@@ -10,8 +10,13 @@ installed on a machine to build/run it.
 **Status:** Phases 0-2 (MVP/POC) done — `remote add` / `list` / `pull` /
 `push` all work end to end, verified against real GitHub, including a real
 ArcOS-catalog artifact (see [docs/manual-smoke-test-push.md](docs/manual-smoke-test-push.md)
-and [docs/phase-2-retro.md](docs/phase-2-retro.md)). No auth system, no UI
-yet. Phase 3 (Tauri app) is next.
+and [docs/phase-2-retro.md](docs/phase-2-retro.md)). Phase 3 (Tauri app):
+sidecar-packaging spike done and green (see
+[docs/phase-3-spike-results.md](docs/phase-3-spike-results.md)) — the
+TypeScript engine packages as a standalone ~88MB executable a Tauri shell can
+spawn and talk to over stdio, no Node install required on the end user's
+machine. UI wiring, installer signing, and auto-update are next. No auth
+system yet.
 
 **Relationship to ArcOS:** standalone project, not an ArcOS extension. Physically
 nested inside the `arc_os` folder for convenience only — its own git repo,

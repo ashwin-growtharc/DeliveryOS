@@ -56,8 +56,10 @@ Goal: pull a real ArcOS catalog asset, edit it, push a real PR against `arc_os`,
 
 ## Phase 3 — Tauri app
 
-- [ ] Spike: package the TypeScript engine as a Tauri sidecar process; confirm size and startup latency are acceptable (§9 risk #11) *before* committing further
-- [ ] Confirm who owns the Rust shell layer (§9 risk #10) before starting
+- [x] Spike: package the TypeScript engine as a Tauri sidecar process; confirm size and startup latency are acceptable (§9 risk #11) *before* committing further
+      Done — see [docs/phase-3-spike-results.md](docs/phase-3-spike-results.md). Binary/installer size are solidly green (88MB sidecar, 25-38MB installers). Cold-start latency is green on the median (~108ms) but has a yellow-band tail (up to 391ms in re-testing) — not blocking, but worth a larger real sample once the actual UI exists.
+- [x] Confirm who owns the Rust shell layer (§9 risk #10) before starting
+      Resolved: built via Claude Code (this tooling), directed by the user — no separate staffing question for this project.
 - [ ] Build the Rust shell + webview skeleton
 - [ ] Wire up Browse / Pull / Push UI (per the mockups already built) to the engine via the sidecar
 - [ ] Packaged installer per OS, code-signed (§9 risk #7)

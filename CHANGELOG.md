@@ -4,6 +4,24 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+## Phase 3 — Tauri app (in progress: sidecar spike done)
+
+- Added `src/sidecar.ts`: a newline-delimited-JSON stdio dispatcher wrapping
+  the existing engine directly (only `catalog.list` implemented so far) —
+  the foundation for the desktop app's UI to talk to the engine without
+  duplicating any logic.
+- Packaged the engine as a standalone Node Single Executable Application
+  (SEA), confirmed to run without a Node install on the machine (~88MB).
+- Built a minimal Tauri v2 shell + spike UI proving the shell can spawn the
+  SEA sidecar and get a real response, plus real MSI (37.78MB) and NSIS
+  (25.44MB) installers.
+- Measured cold-start latency: green on the median (~108ms), with a
+  yellow-band tail (up to ~391ms) surfaced by independent re-testing — not
+  blocking, flagged for a larger sample once the real UI exists. Full
+  write-up: [docs/phase-3-spike-results.md](docs/phase-3-spike-results.md).
+- Added [REQUIREMENTS.md](REQUIREMENTS.md) documenting the Rust/MSVC/Tauri
+  toolchain needed to build this and future Phase 3 work.
+
 ## Phase 2 — ArcOS as a remote
 
 - Added an optional `payload_path` manifest field (relative to the remote's

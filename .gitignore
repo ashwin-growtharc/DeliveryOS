@@ -1,5 +1,7 @@
 node_modules/
 dist/
+build/
+sea-config.json
 .deliveryos/
 *.log
 .env

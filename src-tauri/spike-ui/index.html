@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>DeliveryOS - Sidecar Spike</title>
+    <style>
+      body {
+        font-family:
+          -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        margin: 2rem;
+        color: #1a1a1a;
+      }
+      button {
+        font-size: 1rem;
+        padding: 0.5rem 1rem;
+        cursor: pointer;
+      }
+      #status {
+        margin-top: 0.75rem;
+        font-family: monospace;
+        color: #555;
+      }
+      pre {
+        margin-top: 1rem;
+        padding: 1rem;
+        background: #f4f4f4;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        white-space: pre-wrap;
+        word-break: break-all;
+        min-height: 3rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>DeliveryOS Sidecar Spike</h1>
+    <p>
+      Click the button to spawn the Node SEA sidecar
+      (<code>deliveryos-engine</code>) and send it a
+      <code>catalog.list</code> request over stdin.
+    </p>
+    <button id="run-list-btn">List Artifacts</button>
+    <div id="status">idle</div>
+    <pre id="output">(no output yet)</pre>
+
+    <script>
+      // This is a static single HTML file with no bundler/dev-server wired
+      // up (see tauri.conf.json's `build.frontendDist`), so we can't use a
+      // bare `import { invoke } from '@tauri-apps/api/core'` specifier --
+      // the browser has no module resolution for node_modules. Instead we
+      // rely on `app.withGlobalTauri: true` (tauri.conf.json), which
+      // injects `window.__TAURI__.core.invoke` for us.
+      const { invoke } = window.__TAURI__.core;
+
+      const button = document.getElementById('run-list-btn');
+      const status = document.getElementById('status');
+      const output = document.getElementById('output');
+
+      async function runList() {
+        button.disabled = true;
+        status.textContent = 'running...';
+        const clickStart = performance.now();
+        try {
+          const result = await invoke('run_list');
+          const clickElapsed = performance.now() - clickStart;
+          output.textContent = result;
+          status.textContent = `done (round-trip incl. IPC: ${clickElapsed.toFixed(1)} ms)`;
+        } catch (err) {
+          output.textContent = String(err);
+          status.textContent = 'error';
+        } finally {
+          button.disabled = false;
+        }
+      }
+
+      button.addEventListener('click', runList);
+
+      // Cold-start measurement support: automatically fire the exact same
+      // sidecar-spawning command once, with zero manual interaction, as soon
+      // as the window is ready. This lets cold-start latency be measured by
+      // scripting many separate `app.exe` process launches headlessly (no
+      // GUI automation needed) while still exercising the identical
+      // spawn-to-first-response code path the manual button uses. The Rust
+      // side durably logs the measured latency out-of-band (to a fixed
+      // %TEMP% log file), so nothing needs to be read from this UI.
+      window.addEventListener('DOMContentLoaded', () => {
+        runList();
+      });
+    </script>
+  </body>
+</html>
