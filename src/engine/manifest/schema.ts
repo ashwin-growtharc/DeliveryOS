@@ -18,6 +18,15 @@ export const ManifestSchema = z.object({
     .default({}),
   source_repo: z.string().min(1),
   install_target: z.string().min(1),
+  // Optional escape hatch from the artifacts/<id>/payload/ convention: when
+  // set, points directly at the artifact's real payload location, relative
+  // to the remote's root (same relativity convention as install_target) --
+  // may name a single file or a directory. This lets a remote register
+  // already-existing, actively-maintained files (e.g. ArcOS's real catalog)
+  // as a DeliveryOS artifact without duplicating them into a shadow copy
+  // under artifacts/<id>/payload/. When absent, behavior is unchanged:
+  // the payload resolves to artifacts/<id>/payload/.
+  payload_path: z.string().optional(),
   review_required: z.boolean(),
   // Shell command run in install_target after the payload copy, if present.
   post_install: z.string().optional(),

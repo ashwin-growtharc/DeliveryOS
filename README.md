@@ -1,59 +1,9 @@
-# DeliveryOS
+# arc_os-catalog-poc
 
-Standalone, org-wide artifact-sharing platform. See [ARCHITECTURE.md](ARCHITECTURE.md)
-for the full design (five-layer model, kinds, manifest schema, decisions, risks).
-See [PLAN.md](PLAN.md) for the phase-by-phase task breakdown — start there for
-"what do I actually build next." See [CHANGELOG.md](CHANGELOG.md) for what's
-shipped so far.
+Private scratch POC repo — a hand-copied snapshot of two real ArcOS catalog
+assets (`code-reviewer`, `engagement-kickoff`), used to test DeliveryOS's
+Phase 2 ("ArcOS as a remote") without touching the real, shared
+`growtharc/arc_os` repo (forking is disabled there at the org level).
 
-**Status:** Phase 0 (Engine MVP) and Phase 1 (Push) done — `remote add` /
-`list` / `pull` / `push` all work end to end, verified against real GitHub
-(see [docs/manual-smoke-test-push.md](docs/manual-smoke-test-push.md)). No
-auth system, no UI yet. Phase 2 (ArcOS as a remote) is next.
-
-**Relationship to ArcOS:** standalone project, not an ArcOS extension. Physically
-nested inside the `arc_os` folder for convenience only — its own git repo,
-ignored by ArcOS's `.gitignore`, no code or dependency relationship. ArcOS's
-`catalog/` becomes DeliveryOS's first registered remote (Phase 2), nothing more.
-
-## CLI
-
-```
-npm install
-npm run build
-
-deliveryos remote add <git-url> [--name <name>]   # register a git-backed remote
-deliveryos list [--remote <name>] [--json]         # list available artifacts
-deliveryos pull <id> [--remote <name>]             # pull an artifact locally
-
-deliveryos push <id> [--remote <name>]             # push a local edit as a PR
-deliveryos push <id> --new --remote <name> --path <dir> --kind <kind> \
-  --owner <owner> --description <text> [--install-target <path>] \
-  [--artifact-version <semver>] [--review-required] \
-  [--roles a,b] [--teams a,b] [--stacks a,b]        # propose a new artifact as a PR
-```
-
-`push` opens a real GitHub pull request (via `gh auth token` — run `gh auth
-login` once if you haven't) against the artifact's owning remote. Requires a
-GitHub-hosted remote (Phase 1 is GitHub-only). See
-[docs/manual-smoke-test-push.md](docs/manual-smoke-test-push.md) for a
-worked example of both modes against a real repo.
-
-Each remote is a plain git repo with one manifest per artifact:
-
-```
-<remote root>/artifacts/<id>/manifest.yaml
-<remote root>/artifacts/<id>/payload/...    # copied to install_target on pull
-```
-
-The remote registry/cache lives under `~/.deliveryos` (override with the
-`DELIVERYOS_HOME` env var, e.g. for tests); the per-project lockfile lives at
-`.deliveryos/lock.json` in whatever directory you run `pull` from.
-
-## Development
-
-```
-npm run typecheck
-npm run lint
-npm test
-```
+Not a git fork — content was copied by hand from the real catalog files as of
+2026-07-24. Not kept in sync with the real repo; throwaway/POC only.

@@ -1,3 +1,4 @@
+import * as path from 'path';
 import { ChangedFile } from './diff';
 
 export interface PrContent {
@@ -13,18 +14,25 @@ export interface EditPrContentParams {
   gitUserName: string;
   gitUserEmail: string;
   changedFiles: ChangedFile[];
+  // Git-relative root the changed files are reported under: `'payload'`
+  // (the historical abbreviated form, dropping the `artifacts/<id>/`
+  // prefix) by default, or the artifact's `payload_path` when set, so the
+  // PR body names the real file/directory instead of a shadow path that
+  // was never actually written to.
+  payloadRoot?: string;
 }
 
 /** Builds the PR title/body for an edit-mode push (a diff against an
  * already-tracked artifact). One bullet per changed file, in the same
  * order `computeChangedFiles` returned them. */
 export function buildEditPrContent(params: EditPrContentParams): PrContent {
-  const { id, kind, owner, version, gitUserName, gitUserEmail, changedFiles } = params;
+  const { id, kind, owner, version, gitUserName, gitUserEmail, changedFiles, payloadRoot } = params;
 
   const title = `[DeliveryOS] Update ${id} (v${version})`;
 
+  const root = payloadRoot ?? 'payload';
   const changedFilesLines = changedFiles
-    .map((file) => `- ${file.status}: payload/${file.relPath}`)
+    .map((file) => `- ${file.status}: ${path.posix.join(root, file.relPath)}`)
     .join('\n');
 
   const body = `## DeliveryOS push: update \`${id}\`

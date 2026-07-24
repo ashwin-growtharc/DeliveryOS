@@ -1,0 +1,14 @@
+id: code-reviewer
+kind: agent
+description: Reviews changed code for quality, security, and maintainability.
+owner: senior-ai
+version: 1.0.0
+refresh: quarterly
+tags:
+  roles: [senior-ai, ml-eng, engineer-generic, tech-lead, qa, devops]
+  teams: []
+  stacks: [python, typescript, java, any]
+source_repo: git@github.com:ashwin-growtharc/arc_os-catalog-poc.git
+install_target: .claude/agents/code-reviewer.md
+review_required: true
+payload_path: catalog/agents/code-reviewer.md

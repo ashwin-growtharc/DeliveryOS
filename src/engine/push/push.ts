@@ -222,7 +222,15 @@ export async function pushArtifact(
       );
     }
 
-    const payloadDestDir = path.join(cacheDir, 'artifacts', id, 'payload');
+    // If the manifest this was pulled from set `payload_path`, the real
+    // file/directory lives there in the remote's repo, not under
+    // artifacts/<id>/payload/ -- write the diff back to that same real
+    // location so the resulting git diff lands on the real file, not a
+    // shadow copy. Absent: unchanged (artifacts/<id>/payload/).
+    const payloadDestDir = manifest.payload_path
+      ? path.join(cacheDir, manifest.payload_path)
+      : path.join(cacheDir, 'artifacts', id, 'payload');
+    const payloadDestGitRoot = manifest.payload_path ?? `artifacts/${id}/payload`;
     for (const change of changedFiles) {
       if (change.status === 'deleted') {
         fs.rmSync(path.join(payloadDestDir, change.relPath), { force: true });
@@ -231,8 +239,8 @@ export async function pushArtifact(
       }
     }
 
-    filesToCommit = changedFiles.map(
-      (change) => `artifacts/${id}/payload/${change.relPath}`,
+    filesToCommit = changedFiles.map((change) =>
+      path.posix.join(payloadDestGitRoot, change.relPath),
     );
     commitMessage = `DeliveryOS push: update ${id}`;
 
@@ -244,6 +252,7 @@ export async function pushArtifact(
       gitUserName: identity.name,
       gitUserEmail: identity.email,
       changedFiles,
+      payloadRoot: manifest.payload_path,
     });
     prTitle = content.title;
     prBody = content.body;

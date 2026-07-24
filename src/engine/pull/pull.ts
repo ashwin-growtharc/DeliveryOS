@@ -61,10 +61,15 @@ export function pullArtifact(id: string, remoteName: string | undefined, cwd: st
   const { manifest, remoteName: resolvedRemoteName } = entry;
 
   const remoteDir = cachePath(resolvedRemoteName);
-  const payloadDir = path.join(remoteDir, 'artifacts', manifest.id, 'payload');
+  // `payload_path`, when set, points directly at the artifact's real payload
+  // location (a file or directory) relative to the remote's root, bypassing
+  // the artifacts/<id>/payload/ convention entirely. Absent: unchanged.
+  const payloadSrc = manifest.payload_path
+    ? path.join(remoteDir, manifest.payload_path)
+    : path.join(remoteDir, 'artifacts', manifest.id, 'payload');
   const installTarget = path.resolve(cwd, manifest.install_target);
 
-  fs.cpSync(payloadDir, installTarget, { recursive: true });
+  fs.cpSync(payloadSrc, installTarget, { recursive: true });
 
   if (manifest.post_install) {
     try {
@@ -79,12 +84,14 @@ export function pullArtifact(id: string, remoteName: string | undefined, cwd: st
 
   // Snapshot a pristine copy of the payload as-pulled, so `push` can later
   // diff a local edit against exactly what was installed (not against
-  // mtimes, which change on every checkout/copy).
+  // mtimes, which change on every checkout/copy). Snapshotting from
+  // `payloadSrc` (rather than always from artifacts/<id>/payload/) keeps
+  // this correct regardless of which convention this manifest uses.
   const pristineTarget = pristinePath(cwd, manifest.id);
   if (fs.existsSync(pristineTarget)) {
     fs.rmSync(pristineTarget, { recursive: true, force: true });
   }
-  fs.cpSync(payloadDir, pristineTarget, { recursive: true });
+  fs.cpSync(payloadSrc, pristineTarget, { recursive: true });
 
   upsertEntry(cwd, {
     id: manifest.id,

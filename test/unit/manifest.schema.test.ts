@@ -44,4 +44,23 @@ describe('ManifestSchema', () => {
     const result = ManifestSchema.safeParse({ ...baseManifest, version: '1.2' });
     expect(result.success).toBe(false);
   });
+
+  it('accepts a manifest with payload_path set, pointing at a real location outside artifacts/', () => {
+    const result = ManifestSchema.safeParse({
+      ...baseManifest,
+      payload_path: 'catalog/agents/code-reviewer.md',
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.payload_path).toBe('catalog/agents/code-reviewer.md');
+    }
+  });
+
+  it('leaves payload_path undefined when absent, exactly as today', () => {
+    const result = ManifestSchema.safeParse(baseManifest);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.payload_path).toBeUndefined();
+    }
+  });
 });

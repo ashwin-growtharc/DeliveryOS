@@ -8,8 +8,23 @@ export interface ChangedFile {
 }
 
 /** Recursively lists every file (not directory) under `root`, as paths
- * relative to `root` with forward slashes (stable across platforms). */
+ * relative to `root` with forward slashes (stable across platforms).
+ *
+ * `root` itself may be a single file rather than a directory -- this is the
+ * shape a `payload_path` pointing at a single real file (e.g.
+ * `catalog/agents/code-reviewer.md`) takes on disk. In that case `root` has
+ * no meaningful "relative path" of its own, so it's represented by the
+ * single entry `''` (empty string), which callers join back onto `root`
+ * with `path.join`/`path.posix.join` -- both no-ops on an empty segment. */
 export function listFilesRecursive(root: string): string[] {
+  if (!fs.existsSync(root)) {
+    return [];
+  }
+
+  if (fs.statSync(root).isFile()) {
+    return [''];
+  }
+
   const result: string[] = [];
 
   function walk(dir: string): void {
@@ -24,9 +39,7 @@ export function listFilesRecursive(root: string): string[] {
     }
   }
 
-  if (fs.existsSync(root)) {
-    walk(root);
-  }
+  walk(root);
 
   return result;
 }
