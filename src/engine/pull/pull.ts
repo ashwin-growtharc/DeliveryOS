@@ -4,6 +4,7 @@ import { execSync } from 'child_process';
 import { buildCatalog, CatalogEntry } from '../catalog/catalog';
 import { cachePath } from '../remote/remoteCache';
 import { upsertEntry } from '../lockfile/lockfile';
+import { pristinePath } from '../paths';
 import { ArtifactResolutionError, PostInstallError } from '../errors';
 import { Manifest } from '../manifest/schema';
 
@@ -75,6 +76,15 @@ export function pullArtifact(id: string, remoteName: string | undefined, cwd: st
       );
     }
   }
+
+  // Snapshot a pristine copy of the payload as-pulled, so `push` can later
+  // diff a local edit against exactly what was installed (not against
+  // mtimes, which change on every checkout/copy).
+  const pristineTarget = pristinePath(cwd, manifest.id);
+  if (fs.existsSync(pristineTarget)) {
+    fs.rmSync(pristineTarget, { recursive: true, force: true });
+  }
+  fs.cpSync(payloadDir, pristineTarget, { recursive: true });
 
   upsertEntry(cwd, {
     id: manifest.id,

@@ -3,11 +3,13 @@
 Standalone, org-wide artifact-sharing platform. See [ARCHITECTURE.md](ARCHITECTURE.md)
 for the full design (five-layer model, kinds, manifest schema, decisions, risks).
 See [PLAN.md](PLAN.md) for the phase-by-phase task breakdown — start there for
-"what do I actually build next."
+"what do I actually build next." See [CHANGELOG.md](CHANGELOG.md) for what's
+shipped so far.
 
-**Status:** Phase 0 (Engine MVP) built — `remote add` / `list` / `pull` work
-end to end against a git-backed remote, no auth, no UI yet. Phase 1 (push) is
-next.
+**Status:** Phase 0 (Engine MVP) and Phase 1 (Push) done — `remote add` /
+`list` / `pull` / `push` all work end to end, verified against real GitHub
+(see [docs/manual-smoke-test-push.md](docs/manual-smoke-test-push.md)). No
+auth system, no UI yet. Phase 2 (ArcOS as a remote) is next.
 
 **Relationship to ArcOS:** standalone project, not an ArcOS extension. Physically
 nested inside the `arc_os` folder for convenience only — its own git repo,
@@ -23,7 +25,19 @@ npm run build
 deliveryos remote add <git-url> [--name <name>]   # register a git-backed remote
 deliveryos list [--remote <name>] [--json]         # list available artifacts
 deliveryos pull <id> [--remote <name>]             # pull an artifact locally
+
+deliveryos push <id> [--remote <name>]             # push a local edit as a PR
+deliveryos push <id> --new --remote <name> --path <dir> --kind <kind> \
+  --owner <owner> --description <text> [--install-target <path>] \
+  [--artifact-version <semver>] [--review-required] \
+  [--roles a,b] [--teams a,b] [--stacks a,b]        # propose a new artifact as a PR
 ```
+
+`push` opens a real GitHub pull request (via `gh auth token` — run `gh auth
+login` once if you haven't) against the artifact's owning remote. Requires a
+GitHub-hosted remote (Phase 1 is GitHub-only). See
+[docs/manual-smoke-test-push.md](docs/manual-smoke-test-push.md) for a
+worked example of both modes against a real repo.
 
 Each remote is a plain git repo with one manifest per artifact:
 

@@ -44,3 +44,15 @@ export function projectDeliveryOsDir(cwd: string): string {
 export function lockfilePath(cwd: string): string {
   return path.join(projectDeliveryOsDir(cwd), 'lock.json');
 }
+
+/** Project-local (cwd-scoped) directory holding pristine (as-pulled)
+ * snapshots of every pulled artifact's payload, keyed by id. Used by
+ * `push` to diff a local edit against what was actually pulled. */
+export function pristineDir(cwd: string): string {
+  return path.join(projectDeliveryOsDir(cwd), 'pristine');
+}
+
+/** Path to the pristine snapshot for a specific pulled artifact id. */
+export function pristinePath(cwd: string, id: string): string {
+  return path.join(pristineDir(cwd), id);
+}

@@ -27,3 +27,38 @@ export class ArtifactResolutionError extends DeliveryOsError {}
 
 /** Thrown when a pulled artifact's post_install command exits non-zero. */
 export class PostInstallError extends DeliveryOsError {}
+
+/** Thrown when `gh auth token` (ambient GitHub CLI auth) can't be used to
+ * obtain a token -- the command isn't available, isn't logged in, or
+ * returned nothing. Message always points the user at `gh auth login`. */
+export class GithubAuthError extends DeliveryOsError {}
+
+/** Thrown when a GitHub REST API call (via Octokit) fails -- wraps
+ * whatever Octokit threw with context about which call/repo it was. */
+export class GithubApiError extends DeliveryOsError {}
+
+/** Thrown when `push` is run in edit mode against a pulled artifact whose
+ * local copy is byte-for-byte identical to its pristine snapshot -- there's
+ * nothing to open a PR for. */
+export class NoLocalChangesError extends DeliveryOsError {}
+
+/** Thrown when `push --new` targets an id that already exists in the
+ * target remote's (freshly-refreshed) catalog. */
+export class IdCollisionError extends DeliveryOsError {}
+
+/** Thrown when the combination of `--new` and the cwd's lockfile state
+ * doesn't make sense: `--new` on an id that's already tracked, or no
+ * `--new` on an id that isn't tracked yet (and isn't fully specified for
+ * propose-new). Also covers a `--remote` that conflicts with the id's
+ * lockfile-recorded remote in edit mode. */
+export class PushModeConflictError extends DeliveryOsError {}
+
+/** Thrown when a remote's git URL isn't a recognizable github.com URL.
+ * Phase 1's GitHub API integration (branch/PR) is GitHub-only by design. */
+export class UnsupportedRemoteError extends DeliveryOsError {}
+
+/** Thrown when diffing a pulled artifact against its pristine snapshot, but
+ * no snapshot exists on disk (e.g. it was pulled before pristine snapshots
+ * were introduced). Tells the caller to re-pull rather than silently
+ * treating everything as changed. */
+export class PristineSnapshotMissingError extends DeliveryOsError {}

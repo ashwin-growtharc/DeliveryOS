@@ -26,16 +26,19 @@ Goal: `deliveryos pull` works against one throwaway test remote. No auth, no UI.
 
 See the repo root `src/` and `test/` for the implementation (CLI: `commander`, schema: `zod`, git: `simple-git`, tests: `vitest`); [README.md](README.md) has usage.
 
-## Phase 1 — Push
+## Phase 1 — Push — **Done**
 
 Goal: `deliveryos push` opens a real GitHub PR from a local edit. Still no auth beyond the developer's own existing git/GitHub credentials.
 
-- [ ] Add GitHub API integration (e.g. Octokit) for branch creation, commit, and PR opening
-- [ ] Implement diff detection: compare the local copy of a pulled resource against the version recorded in the lockfile
-- [ ] Implement `push`: create a branch, commit the changed files, open a PR against the owning remote, with an auto-drafted title/description
-- [ ] Handle the "propose new" case separately from "edit" (§5.5 concept in ARCHITECTURE.md): no prior lockfile entry means the PR is framed as a new-resource addition, not a diff
-- [ ] Add basic `id` collision detection on propose-new (reject/warn if the id already exists in the target remote)
-- [ ] **End-to-end test:** full round trip against the test remote — `pull` → edit locally → `push` → confirm a real GitHub PR appears with the correct diff and branch name. Nothing in Phase 2 starts until this passes.
+- [x] Add GitHub API integration (e.g. Octokit) for branch creation, commit, and PR opening
+- [x] Implement diff detection: compare the local copy of a pulled resource against the version recorded in the lockfile
+- [x] Implement `push`: create a branch, commit the changed files, open a PR against the owning remote, with an auto-drafted title/description
+- [x] Handle the "propose new" case separately from "edit" (§5.5 concept in ARCHITECTURE.md): no prior lockfile entry means the PR is framed as a new-resource addition, not a diff
+- [x] Add basic `id` collision detection on propose-new (reject/warn if the id already exists in the target remote)
+- [x] **End-to-end test:** full round trip against the test remote — `pull` → edit locally → `push` → confirm a real GitHub PR appears with the correct diff and branch name. Nothing in Phase 2 starts until this passes.
+      Automated e2e against a local git fixture + fake GitHub client passes (`test/e2e/push.e2e.test.ts`, `test/e2e/push.cliFlags.e2e.test.ts`). The real-GitHub check also passed manually against `ashwin-growtharc/deliveryos-smoke-test` — see [docs/manual-smoke-test-push.md](docs/manual-smoke-test-push.md) — both edit-mode (PR #1) and propose-new-mode (PR #2), branch name/diff/title/body all matched exactly.
+
+See [CHANGELOG.md](CHANGELOG.md) for what shipped, including two bugs found and fixed during QA (cache-isolation contamination, a `--version` flag collision).
 
 ## Phase 2 — ArcOS as a remote (MVP/POC complete here)
 
