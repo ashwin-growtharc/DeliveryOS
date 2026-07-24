@@ -1,6 +1,7 @@
 # DeliveryOS — Organization Resource Sharing Platform
 
-**Status:** draft, unratified. **Name:** DeliveryOS (decided).
+**Status:** design draft, unratified. **Implementation:** Phase 0 (Engine MVP)
+built — see [PLAN.md](PLAN.md) and [README.md](README.md). **Name:** DeliveryOS (decided).
 **Origin:** grew out of exploring ArcOS's catalog/distribution model; scoped out
 as its own project rather than an ArcOS extension.
 
@@ -319,7 +320,7 @@ deliberately deferred past this point; see risk #9 in §9.
 
 | Phase | Deliverable |
 |---|---|
-| **0 — Engine MVP** | TypeScript engine: manifest schema, one remote, lockfile, `deliveryos pull` via CLI only (no UI yet). No auth — uses whatever git/GitHub credentials are already on the developer's own machine. |
+| **0 — Engine MVP** — **Done** | TypeScript engine: manifest schema, one remote, lockfile, `deliveryos pull` via CLI only (no UI yet). No auth — uses whatever git/GitHub credentials are already on the developer's own machine. |
 | **1 — Push** | `deliveryos push` branch + PR automation. Still no auth system — same local credentials as Phase 0. |
 | **2 — ArcOS as a remote** | Register ArcOS's `catalog/` as a DeliveryOS remote — proves "governed source feeding a general distributor." **MVP/POC complete at this point.** |
 | **3 — Tauri app** | Rust shell + webview UI around the same engine (run as a bundled sidecar process): browse/pull/push/profile UI, packaged installer, auto-update wired up |
@@ -488,7 +489,7 @@ proprietary one wherever one already exists.
 
 ## 11. Next steps
 
-Pick one to start:
-1. Scaffold the Phase 0 engine (TypeScript, manifest schema + one test remote + `deliveryos pull` via CLI) in a new repo.
-2. Design the app distribution/install story before building anything that depends on it.
-3. Decide the kind-sprawl trim-back (§9 item 1) before starting Phase 0.
+Phase 0 is done (§8). Pick one to start next:
+1. Phase 1 — Push: GitHub API integration (branch + commit + PR) on top of the Phase 0 engine.
+2. Design the app distribution/install story before building anything that depends on it (Phase 3).
+3. Decide the kind-sprawl trim-back (§9 item 1) before Phase 2 introduces real ArcOS manifests.

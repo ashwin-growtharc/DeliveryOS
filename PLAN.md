@@ -10,19 +10,21 @@ against one real remote before anything else gets built.
 
 ---
 
-## Phase 0 — Engine MVP
+## Phase 0 — Engine MVP — **Done**
 
 Goal: `deliveryos pull` works against one throwaway test remote. No auth, no UI.
 
-- [ ] Scaffold a plain TypeScript project (`package.json`, `tsconfig.json`, basic `src/` layout)
-- [ ] Define the manifest schema as TypeScript types + a runtime validator (e.g. zod) — matches §7 of ARCHITECTURE.md, including `tags.stacks` and `refresh`
-- [ ] Implement the manifest parser: read a remote's manifests, validate against the schema, reject anything malformed
-- [ ] Implement the lockfile: a JSON file per machine recording `{ id, version, remote }` for everything installed
-- [ ] Implement `remote add <git-url>`: register a git repo as a source, clone/fetch it locally
-- [ ] Implement `list`: read manifests from all registered remotes, print what's available (no profile filtering yet — that's Phase 4)
-- [ ] Implement `pull <id>`: find the manifest, copy its content to `install_target`, run `post_install` if present, update the lockfile
-- [ ] Create one small real test remote (a throwaway git repo with 2–3 sample manifests covering different kinds) to pull against
-- [ ] **End-to-end test:** `deliveryos remote add` → `deliveryos list` → `deliveryos pull` run in sequence against the test remote, confirm files land correctly and the lockfile updates. Nothing in Phase 1 starts until this passes.
+- [x] Scaffold a plain TypeScript project (`package.json`, `tsconfig.json`, basic `src/` layout)
+- [x] Define the manifest schema as TypeScript types + a runtime validator (e.g. zod) — matches §7 of ARCHITECTURE.md, including `tags.stacks` and `refresh`
+- [x] Implement the manifest parser: read a remote's manifests, validate against the schema, reject anything malformed
+- [x] Implement the lockfile: a JSON file per machine recording `{ id, version, remote }` for everything installed
+- [x] Implement `remote add <git-url>`: register a git repo as a source, clone/fetch it locally
+- [x] Implement `list`: read manifests from all registered remotes, print what's available (no profile filtering yet — that's Phase 4)
+- [x] Implement `pull <id>`: find the manifest, copy its content to `install_target`, run `post_install` if present, update the lockfile
+- [x] Create one small real test remote (a throwaway git repo with 2–3 sample manifests covering different kinds) to pull against
+- [x] **End-to-end test:** `deliveryos remote add` → `deliveryos list` → `deliveryos pull` run in sequence against the test remote, confirm files land correctly and the lockfile updates. Nothing in Phase 1 starts until this passes.
+
+See the repo root `src/` and `test/` for the implementation (CLI: `commander`, schema: `zod`, git: `simple-git`, tests: `vitest`); [README.md](README.md) has usage.
 
 ## Phase 1 — Push
 
