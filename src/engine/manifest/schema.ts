@@ -1,0 +1,26 @@
+import { z } from 'zod';
+
+export const ManifestSchema = z.object({
+  id: z.string().min(1),
+  // Deliberately a plain string, not a closed enum: `kind` is an
+  // open-ended vocabulary that new artifact authors can extend freely.
+  kind: z.string().min(1),
+  description: z.string().min(1),
+  owner: z.string().min(1),
+  version: z.string().regex(/^\d+\.\d+\.\d+$/),
+  refresh: z.string().optional(),
+  tags: z
+    .object({
+      roles: z.array(z.string()).default([]),
+      teams: z.array(z.string()).default([]),
+      stacks: z.array(z.string()).default([]),
+    })
+    .default({}),
+  source_repo: z.string().min(1),
+  install_target: z.string().min(1),
+  review_required: z.boolean(),
+  // Shell command run in install_target after the payload copy, if present.
+  post_install: z.string().optional(),
+});
+
+export type Manifest = z.infer<typeof ManifestSchema>;
