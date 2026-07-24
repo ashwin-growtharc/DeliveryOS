@@ -4,7 +4,28 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
-## Phase 1 — Push (unreleased)
+## Phase 2 — ArcOS as a remote
+
+- Added an optional `payload_path` manifest field (relative to the remote's
+  repo root) so `pull`/`push` can read from and diff against a real,
+  pre-existing file or directory elsewhere in a remote's repo, instead of
+  requiring payloads to live under `artifacts/<id>/payload/`. Fully
+  backward-compatible — manifests without it behave exactly as before.
+  Propose-new mode is unaffected (always uses the classic convention, since a
+  brand-new artifact has no pre-existing real file to point at).
+- Wrote real DeliveryOS manifests for two actual ArcOS catalog assets
+  (`code-reviewer`, `engagement-kickoff`), using `payload_path` to point at
+  their real files rather than duplicating them.
+- Proved the full pull -> edit -> push -> PR loop end to end against real
+  ArcOS catalog content, via a personal scratch repo
+  (`ashwin-growtharc/arc_os-catalog-poc`) rather than the shared
+  `growtharc/arc_os` repo directly (forking is disabled there at the org
+  level). See [docs/phase-2-retro.md](docs/phase-2-retro.md) for the full
+  write-up, including an open governance question about whether ArcOS's
+  "core needs 2 reviewers" convention actually applies to catalog assets
+  under its own current rules.
+
+## Phase 1 — Push
 
 - Added `deliveryos push <id> [--remote <name>]` — pushes a local edit to a
   previously-pulled artifact as a branch + real GitHub PR against its owning

@@ -40,14 +40,15 @@ Goal: `deliveryos push` opens a real GitHub PR from a local edit. Still no auth 
 
 See [CHANGELOG.md](CHANGELOG.md) for what shipped, including two bugs found and fixed during QA (cache-isolation contamination, a `--version` flag collision).
 
-## Phase 2 — ArcOS as a remote (MVP/POC complete here)
+## Phase 2 — ArcOS as a remote (MVP/POC complete here) — **Done, with a caveat**
 
 Goal: pull a real ArcOS catalog asset, edit it, push a real PR against `arc_os`, respecting its own review rules.
 
-- [ ] Write DeliveryOS manifests for a small number of real ArcOS catalog assets (start with just `code-reviewer` and one skill), mapping ArcOS's existing frontmatter into DeliveryOS's manifest shape
-- [ ] Register `arc_os`'s `catalog/` as a real DeliveryOS remote
-- [ ] **End-to-end test:** pull a real ArcOS skill/agent via `deliveryos pull`, make a real edit, `deliveryos push`, confirm the PR lands against `arc_os` and its existing "core needs 2 reviewers" convention still applies untouched. This is the MVP/POC exit test — nothing in Phase 3 starts until this passes against the real ArcOS repo, not just the throwaway test remote.
-- [ ] Write up what broke / what was harder than expected — this is the checkpoint to decide whether Phase 3 (the app) is worth building yet
+- [x] Write DeliveryOS manifests for a small number of real ArcOS catalog assets (start with just `code-reviewer` and one skill), mapping ArcOS's existing frontmatter into DeliveryOS's manifest shape
+- [x] Register `arc_os`'s `catalog/` as a real DeliveryOS remote
+      Forking `growtharc/arc_os` is disabled at the org level, so this was proven against a personal scratch copy (`ashwin-growtharc/arc_os-catalog-poc`, seeded with real catalog file content) rather than the shared repo itself — see [docs/phase-2-retro.md](docs/phase-2-retro.md).
+- [x] **End-to-end test:** pull a real ArcOS skill/agent via `deliveryos pull`, make a real edit, `deliveryos push`, confirm a real PR lands. The mechanical loop is fully proven ([arc_os-catalog-poc#1](https://github.com/ashwin-growtharc/arc_os-catalog-poc/pull/1)); the "respects `arc_os`'s own 2-reviewer convention" half is **not yet proven against the real repo** — see the retro for why that rule is ambiguous even on ArcOS's own current, ratified conventions.
+- [x] Write up what broke / what was harder than expected — see [docs/phase-2-retro.md](docs/phase-2-retro.md), including a recommended `payload_path` engine addition (shipped) and a conditional go/no-go for Phase 3.
 
 ---
 

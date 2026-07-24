@@ -6,15 +6,18 @@ See [PLAN.md](PLAN.md) for the phase-by-phase task breakdown — start there for
 "what do I actually build next." See [CHANGELOG.md](CHANGELOG.md) for what's
 shipped so far.
 
-**Status:** Phase 0 (Engine MVP) and Phase 1 (Push) done — `remote add` /
-`list` / `pull` / `push` all work end to end, verified against real GitHub
-(see [docs/manual-smoke-test-push.md](docs/manual-smoke-test-push.md)). No
-auth system, no UI yet. Phase 2 (ArcOS as a remote) is next.
+**Status:** Phases 0-2 (MVP/POC) done — `remote add` / `list` / `pull` /
+`push` all work end to end, verified against real GitHub, including a real
+ArcOS-catalog artifact (see [docs/manual-smoke-test-push.md](docs/manual-smoke-test-push.md)
+and [docs/phase-2-retro.md](docs/phase-2-retro.md)). No auth system, no UI
+yet. Phase 3 (Tauri app) is next.
 
 **Relationship to ArcOS:** standalone project, not an ArcOS extension. Physically
 nested inside the `arc_os` folder for convenience only — its own git repo,
-ignored by ArcOS's `.gitignore`, no code or dependency relationship. ArcOS's
-`catalog/` becomes DeliveryOS's first registered remote (Phase 2), nothing more.
+ignored by ArcOS's `.gitignore`, no code or dependency relationship. Phase 2
+proved ArcOS's catalog assets can be mapped into DeliveryOS manifests and
+pulled/pushed for real — see [docs/phase-2-retro.md](docs/phase-2-retro.md)
+for what that did and didn't cover.
 
 ## CLI
 
@@ -45,6 +48,12 @@ Each remote is a plain git repo with one manifest per artifact:
 <remote root>/artifacts/<id>/manifest.yaml
 <remote root>/artifacts/<id>/payload/...    # copied to install_target on pull
 ```
+
+A manifest can instead set `payload_path: <path relative to remote root>` to
+point at a real file or directory living anywhere else in the repo, instead
+of duplicating it under `artifacts/<id>/payload/` — this is how a repo with
+its own pre-existing file layout (like ArcOS's `catalog/`) becomes a remote
+without restructuring itself.
 
 The remote registry/cache lives under `~/.deliveryos` (override with the
 `DELIVERYOS_HOME` env var, e.g. for tests); the per-project lockfile lives at
