@@ -4,7 +4,8 @@ Standalone, org-wide artifact-sharing platform. See [ARCHITECTURE.md](ARCHITECTU
 for the full design (five-layer model, kinds, manifest schema, decisions, risks).
 See [PLAN.md](PLAN.md) for the phase-by-phase task breakdown — start there for
 "what do I actually build next." See [CHANGELOG.md](CHANGELOG.md) for what's
-shipped so far.
+shipped so far, and [REQUIREMENTS.md](REQUIREMENTS.md) for what needs to be
+installed on a machine to build/run it.
 
 **Status:** Phases 0-2 (MVP/POC) done — `remote add` / `list` / `pull` /
 `push` all work end to end, verified against real GitHub, including a real
