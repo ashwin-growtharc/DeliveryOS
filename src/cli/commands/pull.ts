@@ -8,6 +8,9 @@ export function registerPullCommand(program: Command): void {
     .option('-r, --remote <name>', 'Disambiguate which remote to pull the artifact from')
     .action((id: string, options: { remote?: string }) => {
       const result = pullArtifact(id, options.remote, process.cwd());
+      if (result.postInstallOutput && result.postInstallOutput.trim().length > 0) {
+        console.log(result.postInstallOutput.trimEnd());
+      }
       console.log(`Pulled "${result.manifest.id}" -> ${result.installTarget}`);
     });
 }

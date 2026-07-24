@@ -112,6 +112,11 @@ describe('pull e2e', () => {
     expect(result.stdout).toContain(`Pulled "${artifact.id}"`);
     expect(fs.existsSync(path.join(installTarget, 'README.md'))).toBe(true);
     expect(fs.existsSync(path.join(installTarget, '.post_install_ran'))).toBe(true);
+    // Captured via stdio:'pipe' (not 'inherit', which would corrupt the
+    // sidecar's NDJSON stream) and surfaced explicitly by the CLI -- this
+    // locks in that the capture-and-resurface path actually works, not just
+    // that the side-effecting marker file got written.
+    expect(result.stdout).toContain(`post_install ran for ${artifact.id}`);
 
     const lockfile = JSON.parse(
       fs.readFileSync(path.join(scratchCwd, '.deliveryos', 'lock.json'), 'utf-8'),

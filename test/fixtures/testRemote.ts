@@ -35,7 +35,7 @@ function manifestYaml(artifact: TestArtifact): string {
   ];
   if (artifact.hasPostInstall) {
     lines.push(
-      `post_install: node -e "require('fs').writeFileSync('.post_install_ran', 'done')"`,
+      `post_install: node -e "require('fs').writeFileSync('.post_install_ran', 'done'); console.log('post_install ran for ${artifact.id}')"`,
     );
   }
   return lines.join('\n') + '\n';

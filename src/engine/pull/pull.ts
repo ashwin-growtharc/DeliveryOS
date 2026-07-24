@@ -12,6 +12,11 @@ export interface PullResult {
   manifest: Manifest;
   remoteName: string;
   installTarget: string;
+  postInstallOutput?: string;
+}
+
+function isExecError(err: unknown): err is Error & { stdout?: Buffer; stderr?: Buffer } {
+  return err instanceof Error;
 }
 
 /**
@@ -71,13 +76,25 @@ export function pullArtifact(id: string, remoteName: string | undefined, cwd: st
 
   fs.cpSync(payloadSrc, installTarget, { recursive: true });
 
+  let postInstallOutput: string | undefined;
   if (manifest.post_install) {
+    // `stdio: 'pipe'` (not 'inherit') is required here: this function can run
+    // inside the Tauri sidecar (src/sidecar.ts), whose stdout is a
+    // newline-delimited JSON stream -- a post_install command's raw output
+    // written directly to the parent's stdout via 'inherit' would corrupt
+    // that stream mid-line. Capturing it instead and returning it lets each
+    // caller (CLI vs. sidecar) decide how to surface it.
     try {
-      execSync(manifest.post_install, { cwd: installTarget, stdio: 'inherit' });
+      postInstallOutput = execSync(manifest.post_install, { cwd: installTarget, stdio: 'pipe' })
+        .toString('utf-8');
     } catch (err) {
+      const stdout = isExecError(err) ? err.stdout?.toString('utf-8') ?? '' : '';
+      const stderr = isExecError(err) ? err.stderr?.toString('utf-8') ?? '' : '';
       const detail = err instanceof Error ? err.message : String(err);
+      const output = [stdout, stderr].filter((s) => s.trim().length > 0).join('\n');
       throw new PostInstallError(
-        `post_install command failed for artifact "${manifest.id}": ${detail}`,
+        `post_install command failed for artifact "${manifest.id}": ${detail}`
+          + (output ? `\n${output}` : ''),
       );
     }
   }
@@ -99,5 +116,5 @@ export function pullArtifact(id: string, remoteName: string | undefined, cwd: st
     remote: resolvedRemoteName,
   });
 
-  return { manifest, remoteName: resolvedRemoteName, installTarget };
+  return { manifest, remoteName: resolvedRemoteName, installTarget, postInstallOutput };
 }
