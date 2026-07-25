@@ -24,6 +24,7 @@ export interface PushCommandFlags {
   roles?: string;
   teams?: string;
   stacks?: string;
+  postInstall?: string;
 }
 
 /** Maps raw commander flags onto the engine's PushOptions shape. Validation
@@ -43,6 +44,7 @@ export function toPushOptions(flags: PushCommandFlags): PushOptions {
     roles: parseList(flags.roles),
     teams: parseList(flags.teams),
     stacks: parseList(flags.stacks),
+    postInstall: flags.postInstall,
   };
 }
 
@@ -68,6 +70,11 @@ export function registerPushCommand(program: Command): void {
     .option('--roles <list>', 'Comma-separated roles tag (--new only)')
     .option('--teams <list>', 'Comma-separated teams tag (--new only)')
     .option('--stacks <list>', 'Comma-separated stacks tag (--new only)')
+    .option(
+      '--post-install <cmd>',
+      'Shell command to run in install_target after a pull (--new only; e.g. "npm install", '
+        + '"pip install -e \\".[dev]\\""). Omit if the project needs no setup step.',
+    )
     .action(async (id: string, flags: PushCommandFlags) => {
       const options = toPushOptions(flags);
       const result = await pushArtifact(id, options, process.cwd());

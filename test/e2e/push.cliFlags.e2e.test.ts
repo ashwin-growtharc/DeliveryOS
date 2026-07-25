@@ -142,4 +142,108 @@ describe('push CLI flags e2e', () => {
     },
     30_000,
   );
+
+  it(
+    '`push <id> --new --post-install <cmd>` sets the committed manifest\'s post_install field',
+    async () => {
+      const remoteName = 'test-remote-cli-flags-postinstall';
+      addRemoteEntry({ name: remoteName, url: FAKE_GITHUB_URL, addedAt: new Date().toISOString() });
+      await cloneRemote(remoteName, fixtureRemoteDir);
+
+      const id = 'cli-flag-post-install-artifact';
+      const payloadDir = fs.mkdtempSync(path.join(scratchRoot, 'cli-flag-postinstall-payload-'));
+      fs.writeFileSync(path.join(payloadDir, 'package.json'), '{"name":"demo"}\n', 'utf-8');
+
+      const { buildProgram } = await import('../../src/cli/program');
+      const program = buildProgram();
+
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        await program.parseAsync([
+          'node',
+          'deliveryos',
+          'push',
+          id,
+          '--new',
+          '--remote',
+          remoteName,
+          '--path',
+          payloadDir,
+          '--kind',
+          'template',
+          '--owner',
+          'platform-team',
+          '--description',
+          'CLI-flag-parsed artifact with a real setup step',
+          '--post-install',
+          'npm install',
+        ]);
+      } finally {
+        logSpy.mockRestore();
+      }
+
+      const fixtureGit = simpleGit(fixtureRemoteDir);
+      const branchSummary = await fixtureGit.branch(['-a']);
+      const pushedBranch = branchSummary.all.find((b) => b.includes(`deliveryos/${id}/`));
+      expect(pushedBranch).toBeDefined();
+
+      const manifestContent = await fixtureGit.show([
+        `${pushedBranch}:artifacts/${id}/manifest.yaml`,
+      ]);
+      expect(manifestContent).toContain(`id: ${id}`);
+      expect(manifestContent).toContain('post_install: npm install');
+    },
+    30_000,
+  );
+
+  it(
+    'propose-new WITHOUT --post-install omits the field entirely (no empty/null post_install written)',
+    async () => {
+      const remoteName = 'test-remote-cli-flags-no-postinstall';
+      addRemoteEntry({ name: remoteName, url: FAKE_GITHUB_URL, addedAt: new Date().toISOString() });
+      await cloneRemote(remoteName, fixtureRemoteDir);
+
+      const id = 'cli-flag-no-post-install-artifact';
+      const payloadDir = fs.mkdtempSync(path.join(scratchRoot, 'cli-flag-no-postinstall-payload-'));
+      fs.writeFileSync(path.join(payloadDir, 'README.md'), '# no setup needed\n', 'utf-8');
+
+      const { buildProgram } = await import('../../src/cli/program');
+      const program = buildProgram();
+
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        await program.parseAsync([
+          'node',
+          'deliveryos',
+          'push',
+          id,
+          '--new',
+          '--remote',
+          remoteName,
+          '--path',
+          payloadDir,
+          '--kind',
+          'doc',
+          '--owner',
+          'platform-team',
+          '--description',
+          'CLI-flag-parsed artifact with no setup step',
+        ]);
+      } finally {
+        logSpy.mockRestore();
+      }
+
+      const fixtureGit = simpleGit(fixtureRemoteDir);
+      const branchSummary = await fixtureGit.branch(['-a']);
+      const pushedBranch = branchSummary.all.find((b) => b.includes(`deliveryos/${id}/`));
+      expect(pushedBranch).toBeDefined();
+
+      const manifestContent = await fixtureGit.show([
+        `${pushedBranch}:artifacts/${id}/manifest.yaml`,
+      ]);
+      expect(manifestContent).toContain(`id: ${id}`);
+      expect(manifestContent).not.toContain('post_install');
+    },
+    30_000,
+  );
 });

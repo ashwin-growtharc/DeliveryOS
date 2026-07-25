@@ -42,12 +42,17 @@ deliveryos push <id> [--remote <name>]             # push a local edit as a PR
 deliveryos push <id> --new --remote <name> --path <dir> --kind <kind> \
   --owner <owner> --description <text> [--install-target <path>] \
   [--artifact-version <semver>] [--review-required] \
-  [--roles a,b] [--teams a,b] [--stacks a,b]        # propose a new artifact as a PR
+  [--roles a,b] [--teams a,b] [--stacks a,b] \
+  [--post-install <cmd>]                            # propose a new artifact as a PR
 ```
 
 `push` opens a real GitHub pull request (via `gh auth token` — run `gh auth
 login` once if you haven't) against the artifact's owning remote. Requires a
-GitHub-hosted remote (Phase 1 is GitHub-only). See
+GitHub-hosted remote (Phase 1 is GitHub-only). `--post-install` (propose-new
+only) is whatever one-line shell command a fresh pull of this artifact
+should run afterward — `npm install`, `pip install -e ".[dev]"`, anything;
+DeliveryOS doesn't know or care what it is, it just runs it in
+`install_target`. Omit it entirely if the artifact needs no setup step. See
 [docs/manual-smoke-test-push.md](docs/manual-smoke-test-push.md) for a
 worked example of both modes against a real repo.
 

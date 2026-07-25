@@ -6,6 +6,14 @@ design rationale.
 
 ## Phase 3 — Tauri app (in progress: spike + UI wiring done)
 
+- Added `--post-install <cmd>` to `push --new` (CLI) and a "Setup command"
+  field to the Add-new form (app), closing a real gap: proposing a
+  brand-new artifact previously had no way to declare its own setup step
+  (`npm install`, `pip install -e ".[dev]"`, etc.) through the normal flow —
+  it could only be added by hand-editing the generated `manifest.yaml`
+  before merging. Verified fully end-to-end through the real GUI: filled
+  in the form, opened a real PR, merged it, pulled the new artifact, and
+  confirmed on disk that the setup command actually ran.
 - Fixed a UI bug: the "Refresh" button (and any other button using the
   shared `withBusy` helper in `src-tauri/spike-ui/app.js`) could get
   permanently stuck showing "Working..." instead of its real label. Cause:

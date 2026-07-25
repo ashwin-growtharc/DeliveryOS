@@ -108,6 +108,11 @@
               <input id="f-roles" type="text" placeholder="pm, engagement-lead" />
             </div>
             <div class="field">
+              <label for="f-post-install">Setup command (optional)</label>
+              <input id="f-post-install" type="text" placeholder="e.g. npm install, pip install -e &quot;.[dev]&quot;" />
+              <p class="field-hint">Runs automatically right after someone pulls this, in the folder it lands in. Leave blank if nothing needs to be installed.</p>
+            </div>
+            <div class="field">
               <label for="f-remote">Remote</label>
               <select id="f-remote" required></select>
             </div>

@@ -445,6 +445,7 @@
     const owner = $('f-owner').value.trim();
     const roles = parseCommaList($('f-roles').value);
     const remote = $('f-remote').value;
+    const postInstall = $('f-post-install').value.trim() || undefined;
 
     await withBusy(submitBtn, 'Working...', async () => {
       try {
@@ -459,6 +460,7 @@
             owner,
             description,
             roles,
+            postInstall,
           },
         });
         toastSuccess(`Proposed ${id}: opened PR #${result.number} (${result.url})`);

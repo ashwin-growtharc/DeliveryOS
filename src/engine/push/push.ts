@@ -48,6 +48,7 @@ export interface PushOptions {
   roles?: string[];
   teams?: string[];
   stacks?: string[];
+  postInstall?: string;
 }
 
 export interface PushResult {
@@ -168,6 +169,12 @@ export async function pushArtifact(
       source_repo: remoteEntry.url,
       install_target: options.installTarget ?? id,
       review_required: Boolean(options.reviewRequired),
+      // Every project has its own setup step (pip/npm/cargo/none at all) --
+      // DeliveryOS doesn't know or care which; it just runs whatever's here,
+      // in install_target, after the payload lands. Omitted entirely (not
+      // an empty string) when the proposer doesn't set one, so pull's
+      // `if (manifest.post_install)` check skips it cleanly.
+      ...(options.postInstall ? { post_install: options.postInstall } : {}),
     };
 
     const result = ManifestSchema.safeParse(candidateManifest);
