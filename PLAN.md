@@ -60,8 +60,9 @@ Goal: pull a real ArcOS catalog asset, edit it, push a real PR against `arc_os`,
       Done — see [docs/phase-3-spike-results.md](docs/phase-3-spike-results.md). Binary/installer size are solidly green (88MB sidecar, 25-38MB installers). Cold-start latency is green on the median (~108ms) but has a yellow-band tail (up to 391ms in re-testing) — not blocking, but worth a larger real sample once the actual UI exists.
 - [x] Confirm who owns the Rust shell layer (§9 risk #10) before starting
       Resolved: built via Claude Code (this tooling), directed by the user — no separate staffing question for this project.
-- [ ] Build the Rust shell + webview skeleton
-- [ ] Wire up Browse / Pull / Push UI (per the mockups already built) to the engine via the sidecar
+- [x] Build the Rust shell + webview skeleton
+- [x] Wire up Browse / Pull / Push UI (per the mockups already built) to the engine via the sidecar
+      Done, with a deliberate scope cut from the original mockup — see [docs/phase-3-ui-scope.md](docs/phase-3-ui-scope.md). Built for real: Browse (search/filters/status badges), Detail, Pull, Push (edit + propose-new), Settings (remotes). Omitted: onboarding/sign-in, sync/drift banner, conflict resolution, version history, profile switching — none have engine support yet (Phase 4/5). Styled with the ArcFlow brand system. Verified via sidecar-level e2e tests (data correctness) + [docs/manual-ui-clickthrough.md](docs/manual-ui-clickthrough.md) (human click-through, since no GUI automation exists for a native Tauri window here). One known gap: `artifact.push`'s success path can't be tested through the sidecar itself (no way to inject a fake GitHub client across the process boundary) — only verified manually.
 - [ ] Packaged installer per OS, code-signed (§9 risk #7)
 - [ ] Auto-update wired up
 - [ ] **End-to-end test:** someone *outside the builder team* runs a fresh install on a clean machine, times it, and completes a full pull → edit → push cycle through the UI alone, no terminal. Installer isn't called "stable" until this passes (§9 risk #7, borrowed from ArcOS's day-1-install runbook).

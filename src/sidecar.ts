@@ -1,12 +1,11 @@
 #!/usr/bin/env node
 /**
- * Sidecar entry point for the Phase 3 Node SEA / (eventual) Tauri-sidecar
- * spike. This is a SEPARATE process entry point from `src/index.ts` -- it
- * is never wired into `src/cli/program.ts`, and it must never call
- * `console.log`/`console.error` directly the way the CLI commands do,
- * because stdout here is a line-delimited JSON protocol that a host
- * process (eventually the Tauri shell) parses one line at a time. Any
- * stray non-JSON line would corrupt that stream.
+ * Sidecar entry point for the Tauri app. This is a SEPARATE process entry
+ * point from `src/index.ts` -- it is never wired into `src/cli/program.ts`,
+ * and it must never call `console.log`/`console.error` directly the way the
+ * CLI commands do, because stdout here is a line-delimited JSON protocol
+ * that the Tauri host process parses one line at a time. Any stray
+ * non-JSON line would corrupt that stream.
  *
  * Protocol: the host writes one JSON object per line to stdin:
  *   { "id": string, "command": string, "args"?: object }
@@ -18,8 +17,23 @@
  * The process keeps reading/responding to further lines until stdin
  * closes (EOF), at which point it exits cleanly.
  */
+import * as path from 'path';
 import * as readline from 'readline';
 import { buildCatalog } from './engine/catalog/catalog';
+import { readLockfile } from './engine/lockfile/lockfile';
+import { computeChangedFiles } from './engine/push/diff';
+import { pristinePath } from './engine/paths';
+import { pullArtifact } from './engine/pull/pull';
+import { pushArtifact, PushOptions } from './engine/push/push';
+import {
+  listRemotes,
+  addRemoteEntry,
+  findRemote,
+  deriveNameFromUrl,
+} from './engine/remote/remoteRegistry';
+import { cloneRemote } from './engine/remote/remoteCache';
+import { RemoteRegistryError } from './engine/errors';
+import { Manifest } from './engine/manifest/schema';
 
 interface SidecarRequest {
   id: string;
@@ -41,22 +55,115 @@ interface SidecarErrorResponse {
 
 type SidecarResponse = SidecarSuccessResponse | SidecarErrorResponse;
 
-type CommandHandler = (args: Record<string, unknown>) => unknown;
+/** A handler may return its result synchronously or asynchronously --
+ * `handleLine` always `await`s whatever comes back (awaiting a
+ * non-Promise value is a no-op), so both shapes work uniformly. */
+type CommandHandler = (args: Record<string, unknown>) => unknown | Promise<unknown>;
+
+type LocalStatus = 'not_pulled' | 'pulled' | 'edited_locally';
+
+export interface CatalogListEntry {
+  manifest: Manifest;
+  remoteName: string;
+  localStatus: LocalStatus;
+  installTarget: string;
+}
+
+function requireString(args: Record<string, unknown>, key: string): string {
+  const value = args[key];
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new Error(`"${key}" is required`);
+  }
+  return value;
+}
+
+function optionalString(args: Record<string, unknown>, key: string): string | undefined {
+  const value = args[key];
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
 
 /**
- * Command map. For this spike, only `catalog.list` is a real command --
- * everything else falls through to the "unknown command" error path
- * below rather than being special-cased.
+ * Computes each catalog entry's status relative to the cwd-scoped
+ * lockfile/pristine snapshot:
+ *  - no lockfile entry -> 'not_pulled'
+ *  - lockfile entry, no diff against the pristine snapshot -> 'pulled'
+ *  - lockfile entry, diff detected -> 'edited_locally'
+ *  - lockfile entry, but the diff can't be computed (e.g. a missing
+ *    pristine snapshot, `PristineSnapshotMissingError`) -> falls back to
+ *    'pulled' rather than throwing, so one bad entry never breaks Browse
+ *    for every other artifact in the same `catalog.list` call.
  */
-const commands: Record<string, CommandHandler> = {
-  'catalog.list': (args) => {
-    const entries = buildCatalog();
-    const remote = args.remote;
-    if (typeof remote === 'string' && remote.length > 0) {
-      return entries.filter((entry) => entry.remoteName === remote);
+function catalogList(args: Record<string, unknown>): CatalogListEntry[] {
+  const cwd = requireString(args, 'cwd');
+  const remote = optionalString(args, 'remote');
+
+  let entries = buildCatalog();
+  if (remote) {
+    entries = entries.filter((entry) => entry.remoteName === remote);
+  }
+
+  const lockfile = readLockfile(cwd);
+
+  return entries.map((entry) => {
+    const { manifest, remoteName } = entry;
+    const installTarget = path.resolve(cwd, manifest.install_target);
+    const lockEntry = lockfile.entries.find((e) => e.id === manifest.id);
+
+    let localStatus: LocalStatus;
+    if (!lockEntry) {
+      localStatus = 'not_pulled';
+    } else {
+      try {
+        const changedFiles = computeChangedFiles(installTarget, pristinePath(cwd, manifest.id));
+        localStatus = changedFiles.length === 0 ? 'pulled' : 'edited_locally';
+      } catch {
+        localStatus = 'pulled';
+      }
     }
-    return entries;
+
+    return { manifest, remoteName, localStatus, installTarget };
+  });
+}
+
+async function remoteAdd(args: Record<string, unknown>): Promise<{ name: string; url: string; dest: string }> {
+  const url = requireString(args, 'url');
+  const name = optionalString(args, 'name') ?? deriveNameFromUrl(url);
+
+  // Check for an existing registration before cloning anything, so a
+  // duplicate name fails fast without corrupting the existing entry or
+  // leaving behind a stray clone -- mirrors `runRemoteAdd`'s order exactly
+  // (src/cli/commands/remoteAdd.ts).
+  if (findRemote(name)) {
+    throw new RemoteRegistryError(`A remote named "${name}" is already registered`);
+  }
+
+  const dest = await cloneRemote(name, url);
+  addRemoteEntry({ name, url, addedAt: new Date().toISOString() });
+
+  return { name, url, dest };
+}
+
+/** Command map: every command the frontend/Tauri layer can invoke. */
+const commands: Record<string, CommandHandler> = {
+  'catalog.list': (args) => catalogList(args),
+
+  'artifact.pull': (args) => {
+    const id = requireString(args, 'id');
+    const cwd = requireString(args, 'cwd');
+    const remote = optionalString(args, 'remote');
+    return pullArtifact(id, remote, cwd);
   },
+
+  'artifact.push': async (args) => {
+    const id = requireString(args, 'id');
+    const cwd = requireString(args, 'cwd');
+    const options = (args.options ?? {}) as PushOptions;
+    return await pushArtifact(id, options, cwd);
+  },
+
+  'remote.list': () => listRemotes(),
+
+  'remote.add': async (args) => remoteAdd(args),
 };
 
 /**
@@ -78,7 +185,14 @@ function errorInfo(err: unknown): { type: string; message: string } {
   return { type: 'Error', message: String(err) };
 }
 
-function handleLine(line: string): void {
+/**
+ * Handles a single request line. This is `async` (some commands --
+ * `artifact.push`, `remote.add` -- do real async work like git clone/push
+ * and GitHub API calls), but it never throws/rejects: every error path
+ * resolves to a `writeResponse` call. That's what makes it safe for `main`
+ * to fire this off without awaiting it per line (see below).
+ */
+async function handleLine(line: string): Promise<void> {
   const trimmed = line.trim();
   if (trimmed.length === 0) {
     return;
@@ -102,7 +216,7 @@ function handleLine(line: string): void {
     if (!handler) {
       throw new Error(`Unknown command "${String(command)}"`);
     }
-    const result = handler(args ?? {});
+    const result = await handler(args ?? {});
     writeResponse({ id, ok: true, result });
   } catch (err) {
     writeResponse({ id, ok: false, error: errorInfo(err) });
@@ -111,9 +225,43 @@ function handleLine(line: string): void {
 
 function main(): void {
   const rl = readline.createInterface({ input: process.stdin, terminal: false });
-  rl.on('line', handleLine);
+
+  // Tracks requests whose `handleLine` call hasn't resolved yet. This is
+  // what lets `close` (stdin EOF) wait for in-flight async handlers
+  // (`artifact.push`, `remote.add`) to actually finish and write their
+  // response before the process exits, instead of racing them: without
+  // this, a host that sends one request and closes stdin immediately
+  // afterward (or this sidecar being piped a batch of lines directly, as
+  // in manual smoke-testing) could hit EOF while e.g. a `remote.add`
+  // clone is still running, and `process.exit(0)` would kill it
+  // mid-flight with no response ever written.
+  let pendingCount = 0;
+  let stdinClosed = false;
+
+  function exitIfDone(): void {
+    if (stdinClosed && pendingCount === 0) {
+      process.exit(0);
+    }
+  }
+
+  rl.on('line', (line) => {
+    // Fire-and-forget from the readline loop's perspective: `handleLine`
+    // may await real async work (git clone, GitHub API calls), but the
+    // loop must keep accepting further lines concurrently rather than
+    // blocking on any one request's completion -- there's no shared
+    // mutable state across a single call, so overlapping in-flight
+    // requests are safe. `handleLine` never throws/rejects (every error
+    // path writes an error response instead), so `.finally` is purely for
+    // pending-count bookkeeping, never error handling.
+    pendingCount += 1;
+    void handleLine(line).finally(() => {
+      pendingCount -= 1;
+      exitIfDone();
+    });
+  });
   rl.on('close', () => {
-    process.exit(0);
+    stdinClosed = true;
+    exitIfDone();
   });
 }
 

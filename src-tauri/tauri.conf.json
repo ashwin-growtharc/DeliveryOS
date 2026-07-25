@@ -11,8 +11,10 @@
     "windows": [
       {
         "title": "DeliveryOS",
-        "width": 800,
-        "height": 600,
+        "width": 1200,
+        "height": 800,
+        "minWidth": 860,
+        "minHeight": 560,
         "resizable": true,
         "fullscreen": false
       }

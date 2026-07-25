@@ -4,21 +4,40 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
-## Phase 3 — Tauri app (in progress: sidecar spike done)
+## Phase 3 — Tauri app (in progress: spike + UI wiring done)
 
 - Added `src/sidecar.ts`: a newline-delimited-JSON stdio dispatcher wrapping
-  the existing engine directly (only `catalog.list` implemented so far) —
-  the foundation for the desktop app's UI to talk to the engine without
-  duplicating any logic.
+  the existing engine directly — the foundation for the desktop app's UI to
+  talk to the engine without duplicating any logic. Now implements 5
+  commands: `catalog.list` (with a computed `localStatus` per artifact —
+  `not_pulled`/`pulled`/`edited_locally`), `artifact.pull`, `artifact.push`,
+  `remote.list`, `remote.add`.
 - Packaged the engine as a standalone Node Single Executable Application
   (SEA), confirmed to run without a Node install on the machine (~88MB).
-- Built a minimal Tauri v2 shell + spike UI proving the shell can spawn the
-  SEA sidecar and get a real response, plus real MSI (37.78MB) and NSIS
-  (25.44MB) installers.
+- Built a real Tauri v2 desktop UI (Browse, Detail, Add-new, Settings) via
+  one generalized `sidecar_call` Rust command — every future sidecar command
+  needs zero new Rust code. Styled with the ArcFlow brand system (colors,
+  EB Garamond/IBM Plex Sans/JetBrains Mono typography). Deliberately omits
+  onboarding/sign-in, sync/drift banners, conflict resolution, version
+  history, and profile switching — none have engine support yet; see
+  [docs/phase-3-ui-scope.md](docs/phase-3-ui-scope.md) for the full
+  section-by-section scope decision.
+- Real MSI (37.78MB) and NSIS (25.44MB) installers build successfully.
 - Measured cold-start latency: green on the median (~108ms), with a
   yellow-band tail (up to ~391ms) surfaced by independent re-testing — not
-  blocking, flagged for a larger sample once the real UI exists. Full
-  write-up: [docs/phase-3-spike-results.md](docs/phase-3-spike-results.md).
+  blocking. Full write-up: [docs/phase-3-spike-results.md](docs/phase-3-spike-results.md).
+- Fixed a latent bug: `pull`'s `post_install` step used `stdio:'inherit'`,
+  which would have corrupted the sidecar's JSON stream — now captured via
+  `stdio:'pipe'` and surfaced explicitly, with no CLI-visible regression.
+- Fixed during review: the Rust `sidecar_call` command could leak orphaned
+  sidecar processes on certain error paths (missing `child.kill()` calls) —
+  now killed on every return path.
+- Added sidecar-level e2e tests (`test/e2e/sidecar.e2e.test.ts`) driving the
+  JSON-RPC protocol directly, since no GUI-automation tool exists for a
+  native Tauri window here. One known coverage gap: `artifact.push`'s
+  success path can't be tested through the sidecar itself (no way to inject
+  a fake GitHub client across the process boundary) — only verified via the
+  manual runbook. See [docs/manual-ui-clickthrough.md](docs/manual-ui-clickthrough.md).
 - Added [REQUIREMENTS.md](REQUIREMENTS.md) documenting the Rust/MSVC/Tauri
   toolchain needed to build this and future Phase 3 work.
 

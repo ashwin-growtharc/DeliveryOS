@@ -55,6 +55,18 @@ export function findRemote(name: string): RemoteEntry | undefined {
   return readRegistry().remotes.find((r) => r.name === name);
 }
 
+/** Derives a remote name from the last path segment of a git URL or path,
+ * stripping a trailing `.git` suffix if present. Single shared
+ * implementation used by both the CLI's `remote add` command
+ * (`src/cli/commands/remoteAdd.ts`) and the Tauri sidecar's `remote.add`
+ * command (`src/sidecar.ts`) -- never duplicated. */
+export function deriveNameFromUrl(url: string): string {
+  const normalized = url.replace(/[/\\]+$/, ''); // trim trailing slashes
+  const segments = normalized.split(/[/\\]/).filter((s) => s.length > 0);
+  const last = segments[segments.length - 1] ?? normalized;
+  return last.endsWith('.git') ? last.slice(0, -4) : last;
+}
+
 /**
  * Adds a new remote entry to the registry. Throws RemoteRegistryError
  * (without mutating the existing registry) if `name` is already

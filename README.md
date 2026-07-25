@@ -10,12 +10,13 @@ installed on a machine to build/run it.
 **Status:** Phases 0-2 (MVP/POC) done — `remote add` / `list` / `pull` /
 `push` all work end to end, verified against real GitHub, including a real
 ArcOS-catalog artifact (see [docs/manual-smoke-test-push.md](docs/manual-smoke-test-push.md)
-and [docs/phase-2-retro.md](docs/phase-2-retro.md)). Phase 3 (Tauri app):
-sidecar-packaging spike done and green (see
-[docs/phase-3-spike-results.md](docs/phase-3-spike-results.md)) — the
-TypeScript engine packages as a standalone ~88MB executable a Tauri shell can
-spawn and talk to over stdio, no Node install required on the end user's
-machine. UI wiring, installer signing, and auto-update are next. No auth
+and [docs/phase-2-retro.md](docs/phase-2-retro.md)). Phase 3 (Tauri app): the
+sidecar-packaging spike is green (see [docs/phase-3-spike-results.md](docs/phase-3-spike-results.md)),
+and a real desktop UI (Browse, Pull, Push, Settings) is wired up and working
+— see [docs/phase-3-ui-scope.md](docs/phase-3-ui-scope.md) for exactly what
+was built vs. deliberately deferred to later phases, and
+[docs/manual-ui-clickthrough.md](docs/manual-ui-clickthrough.md) for how to
+verify it by hand. Installer signing and auto-update are next. No auth
 system yet.
 
 **Relationship to ArcOS:** standalone project, not an ArcOS extension. Physically

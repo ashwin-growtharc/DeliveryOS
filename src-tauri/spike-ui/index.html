@@ -2,90 +2,142 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>DeliveryOS - Sidecar Spike</title>
-    <style>
-      body {
-        font-family:
-          -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-        margin: 2rem;
-        color: #1a1a1a;
-      }
-      button {
-        font-size: 1rem;
-        padding: 0.5rem 1rem;
-        cursor: pointer;
-      }
-      #status {
-        margin-top: 0.75rem;
-        font-family: monospace;
-        color: #555;
-      }
-      pre {
-        margin-top: 1rem;
-        padding: 1rem;
-        background: #f4f4f4;
-        border: 1px solid #ddd;
-        border-radius: 4px;
-        white-space: pre-wrap;
-        word-break: break-all;
-        min-height: 3rem;
-      }
-    </style>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DeliveryOS</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="style.css" />
   </head>
   <body>
-    <h1>DeliveryOS Sidecar Spike</h1>
-    <p>
-      Click the button to spawn the Node SEA sidecar
-      (<code>deliveryos-engine</code>) and send it a
-      <code>catalog.list</code> request over stdin.
-    </p>
-    <button id="run-list-btn">List Artifacts</button>
-    <div id="status">idle</div>
-    <pre id="output">(no output yet)</pre>
+    <div id="app">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark">&#9889;</span>
+          <span class="brand-name">DeliveryOS</span>
+        </div>
+        <nav class="nav">
+          <button class="nav-btn" data-view="browse">Browse</button>
+          <button class="nav-btn" data-view="settings">Settings</button>
+        </nav>
+        <div class="folder-display">
+          <span class="folder-label">Project</span>
+          <span id="folder-path" class="folder-path">No folder selected</span>
+          <button id="change-folder-btn" class="btn btn-sm">Change folder</button>
+        </div>
+      </header>
 
-    <script>
-      // This is a static single HTML file with no bundler/dev-server wired
-      // up (see tauri.conf.json's `build.frontendDist`), so we can't use a
-      // bare `import { invoke } from '@tauri-apps/api/core'` specifier --
-      // the browser has no module resolution for node_modules. Instead we
-      // rely on `app.withGlobalTauri: true` (tauri.conf.json), which
-      // injects `window.__TAURI__.core.invoke` for us.
-      const { invoke } = window.__TAURI__.core;
+      <main id="main">
+        <!-- Browse -->
+        <section id="view-browse" class="view">
+          <div id="browse-no-folder" class="hint-banner" hidden>
+            Select a project folder to start browsing artifacts.
+          </div>
+          <div class="browse-toolbar">
+            <input id="search-input" type="text" placeholder="Search resources" />
+            <button id="refresh-btn" class="btn">Refresh</button>
+            <button id="add-new-btn" class="btn btn-primary">+ Add new</button>
+          </div>
+          <div id="chips" class="chips"></div>
+          <div id="card-grid" class="grid"></div>
+          <p id="browse-empty" class="empty-state" hidden>No artifacts match.</p>
+        </section>
 
-      const button = document.getElementById('run-list-btn');
-      const status = document.getElementById('status');
-      const output = document.getElementById('output');
+        <!-- Detail -->
+        <section id="view-detail" class="view" hidden>
+          <button id="back-to-browse-btn" class="btn back-btn">&larr; Back to Browse</button>
+          <div class="card detail-card">
+            <div class="detail-header">
+              <div class="detail-title">
+                <span id="detail-kind" class="kind-label"></span>
+                <span id="detail-name" class="name"></span>
+                <span id="detail-badge" class="badge"></span>
+              </div>
+              <button id="detail-action-btn" class="btn btn-primary" hidden></button>
+            </div>
+            <p id="detail-description" class="detail-description"></p>
+            <div class="meta-grid">
+              <div><span class="k">Kind</span><br /><span id="meta-kind" class="v"></span></div>
+              <div><span class="k">Version</span><br /><span id="meta-version" class="v"></span></div>
+              <div><span class="k">Owner</span><br /><span id="meta-owner" class="v"></span></div>
+              <div><span class="k">Refresh</span><br /><span id="meta-refresh" class="v"></span></div>
+              <div style="grid-column:1/-1;">
+                <span class="k">Tags</span><br />
+                <span id="meta-tags"></span>
+              </div>
+            </div>
+            <div class="install-path-label">Installs to</div>
+            <div id="detail-install-path" class="install-path"></div>
+          </div>
+        </section>
 
-      async function runList() {
-        button.disabled = true;
-        status.textContent = 'running...';
-        const clickStart = performance.now();
-        try {
-          const result = await invoke('run_list');
-          const clickElapsed = performance.now() - clickStart;
-          output.textContent = result;
-          status.textContent = `done (round-trip incl. IPC: ${clickElapsed.toFixed(1)} ms)`;
-        } catch (err) {
-          output.textContent = String(err);
-          status.textContent = 'error';
-        } finally {
-          button.disabled = false;
-        }
-      }
+        <!-- Add new -->
+        <section id="view-addnew" class="view" hidden>
+          <button class="btn back-btn" data-view="browse">&larr; Back to Browse</button>
+          <form id="addnew-form" class="card form-grid">
+            <h2 class="section-title">Propose a new artifact</h2>
+            <div class="field">
+              <label for="f-id">Artifact ID</label>
+              <input id="f-id" type="text" required placeholder="e.g. code-reviewer" />
+            </div>
+            <div class="field">
+              <label for="f-kind">Kind</label>
+              <input id="f-kind" type="text" required placeholder="e.g. agent-asset" />
+            </div>
+            <div class="field">
+              <label>Payload</label>
+              <div class="payload-picker">
+                <button type="button" id="pick-payload-file-btn" class="btn btn-sm">Choose file&hellip;</button>
+                <button type="button" id="pick-payload-dir-btn" class="btn btn-sm">Choose folder&hellip;</button>
+                <span id="payload-path-display" class="install-path">No file or folder selected</span>
+              </div>
+            </div>
+            <div class="field">
+              <label for="f-description">Description</label>
+              <textarea id="f-description" required rows="3"></textarea>
+            </div>
+            <div class="field">
+              <label for="f-owner">Owner</label>
+              <input id="f-owner" type="text" required />
+            </div>
+            <div class="field">
+              <label for="f-roles">Who is this for (roles, comma-separated)</label>
+              <input id="f-roles" type="text" placeholder="pm, engagement-lead" />
+            </div>
+            <div class="field">
+              <label for="f-remote">Remote</label>
+              <select id="f-remote" required></select>
+            </div>
+            <button type="submit" id="addnew-submit-btn" class="btn btn-primary" style="align-self:flex-start;">
+              Propose
+            </button>
+          </form>
+        </section>
 
-      button.addEventListener('click', runList);
+        <!-- Settings -->
+        <section id="view-settings" class="view" hidden>
+          <div class="card">
+            <h2 class="section-title">Remotes</h2>
+            <div id="remotes-list"></div>
+          </div>
+          <div class="card">
+            <h2 class="section-title">Add remote</h2>
+            <form id="remote-form" class="remote-form">
+              <input id="r-url" type="text" placeholder="git URL (e.g. https://github.com/owner/repo.git)" required />
+              <input id="r-name" type="text" placeholder="Name (optional)" />
+              <button type="submit" id="remote-submit-btn" class="btn btn-primary">Add remote</button>
+            </form>
+          </div>
+        </section>
+      </main>
 
-      // Cold-start measurement support: automatically fire the exact same
-      // sidecar-spawning command once, with zero manual interaction, as soon
-      // as the window is ready. This lets cold-start latency be measured by
-      // scripting many separate `app.exe` process launches headlessly (no
-      // GUI automation needed) while still exercising the identical
-      // spawn-to-first-response code path the manual button uses. The Rust
-      // side durably logs the measured latency out-of-band (to a fixed
-      // %TEMP% log file), so nothing needs to be read from this UI.
-      window.addEventListener('DOMContentLoaded', () => {
-        runList();
-      });
-    </script>
+      <div id="toast-stack" class="toast-stack"></div>
+    </div>
+
+    <script src="sidecar.js"></script>
+    <script src="app.js"></script>
   </body>
 </html>

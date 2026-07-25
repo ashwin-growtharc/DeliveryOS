@@ -1,16 +1,7 @@
 import { Command } from 'commander';
-import { addRemoteEntry, findRemote } from '../../engine/remote/remoteRegistry';
+import { addRemoteEntry, findRemote, deriveNameFromUrl } from '../../engine/remote/remoteRegistry';
 import { cloneRemote, cachePath } from '../../engine/remote/remoteCache';
 import { RemoteRegistryError } from '../../engine/errors';
-
-/** Derives a remote name from the last path segment of a git URL or path,
- * stripping a trailing `.git` suffix if present. */
-export function deriveNameFromUrl(url: string): string {
-  const normalized = url.replace(/[/\\]+$/, ''); // trim trailing slashes
-  const segments = normalized.split(/[/\\]/).filter((s) => s.length > 0);
-  const last = segments[segments.length - 1] ?? normalized;
-  return last.endsWith('.git') ? last.slice(0, -4) : last;
-}
 
 export async function runRemoteAdd(gitUrl: string, nameOption: string | undefined): Promise<void> {
   const name = nameOption ?? deriveNameFromUrl(gitUrl);
