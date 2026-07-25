@@ -62,6 +62,32 @@ design rationale.
   "core needs 2 reviewers" convention actually applies to catalog assets
   under its own current rules.
 
+## Post-Phase-2 addendum — two more real artifacts
+
+- Added `arcos-cli` (`kind: template`, `review_required: false`,
+  Pull-only) to the existing `ashwin-growtharc/arc_os-catalog-poc` scratch
+  remote: a full mirror of the real `growtharc/arc_os` repo's 75 tracked
+  files, hand-copied into an `arcos-mirror/` subdirectory (not the repo
+  root, to avoid colliding with that same remote's own Phase 2
+  `artifacts/`/`catalog/`/README content) and referenced via
+  `payload_path: arcos-mirror`. `post_install: pip install -e ".[dev]"`
+  verified to run and succeed for real. See
+  [docs/artifact-arcos-cli-retro.md](docs/artifact-arcos-cli-retro.md).
+- Added `launchpad-template` (`kind: template`) to a brand-new scratch
+  remote, `ashwin-growtharc/launchpad-template-poc`, seeded with a real
+  copy of Launchpad's actual Next.js "Hello World" starter kit (20
+  git-tracked files). DeliveryOS's first artifact sourced from a project
+  with no relationship to ArcOS at all; confirms the manifest schema and
+  pull/push mechanics are genuinely payload-agnostic — no engine changes
+  were needed. `post_install: npm install` verified to run and succeed for
+  real. See
+  [docs/artifact-launchpad-template-retro.md](docs/artifact-launchpad-template-retro.md).
+- Both were verified end to end via the real, built CLI (`remote add` →
+  `list --json` → `pull`) against fresh scratch `DELIVERYOS_HOME`/cwd
+  pairs, independent of any earlier manual testing session. Zero
+  `src/`/`test/` diffs were needed for either — confirmed by `git status`
+  on the engine directories before and after.
+
 ## Phase 1 — Push
 
 - Added `deliveryos push <id> [--remote <name>]` — pushes a local edit to a
