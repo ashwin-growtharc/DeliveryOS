@@ -1,4 +1,5 @@
 use serde::Deserialize;
+use tauri::Emitter;
 use tauri_plugin_shell::process::CommandEvent;
 use tauri_plugin_shell::ShellExt;
 
@@ -75,7 +76,29 @@ async fn sidecar_call(
           continue;
         }
 
-        let parsed = match serde_json::from_str::<SidecarResponseRaw>(&text) {
+        // Parse generically first: a progress line (`{"id","event":
+        // "progress","stage","message"}`) has no `ok` field, so deserializing
+        // it directly as `SidecarResponseRaw` would fail. Check for the
+        // progress shape first, forward it to the frontend as a
+        // `sidecar-progress` event, and keep looping -- the child is neither
+        // killed nor returned from for a progress line, only for the real
+        // final response.
+        let generic: serde_json::Value = match serde_json::from_str(&text) {
+          Ok(value) => value,
+          Err(e) => {
+            let _ = child.kill();
+            return Err(format!(
+              "failed to parse sidecar response as JSON: {e} (raw line: {text})"
+            ));
+          }
+        };
+
+        if generic.get("event").and_then(|v| v.as_str()) == Some("progress") {
+          let _ = app.emit("sidecar-progress", &generic);
+          continue;
+        }
+
+        let parsed = match serde_json::from_value::<SidecarResponseRaw>(generic) {
           Ok(parsed) => parsed,
           Err(e) => {
             let _ = child.kill();
@@ -135,6 +158,7 @@ pub fn run() {
   tauri::Builder::default()
     .plugin(tauri_plugin_shell::init())
     .plugin(tauri_plugin_dialog::init())
+    .plugin(tauri_plugin_opener::init())
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(

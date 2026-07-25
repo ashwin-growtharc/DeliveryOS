@@ -16,6 +16,16 @@
  *
  * The process keeps reading/responding to further lines until stdin
  * closes (EOF), at which point it exits cleanly.
+ *
+ * For long-running commands (`artifact.pull`/`artifact.push`), the sidecar
+ * also writes zero or more intermediate progress lines BEFORE the final
+ * response line for that same request:
+ *   { "id": string, "event": "progress", "stage": string, "message": string }
+ * `id` here is the same request id the eventual final response will carry,
+ * so the host can correlate a stream of progress lines with the call that
+ * produced them. These are purely additive -- they never replace or delay
+ * the final `{ok, result}` / `{ok:false, error}` line, which remains the
+ * actual completion signal.
  */
 import * as path from 'path';
 import * as readline from 'readline';
@@ -23,7 +33,7 @@ import { buildCatalog } from './engine/catalog/catalog';
 import { readLockfile } from './engine/lockfile/lockfile';
 import { computeChangedFiles } from './engine/push/diff';
 import { pristinePath } from './engine/paths';
-import { pullArtifact } from './engine/pull/pull';
+import { pullArtifact, ProgressCallback } from './engine/pull/pull';
 import { pushArtifact, PushOptions } from './engine/push/push';
 import {
   listRemotes,
@@ -57,8 +67,16 @@ type SidecarResponse = SidecarSuccessResponse | SidecarErrorResponse;
 
 /** A handler may return its result synchronously or asynchronously --
  * `handleLine` always `await`s whatever comes back (awaiting a
- * non-Promise value is a no-op), so both shapes work uniformly. */
-type CommandHandler = (args: Record<string, unknown>) => unknown | Promise<unknown>;
+ * non-Promise value is a no-op), so both shapes work uniformly.
+ *
+ * Every handler also receives a `ctx` object carrying `onProgress`, built
+ * fresh per request by `handleLine` -- most handlers simply ignore it; only
+ * `artifact.pull`/`artifact.push` actually call it, to surface live
+ * stage-by-stage progress for those long-running commands. */
+type CommandHandler = (
+  args: Record<string, unknown>,
+  ctx: { onProgress: ProgressCallback },
+) => unknown | Promise<unknown>;
 
 type LocalStatus = 'not_pulled' | 'pulled' | 'edited_locally';
 
@@ -125,7 +143,9 @@ function catalogList(args: Record<string, unknown>): CatalogListEntry[] {
   });
 }
 
-async function remoteAdd(args: Record<string, unknown>): Promise<{ name: string; url: string; dest: string }> {
+async function remoteAdd(
+  args: Record<string, unknown>,
+): Promise<{ name: string; url: string; dest: string }> {
   const url = requireString(args, 'url');
   const name = optionalString(args, 'name') ?? deriveNameFromUrl(url);
 
@@ -147,18 +167,18 @@ async function remoteAdd(args: Record<string, unknown>): Promise<{ name: string;
 const commands: Record<string, CommandHandler> = {
   'catalog.list': (args) => catalogList(args),
 
-  'artifact.pull': (args) => {
+  'artifact.pull': (args, { onProgress }) => {
     const id = requireString(args, 'id');
     const cwd = requireString(args, 'cwd');
     const remote = optionalString(args, 'remote');
-    return pullArtifact(id, remote, cwd);
+    return pullArtifact(id, remote, cwd, onProgress);
   },
 
-  'artifact.push': async (args) => {
+  'artifact.push': async (args, { onProgress }) => {
     const id = requireString(args, 'id');
     const cwd = requireString(args, 'cwd');
     const options = (args.options ?? {}) as PushOptions;
-    return await pushArtifact(id, options, cwd);
+    return await pushArtifact(id, options, cwd, undefined, onProgress);
   },
 
   'remote.list': () => listRemotes(),
@@ -176,6 +196,18 @@ const commands: Record<string, CommandHandler> = {
  */
 function writeResponse(response: SidecarResponse): void {
   process.stdout.write(JSON.stringify(response) + '\n');
+}
+
+/**
+ * Writes a single progress line for an in-flight request, using the exact
+ * same "one JSON object per line, no pretty-printing" discipline as
+ * `writeResponse` -- for the same reason: a description or message field
+ * containing an embedded `\n` must not split this onto multiple physical
+ * lines. Always written before that request's eventual `writeResponse` call,
+ * never after.
+ */
+function writeProgress(id: string | null, stage: string, message: string): void {
+  process.stdout.write(JSON.stringify({ id, event: 'progress', stage, message }) + '\n');
 }
 
 function errorInfo(err: unknown): { type: string; message: string } {
@@ -216,7 +248,8 @@ async function handleLine(line: string): Promise<void> {
     if (!handler) {
       throw new Error(`Unknown command "${String(command)}"`);
     }
-    const result = await handler(args ?? {});
+    const ctx = { onProgress: (stage: string, message: string) => writeProgress(id, stage, message) };
+    const result = await handler(args ?? {}, ctx);
     writeResponse({ id, ok: true, result });
   } catch (err) {
     writeResponse({ id, ok: false, error: errorInfo(err) });

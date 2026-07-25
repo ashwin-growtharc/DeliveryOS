@@ -6,6 +6,8 @@
 (function () {
   const call = window.DeliveryOS.call;
   const { open: openDialog } = window.__TAURI__.dialog;
+  const { revealItemInDir } = window.__TAURI__.opener;
+  const { listen } = window.__TAURI__.event;
 
   const PROJECT_DIR_KEY = 'deliveryos.projectDir';
 
@@ -24,6 +26,13 @@
     selectedKey: null, // `${id}::${remoteName}` of the entry shown in Detail
     remotes: [],
   };
+
+  // Unlisten function for the current `sidecar-progress` event subscription,
+  // if one is active -- there is at most one live subscription at a time
+  // (Detail's action button is the sole trigger for pull/push now), torn
+  // down and re-created fresh every time a new action starts or a new
+  // Detail view is opened.
+  let progressUnlisten = null;
 
   // ---------- small DOM helpers ----------
 
@@ -239,11 +248,6 @@
       const card = document.createElement('div');
       card.className = 'res-card';
 
-      const action = actionButtonFor(entry);
-      const actionHtml = action
-        ? `<button class="btn card-action" data-key="${escapeHtml(entryKey(entry))}" data-action="${action.action}">${action.label}</button>`
-        : '';
-
       card.innerHTML = `
         <div class="row1">
           <span class="kind">${escapeHtml(entry.manifest.kind)}</span>
@@ -253,60 +257,47 @@
         <div class="summary">${escapeHtml(entry.manifest.description)}</div>
         <div class="row2">
           <span class="meta">v${escapeHtml(entry.manifest.version)} &middot; ${escapeHtml(entry.manifest.owner)}</span>
-          ${actionHtml}
         </div>
       `;
 
-      card.addEventListener('click', (ev) => {
-        if (ev.target.closest('.card-action')) {
-          return; // handled by the action button's own listener below
-        }
-        openDetail(entry);
-      });
-
-      const actionBtn = card.querySelector('.card-action');
-      if (actionBtn) {
-        actionBtn.addEventListener('click', (ev) => {
-          ev.stopPropagation();
-          if (action.action === 'pull') {
-            void doPull(entry, actionBtn);
-          } else {
-            void doPush(entry, actionBtn);
-          }
-        });
-      }
+      // The whole card is the click target now -- Pull/Push moved into
+      // Detail, so there's no inner action button to carve out a
+      // stopPropagation() exception for anymore.
+      card.addEventListener('click', () => openDetail(entry));
 
       grid.appendChild(card);
     }
   }
 
-  async function doPull(entry, button) {
+  /** Runs `action` ('pull' or 'push') for `entry`, driving the Detail
+   * view's progress panel (see beginProgress/endProgress) around the call.
+   * This is the single call site for both actions now that cards no longer
+   * have their own action button -- previously doPull/doPush were each
+   * called from both a card's button and Detail's button; now Detail's
+   * action button is the only trigger, so one function covers it. */
+  async function runArtifactAction(entry, action, button) {
     await withBusy(button, 'Working...', async () => {
+      await beginProgress();
       try {
-        const result = await call('artifact.pull', {
-          id: entry.manifest.id,
-          remote: entry.remoteName,
-          cwd: state.projectDir,
-        });
-        toastSuccess(`Pulled ${result.manifest.id}`);
+        if (action === 'pull') {
+          const result = await call('artifact.pull', {
+            id: entry.manifest.id,
+            remote: entry.remoteName,
+            cwd: state.projectDir,
+          });
+          toastSuccess(`Pulled ${result.manifest.id}`);
+        } else {
+          const result = await call('artifact.push', {
+            id: entry.manifest.id,
+            cwd: state.projectDir,
+            options: {},
+          });
+          toastSuccess(`Pushed ${entry.manifest.id}: opened PR #${result.number} (${result.url})`);
+        }
+        endProgress(true);
         await loadCatalog();
       } catch (err) {
-        toastError(err);
-      }
-    });
-  }
-
-  async function doPush(entry, button) {
-    await withBusy(button, 'Working...', async () => {
-      try {
-        const result = await call('artifact.push', {
-          id: entry.manifest.id,
-          cwd: state.projectDir,
-          options: {},
-        });
-        toastSuccess(`Pushed ${entry.manifest.id}: opened PR #${result.number} (${result.url})`);
-        await loadCatalog();
-      } catch (err) {
+        endProgress(false);
         toastError(err);
       }
     });
@@ -314,8 +305,95 @@
 
   // ---------- detail ----------
 
+  /** Shows the Open-folder button's target in the OS file manager. Uses
+   * `revealItemInDir` (not `openPath`) specifically because install_target
+   * can be either a directory (payload_path pointed at a folder) or a
+   * single file (payload_path pointed at one file, e.g. code-reviewer's
+   * install target is a single .md file) -- openPath on a file would launch
+   * that file in its default app (e.g. an editor) instead of showing it in
+   * Explorer, which doesn't match what a button labeled "Open folder" should
+   * do for either case. revealItemInDir handles both uniformly. Errors (e.g.
+   * the path no longer exists on disk) surface as a toast, same as every
+   * other engine/OS call in this app. */
+  async function openInstallFolder(path) {
+    try {
+      await revealItemInDir(path);
+    } catch (err) {
+      toastError(err);
+    }
+  }
+
+  /** Appends one `{stage, message}` line to the progress log and scrolls it
+   * into view. Each line shows the stage as a small uppercase label
+   * alongside the human-readable message -- deliberately not a percentage,
+   * see style.css's `.progress-log` comment for why. */
+  function appendProgressLine(stage, message) {
+    const log = $('progress-log');
+    const line = document.createElement('div');
+    line.className = 'progress-line';
+    line.innerHTML = '<span class="stage"></span><span class="msg"></span>';
+    line.querySelector('.stage').textContent = stage;
+    line.querySelector('.msg').textContent = message;
+    log.appendChild(line);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  /** Resets and shows the progress panel for a fresh pull/push, and
+   * (re)subscribes to `sidecar-progress` events -- awaited so the
+   * subscription is guaranteed live before the caller issues the
+   * `artifact.pull`/`artifact.push` call that follows, closing any race
+   * where an early progress line could otherwise arrive before anyone is
+   * listening for it. Tears down any previous subscription first (there's
+   * only ever one action in flight at a time, but this is defensive). */
+  async function beginProgress() {
+    const panel = $('detail-progress');
+    $('progress-log').innerHTML = '';
+    panel.hidden = false;
+    panel.classList.remove('done', 'error');
+    $('progress-status').textContent = 'Working…';
+
+    if (progressUnlisten) {
+      progressUnlisten();
+      progressUnlisten = null;
+    }
+    progressUnlisten = await listen('sidecar-progress', (event) => {
+      const { stage, message } = event.payload;
+      appendProgressLine(stage, message);
+    });
+  }
+
+  /** Marks the progress panel as finished (success or failure) and tears
+   * down the event subscription. Deliberately does NOT hide or clear the
+   * panel/log -- the point is to leave the full stage history visible
+   * through to "Done"/"Failed", not wipe it the moment the action settles. */
+  function endProgress(success) {
+    const panel = $('detail-progress');
+    panel.classList.add(success ? 'done' : 'error');
+    $('progress-status').textContent = success ? 'Done' : 'Failed';
+    if (progressUnlisten) {
+      progressUnlisten();
+      progressUnlisten = null;
+    }
+  }
+
+  /** Resets the progress panel back to its hidden, empty idle state. Called
+   * only when a NEW Detail view is opened (openDetail(), below) -- never by
+   * renderDetail()/refreshDetailIfShown()'s post-action re-render, which
+   * must leave an in-progress or just-finished log alone. */
+  function resetProgressPanel() {
+    const panel = $('detail-progress');
+    panel.hidden = true;
+    panel.classList.remove('done', 'error');
+    $('progress-log').innerHTML = '';
+    if (progressUnlisten) {
+      progressUnlisten();
+      progressUnlisten = null;
+    }
+  }
+
   function openDetail(entry) {
     state.selectedKey = entryKey(entry);
+    resetProgressPanel();
     renderDetail(entry);
     showViewRaw('detail');
   }
@@ -357,17 +435,22 @@
 
     $('detail-install-path').textContent = entry.installTarget;
 
+    const openFolderBtn = $('detail-open-folder-btn');
+    if (entry.localStatus !== 'not_pulled') {
+      openFolderBtn.hidden = false;
+      openFolderBtn.onclick = () => void openInstallFolder(entry.installTarget);
+    } else {
+      openFolderBtn.hidden = true;
+      openFolderBtn.onclick = null;
+    }
+
     const actionBtn = $('detail-action-btn');
     const action = actionButtonFor(entry);
     if (action) {
       actionBtn.hidden = false;
       actionBtn.textContent = action.label;
       actionBtn.onclick = () => {
-        if (action.action === 'pull') {
-          void doPull(entry, actionBtn).then(() => refreshDetailIfShown(entry));
-        } else {
-          void doPush(entry, actionBtn).then(() => refreshDetailIfShown(entry));
-        }
+        void runArtifactAction(entry, action.action, actionBtn).then(() => refreshDetailIfShown(entry));
       };
     } else {
       actionBtn.hidden = true;

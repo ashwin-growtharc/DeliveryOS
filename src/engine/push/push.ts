@@ -4,7 +4,7 @@ import { stringify as stringifyYaml } from 'yaml';
 import { readLockfile } from '../lockfile/lockfile';
 import { findRemote } from '../remote/remoteRegistry';
 import { cachePath } from '../remote/remoteCache';
-import { resolveArtifact } from '../pull/pull';
+import { resolveArtifact, ProgressCallback } from '../pull/pull';
 import { buildCatalog } from '../catalog/catalog';
 import { ManifestSchema, Manifest } from '../manifest/schema';
 import { pristinePath } from '../paths';
@@ -81,6 +81,7 @@ export async function pushArtifact(
   options: PushOptions,
   cwd: string,
   octokit?: GithubClient,
+  onProgress?: ProgressCallback,
 ): Promise<PushResult> {
   const lockfile = readLockfile(cwd);
   const lockEntry = lockfile.entries.find((e) => e.id === id);
@@ -125,6 +126,7 @@ export async function pushArtifact(
 
   // Refresh the local cache to the remote's current tip before branching,
   // diffing, or collision-checking against it.
+  onProgress?.('fetch', `Fetching remote "${remoteName}"...`);
   await fetchAndReset(cachePath(remoteName));
 
   const branchName = buildBranchName(id);
@@ -145,6 +147,7 @@ export async function pushArtifact(
 
     // Collision check: the id must not already exist in this remote's
     // just-refreshed catalog.
+    onProgress?.('diff', `Checking "${id}" is not already taken in remote "${remoteName}"...`);
     const catalog = buildCatalog();
     const collision = catalog.find(
       (entry) => entry.remoteName === remoteName && entry.manifest.id === id,
@@ -191,6 +194,7 @@ export async function pushArtifact(
     }
     const payloadFiles = listFilesRecursive(options.payloadPath);
 
+    onProgress?.('stage', `Staging payload files for "${id}"...`);
     const artifactDir = path.join(cacheDir, 'artifacts', id);
     const payloadDestDir = path.join(artifactDir, 'payload');
     fs.mkdirSync(payloadDestDir, { recursive: true });
@@ -222,6 +226,7 @@ export async function pushArtifact(
     const installTarget = path.resolve(cwd, manifest.install_target);
     const pristine = pristinePath(cwd, id);
 
+    onProgress?.('diff', `Diffing "${id}" against its pristine snapshot...`);
     const changedFiles = computeChangedFiles(installTarget, pristine);
     if (changedFiles.length === 0) {
       throw new NoLocalChangesError(
@@ -238,6 +243,7 @@ export async function pushArtifact(
       ? path.join(cacheDir, manifest.payload_path)
       : path.join(cacheDir, 'artifacts', id, 'payload');
     const payloadDestGitRoot = manifest.payload_path ?? `artifacts/${id}/payload`;
+    onProgress?.('stage', `Staging ${changedFiles.length} changed file(s) for "${id}"...`);
     for (const change of changedFiles) {
       if (change.status === 'deleted') {
         fs.rmSync(path.join(payloadDestDir, change.relPath), { force: true });
@@ -265,10 +271,14 @@ export async function pushArtifact(
     prBody = content.body;
   }
 
+  onProgress?.('branch', `Creating branch "${branchName}"...`);
   await createBranch(cacheDir, branchName);
+  onProgress?.('commit', 'Committing changes...');
   await commitPaths(cacheDir, filesToCommit, commitMessage, identity);
+  onProgress?.('push', `Pushing branch "${branchName}"...`);
   await pushBranch(cacheDir, branchName);
 
+  onProgress?.('pr-open', 'Opening pull request...');
   const client = octokit ?? (await createOctokit(getGithubToken()));
   const base = await getDefaultBranch(client, ghOwner, ghRepo);
   const opened = await openPullRequest(client, {

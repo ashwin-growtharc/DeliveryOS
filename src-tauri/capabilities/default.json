@@ -9,6 +9,15 @@
     "core:default",
     "dialog:default",
     {
+      "identifier": "opener:allow-open-path",
+      "allow": [
+        {
+          "path": "**"
+        }
+      ]
+    },
+    "opener:allow-reveal-item-in-dir",
+    {
       "identifier": "shell:allow-execute",
       "allow": [
         {

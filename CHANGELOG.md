@@ -6,6 +6,22 @@ design rationale.
 
 ## Phase 3 — Tauri app (in progress: spike + UI wiring done)
 
+- Added live progress visibility during Pull/Push: `pullArtifact`/`pushArtifact`
+  gained an optional `onProgress` callback (no-op for CLI, unchanged
+  behavior there), the sidecar streams `{event:'progress'}` lines mid-call,
+  and the Rust host forwards them as Tauri events. Detail view now shows a
+  real, honest activity log (named stages, not a fake percentage bar —
+  there's no way to know "80% done" for an arbitrary shell command).
+- Restructured Browse cards: no more per-card Pull/Push button — the whole
+  card opens Detail, and Pull/Push (with the new progress log) happens from
+  there instead.
+- Added an "Open folder" button in Detail, using `revealItemInDir` (not
+  `openPath`) so it works consistently whether the artifact's install
+  target is a file or a directory. Found and fixed two real bugs during
+  QA: the opener permission had no scope (every real path was rejected),
+  and the initial implementation used `openPath` which launched single-file
+  artifacts in their default editor instead of revealing them in Explorer.
+
 - Added `--post-install <cmd>` to `push --new` (CLI) and a "Setup command"
   field to the Add-new form (app), closing a real gap: proposing a
   brand-new artifact previously had no way to declare its own setup step

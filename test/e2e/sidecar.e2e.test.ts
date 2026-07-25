@@ -37,6 +37,17 @@ interface SidecarResponse {
   error?: { type: string; message: string };
 }
 
+/** Shape of an intermediate progress line the sidecar writes for
+ * `artifact.pull`/`artifact.push` (see src/sidecar.ts's `writeProgress`).
+ * Distinguished from a `SidecarResponse` by its `event: 'progress'` field --
+ * it never resolves a pending request the way a final response does. */
+interface SidecarProgressLine {
+  id: string | null;
+  event: 'progress';
+  stage: string;
+  message: string;
+}
+
 interface CatalogListEntry {
   manifest: { id: string; kind: string; version: string; description: string; owner: string };
   remoteName: string;
@@ -56,6 +67,10 @@ class SidecarSession {
   private readonly child: ChildProcess;
   private readonly pending = new Map<string, (res: SidecarResponse) => void>();
   private readonly stderrChunks: string[] = [];
+  // Progress lines don't resolve a pending request the way a final response
+  // does (see the 'line' handler below), so they're accumulated here
+  // instead -- tests drain them with `takeProgressLines()`.
+  private readonly progressLines: SidecarProgressLine[] = [];
   private nextId = 1;
   private readonly exited: Promise<number | null>;
 
@@ -71,9 +86,9 @@ class SidecarSession {
       if (trimmed.length === 0) {
         return;
       }
-      let parsed: SidecarResponse;
+      let parsed: SidecarResponse | SidecarProgressLine;
       try {
-        parsed = JSON.parse(trimmed) as SidecarResponse;
+        parsed = JSON.parse(trimmed) as SidecarResponse | SidecarProgressLine;
       } catch {
         // A response line that isn't valid JSON would itself be a sidecar
         // protocol bug (never expected here) -- ignore rather than crash
@@ -81,11 +96,18 @@ class SidecarSession {
         // loudly instead.
         return;
       }
-      const key = parsed.id === null ? '__null__' : parsed.id;
+
+      if ((parsed as SidecarProgressLine).event === 'progress') {
+        this.progressLines.push(parsed as SidecarProgressLine);
+        return;
+      }
+
+      const response = parsed as SidecarResponse;
+      const key = response.id === null ? '__null__' : response.id;
       const resolver = this.pending.get(key);
       if (resolver) {
         this.pending.delete(key);
-        resolver(parsed);
+        resolver(response);
       }
     });
 
@@ -121,6 +143,17 @@ class SidecarSession {
 
   stderrOutput(): string {
     return this.stderrChunks.join('');
+  }
+
+  /** Returns every progress line accumulated since the last call to this
+   * method (or since the session was created), then clears the buffer.
+   * Callers typically drain it once right before a call whose progress they
+   * want to isolate (in case an earlier request left stray lines) and once
+   * more right after awaiting that call's response. */
+  takeProgressLines(): SidecarProgressLine[] {
+    const lines = this.progressLines.slice();
+    this.progressLines.length = 0;
+    return lines;
   }
 
   /** Closes stdin (EOF, matching how a real host session ends) and waits
@@ -485,6 +518,146 @@ describe('sidecar e2e', () => {
         expect(branchSummary.all.some((b) => b.startsWith(`deliveryos/${artifact.id}/`))).toBe(
           true,
         );
+      } finally {
+        await session.close();
+      }
+    },
+    30_000,
+  );
+
+  it(
+    'artifact.pull emits progress stages in order (resolve, copy, post_install, snapshot, '
+      + 'lockfile) before the final response, and the final response shape is untouched',
+    async () => {
+      const cwd = newScratchCwd('pull-progress');
+      const session = new SidecarSession(cwd, deliveryOsHome);
+      try {
+        const addResp = await session.request('remote.add', {
+          url: fixtureRemoteDir,
+          name: 'sidecar-remote-pull-progress',
+        });
+        expect(addResp.ok).toBe(true);
+        session.takeProgressLines(); // discard remote.add's own progress lines (it emits none, but be defensive)
+
+        // handbook-doc is TEST_ARTIFACTS's one artifact with a post_install
+        // command -- pulling it exercises all 5 progress stages, including
+        // the 'post_install' one that's conditionally emitted.
+        const artifact = TEST_ARTIFACTS.find((a) => a.hasPostInstall)!;
+        const pullResp = await session.request('artifact.pull', {
+          id: artifact.id,
+          remote: 'sidecar-remote-pull-progress',
+          cwd,
+        });
+        expect(pullResp.ok).toBe(true);
+
+        const progressLines = session.takeProgressLines();
+        expect(progressLines.map((p) => p.stage)).toEqual([
+          'resolve',
+          'copy',
+          'post_install',
+          'snapshot',
+          'lockfile',
+        ]);
+        for (const line of progressLines) {
+          expect(line.id).toBe(pullResp.id);
+          expect(line.stage.length).toBeGreaterThan(0);
+          expect(line.message.length).toBeGreaterThan(0);
+        }
+
+        // Adding progress lines must not have changed the final response's
+        // own shape -- still exactly {id, ok, result}, nothing extra bolted
+        // on and nothing dropped.
+        expect(Object.keys(pullResp).sort()).toEqual(['id', 'ok', 'result']);
+      } finally {
+        await session.close();
+      }
+    },
+    30_000,
+  );
+
+  it(
+    "artifact.pull on an artifact WITHOUT post_install emits progress stages with the "
+      + "'post_install' stage absent",
+    async () => {
+      const cwd = newScratchCwd('pull-progress-no-postinstall');
+      const session = new SidecarSession(cwd, deliveryOsHome);
+      try {
+        const addResp = await session.request('remote.add', {
+          url: fixtureRemoteDir,
+          name: 'sidecar-remote-pull-progress-2',
+        });
+        expect(addResp.ok).toBe(true);
+        session.takeProgressLines();
+
+        const artifact = TEST_ARTIFACTS.find((a) => !a.hasPostInstall)!;
+        const pullResp = await session.request('artifact.pull', {
+          id: artifact.id,
+          remote: 'sidecar-remote-pull-progress-2',
+          cwd,
+        });
+        expect(pullResp.ok).toBe(true);
+
+        const stages = session.takeProgressLines().map((p) => p.stage);
+        expect(stages).toEqual(['resolve', 'copy', 'snapshot', 'lockfile']);
+      } finally {
+        await session.close();
+      }
+    },
+    30_000,
+  );
+
+  it(
+    'artifact.push emits early progress stages (fetch, diff, ...) before hitting the real '
+      + 'GitHub-auth wall',
+    async () => {
+      // Same split as the existing "artifact.push (edit mode)" coverage-gap
+      // test above: a fake github.com-shaped URL registered directly (so
+      // the sidecar's own remote.add isn't asked to clone a real
+      // github.com URL), cloned from the real local fixture "remote".
+      const remoteName = 'sidecar-remote-push-progress';
+      const fakeGithubUrl =
+        'https://github.com/deliveryos-qa-fake-owner/deliveryos-qa-fake-repo-progress.git';
+      addRemoteEntry({ name: remoteName, url: fakeGithubUrl, addedAt: new Date().toISOString() });
+      await cloneRemote(remoteName, fixtureRemoteDir);
+
+      const cwd = newScratchCwd('push-progress');
+      const session = new SidecarSession(cwd, deliveryOsHome);
+      try {
+        const artifact = TEST_ARTIFACTS.find((a) => a.id === 'welcome-template')!;
+        const pullResp = await session.request('artifact.pull', {
+          id: artifact.id,
+          remote: remoteName,
+          cwd,
+        });
+        expect(pullResp.ok).toBe(true);
+
+        const installTarget = path.resolve(cwd, artifact.installTarget);
+        fs.writeFileSync(
+          path.join(installTarget, 'README.md'),
+          '# welcome-template\n\nedited for the push progress test.\n',
+          'utf-8',
+        );
+
+        session.takeProgressLines(); // discard the pull's own progress lines
+        const pushResp = await session.request('artifact.push', {
+          id: artifact.id,
+          cwd,
+          options: {},
+        });
+        expect(pushResp.ok).toBe(false);
+        expect(['GithubAuthError', 'GithubApiError']).toContain(pushResp.error?.type);
+
+        const stages = session.takeProgressLines().map((p) => p.stage);
+        // How far push gets before hitting the real GitHub-auth wall could
+        // vary slightly machine-to-machine (gh CLI installed/logged in or
+        // not) -- assert a reasonable early prefix rather than the exact
+        // full stage list, to avoid flakiness.
+        expect(stages.length).toBeGreaterThan(0);
+        expect(stages.slice(0, 2)).toEqual(['fetch', 'diff']);
+        for (const stage of stages) {
+          expect(typeof stage).toBe('string');
+          expect(stage.length).toBeGreaterThan(0);
+        }
       } finally {
         await session.close();
       }

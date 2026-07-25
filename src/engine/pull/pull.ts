@@ -15,6 +15,17 @@ export interface PullResult {
   postInstallOutput?: string;
 }
 
+/**
+ * Shared progress-reporting hook for `pullArtifact`/`pushArtifact`. Callers
+ * that don't care (the CLI commands) simply omit it -- every call site is a
+ * no-op-safe `onProgress?.(...)`, so passing undefined changes no behavior.
+ * The sidecar (`src/sidecar.ts`) is the one real consumer: it wires this to
+ * emit `{event:'progress'}` lines to the Tauri host mid-call, which is what
+ * lets the desktop UI show live stage-by-stage status instead of appearing
+ * to hang during a long pull/push.
+ */
+export type ProgressCallback = (stage: string, message: string) => void;
+
 function isExecError(err: unknown): err is Error & { stdout?: Buffer; stderr?: Buffer } {
   return err instanceof Error;
 }
@@ -61,7 +72,13 @@ export function resolveArtifact(
  * present, then upserts the cwd-scoped lockfile. The lockfile is only
  * updated once both the copy and post_install succeed.
  */
-export function pullArtifact(id: string, remoteName: string | undefined, cwd: string): PullResult {
+export function pullArtifact(
+  id: string,
+  remoteName: string | undefined,
+  cwd: string,
+  onProgress?: ProgressCallback,
+): PullResult {
+  onProgress?.('resolve', `Resolving artifact "${id}"...`);
   const entry = resolveArtifact(id, remoteName);
   const { manifest, remoteName: resolvedRemoteName } = entry;
 
@@ -74,10 +91,12 @@ export function pullArtifact(id: string, remoteName: string | undefined, cwd: st
     : path.join(remoteDir, 'artifacts', manifest.id, 'payload');
   const installTarget = path.resolve(cwd, manifest.install_target);
 
+  onProgress?.('copy', `Copying payload files to ${installTarget}...`);
   fs.cpSync(payloadSrc, installTarget, { recursive: true });
 
   let postInstallOutput: string | undefined;
   if (manifest.post_install) {
+    onProgress?.('post_install', `Running: ${manifest.post_install}`);
     // `stdio: 'pipe'` (not 'inherit') is required here: this function can run
     // inside the Tauri sidecar (src/sidecar.ts), whose stdout is a
     // newline-delimited JSON stream -- a post_install command's raw output
@@ -109,12 +128,14 @@ export function pullArtifact(id: string, remoteName: string | undefined, cwd: st
   // payloadSrc (pre-post_install) would make every one of those generated
   // files look like a local edit the moment post_install finishes, even
   // though the user hasn't touched anything yet.
+  onProgress?.('snapshot', 'Recording installed state...');
   const pristineTarget = pristinePath(cwd, manifest.id);
   if (fs.existsSync(pristineTarget)) {
     fs.rmSync(pristineTarget, { recursive: true, force: true });
   }
   fs.cpSync(installTarget, pristineTarget, { recursive: true });
 
+  onProgress?.('lockfile', 'Updating lockfile...');
   upsertEntry(cwd, {
     id: manifest.id,
     version: manifest.version,
