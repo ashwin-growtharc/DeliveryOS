@@ -70,7 +70,22 @@ Goal: pull a real ArcOS catalog asset, edit it, push a real PR against `arc_os`,
 - [ ] **End-to-end test:** someone *outside the builder team* runs a fresh install on a clean machine, times it, and completes a full pull → edit → push cycle through the UI alone, no terminal. Installer isn't called "stable" until this passes (§9 risk #7, borrowed from ArcOS's day-1-install runbook).
       **Deliberately deferred** at POC stage — a second Windows device is available for a future clean-machine install check, but that only tests "does the installer work without dev tools present," not the actual point of this bar (a genuinely fresh, non-builder pair of eyes catching UX confusion). Revisit once that's actually needed.
 
-## Phase 4 — Team rollout
+## Phase 4 — Team rollout — **Deferred, out of sequence**
+
+**Decision:** GrowthArc has no real SSO/IdP today, and building one from
+scratch just to unblock this phase would mean inventing infrastructure
+DeliveryOS was explicitly designed not to invent (§9 risk #9 already assumed
+"whatever IdP GrowthArc already uses" would exist by this point — it
+doesn't). Rather than block everything else on that, **Phase 5 is done next
+instead** — nothing in Phase 5 depends on auth or multi-user profiles, so a
+complete, polished single-user app is reachable without it. Phase 4 is
+picked back up once real identity infrastructure actually exists, not
+abandoned. One piece of it (self-declared, unverified local profiles +
+role-based filtering) may get pulled forward into that single-user app
+without waiting for real auth — a self-declared profile needs no external
+dependency, it just isn't *verified* identity. Track that decision here if
+it happens, rather than silently blurring "Phase 4 done" with "profiles
+exist but nobody's SSO'd in."
 
 - [ ] Design and build auth/SSO (first time it's actually needed — §9 risk #9)
 - [ ] Profiles: saved tag-filter queries per role/team (§5.3 Filter 1)
@@ -80,7 +95,7 @@ Goal: pull a real ArcOS catalog asset, edit it, push a real PR against `arc_os`,
 - [ ] Decide the kind-sprawl question (§9 risk #1) before opening up beyond the 1–2 kinds proven in Phase 2
 - [ ] **End-to-end test:** two people, two different profiles (e.g. Sales and Engineering), each sign in, each see genuinely different Browse results, each independently complete a full pull → edit → push cycle without seeing or affecting the other's content.
 
-## Phase 5 — Polish
+## Phase 5 — Polish — **Done next, ahead of Phase 4 (see deferral note above)**
 
 - [ ] Drift detection (`deliveryos doctor` equivalent, surfaced in the app)
 - [ ] Background auto-sync on an interval
