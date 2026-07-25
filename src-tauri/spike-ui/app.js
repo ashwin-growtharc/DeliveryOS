@@ -68,17 +68,33 @@
   /** Disables `button`, swaps its label to `busyLabel`, runs `fn`, then
    * always restores the button -- regardless of success/failure. Every
    * call() site uses this: each call is a fresh sidecar spawn and is never
-   * instant. */
+   * instant.
+   *
+   * Reentrancy-safe: if this fires twice concurrently on the same button
+   * (e.g. a pull's post-success catalog refresh overlapping with an
+   * already-in-flight refresh from opening the Browse view), a busy counter
+   * ensures only the last call to finish restores the idle state -- and it
+   * restores to the button's true idle label (captured once, the first time
+   * this button is ever busied), not whatever text happened to be showing
+   * right before this particular call started. Without this, the second
+   * call would capture "Working..." as its own "original" label and leave
+   * the button stuck on it forever once both calls finish. */
   async function withBusy(button, busyLabel, fn) {
-    const originalLabel = button.textContent;
-    const originalDisabled = button.disabled;
+    if (button.dataset.idleLabel === undefined) {
+      button.dataset.idleLabel = button.textContent;
+    }
+    button._busyCount = (button._busyCount || 0) + 1;
     button.disabled = true;
     button.textContent = busyLabel;
     try {
       return await fn();
     } finally {
-      button.disabled = originalDisabled;
-      button.textContent = originalLabel;
+      button._busyCount -= 1;
+      if (button._busyCount <= 0) {
+        button._busyCount = 0;
+        button.disabled = false;
+        button.textContent = button.dataset.idleLabel;
+      }
     }
   }
 

@@ -1,11 +1,21 @@
 # Manual click-through runbook: DeliveryOS desktop app (Tauri UI)
 
-There is no GUI automation tool available in this environment for a native
-Tauri window, so the Rust shell (`src-tauri/`) + spike UI
-(`src-tauri/spike-ui/`) cannot be exercised by an automated test the way
+No standard browser-automation-style tool exists for a native Tauri window
+the way it does for web pages, so the Rust shell (`src-tauri/`) + spike UI
+(`src-tauri/spike-ui/`) can't be exercised by an automated test the way
 `test/e2e/sidecar.e2e.test.ts` exercises the sidecar's JSON protocol
-directly. This runbook is the human-followable substitute: it drives the
-actual app, click by click, against a real GitHub remote.
+directly -- there's no equivalent of `npm test` for clicking through the
+actual window. This runbook is the human-followable substitute: it drives
+the actual app, click by click, against a real GitHub remote.
+
+(Note: ad hoc native-window automation -- Win32 API mouse/keyboard input
+targeting the window by title, `System.Windows.Automation`'s accessibility
+tree for element positions, `PrintWindow` for screenshots -- has been used
+successfully in this environment for one-off verification and bug repro,
+including reproducing a real click-order race condition. It's a real
+capability worth knowing about, but it's manually scripted each time, not a
+reusable, checked-in automated test suite -- this runbook remains the
+canonical repeatable verification path.)
 
 **Re-run this after any future change to `src-tauri/spike-ui/**` (HTML/CSS/JS)
 or to the sidecar command surface (`src/sidecar.ts`'s `commands` map, request

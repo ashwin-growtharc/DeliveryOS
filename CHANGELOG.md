@@ -6,6 +6,19 @@ design rationale.
 
 ## Phase 3 — Tauri app (in progress: spike + UI wiring done)
 
+- Fixed a UI bug: the "Refresh" button (and any other button using the
+  shared `withBusy` helper in `src-tauri/spike-ui/app.js`) could get
+  permanently stuck showing "Working..." instead of its real label. Cause:
+  `withBusy` wasn't safe against two overlapping calls on the same button
+  (e.g. picking a project folder triggers a catalog refresh, and if a
+  Pull's own post-success refresh overlapped with it before the first
+  finished, the second call captured "Working..." as its own "restore to"
+  value). Now each button's true idle label is remembered once and a busy
+  counter ensures only the last of several overlapping calls restores it.
+  This file has no automated test coverage (ESLint only scans `.ts` files),
+  so the fix was verified by deliberately reproducing the exact race
+  through the real running app and confirming the button always settles
+  back correctly, including under rapid-fire clicking.
 - Fixed a real bug found while testing `arcos-cli`/`launchpad-template`
   through the actual GUI: `pull`'s pristine snapshot was taken *before*
   `post_install` ran, so post_install's own generated files (`node_modules/`,
