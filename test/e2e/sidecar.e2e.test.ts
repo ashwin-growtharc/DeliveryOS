@@ -318,6 +318,46 @@ describe('sidecar e2e', () => {
   );
 
   it(
+    "a freshly-pulled artifact WITH post_install shows localStatus 'pulled', not 'edited_locally' "
+      + '(post_install\'s own generated files must not be misread as a local edit)',
+    async () => {
+      const cwd = newScratchCwd('pull-post-install-status');
+      const session = new SidecarSession(cwd, deliveryOsHome);
+      try {
+        const addResp = await session.request('remote.add', {
+          url: fixtureRemoteDir,
+          name: 'sidecar-remote-postinstall',
+        });
+        expect(addResp.ok).toBe(true);
+
+        const artifact = TEST_ARTIFACTS.find((a) => a.hasPostInstall)!;
+        const pullResp = await session.request('artifact.pull', {
+          id: artifact.id,
+          remote: 'sidecar-remote-postinstall',
+          cwd,
+        });
+        expect(pullResp.ok).toBe(true);
+
+        // Sanity check: post_install's marker file really did land -- if it
+        // didn't, the localStatus assertion below would pass for the wrong
+        // reason (nothing to misdiagnose as an edit).
+        const installTarget = path.resolve(cwd, artifact.installTarget);
+        expect(fs.existsSync(path.join(installTarget, '.post_install_ran'))).toBe(true);
+
+        const listResp = await session.request('catalog.list', { cwd });
+        const entries = listResp.result as CatalogListEntry[];
+        const entry = entries.find(
+          (e) => e.manifest.id === artifact.id && e.remoteName === 'sidecar-remote-postinstall',
+        );
+        expect(entry?.localStatus).toBe('pulled');
+      } finally {
+        await session.close();
+      }
+    },
+    30_000,
+  );
+
+  it(
     'editing a pulled artifact on disk flips localStatus to edited_locally on the next catalog.list',
     async () => {
       const cwd = newScratchCwd('edit-flip');

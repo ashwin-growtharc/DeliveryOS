@@ -99,16 +99,21 @@ export function pullArtifact(id: string, remoteName: string | undefined, cwd: st
     }
   }
 
-  // Snapshot a pristine copy of the payload as-pulled, so `push` can later
-  // diff a local edit against exactly what was installed (not against
-  // mtimes, which change on every checkout/copy). Snapshotting from
-  // `payloadSrc` (rather than always from artifacts/<id>/payload/) keeps
-  // this correct regardless of which convention this manifest uses.
+  // Snapshot a pristine copy of the artifact as-pulled, so `push`/status
+  // checks can later diff a local edit against exactly what a fresh pull
+  // left behind (not against mtimes, which change on every checkout/copy).
+  // Snapshotting from `installTarget` -- AFTER post_install has already run,
+  // not from `payloadSrc` before it -- is deliberate: post_install commonly
+  // generates its own files (node_modules/, a lockfile, an .egg-info/ dir)
+  // as an expected, normal side effect of a fresh pull. Snapshotting from
+  // payloadSrc (pre-post_install) would make every one of those generated
+  // files look like a local edit the moment post_install finishes, even
+  // though the user hasn't touched anything yet.
   const pristineTarget = pristinePath(cwd, manifest.id);
   if (fs.existsSync(pristineTarget)) {
     fs.rmSync(pristineTarget, { recursive: true, force: true });
   }
-  fs.cpSync(payloadSrc, pristineTarget, { recursive: true });
+  fs.cpSync(installTarget, pristineTarget, { recursive: true });
 
   upsertEntry(cwd, {
     id: manifest.id,

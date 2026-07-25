@@ -6,6 +6,16 @@ design rationale.
 
 ## Phase 3 — Tauri app (in progress: spike + UI wiring done)
 
+- Fixed a real bug found while testing `arcos-cli`/`launchpad-template`
+  through the actual GUI: `pull`'s pristine snapshot was taken *before*
+  `post_install` ran, so post_install's own generated files (`node_modules/`,
+  a fresh lockfile, an `.egg-info/` dir) were misread as local edits —
+  every freshly-pulled artifact with a `post_install` step showed
+  "Edited locally" instead of "Pulled" (and, for a real Push, would have
+  tried to commit those generated files into a PR). Now snapshots pristine
+  from `installTarget` *after* `post_install` completes. Verified both via
+  a new regression test (`test/e2e/sidecar.e2e.test.ts`) and a live re-test
+  through the real app.
 - Added `src/sidecar.ts`: a newline-delimited-JSON stdio dispatcher wrapping
   the existing engine directly — the foundation for the desktop app's UI to
   talk to the engine without duplicating any logic. Now implements 5
