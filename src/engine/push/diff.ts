@@ -59,6 +59,14 @@ export function listFilesRecursive(root: string): string[] {
   function walk(dir: string): void {
     const entries = fs.readdirSync(dir, { withFileTypes: true });
     for (const entry of entries) {
+      // A `.git` directory is never something anyone wants copied/diffed as
+      // payload content -- a project's own .gitignore typically doesn't even
+      // list it (git never applies .gitignore to itself), so relying on
+      // .gitignore filtering alone wouldn't catch it. Skipped unconditionally,
+      // at the walk level, so a large repo's history is never even read.
+      if (entry.isDirectory() && entry.name === '.git') {
+        continue;
+      }
       const fullPath = path.join(dir, entry.name);
       if (entry.isDirectory()) {
         walk(fullPath);
@@ -71,6 +79,19 @@ export function listFilesRecursive(root: string): string[] {
   walk(root);
 
   return result;
+}
+
+/**
+ * Like `listFilesRecursive`, but also excludes anything the payload's own
+ * `.gitignore` says to ignore (build output, `node_modules/`, caches, etc.)
+ * -- for proposing a whole project folder as a new artifact's payload
+ * (`push --new`), where nothing has diffed it against a pristine snapshot
+ * yet to filter that noise out the way `computeChangedFiles` already does
+ * for edit-mode pushes.
+ */
+export function listPayloadFiles(root: string): string[] {
+  const isIgnored = loadIgnoreFilter(root);
+  return listFilesRecursive(root).filter((relPath) => !isIgnored(relPath));
 }
 
 /**

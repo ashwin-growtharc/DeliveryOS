@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { computeChangedFiles, listFilesRecursive } from '../../src/engine/push/diff';
+import { computeChangedFiles, listFilesRecursive, listPayloadFiles } from '../../src/engine/push/diff';
 import { PristineSnapshotMissingError } from '../../src/engine/errors';
 
 let installTarget: string;
@@ -135,5 +135,32 @@ describe('listFilesRecursive', () => {
 
   it('returns an empty array for a nonexistent root', () => {
     expect(listFilesRecursive(path.join(installTarget, 'does-not-exist'))).toEqual([]);
+  });
+
+  it('never descends into a nested .git directory', () => {
+    write(installTarget, 'a.txt', 'a');
+    write(installTarget, '.git/objects/abc123', 'not a real git object, just noise');
+    write(installTarget, '.git/HEAD', 'ref: refs/heads/main\n');
+
+    expect(listFilesRecursive(installTarget).sort()).toEqual(['a.txt']);
+  });
+});
+
+describe('listPayloadFiles', () => {
+  it('excludes files matched by the payload\'s own .gitignore, on top of everything listFilesRecursive already excludes', () => {
+    write(installTarget, '.gitignore', 'node_modules/\ndist/\n');
+    write(installTarget, 'src/index.ts', 'export {}\n');
+    write(installTarget, 'node_modules/some-dep/index.js', '// vendored\n');
+    write(installTarget, 'dist/index.js', '// build output\n');
+    write(installTarget, '.git/HEAD', 'ref: refs/heads/main\n');
+
+    expect(listPayloadFiles(installTarget).sort()).toEqual(['.gitignore', 'src/index.ts']);
+  });
+
+  it('returns every file when there is no .gitignore at all', () => {
+    write(installTarget, 'README.md', 'hello\n');
+    write(installTarget, 'docs/guide.md', 'guide\n');
+
+    expect(listPayloadFiles(installTarget).sort()).toEqual(['README.md', 'docs/guide.md']);
   });
 });

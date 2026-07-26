@@ -41,6 +41,21 @@ design rationale.
   copy) via the `ignore` package. Verified directly against the real,
   previously-broken `arcos-cli` folder, plus two new unit tests.
 
+- Fixed `push --new` (Add New in the app) copying a whole project folder's
+  payload verbatim, unfiltered. Proposing something like a project template
+  (not just a single doc) via "Choose folder..." would previously copy
+  *everything* underneath it into the remote's tracked catalog, including a
+  nested `.git/` (which git would try to treat as an embedded repo rather
+  than plain files once committed) and anything the project's own
+  `.gitignore` excludes (`node_modules/`, build output, caches) -- neither
+  was filtered the way an edit-mode push's diff already is. `.git` is now
+  skipped unconditionally while walking the payload (regardless of
+  `.gitignore` content, since a project's `.gitignore` typically doesn't
+  even list `.git` -- git never applies it there); everything else is
+  filtered through the same `.gitignore`-aware logic edit-mode push already
+  uses. Covered by a new e2e test asserting the actual committed tree in a
+  real git fixture.
+
 - Fixed `push --new` crashing with `fatal: '...' is not a valid branch name`
   whenever the proposed artifact's id contained a space or uppercase letter
   (e.g. typing "GrowthArc-Brand Guidelines" into the Add New form's free-text

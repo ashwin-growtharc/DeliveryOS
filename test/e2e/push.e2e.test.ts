@@ -210,6 +210,75 @@ describe('push e2e', () => {
   );
 
   it(
+    'propose-new mode with a PROJECT FOLDER payload excludes .git and .gitignore-matched noise (node_modules, dist)',
+    async () => {
+      const remoteName = 'test-remote-project-payload';
+      await registerAndClone(remoteName, fixtureRemoteDir);
+
+      const id = 'launchpad-template';
+      const cwd = newScratchCwd('propose-new-project');
+
+      const payloadDir = fs.mkdtempSync(path.join(scratchRoot, 'project-payload-'));
+      fs.writeFileSync(path.join(payloadDir, '.gitignore'), 'node_modules/\ndist/\n', 'utf-8');
+      fs.writeFileSync(path.join(payloadDir, 'README.md'), '# launchpad template\n', 'utf-8');
+      fs.mkdirSync(path.join(payloadDir, 'src'), { recursive: true });
+      fs.writeFileSync(path.join(payloadDir, 'src', 'index.ts'), 'export {}\n', 'utf-8');
+      // Noise a real project folder would actually have on disk -- none of
+      // this should ever reach the remote.
+      fs.mkdirSync(path.join(payloadDir, 'node_modules', 'some-dep'), { recursive: true });
+      fs.writeFileSync(path.join(payloadDir, 'node_modules', 'some-dep', 'index.js'), '// vendored\n', 'utf-8');
+      fs.mkdirSync(path.join(payloadDir, 'dist'), { recursive: true });
+      fs.writeFileSync(path.join(payloadDir, 'dist', 'index.js'), '// build output\n', 'utf-8');
+      fs.mkdirSync(path.join(payloadDir, '.git', 'objects'), { recursive: true });
+      fs.writeFileSync(path.join(payloadDir, '.git', 'HEAD'), 'ref: refs/heads/main\n', 'utf-8');
+
+      const octokit = makeFakeOctokit();
+      const result = await pushArtifact(
+        id,
+        {
+          isNew: true,
+          remote: remoteName,
+          payloadPath: payloadDir,
+          kind: 'template',
+          owner: 'platform-team',
+          description: 'A launchpad project template',
+          version: '1.0.0',
+        },
+        cwd,
+        octokit,
+      );
+
+      const call = octokit.rest.pulls.create.mock.calls[0][0];
+      // The PR body's changed-files list only names what actually got
+      // filtered through and copied.
+      expect(call.body).toContain(`artifacts/${id}/payload/README.md`);
+      expect(call.body).toContain(`artifacts/${id}/payload/src/index.ts`);
+      expect(call.body).toContain(`artifacts/${id}/payload/.gitignore`);
+      expect(call.body).not.toContain('node_modules');
+      expect(call.body).not.toContain('dist/index.js');
+      expect(call.body).not.toContain('.git/HEAD');
+
+      const fixtureGit = simpleGit(fixtureRemoteDir);
+      const committedFiles = await fixtureGit.raw([
+        'ls-tree',
+        '-r',
+        '--name-only',
+        result.branch,
+        `artifacts/${id}/payload/`,
+      ]);
+      const committedPaths = committedFiles.trim().split('\n').filter(Boolean);
+      expect(committedPaths.sort()).toEqual(
+        [
+          `artifacts/${id}/payload/.gitignore`,
+          `artifacts/${id}/payload/README.md`,
+          `artifacts/${id}/payload/src/index.ts`,
+        ].sort(),
+      );
+    },
+    30_000,
+  );
+
+  it(
     'propose-new mode with a SINGLE-FILE payload (not a directory) pushes the file correctly, not a crash',
     async () => {
       // Regression test: --path pointing at one real file (e.g. picking a

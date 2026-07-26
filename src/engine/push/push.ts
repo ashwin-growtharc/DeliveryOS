@@ -8,7 +8,7 @@ import { resolveArtifact, ProgressCallback } from '../pull/pull';
 import { buildCatalog } from '../catalog/catalog';
 import { ManifestSchema, Manifest } from '../manifest/schema';
 import { pristinePath } from '../paths';
-import { computeChangedFiles, listFilesRecursive } from './diff';
+import { computeChangedFiles, listPayloadFiles } from './diff';
 import { buildBranchName } from './branchName';
 import { buildEditPrContent, buildProposeNewPrContent } from './prContent';
 import {
@@ -192,15 +192,24 @@ export async function pushArtifact(
     if (!fs.existsSync(options.payloadPath)) {
       throw new ManifestValidationError(`--path "${options.payloadPath}" does not exist`);
     }
-    // `listFilesRecursive` returns [''] as a sentinel for a single-file root
-    // (see its own doc comment) -- normalize that into the file's real
-    // basename here, once, so every downstream use (the actual copy below,
-    // the git commit path list, and the PR body's "new files" list) refers
-    // to a real path under payload/ instead of an empty string.
+    // `listFilesRecursive`/`listPayloadFiles` return [''] as a sentinel for a
+    // single-file root (see its own doc comment) -- normalize that into the
+    // file's real basename here, once, so every downstream use (the actual
+    // copy below, the git commit path list, and the PR body's "new files"
+    // list) refers to a real path under payload/ instead of an empty string.
     const payloadIsFile = fs.statSync(options.payloadPath).isFile();
+    // `listPayloadFiles` (not the raw `listFilesRecursive`) for a directory
+    // payload: proposing a whole project folder (e.g. a template/scaffold,
+    // not just a single doc) would otherwise copy EVERYTHING underneath it
+    // verbatim, including a nested `.git/` (which git would try to treat as
+    // an embedded repo/gitlink rather than plain files once committed here)
+    // and whatever the project's own .gitignore excludes (node_modules/,
+    // build output, caches). listFilesRecursive alone already skips `.git`
+    // unconditionally at the walk level; listPayloadFiles adds the
+    // .gitignore filtering on top.
     const payloadFiles = payloadIsFile
       ? [path.basename(options.payloadPath)]
-      : listFilesRecursive(options.payloadPath);
+      : listPayloadFiles(options.payloadPath);
 
     onProgress?.('stage', `Staging payload files for "${id}"...`);
     const artifactDir = path.join(cacheDir, 'artifacts', id);
@@ -212,7 +221,14 @@ export async function pushArtifact(
       // actual destination FILE path, not the directory itself.
       fs.copyFileSync(options.payloadPath, path.join(payloadDestDir, payloadFiles[0]));
     } else {
-      fs.cpSync(options.payloadPath, payloadDestDir, { recursive: true });
+      // Copied file-by-file (reusing the same helper edit-mode push already
+      // uses) rather than one bulk `fs.cpSync` of the whole source
+      // directory, so what's physically copied always matches `payloadFiles`
+      // exactly -- a bulk recursive copy would re-introduce everything
+      // `listPayloadFiles` just filtered out.
+      for (const relPath of payloadFiles) {
+        copyFileInto(options.payloadPath, payloadDestDir, relPath);
+      }
     }
     fs.writeFileSync(path.join(artifactDir, 'manifest.yaml'), stringifyYaml(manifest), 'utf-8');
 
