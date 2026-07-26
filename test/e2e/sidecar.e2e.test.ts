@@ -688,4 +688,84 @@ describe('sidecar e2e', () => {
     },
     30_000,
   );
+
+  it(
+    'sync.checkForUpdates detects a version bump pushed upstream to a pulled artifact, '
+      + "fetching fresh before comparing, and leaves an untouched pulled artifact out of the result",
+    async () => {
+      const cwd = newScratchCwd('sync-check-updates');
+      const remoteName = 'sidecar-remote-sync';
+      const session = new SidecarSession(cwd, deliveryOsHome);
+      try {
+        const addResp = await session.request('remote.add', {
+          url: fixtureRemoteDir,
+          name: remoteName,
+        });
+        expect(addResp.ok).toBe(true);
+
+        const welcome = TEST_ARTIFACTS.find((a) => a.id === 'welcome-template')!;
+        const lintConfig = TEST_ARTIFACTS.find((a) => a.id === 'lint-config')!;
+
+        const pullWelcome = await session.request('artifact.pull', {
+          id: welcome.id,
+          remote: remoteName,
+          cwd,
+        });
+        expect(pullWelcome.ok).toBe(true);
+
+        // A second artifact, pulled but never modified upstream -- proves
+        // checkForUpdates doesn't just report everything that was pulled.
+        const pullLintConfig = await session.request('artifact.pull', {
+          id: lintConfig.id,
+          remote: remoteName,
+          cwd,
+        });
+        expect(pullLintConfig.ok).toBe(true);
+
+        // Bump welcome-template's version directly against the fixture
+        // "remote" repo -- same direct simpleGit(fixtureRemoteDir)
+        // read/write-file/add/commit pattern the push-progress tests above
+        // use, just editing the manifest instead of leaving it alone.
+        const manifestPath = path.join(
+          fixtureRemoteDir,
+          'artifacts',
+          welcome.id,
+          'manifest.yaml',
+        );
+        const originalManifest = fs.readFileSync(manifestPath, 'utf-8');
+        const bumpedManifest = originalManifest.replace(/^version: .*$/m, 'version: 1.1.0');
+        expect(bumpedManifest).not.toBe(originalManifest);
+        fs.writeFileSync(manifestPath, bumpedManifest, 'utf-8');
+
+        const fixtureGit = simpleGit(fixtureRemoteDir);
+        await fixtureGit.add(['artifacts/welcome-template/manifest.yaml']);
+        await fixtureGit.commit('bump welcome-template to 1.1.0');
+
+        session.takeProgressLines(); // discard the two pulls' own progress lines
+
+        const checkResp = await session.request('sync.checkForUpdates', { cwd });
+        expect(checkResp.ok).toBe(true);
+        const updates = checkResp.result as Array<{
+          id: string;
+          remote: string;
+          installedVersion: string;
+          availableVersion: string;
+        }>;
+
+        expect(updates).toHaveLength(1);
+        expect(updates[0]).toEqual({
+          id: 'welcome-template',
+          remote: remoteName,
+          installedVersion: '1.0.0',
+          availableVersion: '1.1.0',
+        });
+
+        const progressLines = session.takeProgressLines();
+        expect(progressLines.some((line) => line.stage === 'fetch')).toBe(true);
+      } finally {
+        await session.close();
+      }
+    },
+    30_000,
+  );
 });

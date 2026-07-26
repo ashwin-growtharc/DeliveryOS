@@ -35,6 +35,7 @@ import { computeChangedFiles } from './engine/push/diff';
 import { pristinePath } from './engine/paths';
 import { pullArtifact, ProgressCallback } from './engine/pull/pull';
 import { pushArtifact, PushOptions } from './engine/push/push';
+import { checkForUpdates } from './engine/sync/sync';
 import {
   listRemotes,
   addRemoteEntry,
@@ -184,6 +185,11 @@ const commands: Record<string, CommandHandler> = {
   'remote.list': () => listRemotes(),
 
   'remote.add': async (args) => remoteAdd(args),
+
+  'sync.checkForUpdates': (args, { onProgress }) => {
+    const cwd = requireString(args, 'cwd');
+    return checkForUpdates(cwd, onProgress);
+  },
 };
 
 /**

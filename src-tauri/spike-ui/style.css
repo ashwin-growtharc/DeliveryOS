@@ -385,6 +385,18 @@ input, textarea, select {
   opacity: 1;
 }
 
+.badge.update_available {
+  background: var(--sky-100);
+  color: var(--cyan-600);
+  opacity: 1;
+}
+
+.badge.both_changed {
+  background: var(--danger-100);
+  color: var(--danger-600);
+  opacity: 1;
+}
+
 /* ---------- detail ---------- */
 
 .detail-header {
@@ -479,6 +491,25 @@ input, textarea, select {
 
 #detail-open-folder-btn {
   margin-top: 10px;
+}
+
+/* ---------- drift warning (both locally edited AND updated upstream) ----------
+ * Reuses the same danger tokens as the toast/error styling above -- this is
+ * the deliberate safeguard against a silent overwrite, so it needs to read
+ * as a warning, not just another badge. */
+
+.drift-warning {
+  margin-top: 14px;
+  background: var(--danger-100);
+  border: 1px solid var(--danger-500);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+}
+
+.drift-warning-text {
+  font-size: 13px;
+  color: var(--danger-600);
+  margin: 0 0 10px;
 }
 
 /* ---------- progress panel (live Pull/Push stage feed) ----------

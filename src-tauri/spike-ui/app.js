@@ -17,12 +17,17 @@
     not_pulled: 'Not pulled',
     pulled: 'Pulled',
     edited_locally: 'Edited locally',
+    update_available: 'Update available',
+    both_changed: 'Both changed',
   };
 
   const state = {
     view: 'browse',
     projectDir: null,
-    catalog: [], // last catalog.list() result: { manifest, remoteName, localStatus, installTarget }[]
+    // last catalog.list() result, enriched client-side with `availableVersion`
+    // (from sync.checkForUpdates) as entries: { manifest, remoteName,
+    // localStatus, installTarget, availableVersion? }[]
+    catalog: [],
     search: '',
     activeKind: 'All',
     selectedKey: null, // `${id}::${remoteName}` of the entry shown in Detail
@@ -44,6 +49,25 @@
 
   function entryKey(entry) {
     return `${entry.manifest.id}::${entry.remoteName}`;
+  }
+
+  /** Derives the status actually shown in the UI (badge + action button)
+   * from an entry's raw `localStatus` (from catalog.list) plus whatever
+   * `availableVersion` was merged in client-side by a prior
+   * sync.checkForUpdates call (see handleCheckForArtifactUpdates). An entry
+   * that's both edited locally AND has a newer upstream version is its own
+   * distinct status ('both_changed') -- deliberately not just
+   * 'update_available' -- because pulling to get the update would silently
+   * discard the local edit, which needs its own explicit warning/action
+   * rather than a plain one-click button. */
+  function displayStatus(entry) {
+    if (entry.availableVersion && entry.localStatus === 'edited_locally') {
+      return 'both_changed';
+    }
+    if (entry.availableVersion) {
+      return 'update_available';
+    }
+    return entry.localStatus;
   }
 
   function escapeHtml(value) {
@@ -231,11 +255,24 @@
   }
 
   function actionButtonFor(entry) {
-    if (entry.localStatus === 'not_pulled') {
+    const status = displayStatus(entry);
+    if (status === 'not_pulled') {
       return { label: 'Pull', action: 'pull' };
     }
-    if (entry.localStatus === 'edited_locally') {
+    if (status === 'edited_locally') {
       return { label: 'Push', action: 'push' };
+    }
+    if (status === 'update_available') {
+      // Pulling always overwrites install_target with current upstream
+      // content, so "Update" is just a pull under a friendlier label --
+      // no separate update codepath needed.
+      return { label: 'Update', action: 'pull' };
+    }
+    if (status === 'both_changed') {
+      // No default one-click action: pulling here would silently discard
+      // the local edit. Detail view instead renders an explicit warning
+      // block with its own confirm-gated overwrite button.
+      return null;
     }
     return null; // 'pulled': nothing to do
   }
@@ -250,10 +287,11 @@
       const card = document.createElement('div');
       card.className = 'res-card';
 
+      const status = displayStatus(entry);
       card.innerHTML = `
         <div class="row1">
           <span class="kind">${escapeHtml(entry.manifest.kind)}</span>
-          <span class="badge ${entry.localStatus}">${STATUS_LABELS[entry.localStatus]}</span>
+          <span class="badge ${status}">${STATUS_LABELS[status]}</span>
         </div>
         <div class="name">${escapeHtml(entry.manifest.id)}</div>
         <div class="summary">${escapeHtml(entry.manifest.description)}</div>
@@ -298,6 +336,53 @@
         }
         endProgress(true);
         await loadCatalog();
+      } catch (err) {
+        endProgress(false);
+        toastError(err);
+      }
+    });
+  }
+
+  /** Checks every registered remote referenced by the current project's
+   * lockfile for newer artifact versions (`sync.checkForUpdates`), then
+   * merges the result into the already-loaded `state.catalog` client-side
+   * by matching `id`+`remoteName` -- this only enriches data already
+   * rendered from a prior `catalog.list` call; it deliberately does NOT
+   * call `loadCatalog()`/re-run `catalog.list`, which stays fast and
+   * local-only. Drives the same Detail progress panel
+   * (beginProgress/endProgress) that runArtifactAction uses, so a fetch
+   * against every relevant remote shows live stage-by-stage progress
+   * instead of appearing to hang. */
+  async function handleCheckForArtifactUpdates() {
+    const btn = $('check-artifact-updates-btn');
+    await withBusy(btn, 'Checking...', async () => {
+      await beginProgress();
+      try {
+        const updates = await call('sync.checkForUpdates', { cwd: state.projectDir });
+        endProgress(true);
+
+        for (const update of updates) {
+          const entry = state.catalog.find(
+            (e) => e.manifest.id === update.id && e.remoteName === update.remote,
+          );
+          if (entry) {
+            entry.availableVersion = update.availableVersion;
+          }
+        }
+
+        renderCards();
+        if (state.selectedKey) {
+          const selected = state.catalog.find((e) => entryKey(e) === state.selectedKey);
+          if (selected) {
+            refreshDetailIfShown(selected);
+          }
+        }
+
+        toastSuccess(
+          updates.length === 0
+            ? 'No updates available.'
+            : `${updates.length} update${updates.length === 1 ? '' : 's'} available.`,
+        );
       } catch (err) {
         endProgress(false);
         toastError(err);
@@ -415,10 +500,11 @@
 
   function renderDetail(entry) {
     const { manifest } = entry;
+    const status = displayStatus(entry);
     $('detail-kind').textContent = manifest.kind;
     $('detail-name').textContent = manifest.id;
-    $('detail-badge').textContent = STATUS_LABELS[entry.localStatus];
-    $('detail-badge').className = `badge ${entry.localStatus}`;
+    $('detail-badge').textContent = STATUS_LABELS[status];
+    $('detail-badge').className = `badge ${status}`;
     $('detail-description').textContent = manifest.description;
     $('meta-kind').textContent = manifest.kind;
     $('meta-version').textContent = manifest.version;
@@ -457,6 +543,29 @@
     } else {
       actionBtn.hidden = true;
       actionBtn.onclick = null;
+    }
+
+    // 'both_changed' gets no default one-click action button above -- instead
+    // a distinct warning block with its own confirm-gated overwrite button,
+    // so a local edit is never silently discarded by a plain "Update" click.
+    const driftWarning = $('detail-drift-warning');
+    const overwriteBtn = $('detail-overwrite-btn');
+    if (status === 'both_changed') {
+      driftWarning.hidden = false;
+      overwriteBtn.onclick = () => {
+        if (
+          window.confirm(
+            'This will discard your local edits to ' +
+              entry.manifest.id +
+              ' and replace them with the upstream version. Continue?',
+          )
+        ) {
+          void runArtifactAction(entry, 'pull', overwriteBtn).then(() => refreshDetailIfShown(entry));
+        }
+      };
+    } else {
+      driftWarning.hidden = true;
+      overwriteBtn.onclick = null;
     }
   }
 
@@ -649,6 +758,7 @@
 
     $('change-folder-btn').addEventListener('click', () => void changeFolder());
     $('refresh-btn').addEventListener('click', () => void loadCatalog());
+    $('check-artifact-updates-btn').addEventListener('click', () => void handleCheckForArtifactUpdates());
     $('add-new-btn').addEventListener('click', () => showView('addnew'));
     $('back-to-browse-btn').addEventListener('click', () => showView('browse'));
 

@@ -3,6 +3,7 @@ import { registerRemoteCommand } from './commands/remoteAdd';
 import { registerListCommand } from './commands/list';
 import { registerPullCommand } from './commands/pull';
 import { registerPushCommand } from './commands/push';
+import { registerCheckUpdatesCommand } from './commands/checkUpdates';
 
 export function buildProgram(): Command {
   const program = new Command();
@@ -16,6 +17,7 @@ export function buildProgram(): Command {
   registerListCommand(program);
   registerPullCommand(program);
   registerPushCommand(program);
+  registerCheckUpdatesCommand(program);
 
   return program;
 }

@@ -39,6 +39,7 @@
           <div class="browse-toolbar">
             <input id="search-input" type="text" placeholder="Search resources" />
             <button id="refresh-btn" class="btn">Refresh</button>
+            <button id="check-artifact-updates-btn" class="btn">Check for updates</button>
             <button id="add-new-btn" class="btn btn-primary">+ Add new</button>
           </div>
           <div id="chips" class="chips"></div>
@@ -72,6 +73,16 @@
             <div class="install-path-label">Installs to</div>
             <div id="detail-install-path" class="install-path"></div>
             <button id="detail-open-folder-btn" class="btn btn-sm" hidden>Open folder</button>
+
+            <div id="detail-drift-warning" class="drift-warning" hidden>
+              <p class="drift-warning-text">
+                This artifact has been edited locally AND updated upstream. Pulling now would
+                normally overwrite your local edits, so no default action is offered above.
+              </p>
+              <button id="detail-overwrite-btn" class="btn btn-danger-ghost">
+                Overwrite with upstream (discards your local edits)
+              </button>
+            </div>
 
             <div id="detail-progress" class="progress-panel" hidden>
               <div class="progress-header">

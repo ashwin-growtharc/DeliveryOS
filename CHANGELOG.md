@@ -4,7 +4,18 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
-## Phase 3 — Tauri app (in progress: spike + UI wiring done)
+## Phase 5 — Polish (in progress)
+
+- Added drift detection: `deliveryos check-updates` (CLI) and a "Check for
+  updates" button in Browse (app) compare each pulled artifact's recorded
+  version against its remote's current version (fetching only remotes the
+  lockfile actually references, not every registered one). A pulled artifact
+  that's both locally edited AND has an upstream update gets a distinct
+  "Both changed" state with no one-click action — updating it requires an
+  explicit confirmation, so the existing Update button can never silently
+  overwrite a local edit.
+
+## Phase 3 — Tauri app — **Done**
 
 - Added live progress visibility during Pull/Push: `pullArtifact`/`pushArtifact`
   gained an optional `onProgress` callback (no-op for CLI, unchanged
