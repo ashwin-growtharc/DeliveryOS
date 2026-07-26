@@ -146,6 +146,7 @@ The frontend (`src-tauri/spike-ui/*.js`) has no automated test coverage
 | [CHANGELOG.md](CHANGELOG.md) | What's actually shipped, phase by phase |
 | [REQUIREMENTS.md](REQUIREMENTS.md) | What to install on a machine to build/run this (Node, `gh`, Rust/MSVC for the app) |
 | [docs/demo-guide.md](docs/demo-guide.md) | Non-technical walkthrough for showing DeliveryOS to anyone |
+| [docs/demo-script.md](docs/demo-script.md) | Step-by-step live demo script (what to click, what to say, anticipated Q&A) |
 | [docs/manual-smoke-test-push.md](docs/manual-smoke-test-push.md) | How to verify `push` against a real GitHub repo by hand |
 | [docs/manual-ui-clickthrough.md](docs/manual-ui-clickthrough.md) | How to verify the desktop app by hand (no automated GUI test suite exists) |
 | [docs/phase-2-retro.md](docs/phase-2-retro.md) | What broke proving the engine against real ArcOS catalog content |
