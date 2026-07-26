@@ -8,6 +8,8 @@
   const { open: openDialog } = window.__TAURI__.dialog;
   const { revealItemInDir } = window.__TAURI__.opener;
   const { listen } = window.__TAURI__.event;
+  const { check } = window.__TAURI__.updater;
+  const { relaunch } = window.__TAURI__.process;
 
   const PROJECT_DIR_KEY = 'deliveryos.projectDir';
 
@@ -609,6 +611,30 @@
     });
   }
 
+  // ---------- updates ----------
+
+  async function handleCheckForUpdates() {
+    const btn = $('check-updates-btn');
+    const status = $('update-status');
+    await withBusy(btn, 'Checking...', async () => {
+      try {
+        const update = await check();
+        if (!update) {
+          status.textContent = 'You are on the latest version.';
+          toastSuccess('You are on the latest version.');
+          return;
+        }
+        status.textContent = `Update ${update.version} available. Downloading and installing...`;
+        toastSuccess(`Update ${update.version} available. Downloading and installing...`);
+        await update.downloadAndInstall();
+        await relaunch();
+      } catch (err) {
+        status.textContent = '';
+        toastError(err);
+      }
+    });
+  }
+
   // ---------- wiring ----------
 
   function wireEvents() {
@@ -636,6 +662,8 @@
     $('pick-payload-dir-btn').addEventListener('click', () => void pickPayload(true));
 
     $('remote-form').addEventListener('submit', (ev) => void submitAddRemote(ev));
+
+    $('check-updates-btn').addEventListener('click', () => void handleCheckForUpdates());
   }
 
   async function init() {

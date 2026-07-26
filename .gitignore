@@ -5,3 +5,5 @@ sea-config.json
 .deliveryos/
 *.log
 .env
+*.key
+*.key.pub
