@@ -41,6 +41,15 @@ design rationale.
   copy) via the `ignore` package. Verified directly against the real,
   previously-broken `arcos-cli` folder, plus two new unit tests.
 
+- Fixed `edited_locally` having no way to resolve in the UI at all. Detail's
+  action button only ever offered "Push" for that status, so an edit that
+  was actually already pushed and merged upstream (or one the user simply
+  wanted to discard) had no path back to "Pulled" short of manually deleting
+  files on disk. The drift-warning block (previously shown only for the
+  rarer `both_changed` case) now also appears for plain `edited_locally`,
+  with a "Discard local edit and re-sync" button that re-pulls after an
+  explicit confirmation.
+
 ## Phase 5 — Polish (in progress)
 
 - Added drift detection: `deliveryos check-updates` (CLI) and a "Check for

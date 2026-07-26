@@ -628,19 +628,38 @@
       actionBtn.onclick = null;
     }
 
-    // 'both_changed' gets no default one-click action button above -- instead
-    // a distinct warning block with its own confirm-gated overwrite button,
-    // so a local edit is never silently discarded by a plain "Update" click.
+    // 'both_changed' gets no default one-click action button above (pulling
+    // there would silently discard a local edit). 'edited_locally' DOES get
+    // a default action (Push), but that's only useful if you actually want
+    // to propose the edit -- there was previously no way to instead say
+    // "discard this and re-sync," even when that's exactly what's needed
+    // (e.g. this exact edit was already pushed and merged some other way,
+    // and the local pristine snapshot is just stale). Both states show the
+    // same confirm-gated "discard and re-sync" escape hatch; only the
+    // wording differs, since 'edited_locally' isn't necessarily "wrong,"
+    // just possibly no longer what you want tracked as a pending edit.
     const driftWarning = $('detail-drift-warning');
+    const driftWarningText = $('detail-drift-warning-text');
     const overwriteBtn = $('detail-overwrite-btn');
-    if (status === 'both_changed') {
+    if (status === 'both_changed' || status === 'edited_locally') {
       driftWarning.hidden = false;
+      driftWarningText.textContent =
+        status === 'both_changed'
+          ? 'This artifact has been edited locally AND updated upstream. Pulling now would '
+            + 'normally overwrite your local edits, so no default action is offered above.'
+          : 'If this local edit is already accounted for elsewhere (e.g. it was pushed and '
+            + 'merged, or you no longer want to keep it), you can discard it and re-sync to '
+            + 'exactly what\'s currently on the remote.';
+      overwriteBtn.textContent =
+        status === 'both_changed'
+          ? 'Overwrite with upstream (discards your local edits)'
+          : 'Discard local edit and re-sync';
       overwriteBtn.onclick = () => {
         if (
           window.confirm(
             'This will discard your local edits to ' +
               entry.manifest.id +
-              ' and replace them with the upstream version. Continue?',
+              ' and replace them with the current upstream version. Continue?',
           )
         ) {
           void runArtifactAction(entry, 'pull', overwriteBtn).then(() => refreshDetailIfShown(entry));
