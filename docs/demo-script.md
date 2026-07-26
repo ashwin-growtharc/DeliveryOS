@@ -168,7 +168,35 @@ Click **Push**. Say, while it runs:
 
 Show the toast with the PR link — open it in a browser, show the real diff.
 
-## 9. Check for updates + auto-sync (1 min)
+## 9. Add new — propose something that doesn't exist yet (2-3 min)
+
+This is different from step 8: instead of editing something you already
+pulled, you're proposing a brand-new artifact from scratch. Use the real
+brand guidelines doc as the content — more compelling than a placeholder.
+
+1. Go to **Add-new**.
+2. **Artifact ID**: `growtharc-brand-guidelines`
+3. **Kind**: `doc`
+4. **Payload**: click "Choose file…" and pick
+   `delivery-os\docs\growtharc-brand-guidelines.md` directly.
+5. **Description**: something like "Color palette, typography, and
+   component patterns for GrowthArc-branded products."
+6. **Owner**: your name/team.
+7. **Remote**: pick whichever registered remote you want this proposed
+   against (e.g. `arcos-poc`).
+8. **Setup command**: leave blank — it's just a doc, nothing to install.
+9. Click **Propose**.
+
+Say, while it runs:
+
+> "Same mechanism as editing something — it stages the file, opens a real
+> PR proposing this as a brand-new shared resource. Anyone else who wants
+> the brand guidelines from now on just clicks Pull."
+
+Show the resulting PR — note the title format:
+`[DeliveryOS] Propose new artifact: growtharc-brand-guidelines`.
+
+## 10. Check for updates + auto-sync (1 min)
 
 Back in Browse, click **Check for updates**. Say:
 
