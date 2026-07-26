@@ -1,6 +1,35 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import ignore from 'ignore';
 import { PristineSnapshotMissingError } from '../errors';
+
+/** Loads a gitignore-pattern filter from `<root>/.gitignore`, if present.
+ * Returns a predicate that's `true` for paths that should be treated as
+ * ignored -- i.e. excluded from local-edit/diff detection entirely.
+ *
+ * Why this matters: many real projects generate their own build/cache
+ * artifacts as a normal side effect of being used (Python's `__pycache__`,
+ * `node_modules`, `.pytest_cache`, etc.) -- files the project's own
+ * `.gitignore` already excludes, and which `git add` would refuse to stage
+ * without `-f` regardless. Without this filter, those files show up as
+ * false "local edits" the moment anyone runs the pulled tool (not just
+ * during its one-time post_install step), which both mislabels an
+ * unmodified pull as "Edited locally" and would make a real `push` fail
+ * outright trying to stage gitignored paths. `root` is always a plain
+ * directory copy on the local machine (installTarget or its pristine
+ * snapshot), never the actual git repo -- this only reads whatever
+ * `.gitignore` file happens to be part of the copied payload itself, it
+ * does not run git. `root` may also be a single file (per
+ * `listFilesRecursive`'s doc comment) -- returns "nothing is ignored" in
+ * that case, since there's no directory to hold a `.gitignore`. */
+function loadIgnoreFilter(root: string): (relPath: string) => boolean {
+  const gitignorePath = path.join(root, '.gitignore');
+  if (!fs.existsSync(root) || fs.statSync(root).isFile() || !fs.existsSync(gitignorePath)) {
+    return () => false;
+  }
+  const ig = ignore().add(fs.readFileSync(gitignorePath, 'utf-8'));
+  return (relPath: string) => relPath !== '' && ig.ignores(relPath);
+}
 
 export interface ChangedFile {
   relPath: string;
@@ -62,8 +91,14 @@ export function computeChangedFiles(installTarget: string, pristineDir: string):
     );
   }
 
-  const currentFiles = new Set(listFilesRecursive(installTarget));
-  const pristineFiles = new Set(listFilesRecursive(pristineDir));
+  // The pristine snapshot is a copy of the same payload, taken right after
+  // pull -- its .gitignore (if any) is the same file, so either root works
+  // as the source of truth for what's ignored; installTarget is preferred
+  // since it's the one that actually reflects what's currently on disk.
+  const isIgnored = loadIgnoreFilter(installTarget);
+
+  const currentFiles = new Set(listFilesRecursive(installTarget).filter((p) => !isIgnored(p)));
+  const pristineFiles = new Set(listFilesRecursive(pristineDir).filter((p) => !isIgnored(p)));
   const allPaths = Array.from(new Set([...currentFiles, ...pristineFiles])).sort();
 
   const changes: ChangedFile[] = [];

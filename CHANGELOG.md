@@ -4,6 +4,19 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+## Unreleased
+
+- Fixed a real bug found while demo-prepping `arcos-cli`: simply *running*
+  a pulled Python tool (`arcos --help`, `pytest`, etc.) generates
+  `__pycache__`/bytecode cache files, which are correctly excluded by the
+  project's own `.gitignore` — but `computeChangedFiles` didn't know about
+  `.gitignore` at all, so it misread that cache as a "local edit," flipping
+  a perfectly fine pull to "Edited locally" and making a real `push` fail
+  outright trying to stage gitignored paths. Fixed by filtering the diff
+  through the artifact's own `.gitignore` (already present in the pulled
+  copy) via the `ignore` package. Verified directly against the real,
+  previously-broken `arcos-cli` folder, plus two new unit tests.
+
 ## Phase 5 — Polish (in progress)
 
 - Added drift detection: `deliveryos check-updates` (CLI) and a "Check for

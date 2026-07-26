@@ -19,6 +19,7 @@
   "dependencies": {
     "@octokit/rest": "^22.0.1",
     "commander": "^12.1.0",
+    "ignore": "^7.0.6",
     "simple-git": "^3.27.0",
     "yaml": "^2.6.0",
     "zod": "^3.23.8"
