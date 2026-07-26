@@ -4,6 +4,14 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- Fixed a crash proposing a new artifact whose payload is a single file
+  (e.g. picking one `.md` file via the app's file picker instead of a
+  folder): `Cannot overwrite directory ... with non-directory ...`.
+  `fs.cpSync` can't copy a file onto a path that already exists as a
+  directory (the freshly-created `payload/` dir) -- now copies a
+  single-file payload to `payload/<filename>` directly instead. Covered by
+  a new regression test.
+
 - Added transparency about what happens to a push after it opens a PR.
   Pushing never updated local state on its own (the edit isn't accepted
   just because a PR exists), so there was no way to later tell "still

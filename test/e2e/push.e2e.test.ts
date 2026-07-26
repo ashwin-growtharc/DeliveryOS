@@ -210,6 +210,54 @@ describe('push e2e', () => {
   );
 
   it(
+    'propose-new mode with a SINGLE-FILE payload (not a directory) pushes the file correctly, not a crash',
+    async () => {
+      // Regression test: --path pointing at one real file (e.g. picking a
+      // single .md file via the app's file picker, rather than a folder)
+      // used to crash with "Cannot overwrite directory ... with
+      // non-directory ..." -- fs.cpSync can't copy a file onto a path that
+      // already exists as a directory (the freshly-created payload/ dir).
+      const remoteName = 'test-remote-new-singlefile';
+      await registerAndClone(remoteName, fixtureRemoteDir);
+
+      const id = 'brand-new-single-file-artifact';
+      const cwd = newScratchCwd('propose-new-file');
+
+      const payloadDir = fs.mkdtempSync(path.join(scratchRoot, 'payload-file-'));
+      const payloadFile = path.join(payloadDir, 'guidelines.md');
+      fs.writeFileSync(payloadFile, '# Brand Guidelines\n\nContent here.\n', 'utf-8');
+
+      const octokit = makeFakeOctokit();
+      const result = await pushArtifact(
+        id,
+        {
+          isNew: true,
+          remote: remoteName,
+          payloadPath: payloadFile,
+          kind: 'doc',
+          owner: 'platform-team',
+          description: 'Brand guidelines',
+          version: '1.0.0',
+        },
+        cwd,
+        octokit,
+      );
+
+      expect(await branchExistsInFixture(fixtureRemoteDir, result.branch)).toBe(true);
+
+      const fixtureGit = simpleGit(fixtureRemoteDir);
+      const fileContent = await fixtureGit.show([
+        `${result.branch}:artifacts/${id}/payload/guidelines.md`,
+      ]);
+      expect(fileContent).toBe('# Brand Guidelines\n\nContent here.\n');
+
+      const call = octokit.rest.pulls.create.mock.calls[0][0];
+      expect(call.body).toContain(`artifacts/${id}/payload/guidelines.md`);
+    },
+    30_000,
+  );
+
+  it(
     'edit mode: hard-errors with NoLocalChangesError and creates nothing when there are zero local changes',
     async () => {
       const remoteName = 'test-remote-nochanges';

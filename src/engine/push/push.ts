@@ -192,13 +192,28 @@ export async function pushArtifact(
     if (!fs.existsSync(options.payloadPath)) {
       throw new ManifestValidationError(`--path "${options.payloadPath}" does not exist`);
     }
-    const payloadFiles = listFilesRecursive(options.payloadPath);
+    // `listFilesRecursive` returns [''] as a sentinel for a single-file root
+    // (see its own doc comment) -- normalize that into the file's real
+    // basename here, once, so every downstream use (the actual copy below,
+    // the git commit path list, and the PR body's "new files" list) refers
+    // to a real path under payload/ instead of an empty string.
+    const payloadIsFile = fs.statSync(options.payloadPath).isFile();
+    const payloadFiles = payloadIsFile
+      ? [path.basename(options.payloadPath)]
+      : listFilesRecursive(options.payloadPath);
 
     onProgress?.('stage', `Staging payload files for "${id}"...`);
     const artifactDir = path.join(cacheDir, 'artifacts', id);
     const payloadDestDir = path.join(artifactDir, 'payload');
     fs.mkdirSync(payloadDestDir, { recursive: true });
-    fs.cpSync(options.payloadPath, payloadDestDir, { recursive: true });
+    if (payloadIsFile) {
+      // fs.cpSync can't copy a single file onto a path that already exists
+      // as a directory (payloadDestDir, just created above) -- it needs an
+      // actual destination FILE path, not the directory itself.
+      fs.copyFileSync(options.payloadPath, path.join(payloadDestDir, payloadFiles[0]));
+    } else {
+      fs.cpSync(options.payloadPath, payloadDestDir, { recursive: true });
+    }
     fs.writeFileSync(path.join(artifactDir, 'manifest.yaml'), stringifyYaml(manifest), 'utf-8');
 
     filesToCommit = [
