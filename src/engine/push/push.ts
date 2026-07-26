@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { stringify as stringifyYaml } from 'yaml';
-import { readLockfile } from '../lockfile/lockfile';
+import { readLockfile, upsertEntry } from '../lockfile/lockfile';
 import { findRemote } from '../remote/remoteRegistry';
 import { cachePath } from '../remote/remoteCache';
 import { resolveArtifact, ProgressCallback } from '../pull/pull';
@@ -289,6 +289,17 @@ export async function pushArtifact(
     title: prTitle,
     body: prBody,
   });
+
+  // Record the opened PR against this artifact's lockfile entry so its real
+  // outcome (still open / merged / closed-unmerged) can be checked later via
+  // resolvePendingPushes -- pushing doesn't otherwise touch local state at
+  // all (the edit isn't accepted upstream just because a PR was opened for
+  // it), so without this there would be no way to later tell whether a push
+  // was ever followed up on. Propose-new has no pre-existing lockfile entry
+  // to attach this to -- out of scope here, tracked only for edit-mode.
+  if (!options.isNew && lockEntry) {
+    upsertEntry(cwd, { ...lockEntry, pendingPr: { number: opened.number, url: opened.url } });
+  }
 
   return { url: opened.url, number: opened.number, branch: branchName };
 }

@@ -35,7 +35,7 @@ import { computeChangedFiles } from './engine/push/diff';
 import { pristinePath } from './engine/paths';
 import { pullArtifact, ProgressCallback } from './engine/pull/pull';
 import { pushArtifact, PushOptions } from './engine/push/push';
-import { checkForUpdates } from './engine/sync/sync';
+import { checkForUpdates, resolvePendingPushes } from './engine/sync/sync';
 import {
   listRemotes,
   addRemoteEntry,
@@ -86,6 +86,11 @@ export interface CatalogListEntry {
   remoteName: string;
   localStatus: LocalStatus;
   installTarget: string;
+  /** Set when a previous push opened a PR for this artifact that hasn't
+   * been resolved yet (see `resolvePendingPushes`) -- lets the UI show real
+   * transparency about a push's outcome without a separate network call
+   * just to display it, since this is already-known local lockfile data. */
+  pendingPr?: { number: number; url: string };
 }
 
 function requireString(args: Record<string, unknown>, key: string): string {
@@ -140,7 +145,7 @@ function catalogList(args: Record<string, unknown>): CatalogListEntry[] {
       }
     }
 
-    return { manifest, remoteName, localStatus, installTarget };
+    return { manifest, remoteName, localStatus, installTarget, pendingPr: lockEntry?.pendingPr };
   });
 }
 
@@ -189,6 +194,11 @@ const commands: Record<string, CommandHandler> = {
   'sync.checkForUpdates': (args, { onProgress }) => {
     const cwd = requireString(args, 'cwd');
     return checkForUpdates(cwd, onProgress);
+  },
+
+  'sync.resolvePendingPushes': (args, { onProgress }) => {
+    const cwd = requireString(args, 'cwd');
+    return resolvePendingPushes(cwd, onProgress);
   },
 };
 

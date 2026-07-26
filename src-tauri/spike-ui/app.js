@@ -414,6 +414,65 @@
     });
   }
 
+  /** "Check push status" button handler (Detail view, shown only when the
+   * selected entry has a pendingPr): asks the engine to check every
+   * pending-push PR's real GitHub state and resync anything that got
+   * merged, then merges the result back into state.catalog and reports
+   * what happened for THIS entry specifically via toast. Uses the same
+   * progress-panel plumbing as a normal pull/push, since this can be a
+   * real network call. */
+  async function handleCheckPushStatus(entry) {
+    const btn = $('detail-check-push-status-btn');
+    await withBusy(btn, 'Checking...', async () => {
+      await beginProgress();
+      try {
+        const results = await call('sync.resolvePendingPushes', { cwd: state.projectDir });
+        endProgress(true);
+
+        // A merge resyncs the pristine snapshot server-side, which changes
+        // what localStatus should be (edited_locally -> pulled) -- that can
+        // only be recomputed by re-running catalog.list (it's derived from
+        // files on disk, not something to fake client-side), so do a full,
+        // cheap (local-only, no network) catalog refresh whenever anything
+        // merged. A closed-without-merge result only needs pendingPr
+        // cleared, which is safe to patch in client-side.
+        const anyMerged = results.some((r) => r.merged);
+        if (anyMerged) {
+          await loadCatalog();
+        } else {
+          for (const result of results) {
+            const match = state.catalog.find(
+              (e) => e.manifest.id === result.id && e.remoteName === result.remote,
+            );
+            if (match && result.state === 'closed') {
+              match.pendingPr = undefined;
+            }
+          }
+          renderCards();
+        }
+
+        const mine = results.find(
+          (r) => r.id === entry.manifest.id && r.remote === entry.remoteName,
+        );
+        if (mine) {
+          if (mine.merged) {
+            toastSuccess(`PR #${mine.prNumber} was merged — status updated to Pulled.`);
+          } else if (mine.state === 'closed') {
+            toastError(new Error(`PR #${mine.prNumber} was closed without merging.`));
+          } else {
+            toastSuccess(`PR #${mine.prNumber} is still open.`);
+          }
+        } else {
+          toastSuccess('No pending push found for this artifact.');
+        }
+        refreshDetailIfShown(entry);
+      } catch (err) {
+        endProgress(false);
+        toastError(err);
+      }
+    });
+  }
+
   // ---------- detail ----------
 
   /** Shows the Open-folder button's target in the OS file manager. Uses
@@ -590,6 +649,23 @@
     } else {
       driftWarning.hidden = true;
       overwriteBtn.onclick = null;
+    }
+
+    // Transparency for a previously-pushed edit: pushing a PR doesn't
+    // change local status on its own, so without this there'd be no way to
+    // ever learn whether that push was merged, rejected, or is still open.
+    const pushStatusBlock = $('detail-push-status');
+    const pushStatusText = $('detail-push-status-text');
+    const checkPushBtn = $('detail-check-push-status-btn');
+    if (entry.pendingPr) {
+      pushStatusBlock.hidden = false;
+      pushStatusText.textContent =
+        `Pushed — PR #${entry.pendingPr.number} (${entry.pendingPr.url}) `
+        + `is still open, as far as DeliveryOS knows.`;
+      checkPushBtn.onclick = () => void handleCheckPushStatus(entry);
+    } else {
+      pushStatusBlock.hidden = true;
+      checkPushBtn.onclick = null;
     }
   }
 

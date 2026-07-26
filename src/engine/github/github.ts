@@ -20,6 +20,11 @@ export interface GithubClient {
         title: string;
         body: string;
       }): Promise<{ data: { html_url: string; number: number } }>;
+      get(params: {
+        owner: string;
+        repo: string;
+        pull_number: number;
+      }): Promise<{ data: { state: string; merged: boolean; html_url: string } }>;
     };
   };
 }
@@ -92,6 +97,37 @@ export async function openPullRequest(
     throw new GithubApiError(
       `Failed to open a pull request for ${params.owner}/${params.repo} (${params.head} -> ${params.base}): ${detail}`,
     );
+  }
+}
+
+export interface PullRequestStatus {
+  number: number;
+  url: string;
+  state: 'open' | 'closed';
+  merged: boolean;
+}
+
+/** Fetches a specific pull request's current real state -- open, closed
+ * (rejected), or merged. This is the only way to know whether a
+ * previously-opened DeliveryOS push PR has actually been accepted, since
+ * opening it doesn't tell you anything about what happens to it afterward. */
+export async function getPullRequestStatus(
+  octokit: GithubClient,
+  owner: string,
+  repo: string,
+  pullNumber: number,
+): Promise<PullRequestStatus> {
+  try {
+    const response = await octokit.rest.pulls.get({ owner, repo, pull_number: pullNumber });
+    return {
+      number: pullNumber,
+      url: response.data.html_url,
+      state: response.data.state === 'closed' ? 'closed' : 'open',
+      merged: response.data.merged,
+    };
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    throw new GithubApiError(`Failed to fetch PR #${pullNumber} status for ${owner}/${repo}: ${detail}`);
   }
 }
 

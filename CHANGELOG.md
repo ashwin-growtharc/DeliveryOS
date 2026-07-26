@@ -4,6 +4,22 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- Added transparency about what happens to a push after it opens a PR.
+  Pushing never updated local state on its own (the edit isn't accepted
+  just because a PR exists), so there was no way to later tell "still
+  open" from "merged" from "rejected" — an edit that got merged looked
+  identical to one still sitting unreviewed. Edit-mode push now records
+  the opened PR against the artifact's lockfile entry
+  (`pendingPr: {number, url}`); Detail shows it and a "Check push status"
+  button that asks GitHub for that PR's real state. Merged resyncs the
+  pristine snapshot (so `edited_locally` correctly resolves back to
+  `pulled`) and clears the tracking; still-open leaves everything as-is;
+  closed-without-merging clears the tracking but deliberately leaves the
+  local edit untouched, since that divergence is still real. Only covers
+  pushes made after this shipped — an edit pushed and merged before this
+  existed has no `pendingPr` to check; re-pulling it once resyncs status
+  the same way a merge-driven resync would.
+
 ## Unreleased
 
 - Fixed a real bug found while demo-prepping `arcos-cli`: simply *running*
