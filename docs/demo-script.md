@@ -67,6 +67,7 @@ Point at the repo structure briefly, no need to open files yet:
 - `src-tauri/` — the desktop app shell (Rust) and UI (`spike-ui/`, plain HTML/JS)
 - `docs/` — all the design/decision write-ups, if anyone wants to dig in later
 - `PLAN.md` / `CHANGELOG.md` — what's built, phase by phase, kept honestly up to date the whole way
+- `docs/growtharc-brand-guidelines.md` — worth opening if anyone asks about the app's look — the color palette, typography, and component patterns it's built from, already applied to the real UI
 
 ## 2. Launch the app (1 min)
 
