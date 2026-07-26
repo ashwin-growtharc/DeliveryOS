@@ -28,3 +28,7 @@ tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+# `tauri::async_runtime` re-exports tokio's runtime/spawn/sync/task types, but
+# not `tokio::time` -- needed directly (with the `time` feature) for the
+# auto-sync timer's `tokio::time::sleep` in lib.rs's setup() closure.
+tokio = { version = "1", features = ["time"] }

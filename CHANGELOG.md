@@ -14,6 +14,11 @@ design rationale.
   "Both changed" state with no one-click action — updating it requires an
   explicit confirmation, so the existing Update button can never silently
   overwrite a local edit.
+- Added background auto-sync: a 20-minute Rust-side timer periodically
+  reruns the same check-for-updates logic automatically (no new
+  engine/sidecar code — just a timer event the frontend already knew how to
+  handle). Stays quiet on routine no-op ticks, only toasts when it actually
+  finds new updates.
 
 ## Phase 3 — Tauri app — **Done**
 

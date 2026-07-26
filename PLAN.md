@@ -100,7 +100,8 @@ exist but nobody's SSO'd in."
 
 - [x] Drift detection (`deliveryos doctor` equivalent, surfaced in the app)
       Done — `deliveryos check-updates` (CLI) / a "Check for updates" button in Browse (app) fetches only the remotes actually referenced by the lockfile, compares each pulled artifact's version against its remote's current version, and surfaces `update_available`. A pulled-and-locally-edited artifact that ALSO has an upstream update gets a distinct `both_changed` state with no one-click action — updating it requires an explicit confirmation, since silently overwriting local edits would be exactly the un-designed conflict resolution ARCHITECTURE.md §9 risk #3 still defers. Verified via a sidecar-level e2e test (real git commit simulating an upstream version bump); no GUI click-through was done for this one, per the project's preference to minimize expensive GUI-automation verification when automated tests already cover it.
-- [ ] Background auto-sync on an interval
+- [x] Background auto-sync on an interval
+      Done — a 20-minute Rust-side timer emits a tick the frontend listens for, reusing the exact same check+merge logic the manual "Check for updates" button uses (no new engine/sidecar code). Silent unless it actually finds new updates (a toast then, not on every no-op tick); reentrancy-guarded so an overlapping tick just skips itself. No user-configurable interval yet — a reasonable first default, not an oversight.
 - [ ] Notifications for available updates / PR review status
 - [ ] Lifecycle/deprecation states (§9 risk #5)
 - [ ] Success metrics, using the tiered metrics-ethics model (§9 risk #6) to avoid an accidental leaderboard

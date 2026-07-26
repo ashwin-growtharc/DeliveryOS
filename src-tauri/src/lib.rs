@@ -169,6 +169,24 @@ pub fn run() {
             .build(),
         )?;
       }
+
+      // Background auto-sync (Phase 5): periodically nudge the frontend to
+      // re-check for artifact updates with no user interaction required.
+      // Rust's job here is only the timer -- it emits a plain tick event and
+      // knows nothing about projects, remotes, or the sidecar; the frontend
+      // already owns the project folder and the check+merge logic (the same
+      // `sync.checkForUpdates` call + catalog merge the manual "Check for
+      // updates" button uses, see app.js's checkForArtifactUpdatesCore /
+      // onAutoSyncTick). 20 minutes is a fixed, deliberate default for this
+      // first iteration -- no user-configurable interval yet.
+      let app_handle = app.handle().clone();
+      tauri::async_runtime::spawn(async move {
+        loop {
+          tokio::time::sleep(std::time::Duration::from_secs(20 * 60)).await;
+          let _ = app_handle.emit("auto-sync-tick", ());
+        }
+      });
+
       Ok(())
     })
     .invoke_handler(tauri::generate_handler![sidecar_call])

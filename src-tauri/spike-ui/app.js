@@ -352,39 +352,63 @@
    * local-only. Drives the same Detail progress panel
    * (beginProgress/endProgress) that runArtifactAction uses, so a fetch
    * against every relevant remote shows live stage-by-stage progress
-   * instead of appearing to hang. */
+   * instead of appearing to hang.
+   *
+   * This is the core work only -- no button busy/label state and no toast,
+   * so it can be shared as-is by both the manual "Check for updates" button
+   * (handleCheckForArtifactUpdates, below) and the background auto-sync
+   * timer (onAutoSyncTick) without either one visibly driving UI feedback
+   * that belongs to the other (the button shouldn't silently flip to
+   * "Checking..." every 20 minutes when the user didn't click it, and the
+   * background tick shouldn't show its own "no updates" toast on top of the
+   * manual button's). Returns the raw `updates` array so callers can decide
+   * what, if anything, to tell the user about the result. Rethrows on
+   * failure (after marking the progress panel failed) so each caller can
+   * apply its own error handling. */
+  async function checkForArtifactUpdatesCore() {
+    await beginProgress();
+    try {
+      const updates = await call('sync.checkForUpdates', { cwd: state.projectDir });
+      endProgress(true);
+
+      for (const update of updates) {
+        const entry = state.catalog.find(
+          (e) => e.manifest.id === update.id && e.remoteName === update.remote,
+        );
+        if (entry) {
+          entry.availableVersion = update.availableVersion;
+        }
+      }
+
+      renderCards();
+      if (state.selectedKey) {
+        const selected = state.catalog.find((e) => entryKey(e) === state.selectedKey);
+        if (selected) {
+          refreshDetailIfShown(selected);
+        }
+      }
+
+      return updates;
+    } catch (err) {
+      endProgress(false);
+      throw err;
+    }
+  }
+
+  /** Manual "Check for updates" button handler: busies/relabels the button
+   * and always reports a result (either "No updates available." or a count)
+   * via toast, wrapped around the shared checkForArtifactUpdatesCore(). */
   async function handleCheckForArtifactUpdates() {
     const btn = $('check-artifact-updates-btn');
     await withBusy(btn, 'Checking...', async () => {
-      await beginProgress();
       try {
-        const updates = await call('sync.checkForUpdates', { cwd: state.projectDir });
-        endProgress(true);
-
-        for (const update of updates) {
-          const entry = state.catalog.find(
-            (e) => e.manifest.id === update.id && e.remoteName === update.remote,
-          );
-          if (entry) {
-            entry.availableVersion = update.availableVersion;
-          }
-        }
-
-        renderCards();
-        if (state.selectedKey) {
-          const selected = state.catalog.find((e) => entryKey(e) === state.selectedKey);
-          if (selected) {
-            refreshDetailIfShown(selected);
-          }
-        }
-
+        const updates = await checkForArtifactUpdatesCore();
         toastSuccess(
           updates.length === 0
             ? 'No updates available.'
             : `${updates.length} update${updates.length === 1 ? '' : 's'} available.`,
         );
       } catch (err) {
-        endProgress(false);
         toastError(err);
       }
     });
@@ -744,6 +768,42 @@
     });
   }
 
+  // ---------- auto-sync ----------
+
+  // Reentrancy guard for onAutoSyncTick, below -- there's no scenario where
+  // two ticks should ever run concurrently (each is a full
+  // sync.checkForUpdates round-trip against every remote), so a stray
+  // second `auto-sync-tick` arriving before the first finishes just skips
+  // itself rather than piling up overlapping checks.
+  let autoSyncInFlight = false;
+
+  /** Handles the periodic `auto-sync-tick` event emitted by the Rust
+   * backend (see src-tauri/src/lib.rs's 20-minute timer). Silently reruns
+   * the exact same check+merge logic the manual "Check for updates" button
+   * uses (checkForArtifactUpdatesCore) -- deliberately without that
+   * button's busy/label feedback, since the user didn't click anything --
+   * and only surfaces a toast when the tick actually turned up new updates
+   * (comparing the count of entries with an `availableVersion` before vs.
+   * after), so a routine no-op tick every 20 minutes stays invisible rather
+   * than nagging the user. */
+  async function onAutoSyncTick() {
+    if (autoSyncInFlight) return; // reentrancy guard: skip this tick if a check is already running
+    if (!state.projectDir) return; // nothing to check without a project folder
+    autoSyncInFlight = true;
+    try {
+      const before = state.catalog.filter((e) => e.availableVersion).length;
+      await checkForArtifactUpdatesCore();
+      const after = state.catalog.filter((e) => e.availableVersion).length;
+      if (after > before) {
+        toastSuccess(`${after - before} new update(s) available.`);
+      }
+    } catch (err) {
+      toastError(err);
+    } finally {
+      autoSyncInFlight = false;
+    }
+  }
+
   // ---------- wiring ----------
 
   function wireEvents() {
@@ -778,6 +838,13 @@
 
   async function init() {
     wireEvents();
+
+    // One-time subscription for the whole app session -- unlike
+    // `sidecar-progress` (re-subscribed per action via beginProgress/
+    // endProgress), there's exactly one `auto-sync-tick` listener ever
+    // needed, since the Rust timer behind it runs for the lifetime of the
+    // app and never needs tearing down/re-creating.
+    await listen('auto-sync-tick', () => void onAutoSyncTick());
 
     const stored = localStorage.getItem(PROJECT_DIR_KEY);
     if (stored) {
