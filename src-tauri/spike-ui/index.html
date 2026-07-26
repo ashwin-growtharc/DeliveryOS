@@ -106,7 +106,15 @@
             <h2 class="section-title">Propose a new artifact</h2>
             <div class="field">
               <label for="f-id">Artifact ID</label>
-              <input id="f-id" type="text" required placeholder="e.g. code-reviewer" />
+              <input
+                id="f-id"
+                type="text"
+                required
+                placeholder="e.g. code-reviewer"
+                pattern="[a-z0-9]+(-[a-z0-9]+)*"
+                title="Lowercase letters, numbers, and hyphens only, e.g. growtharc-brand-guidelines"
+              />
+              <p class="field-hint">Lowercase, hyphen-separated, no spaces -- this becomes a folder name and a git branch name.</p>
             </div>
             <div class="field">
               <label for="f-kind">Kind</label>

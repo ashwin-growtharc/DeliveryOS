@@ -41,6 +41,29 @@ design rationale.
   copy) via the `ignore` package. Verified directly against the real,
   previously-broken `arcos-cli` folder, plus two new unit tests.
 
+- Fixed `push --new` crashing with `fatal: '...' is not a valid branch name`
+  whenever the proposed artifact's id contained a space or uppercase letter
+  (e.g. typing "GrowthArc-Brand Guidelines" into the Add New form's free-text
+  ID field) — git branch refs can't contain whitespace. The branch name
+  builder now slugifies the id (lowercase, invalid characters collapsed to
+  `-`) before using it. The Add New form's Artifact ID field also now
+  validates client-side (lowercase/digits/hyphens only) so this is caught
+  with a clear message before a push is even attempted, not as a raw git
+  error after the fact.
+
+- Fixed Browse's "Refresh" never actually refreshing from the remote — it
+  only re-read whatever was already cached on disk. An artifact proposed via
+  Add New and then merged upstream would never appear until *something else*
+  happened to fetch that same remote (e.g. later pulling an unrelated,
+  already-tracked artifact from it), since neither plain Refresh nor "Check
+  for updates" (which only fetches remotes with existing lockfile entries)
+  covered that case. Refresh now calls a new `catalog.refresh` that fetches
+  every registered remote first, tolerating individual remote failures so
+  one unreachable remote doesn't block the rest. Scoped to the Refresh
+  button only — every other internal catalog reload (folder switches,
+  post-push/pull re-renders) still uses the fast, local-only `catalog.list`,
+  so this doesn't reintroduce network flakiness into paths that don't need it.
+
 - Fixed `edited_locally` having no way to resolve in the UI at all. Detail's
   action button only ever offered "Push" for that status, so an edit that
   was actually already pushed and merged upstream (or one the user simply

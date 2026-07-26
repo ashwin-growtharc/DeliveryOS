@@ -212,6 +212,32 @@
     });
   }
 
+  /** Bound only to the Refresh button's click -- unlike the plain
+   * `catalog.list` that every other call site above uses (folder switches,
+   * post-push/pull re-renders, view switches), this one actually re-fetches
+   * every registered remote first via `catalog.refresh`. Deliberately not
+   * used anywhere else: an artifact proposed via Add New and merged upstream
+   * would otherwise never show up in Browse (nothing fetches a remote
+   * nobody has pulled anything from yet), but re-fetching every remote on
+   * every routine internal re-render would reintroduce network flakiness
+   * into actions that don't need it. */
+  async function refreshCatalogFromRemotes() {
+    renderFolderDisplay();
+    if (!state.projectDir) {
+      return;
+    }
+    const refreshBtn = $('refresh-btn');
+    await withBusy(refreshBtn, 'Refreshing...', async () => {
+      try {
+        state.catalog = await call('catalog.refresh', { cwd: state.projectDir });
+      } catch (err) {
+        toastError(err);
+      }
+      renderChips();
+      renderCards();
+    });
+  }
+
   function renderChips() {
     const kinds = Array.from(new Set(state.catalog.map((e) => e.manifest.kind))).sort();
     const container = $('chips');
@@ -760,6 +786,19 @@
     const remote = $('f-remote').value;
     const postInstall = $('f-post-install').value.trim() || undefined;
 
+    // The id becomes a git branch name segment during push (see
+    // buildBranchName). Spaces/uppercase/punctuation there produced a real
+    // crash ("not a valid branch name") -- caught here, before the push even
+    // starts, with a message that says why instead of surfacing a raw git
+    // error.
+    if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(id)) {
+      toastError(new Error(
+        `Artifact ID "${id}" must be lowercase letters, numbers, and hyphens only `
+        + '(e.g. "growtharc-brand-guidelines"), no spaces.',
+      ));
+      return;
+    }
+
     await withBusy(submitBtn, 'Working...', async () => {
       try {
         const result = await call('artifact.push', {
@@ -912,7 +951,7 @@
     }
 
     $('change-folder-btn').addEventListener('click', () => void changeFolder());
-    $('refresh-btn').addEventListener('click', () => void loadCatalog());
+    $('refresh-btn').addEventListener('click', () => void refreshCatalogFromRemotes());
     $('check-artifact-updates-btn').addEventListener('click', () => void handleCheckForArtifactUpdates());
     $('add-new-btn').addEventListener('click', () => showView('addnew'));
     $('back-to-browse-btn').addEventListener('click', () => showView('browse'));

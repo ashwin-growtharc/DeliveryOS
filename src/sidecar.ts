@@ -29,7 +29,7 @@
  */
 import * as path from 'path';
 import * as readline from 'readline';
-import { buildCatalog } from './engine/catalog/catalog';
+import { buildCatalog, refreshCatalog, CatalogEntry } from './engine/catalog/catalog';
 import { readLockfile } from './engine/lockfile/lockfile';
 import { computeChangedFiles } from './engine/push/diff';
 import { pristinePath } from './engine/paths';
@@ -117,18 +117,15 @@ function optionalString(args: Record<string, unknown>, key: string): string | un
  *    'pulled' rather than throwing, so one bad entry never breaks Browse
  *    for every other artifact in the same `catalog.list` call.
  */
-function catalogList(args: Record<string, unknown>): CatalogListEntry[] {
-  const cwd = requireString(args, 'cwd');
-  const remote = optionalString(args, 'remote');
-
-  let entries = buildCatalog();
-  if (remote) {
-    entries = entries.filter((entry) => entry.remoteName === remote);
-  }
-
+function annotateCatalog(
+  entries: CatalogEntry[],
+  cwd: string,
+  remote: string | undefined,
+): CatalogListEntry[] {
+  const filtered = remote ? entries.filter((entry) => entry.remoteName === remote) : entries;
   const lockfile = readLockfile(cwd);
 
-  return entries.map((entry) => {
+  return filtered.map((entry) => {
     const { manifest, remoteName } = entry;
     const installTarget = path.resolve(cwd, manifest.install_target);
     const lockEntry = lockfile.entries.find((e) => e.id === manifest.id);
@@ -147,6 +144,26 @@ function catalogList(args: Record<string, unknown>): CatalogListEntry[] {
 
     return { manifest, remoteName, localStatus, installTarget, pendingPr: lockEntry?.pendingPr };
   });
+}
+
+function catalogList(args: Record<string, unknown>): CatalogListEntry[] {
+  const cwd = requireString(args, 'cwd');
+  const remote = optionalString(args, 'remote');
+  return annotateCatalog(buildCatalog(), cwd, remote);
+}
+
+/** Like `catalog.list`, but re-fetches every registered remote's local cache
+ * first (see `refreshCatalog`'s doc comment) -- what Browse's "Refresh"
+ * button calls, so it actually reflects a merge/change made upstream since
+ * the last fetch instead of just re-reading stale local disk state. */
+async function catalogRefresh(
+  args: Record<string, unknown>,
+  onProgress?: ProgressCallback,
+): Promise<CatalogListEntry[]> {
+  const cwd = requireString(args, 'cwd');
+  const remote = optionalString(args, 'remote');
+  const entries = await refreshCatalog(onProgress);
+  return annotateCatalog(entries, cwd, remote);
 }
 
 async function remoteAdd(
@@ -172,6 +189,8 @@ async function remoteAdd(
 /** Command map: every command the frontend/Tauri layer can invoke. */
 const commands: Record<string, CommandHandler> = {
   'catalog.list': (args) => catalogList(args),
+
+  'catalog.refresh': (args, { onProgress }) => catalogRefresh(args, onProgress),
 
   'artifact.pull': (args, { onProgress }) => {
     const id = requireString(args, 'id');
