@@ -70,7 +70,15 @@ Point at the repo structure briefly, no need to open files yet:
 
 ## 2. Launch the app (1 min)
 
-In a terminal, from the repo root:
+In a terminal, from the repo root. If this is a fresh terminal window,
+`cargo` may not be on `PATH` yet — run this first if `npx tauri dev` below
+complains it can't find `cargo`/`cargo metadata`:
+
+```powershell
+$env:Path += ";$env:USERPROFILE\.cargo\bin"
+```
+
+Then:
 
 ```powershell
 npm run build; npm run build:sidecar
