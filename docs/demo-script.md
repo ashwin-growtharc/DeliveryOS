@@ -10,6 +10,48 @@ and follow top to bottom. Roughly 15-20 minutes including questions.
 - [ ] Have a scratch project folder ready (e.g. `C:\Users\AshwinB\Desktop\demo-project`, empty)
 - [ ] Optional: close other apps so the demo window isn't cluttered
 
+## Resetting to a clean slate (before a re-run, or before tomorrow)
+
+If you've already pulled things into a demo folder (e.g. from a rehearsal),
+run these to start genuinely fresh — otherwise cards will show "Pulled"
+instead of "Not pulled" and the walkthrough won't match what you're saying.
+
+**1. Delete the project folder's DeliveryOS state** (lockfile + pristine
+snapshots — this alone resets every card back to "Not pulled" without
+deleting the actual pulled files, if you want to keep them around to look
+at):
+```powershell
+Remove-Item -Recurse -Force "<project folder>\.deliveryos"
+```
+
+**2. Or, for a fully clean folder**, delete the pulled artifact folders too
+(adjust names to whatever you actually pulled):
+```powershell
+Remove-Item -Recurse -Force "<project folder>\arcos-cli"
+Remove-Item -Recurse -Force "<project folder>\launchpad-template"
+Remove-Item -Recurse -Force "<project folder>\.claude"
+```
+
+**3. `arcos-cli` specifically also installs a real `pip` package** (via its
+`post_install`) — if you pulled it before, `arcos` stays registered on your
+system even after deleting the folder above. Remove it too:
+```powershell
+pip uninstall arcos -y
+```
+(Confirm it's really gone: `arcos --help` should then say "command not
+found.")
+
+**4. If you also want to clear registered remotes** (Settings will show
+empty, requiring you to re-add them live — only do this if you *want* to
+demo the "Add remote" step from scratch):
+```powershell
+Remove-Item -Recurse -Force "$env:USERPROFILE\.deliveryos"
+```
+
+Steps 1-3 are the normal "reset between rehearsals" routine. Step 4 is only
+if you specifically want to re-demo registering a remote from an empty
+Settings screen.
+
 ## 1. Open in VS Code — orient the audience (2 min)
 
 Open the `delivery-os` folder in VS Code. Say:
