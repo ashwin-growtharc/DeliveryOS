@@ -103,6 +103,7 @@ exist but nobody's SSO'd in."
 - [x] Background auto-sync on an interval
       Done — a 20-minute Rust-side timer emits a tick the frontend listens for, reusing the exact same check+merge logic the manual "Check for updates" button uses (no new engine/sidecar code). Silent unless it actually finds new updates (a toast then, not on every no-op tick); reentrancy-guarded so an overlapping tick just skips itself. No user-configurable interval yet — a reasonable first default, not an oversight.
 - [ ] Notifications for available updates / PR review status
+      **Deliberately deferred** — the auto-sync feature already surfaces new updates via an in-app toast, which covers the current single-user, app-in-the-foreground usage pattern. Native OS notifications (visible even when the app isn't focused/is minimized) matter more once there's a reason to expect the app running unattended in the background — revisit then, not now.
 - [ ] Lifecycle/deprecation states (§9 risk #5)
 - [ ] Success metrics, using the tiered metrics-ethics model (§9 risk #6) to avoid an accidental leaderboard
 - [ ] **End-to-end test:** simulate a full week of drift (someone stops syncing, a remote changes upstream, another person edits the same resource) and confirm drift detection, auto-sync, and notifications all surface correctly with no manual intervention required.
