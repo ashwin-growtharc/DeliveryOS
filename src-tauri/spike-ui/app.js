@@ -1277,29 +1277,33 @@
   // ---------- tag picker (roles/stacks/teams input, Add New + Edit) ----------
 
   /** A simple multi-value "chip" picker replacing a raw comma-separated
-   * text field: already-added values render as removable pills, and the
-   * text input suggests values already used elsewhere in the catalog via a
-   * native <datalist> -- picking a suggestion or just typing a brand-new
-   * value both work the same way (tags stay free-text by design, this only
-   * reduces retyping/typos for the common case of reusing an existing
-   * one). `container` is an otherwise-empty element this takes over
-   * entirely; `container.id` must be unique (used to build the <datalist>'s
-   * own id). Values are trimmed+lowercased on commit -- the same
+   * text field: already-added values render as removable pills, and
+   * existing values used elsewhere in the catalog render as visible,
+   * clickable suggestion chips below the input -- not a native <datalist>
+   * popup, which only a browser's own hidden autocomplete UI surfaces (the
+   * same "doesn't match the rest of the app, hides every option behind a
+   * click" problem native <select>s have) and matches the app's own chip
+   * visual language everywhere else instead. Typing a brand-new value and
+   * pressing Enter/comma still works the same way (tags stay free-text by
+   * design). `container` is an otherwise-empty element this takes over
+   * entirely. Values are trimmed+lowercased on commit -- the same
    * canonicalization the old raw comma-text fields used to apply, so e.g.
    * "Python" still lands in the same "stack: python" folder as everything
    * else instead of a separate, near-duplicate one. */
   function createTagPicker(container) {
-    container.classList.add('tag-picker');
-    const datalistId = `${container.id}-datalist`;
+    container.classList.add('tag-picker-wrap');
     container.innerHTML = `
-      <span class="tag-picker-chips"></span>
-      <input class="tag-picker-input" type="text" list="${datalistId}" placeholder="Type, then Enter or comma&hellip;" />
-      <datalist id="${datalistId}"></datalist>
+      <div class="tag-picker">
+        <span class="tag-picker-chips"></span>
+        <input class="tag-picker-input" type="text" placeholder="Type, then Enter or comma&hellip;" />
+      </div>
+      <div class="tag-picker-suggestions"></div>
     `;
     const chipsEl = container.querySelector('.tag-picker-chips');
     const inputEl = container.querySelector('.tag-picker-input');
-    const datalistEl = container.querySelector('datalist');
+    const suggestionsEl = container.querySelector('.tag-picker-suggestions');
     let values = [];
+    let suggestions = [];
 
     function renderTagPickerChips() {
       chipsEl.innerHTML = '';
@@ -1313,8 +1317,24 @@
         chip.querySelector('.tag-chip-remove').addEventListener('click', () => {
           values = values.filter((v) => v !== value);
           renderTagPickerChips();
+          renderSuggestions();
         });
         chipsEl.appendChild(chip);
+      }
+    }
+
+    /** Every known suggestion not already added -- clicking one commits it
+     * exactly like typing it and pressing Enter would. */
+    function renderSuggestions() {
+      suggestionsEl.innerHTML = '';
+      const available = suggestions.filter((s) => !values.includes(s));
+      for (const value of available) {
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'chip tag-picker-suggestion';
+        chip.textContent = value;
+        chip.addEventListener('click', () => commit(value));
+        suggestionsEl.appendChild(chip);
       }
     }
 
@@ -1326,6 +1346,7 @@
       }
       values.push(value);
       renderTagPickerChips();
+      renderSuggestions();
     }
 
     inputEl.addEventListener('keydown', (ev) => {
@@ -1335,6 +1356,7 @@
       } else if (ev.key === 'Backspace' && inputEl.value.length === 0 && values.length > 0) {
         values = values.slice(0, -1);
         renderTagPickerChips();
+        renderSuggestions();
       }
     });
     // Committing on blur too -- otherwise text typed but not confirmed with
@@ -1351,9 +1373,11 @@
       setValues(next) {
         values = [...next];
         renderTagPickerChips();
+        renderSuggestions();
       },
       setSuggestions(list) {
-        datalistEl.innerHTML = list.map((v) => `<option value="${escapeHtml(v)}"></option>`).join('');
+        suggestions = list;
+        renderSuggestions();
       },
     };
   }

@@ -1050,10 +1050,19 @@ input, textarea, select {
 
 /* ---------- tag picker (roles/stacks/teams) ----------
  * Replaces a raw "type a comma-separated list and hope you spell it the
- * same way as last time" text field with removable chips + a suggestion
- * list (a <datalist>) of values already used elsewhere in the catalog --
- * still fully free-text (a new value is just as valid), just easier to
- * reuse an existing one without retyping/mistyping it. */
+ * same way as last time" text field with removable chips for what's
+ * already added, plus a row of clickable, visible suggestion chips for
+ * values already used elsewhere in the catalog -- not a native <datalist>
+ * popup, which is hidden behind the browser's own autocomplete UI and
+ * doesn't match the rest of the app. Still fully free-text (typing a new
+ * value and pressing Enter/comma works the same way); the suggestions are
+ * just a faster way to reuse an existing one without retyping it. */
+.tag-picker-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .tag-picker {
   display: flex;
   flex-wrap: wrap;
@@ -1067,6 +1076,33 @@ input, textarea, select {
 
 .tag-picker-chips {
   display: contents;
+}
+
+.tag-picker-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tag-picker-suggestions:empty {
+  display: none;
+}
+
+/* A suggestion is "click to add," not yet part of the value -- dashed
+ * border keeps it visually distinct from an already-added .tag-chip
+ * (solid fill) and from a single-select .chip-picker option (solid
+ * border), at a glance. */
+.chip.tag-picker-suggestion {
+  border: 1px dashed var(--border-strong);
+  background: transparent;
+  color: var(--primary-700);
+  opacity: .8;
+}
+
+.chip.tag-picker-suggestion:hover {
+  opacity: 1;
+  background: var(--surface-tertiary);
+  border-color: var(--sage-500);
 }
 
 .tag-chip {
