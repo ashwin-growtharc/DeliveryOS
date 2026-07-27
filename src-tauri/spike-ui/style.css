@@ -297,16 +297,48 @@ input, textarea, select {
   margin-bottom: 4px;
 }
 
-.tag-category-row .chip,
-.tag-value-row .chip {
-  /* Dashed border distinguishes the tag rows (category, then its values)
+.tag-category-row .chip {
+  /* Dashed border distinguishes the tag category row (stack/role/project)
      from the Kind row above at a glance, without a second color to
      maintain. */
   border-style: dashed;
 }
 
 .tag-value-row {
-  margin-top: -4px;
+  /* A vertical folder listing, not a chip row -- each value really does
+     open into its own folder-like view (openTagFolder in app.js), so it
+     reads as "pick a folder to open" rather than "pick a filter pill". */
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+  margin-bottom: 16px;
+  align-items: flex-start;
+}
+
+.tag-folder-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--card);
+  cursor: pointer;
+  font-size: 13px;
+  min-width: 180px;
+}
+
+.tag-folder-item:hover {
+  border-color: var(--brand-500);
+}
+
+.tag-folder-item .folder-icon {
+  font-size: 15px;
+}
+
+.tag-folder-item .folder-name {
+  font-family: 'JetBrains Mono', monospace;
 }
 
 .tag-folder-header {
