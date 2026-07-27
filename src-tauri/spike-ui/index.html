@@ -91,7 +91,34 @@
             </div>
             <div class="install-path-label">Installs to</div>
             <div id="detail-install-path" class="install-path"></div>
-            <button id="detail-open-folder-btn" class="btn btn-sm" hidden>Open folder</button>
+            <div class="detail-secondary-actions">
+              <button id="detail-open-folder-btn" class="btn btn-sm" hidden>Open folder</button>
+              <button id="detail-edit-btn" class="btn btn-sm" hidden>Edit</button>
+            </div>
+
+            <form id="detail-edit-form" class="edit-form" hidden>
+              <div class="field">
+                <label for="edit-description">Description</label>
+                <textarea id="edit-description" rows="3"></textarea>
+              </div>
+              <div class="field">
+                <label for="edit-roles">Roles (comma-separated)</label>
+                <input id="edit-roles" type="text" placeholder="pm, engagement-lead" />
+              </div>
+              <div class="field">
+                <label for="edit-teams">Team / project (comma-separated)</label>
+                <input id="edit-teams" type="text" placeholder="engagement, platform" />
+              </div>
+              <div class="field">
+                <label for="edit-stacks">Stack (comma-separated)</label>
+                <input id="edit-stacks" type="text" placeholder="python, typescript" />
+              </div>
+              <p class="field-hint">Saving opens a PR against this field's manifest.yaml -- the payload/content is untouched.</p>
+              <div class="edit-form-actions">
+                <button type="submit" id="edit-save-btn" class="btn btn-primary">Save (opens PR)</button>
+                <button type="button" id="edit-cancel-btn" class="btn btn-sm">Cancel</button>
+              </div>
+            </form>
 
             <div id="detail-drift-warning" class="drift-warning" hidden>
               <p id="detail-drift-warning-text" class="drift-warning-text">

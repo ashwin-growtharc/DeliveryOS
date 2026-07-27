@@ -145,6 +145,75 @@ describe('push e2e', () => {
   );
 
   it(
+    'metadataEdit mode: edits description/roles/stacks without touching the payload, and only commits manifest.yaml',
+    async () => {
+      const remoteName = 'test-remote-metadata-edit';
+      await registerAndClone(remoteName, fixtureRemoteDir);
+
+      const artifact = TEST_ARTIFACTS.find((a) => !a.hasPostInstall && a.id === 'welcome-template')!;
+      const cwd = newScratchCwd('metadata-edit');
+      pullArtifact(artifact.id, remoteName, cwd);
+      // No local edits made at all -- a metadataEdit push must not require
+      // (or even look at) any payload diff.
+
+      const octokit = makeFakeOctokit();
+      const result = await pushArtifact(
+        artifact.id,
+        {
+          metadataEdit: {
+            description: 'Updated via metadataEdit',
+            roles: ['engineering'],
+            stacks: ['python'],
+          },
+        },
+        cwd,
+        octokit,
+      );
+
+      expect(await branchExistsInFixture(fixtureRemoteDir, result.branch)).toBe(true);
+
+      const fixtureGit = simpleGit(fixtureRemoteDir);
+      const manifestContent = await fixtureGit.show([
+        `${result.branch}:artifacts/${artifact.id}/manifest.yaml`,
+      ]);
+      expect(manifestContent).toContain('description: Updated via metadataEdit');
+      expect(manifestContent).toContain('roles:\n    - engineering');
+      expect(manifestContent).toContain('stacks:\n    - python');
+
+      // Only the manifest changed -- the payload (README.md) must NOT appear
+      // in this commit at all.
+      const diffSummary = await fixtureGit.raw(['show', '--stat', '--format=', result.branch]);
+      expect(diffSummary).toContain(`artifacts/${artifact.id}/manifest.yaml`);
+      expect(diffSummary).not.toContain('payload/README.md');
+
+      const call = octokit.rest.pulls.create.mock.calls[0][0];
+      expect(call.title).toContain(`${artifact.id} metadata`);
+      expect(call.body).toContain('description');
+      expect(call.body).toContain('roles');
+      expect(call.body).toContain('stacks');
+      expect(call.body).not.toContain('teams'); // unchanged -- shouldn't be listed
+    },
+    30_000,
+  );
+
+  it(
+    'metadataEdit mode: hard-errors with NoLocalChangesError when nothing actually changed',
+    async () => {
+      const remoteName = 'test-remote-metadata-edit-noop';
+      await registerAndClone(remoteName, fixtureRemoteDir);
+
+      const artifact = TEST_ARTIFACTS.find((a) => !a.hasPostInstall && a.id === 'welcome-template')!;
+      const cwd = newScratchCwd('metadata-edit-noop');
+      pullArtifact(artifact.id, remoteName, cwd);
+
+      await expect(
+        pushArtifact(artifact.id, { metadataEdit: { description: 'Test artifact of kind template' } }, cwd, makeFakeOctokit()),
+      ).rejects.toThrow(NoLocalChangesError);
+    },
+    30_000,
+  );
+
+  it(
     'propose-new mode: pushes a real new branch/files and opens a PR via the propose-new template',
     async () => {
       const remoteName = 'test-remote-new';

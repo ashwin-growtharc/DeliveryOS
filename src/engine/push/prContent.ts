@@ -50,6 +50,67 @@ Opened automatically by \`deliveryos push\`. Review under this repo's normal rul
   return { title, body };
 }
 
+export interface MetadataFields {
+  description: string;
+  roles: string[];
+  teams: string[];
+  stacks: string[];
+}
+
+export interface MetadataEditPrContentParams {
+  id: string;
+  kind: string;
+  owner: string;
+  version: string;
+  gitUserName: string;
+  gitUserEmail: string;
+  before: MetadataFields;
+  after: MetadataFields;
+}
+
+function formatTagList(values: string[]): string {
+  return values.length > 0 ? `[${values.join(', ')}]` : '(none)';
+}
+
+/** Builds the PR title/body for a metadata-only edit (description/roles/
+ * teams/stacks changed via Detail's Edit button -- the payload itself is
+ * untouched). Only lists fields that actually changed, so a PR that just
+ * added one role doesn't also claim description/stacks/teams changed. */
+export function buildMetadataEditPrContent(params: MetadataEditPrContentParams): PrContent {
+  const { id, kind, owner, version, gitUserName, gitUserEmail, before, after } = params;
+
+  const title = `[DeliveryOS] Update ${id} metadata`;
+
+  const lines: string[] = [];
+  if (before.description !== after.description) {
+    lines.push(`- **description**: "${before.description}" -> "${after.description}"`);
+  }
+  if (JSON.stringify(before.roles) !== JSON.stringify(after.roles)) {
+    lines.push(`- **roles**: ${formatTagList(before.roles)} -> ${formatTagList(after.roles)}`);
+  }
+  if (JSON.stringify(before.teams) !== JSON.stringify(after.teams)) {
+    lines.push(`- **teams**: ${formatTagList(before.teams)} -> ${formatTagList(after.teams)}`);
+  }
+  if (JSON.stringify(before.stacks) !== JSON.stringify(after.stacks)) {
+    lines.push(`- **stacks**: ${formatTagList(before.stacks)} -> ${formatTagList(after.stacks)}`);
+  }
+
+  const body = `## DeliveryOS push: update \`${id}\` metadata
+
+**Kind:** ${kind}   **Owner:** ${owner}   **Version:** ${version}
+**Pushed by:** ${gitUserName} <${gitUserEmail}>
+
+### Changed fields
+${lines.join('\n')}
+
+---
+Only \`artifacts/${id}/manifest.yaml\` changed -- the artifact's payload is untouched.
+Opened automatically by \`deliveryos push\`. Review under this repo's normal rules.
+`;
+
+  return { title, body };
+}
+
 export interface ProposeNewPrContentParams {
   id: string;
   kind: string;

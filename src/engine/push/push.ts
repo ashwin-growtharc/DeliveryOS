@@ -10,7 +10,12 @@ import { ManifestSchema, Manifest } from '../manifest/schema';
 import { pristinePath } from '../paths';
 import { computeChangedFiles, listPayloadFiles } from './diff';
 import { buildBranchName } from './branchName';
-import { buildEditPrContent, buildProposeNewPrContent } from './prContent';
+import {
+  buildEditPrContent,
+  buildProposeNewPrContent,
+  buildMetadataEditPrContent,
+  MetadataFields,
+} from './prContent';
 import {
   fetchAndReset,
   createBranch,
@@ -34,6 +39,13 @@ import {
   ManifestValidationError,
 } from '../errors';
 
+export interface MetadataEditOptions {
+  description?: string;
+  roles?: string[];
+  teams?: string[];
+  stacks?: string[];
+}
+
 export interface PushOptions {
   remote?: string;
   isNew?: boolean;
@@ -49,6 +61,11 @@ export interface PushOptions {
   teams?: string[];
   stacks?: string[];
   postInstall?: string;
+  // edit mode only, mutually exclusive with a payload-content diff push:
+  // changes description/roles/teams/stacks on an already-tracked artifact's
+  // manifest.yaml without touching its payload at all. See Detail's Edit
+  // button in the app.
+  metadataEdit?: MetadataEditOptions;
 }
 
 export interface PushResult {
@@ -248,6 +265,66 @@ export async function pushArtifact(
       gitUserName: identity.name,
       gitUserEmail: identity.email,
       payloadFiles,
+    });
+    prTitle = content.title;
+    prBody = content.body;
+  } else if (options.metadataEdit) {
+    // Metadata-only edit: description/roles/teams/stacks changed via
+    // Detail's Edit button, payload untouched entirely. `resolveArtifact`
+    // reads from `buildCatalog()`, which reads the cache `fetchAndReset`
+    // just refreshed above -- `entry.manifest` is already the remote's
+    // current state, not a possibly-stale local read.
+    const entry = resolveArtifact(id, remoteName);
+    const { manifest: current } = entry;
+
+    const before: MetadataFields = {
+      description: current.description,
+      roles: current.tags.roles,
+      teams: current.tags.teams,
+      stacks: current.tags.stacks,
+    };
+    const after: MetadataFields = {
+      description: options.metadataEdit.description ?? before.description,
+      roles: options.metadataEdit.roles ?? before.roles,
+      teams: options.metadataEdit.teams ?? before.teams,
+      stacks: options.metadataEdit.stacks ?? before.stacks,
+    };
+
+    if (JSON.stringify(before) === JSON.stringify(after)) {
+      throw new NoLocalChangesError(
+        `No metadata changes for "${id}" -- description/roles/teams/stacks are all identical to what's currently on the remote.`,
+      );
+    }
+
+    const updatedManifest = {
+      ...current,
+      description: after.description,
+      tags: { roles: after.roles, teams: after.teams, stacks: after.stacks },
+    };
+    const validated = ManifestSchema.safeParse(updatedManifest);
+    if (!validated.success) {
+      const issues = validated.error.issues
+        .map((issue) => `${issue.path.join('.') || '<root>'}: ${issue.message}`)
+        .join('; ');
+      throw new ManifestValidationError(`Metadata edit for "${id}" failed validation: ${issues}`);
+    }
+
+    onProgress?.('stage', `Staging metadata changes for "${id}"...`);
+    const manifestPath = path.join(cacheDir, 'artifacts', id, 'manifest.yaml');
+    fs.writeFileSync(manifestPath, stringifyYaml(validated.data), 'utf-8');
+
+    filesToCommit = [`artifacts/${id}/manifest.yaml`];
+    commitMessage = `DeliveryOS push: update ${id} metadata`;
+
+    const content = buildMetadataEditPrContent({
+      id,
+      kind: current.kind,
+      owner: current.owner,
+      version: current.version,
+      gitUserName: identity.name,
+      gitUserEmail: identity.email,
+      before,
+      after,
     });
     prTitle = content.title;
     prBody = content.body;

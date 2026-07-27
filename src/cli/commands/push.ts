@@ -33,22 +33,39 @@ export interface PushCommandFlags {
 
 /** Maps raw commander flags onto the engine's PushOptions shape. Validation
  * of which flags are required for which mode is left to `pushArtifact`
- * itself (see push.ts) -- this is purely a mechanical translation. */
+ * itself (see push.ts) -- this is purely a mechanical translation.
+ *
+ * `--description`/`--roles`/`--teams`/`--stacks` are dual-purpose: with
+ * `--new` they seed the brand-new manifest, same as always. Without `--new`,
+ * passing any of them now means a metadata-only edit (no `--path`/payload
+ * touched at all) -- previously these flags were silently ignored outside
+ * `--new`, so routing them into `metadataEdit` here is a pure addition, not
+ * a behavior change for any existing script. */
 export function toPushOptions(flags: PushCommandFlags): PushOptions {
+  const isNew = Boolean(flags.new);
+  const roles = parseList(flags.roles);
+  const teams = parseList(flags.teams);
+  const stacks = parseList(flags.stacks);
+  const hasMetadataEdit =
+    !isNew && (flags.description !== undefined || roles !== undefined || teams !== undefined || stacks !== undefined);
+
   return {
     remote: flags.remote,
-    isNew: Boolean(flags.new),
+    isNew,
     payloadPath: flags.path,
     kind: flags.kind,
     owner: flags.owner,
-    description: flags.description,
+    description: isNew ? flags.description : undefined,
     installTarget: flags.installTarget,
     version: flags.artifactVersion,
     reviewRequired: Boolean(flags.reviewRequired),
-    roles: parseList(flags.roles),
-    teams: parseList(flags.teams),
-    stacks: parseList(flags.stacks),
+    roles: isNew ? roles : undefined,
+    teams: isNew ? teams : undefined,
+    stacks: isNew ? stacks : undefined,
     postInstall: flags.postInstall,
+    metadataEdit: hasMetadataEdit
+      ? { description: flags.description, roles, teams, stacks }
+      : undefined,
   };
 }
 
@@ -63,7 +80,11 @@ export function registerPushCommand(program: Command): void {
     .option('--path <dir>', 'Path to the new artifact\'s payload directory (--new only)')
     .option('--kind <kind>', 'Artifact kind (--new only)')
     .option('--owner <owner>', 'Artifact owner (--new only)')
-    .option('--description <text>', 'Artifact description (--new only)')
+    .option(
+      '--description <text>',
+      'Artifact description. With --new, seeds the new manifest. Without --new, edits the '
+        + 'description on an already-tracked artifact\'s manifest (no payload/content touched).',
+    )
     .option('--install-target <path>', 'Install target path (--new only; defaults to <id>)')
     .option(
       '--artifact-version <semver>',
@@ -71,9 +92,21 @@ export function registerPushCommand(program: Command): void {
         'than --version to avoid colliding with the CLI\'s own top-level -V/--version flag.',
     )
     .option('--review-required', 'Mark the new artifact as requiring review (--new only)')
-    .option('--roles <list>', 'Comma-separated roles tag (--new only)')
-    .option('--teams <list>', 'Comma-separated teams tag (--new only)')
-    .option('--stacks <list>', 'Comma-separated stacks tag (--new only)')
+    .option(
+      '--roles <list>',
+      'Comma-separated roles tag. With --new, seeds the new manifest; without --new, edits '
+        + 'an already-tracked artifact\'s roles tag.',
+    )
+    .option(
+      '--teams <list>',
+      'Comma-separated teams tag. With --new, seeds the new manifest; without --new, edits '
+        + 'an already-tracked artifact\'s teams tag.',
+    )
+    .option(
+      '--stacks <list>',
+      'Comma-separated stacks tag. With --new, seeds the new manifest; without --new, edits '
+        + 'an already-tracked artifact\'s stacks tag.',
+    )
     .option(
       '--post-install <cmd>',
       'Shell command to run in install_target after a pull (--new only; e.g. "npm install", '

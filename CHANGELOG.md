@@ -4,6 +4,18 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- Added an Edit button to Detail: description/roles/teams/stacks can now be
+  changed on an already-tracked artifact without touching its payload at
+  all -- opens a PR against just `manifest.yaml`, same PR/pendingPr/"Check
+  push status" transparency an ordinary edit push already gets. New engine
+  mode `pushArtifact({metadataEdit: {...}})`, only ever committing
+  `artifacts/<id>/manifest.yaml`. Also wired into the CLI:
+  `deliveryos push <id> --description/--roles/--teams/--stacks` (without
+  `--new`) now does the same edit instead of being silently ignored, which
+  is what those flags did before this outside `--new`. Covered by new e2e
+  tests (real branch/commit/PR content, plus a no-op case) and unit tests
+  for the CLI's flag routing.
+
 - Add New (propose-new) could only tag a new artifact with `roles` -- there
   was no way to set `stacks`/`teams` from the app at all, so anything
   proposed through the UI could never show up under Browse's "stack" or

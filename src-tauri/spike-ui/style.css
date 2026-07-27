@@ -665,8 +665,26 @@ input, textarea, select {
   word-break: break-all;
 }
 
-#detail-open-folder-btn {
+.detail-secondary-actions {
+  display: flex;
+  gap: 10px;
   margin-top: 10px;
+}
+
+.edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-tertiary);
+}
+
+.edit-form-actions {
+  display: flex;
+  gap: 10px;
 }
 
 /* ---------- drift warning (both locally edited AND updated upstream) ----------

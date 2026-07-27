@@ -16,7 +16,7 @@ describe('toPushOptions', () => {
   });
 
   it('drops empty entries produced by trailing/double commas', () => {
-    const options = toPushOptions({ stacks: 'python,,  ,typescript,' });
+    const options = toPushOptions({ new: true, stacks: 'python,,  ,typescript,' });
     expect(options.stacks).toEqual(['python', 'typescript']);
   });
 
@@ -27,8 +27,9 @@ describe('toPushOptions', () => {
     expect(options.stacks).toBeUndefined();
   });
 
-  it('maps every other flag onto PushOptions unchanged, defaulting booleans to false', () => {
+  it('maps every other --new flag onto PushOptions unchanged, defaulting booleans to false', () => {
     const options = toPushOptions({
+      new: true,
       remote: 'arcos-poc',
       path: '/tmp/payload',
       kind: 'template',
@@ -42,7 +43,7 @@ describe('toPushOptions', () => {
 
     expect(options).toMatchObject({
       remote: 'arcos-poc',
-      isNew: false,
+      isNew: true,
       payloadPath: '/tmp/payload',
       kind: 'template',
       owner: 'platform-team',
@@ -52,5 +53,32 @@ describe('toPushOptions', () => {
       reviewRequired: true,
       postInstall: 'npm install',
     });
+    expect(options.metadataEdit).toBeUndefined();
+  });
+
+  it('without --new, --description/--roles/--teams/--stacks route into metadataEdit instead of the top-level new-manifest fields', () => {
+    const options = toPushOptions({
+      description: 'Updated description',
+      roles: 'PM, Engineering',
+      teams: 'Platform',
+      stacks: 'Python',
+    });
+
+    expect(options.isNew).toBe(false);
+    expect(options.description).toBeUndefined();
+    expect(options.roles).toBeUndefined();
+    expect(options.teams).toBeUndefined();
+    expect(options.stacks).toBeUndefined();
+    expect(options.metadataEdit).toEqual({
+      description: 'Updated description',
+      roles: ['pm', 'engineering'],
+      teams: ['platform'],
+      stacks: ['python'],
+    });
+  });
+
+  it('leaves metadataEdit undefined without --new when none of description/roles/teams/stacks were passed', () => {
+    const options = toPushOptions({ remote: 'arcos-poc' });
+    expect(options.metadataEdit).toBeUndefined();
   });
 });

@@ -796,6 +796,35 @@
     });
   }
 
+  /** Detail's Edit form submit handler: pushes a metadata-only edit
+   * (description/roles/teams/stacks), never touching the artifact's
+   * payload/content at all. Uses the same shared progress panel and
+   * post-push refresh pattern as runArtifactAction/handleCheckPushStatus --
+   * a merged/still-open PR from this shows up via the same pendingPr/"Check
+   * push status" transparency a payload edit push already gets, since the
+   * engine's pushArtifact records pendingPr for this mode too. */
+  async function handleSaveMetadataEdit(entry, metadataEdit) {
+    const saveBtn = $('edit-save-btn');
+    await withBusy(saveBtn, 'Saving...', async () => {
+      await beginProgress();
+      try {
+        const result = await call('artifact.push', {
+          id: entry.manifest.id,
+          cwd: state.projectDir,
+          options: { metadataEdit },
+        });
+        endProgress(true);
+        toastSuccess(`Updated ${entry.manifest.id} metadata: opened PR #${result.number} (${result.url})`);
+        $('detail-edit-form').hidden = true;
+        await loadCatalog();
+        refreshDetailIfShown(entry);
+      } catch (err) {
+        endProgress(false);
+        toastError(err);
+      }
+    });
+  }
+
   // ---------- detail ----------
 
   /** Shows the Open-folder button's target in the OS file manager. Uses
@@ -937,6 +966,40 @@
       openFolderBtn.hidden = true;
       openFolderBtn.onclick = null;
     }
+
+    // Edit: description/roles/teams/stacks only, never the payload -- needs
+    // an existing lockfile entry (metadataEdit push mode requires the
+    // artifact already be tracked), same constraint as Open folder above.
+    // Collapsed on every (re-)render regardless of prior state -- opening it
+    // is always an explicit click, never carried over from a stale render.
+    const editBtn = $('detail-edit-btn');
+    const editForm = $('detail-edit-form');
+    editForm.hidden = true;
+    if (entry.localStatus !== 'not_pulled') {
+      editBtn.hidden = false;
+      editBtn.onclick = () => {
+        $('edit-description').value = manifest.description;
+        $('edit-roles').value = (tags.roles || []).join(', ');
+        $('edit-teams').value = (tags.teams || []).join(', ');
+        $('edit-stacks').value = (tags.stacks || []).join(', ');
+        editForm.hidden = false;
+      };
+    } else {
+      editBtn.hidden = true;
+      editBtn.onclick = null;
+    }
+    editForm.onsubmit = (ev) => {
+      ev.preventDefault();
+      void handleSaveMetadataEdit(entry, {
+        description: $('edit-description').value.trim(),
+        roles: parseCommaList($('edit-roles').value),
+        teams: parseCommaList($('edit-teams').value),
+        stacks: parseCommaList($('edit-stacks').value),
+      });
+    };
+    $('edit-cancel-btn').onclick = () => {
+      editForm.hidden = true;
+    };
 
     const actionBtn = $('detail-action-btn');
     const action = actionButtonFor(entry);
