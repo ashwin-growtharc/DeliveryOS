@@ -91,6 +91,59 @@ describe('scan e2e', () => {
   );
 
   it(
+    'finds new commands/rules in category subfolders, preserving the subfolder in installTarget',
+    async () => {
+      const remoteName = 'scan-test-remote-commands-rules';
+      await registerAndClone(remoteName);
+      const cwd = newScratchCwd('commands-rules');
+
+      const javaCommandsDir = path.join(cwd, '.claude', 'commands', 'java');
+      fs.mkdirSync(javaCommandsDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(javaCommandsDir, 'my-command.md'),
+        '---\nname: my-command\ndescription: Runs a thing.\n---\n',
+        'utf-8',
+      );
+
+      const javaRulesDir = path.join(cwd, '.claude', 'rules', 'java');
+      fs.mkdirSync(javaRulesDir, { recursive: true });
+      // Real rule files use `paths:`, never `description:` -- confirms
+      // description correctly comes back undefined rather than throwing.
+      fs.writeFileSync(
+        path.join(javaRulesDir, 'my-rule.md'),
+        '---\npaths:\n  - "**/*.java"\n---\n# My Rule\n',
+        'utf-8',
+      );
+
+      // A .md file nested inside a "references" subfolder still becomes its
+      // own candidate -- scan doesn't try to detect/exclude that pattern
+      // (see scanForNewArtifacts's own doc comment for why).
+      const referencesDir = path.join(javaCommandsDir, 'references');
+      fs.mkdirSync(referencesDir, { recursive: true });
+      fs.writeFileSync(path.join(referencesDir, 'some-reference.md'), '# Some Reference\n', 'utf-8');
+
+      const candidates = await scanForNewArtifacts(cwd, remoteName);
+      const byId = Object.fromEntries(candidates.map((c) => [c.id, c]));
+
+      expect(byId['my-command']).toMatchObject({
+        kind: 'command',
+        installTarget: '.claude/commands/java/my-command.md',
+        description: 'Runs a thing.',
+      });
+      expect(byId['my-rule']).toMatchObject({
+        kind: 'rule',
+        installTarget: '.claude/rules/java/my-rule.md',
+        description: undefined,
+      });
+      expect(byId['some-reference']).toMatchObject({
+        kind: 'command',
+        installTarget: '.claude/commands/java/references/some-reference.md',
+      });
+    },
+    30_000,
+  );
+
+  it(
     'excludes a local file whose id already exists in the target remote\'s catalog',
     async () => {
       const remoteName = 'scan-test-remote-collision';

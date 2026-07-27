@@ -4,6 +4,42 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- Reworked the growtharc-ai-helpers import for real structural fidelity to
+  the source backup:
+  - Fixed the 67 agents, which had pulled flat into `.claude/agents/<id>.md`,
+    losing the source's category subfolders (`agents/java/`,
+    `agents/engineering/`, ...). Now `.claude/agents/<category>/<id>.md`,
+    matching the reference exactly (`payload_path` -- where each file
+    actually lives in this repo -- is unchanged, only where a pull installs
+    it changes).
+  - Imported `.claude/commands/` (30 artifacts: 19 java commands + a bundled
+    `java-command-references` for their shared `references/` folder, 8
+    orchestration commands, `extract-ui`, and `design-system` -- bundled
+    with its own nested `design-system/references/` subfolder so the exact
+    sibling file+directory layout survives a pull). `architect`,
+    `java-reviewer`, and `design-system` renamed with a `-cmd` suffix where
+    they'd otherwise collide with an existing agent/skill id.
+  - Imported `.claude/rules/` (35 artifacts across common/java/python/rust/
+    typescript). Rule files use a `paths: [glob, ...]` frontmatter
+    convention, never `description:`, so descriptions are derived from each
+    file's own first heading instead. Several filenames repeat verbatim
+    across categories (`coding-style.md`, `security.md`, `testing.md`, ...)
+    -- ids are `<category>-<name>`, with a few further disambiguated
+    (`-rule` suffix) where that still collided with an existing command or
+    skills-lib skill id.
+  - `deliveryos scan` (and the app's Scan view) now also look at
+    `.claude/commands` and `.claude/rules`, recursively (commands/rules
+    commonly nest into category subfolders, unlike the one-level-deep
+    agents/skills) -- every `.md` file found becomes its own candidate,
+    `installTarget` preserving whatever subfolder it was actually found in.
+  - Verified via a real pull of a representative sample (an agent, a java
+    command alongside its shared references, the design-system/extract-ui
+    sibling structure, and rules from two different categories) --
+    byte-identical content, exact folder structure, including files with
+    identical basenames in different categories not colliding.
+  - `growtharc-ai-helpers` now has 210 artifacts total (67 agent + 78 skill
+    + 30 command + 35 rule).
+
 - Added `deliveryos scan` (CLI, sidecar, and a "Scan for new agents/skills"
   button in Browse): finds agents/skills sitting in a project's
   `.claude/agents` and `.claude/skills` that aren't tracked in the lockfile
