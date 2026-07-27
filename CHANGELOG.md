@@ -4,6 +4,16 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- The progress-log overflow fix above turned out incomplete -- it stopped
+  `.msg` forcing `.progress-panel` wider, but `#main` is itself a flex item
+  of `#app` (display:flex, column direction) with the same default
+  `min-width: auto`, so a wide enough descendant could still force `#main`
+  -- and with it the whole page -- wider than the viewport, independent of
+  any individual component's own fix. Added `min-width: 0` to `#main`
+  (the actual fix) plus a global `overflow-x: hidden` on `body` as a safety
+  net, so this class of bug can't resurface from some other component later
+  without someone remembering to fix it locally too.
+
 - Full review pass over the tag-folder/bulk-pull work after repeated
   layout complaints, and fixed everything found:
   - **"Pull all" in a Tag Folder never showed the progress log at all** --

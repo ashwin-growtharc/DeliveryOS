@@ -47,6 +47,16 @@ body {
   color: var(--brand-500);
   line-height: 1.5;
   font-size: 14px;
+  /* A global safety net: fixing each individual long-unbreakable-string
+     case one at a time (progress log paths, tag folder titles, ...) is
+     whack-a-mole -- anything, anywhere, that refuses to shrink below its
+     own content width can still force the whole page wider than the
+     viewport (a flex/grid item's default min-width/min-height is `auto`,
+     not 0). This guarantees the page itself never grows a horizontal
+     scrollbar/overflow no matter where that content lives, without
+     requiring every future component to remember its own overflow-wrap/
+     min-width fix. */
+  overflow-x: hidden;
 }
 
 h1, h2, h3, h4 {
@@ -224,10 +234,17 @@ input, textarea, select {
 
 #main {
   flex: 1;
+  /* #app is display:flex/column, so #main is itself a flex item -- a flex
+     item's default min-width is `auto` (shrink-to-fit its own content),
+     not 0, so a wide-enough descendant (e.g. an unbroken path in the
+     progress log) could still force #main itself wider than the viewport
+     even after that descendant's own overflow is otherwise handled. */
+  min-width: 0;
   max-width: 1080px;
   width: 100%;
   margin: 0 auto;
   padding: 24px 24px 60px;
+  box-sizing: border-box;
 }
 
 .view[hidden] {
