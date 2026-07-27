@@ -188,6 +188,15 @@
 
   function showView(view) {
     state.view = view;
+    // The shared progress/log panel belongs to whatever artifact/folder was
+    // just acted on, not to Browse/Settings/Add-new -- without this, a log
+    // left over from a Detail or Tag Folder action stayed visible after
+    // navigating away from it (e.g. clicking "Back to Browse"), showing up
+    // underneath the plain artifact grid where it doesn't belong. Detail and
+    // Tag Folder both navigate in via showViewRaw (below), which already
+    // calls this same reset right before rendering, so this doesn't clear
+    // anything they're about to show.
+    resetProgressPanel();
     for (const section of document.querySelectorAll('.view')) {
       section.hidden = section.id !== `view-${view}`;
     }

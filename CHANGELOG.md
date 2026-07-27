@@ -4,6 +4,14 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- Fixed the shared progress panel staying visible after navigating away
+  from the artifact/folder it belonged to. `openDetail`/`openTagFolder`
+  already reset it on the way *in*; nothing reset it on the way *out* --
+  clicking "Back to Browse" (from Detail or a Tag Folder) left the last
+  action's log showing underneath the plain artifact grid, where it should
+  never appear. `showView()` (Browse/Settings/Add New's entry point) now
+  resets it too, leaving Detail/Tag Folder's own reset-on-entry untouched.
+
 - The progress-log overflow fix above turned out incomplete -- it stopped
   `.msg` forcing `.progress-panel` wider, but `#main` is itself a flex item
   of `#app` (display:flex, column direction) with the same default
