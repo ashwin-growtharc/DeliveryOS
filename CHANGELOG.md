@@ -4,6 +4,14 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- Fixed the artifact grid still showing while a tag category was expanded,
+  even after the previous fix that set `grid.hidden = true` for exactly that
+  case. Root cause: `.grid { display: grid; }` (an author rule) beats the
+  browser's own `[hidden] { display: none }` rule at equal CSS specificity,
+  so setting the `hidden` attribute on `#card-grid` silently did nothing.
+  Added a single global `[hidden] { display: none !important; }` rule so the
+  `hidden` attribute always wins app-wide, instead of a one-off override.
+
 - Restyled the tag value row (python/java/typescript/...): first pass used
   boxed folder icons, which read as heavy/cluttered; now a clean breadcrumb-
   style list ("name  >") using the app's existing brand tokens, with the

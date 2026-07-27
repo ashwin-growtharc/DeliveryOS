@@ -23,6 +23,19 @@
 
 *, *::before, *::after { box-sizing: border-box; }
 
+/* The HTML `hidden` attribute only wins by default when nothing else sets
+ * `display` on the same element -- any class that does (`.grid`, `.chips`,
+ * etc., all `display: flex`/`grid`) has equal CSS specificity to the
+ * browser's own `[hidden] { display: none }` rule, and an author rule beats
+ * a user-agent rule at equal specificity, so `el.hidden = true` silently did
+ * nothing for e.g. `#card-grid` (a `.grid`) while a tag category was
+ * expanded. `!important` here makes `hidden` always win, everywhere, for
+ * any element -- the one general fix instead of a `.whatever[hidden]`
+ * override per class. */
+[hidden] {
+  display: none !important;
+}
+
 html, body {
   height: 100%;
 }
