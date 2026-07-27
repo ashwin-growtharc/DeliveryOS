@@ -1154,6 +1154,7 @@
     const stacks = parseCommaList($('f-stacks').value);
     const teams = parseCommaList($('f-teams').value);
     const remote = $('f-remote').value;
+    const installTarget = $('f-install-target').value.trim() || undefined;
     const postInstall = $('f-post-install').value.trim() || undefined;
 
     // The id becomes a git branch name segment during push (see
@@ -1184,6 +1185,7 @@
             roles,
             stacks,
             teams,
+            installTarget,
             postInstall,
           },
         });
@@ -1196,6 +1198,143 @@
         toastError(err);
       }
     });
+  }
+
+  // ---------- scan ----------
+
+  /** Entry point for the "Scan for new agents/skills" toolbar button --
+   * resets any leftover results/progress from a previous visit, then loads
+   * the remote picker. Doesn't run the scan itself yet; that's a separate,
+   * explicit "Scan" button click (a remote fetch every time you open this
+   * view, even with nothing changed, would be wasted network activity). */
+  async function openScanView() {
+    resetProgressPanel();
+    $('scan-results').innerHTML = '';
+    $('scan-empty').hidden = true;
+    showViewRaw('scan');
+    await loadRemotesForScanSelect();
+  }
+
+  /** Populates Scan's own remote <select> the same way Add New's is loaded
+   * -- a separate select since the two views are independent entry points
+   * (you might scan against a different remote than the one you'd propose
+   * a manually-picked payload against). */
+  async function loadRemotesForScanSelect() {
+    const select = $('scan-remote-select');
+    select.innerHTML = '';
+    try {
+      state.remotes = await call('remote.list', {});
+    } catch (err) {
+      toastError(err);
+      state.remotes = [];
+    }
+    for (const remote of state.remotes) {
+      const option = document.createElement('option');
+      option.value = remote.name;
+      option.textContent = remote.name;
+      select.appendChild(option);
+    }
+  }
+
+  function renderScanResults(candidates) {
+    const container = $('scan-results');
+    container.innerHTML = '';
+    $('scan-empty').hidden = candidates.length !== 0;
+
+    const byKind = new Map();
+    for (const candidate of candidates) {
+      if (!byKind.has(candidate.kind)) {
+        byKind.set(candidate.kind, []);
+      }
+      byKind.get(candidate.kind).push(candidate);
+    }
+
+    for (const kind of Array.from(byKind.keys()).sort()) {
+      const group = byKind.get(kind);
+      const groupEl = document.createElement('div');
+      groupEl.className = 'kind-group';
+      groupEl.innerHTML = `
+        <div class="kind-group-header">${escapeHtml(kind)} <span class="count">(${group.length})</span></div>
+      `;
+
+      const list = document.createElement('div');
+      list.className = 'kind-group-list';
+
+      for (const candidate of group) {
+        const row = document.createElement('div');
+        row.className = 'kind-group-row';
+        row.innerHTML = `
+          <div class="row-main">
+            <span class="name"></span>
+            <span class="summary"></span>
+          </div>
+        `;
+        row.querySelector('.name').textContent = candidate.id;
+        row.querySelector('.summary').textContent =
+          candidate.description || '(no description found -- add one on the next screen)';
+
+        const btn = document.createElement('button');
+        btn.className = 'btn btn-sm';
+        btn.textContent = 'Review & propose';
+        btn.addEventListener('click', () => {
+          void openAddNewFromScanCandidate(candidate, $('scan-remote-select').value);
+        });
+        row.appendChild(btn);
+
+        list.appendChild(row);
+      }
+
+      groupEl.appendChild(list);
+      container.appendChild(groupEl);
+    }
+  }
+
+  async function handleRunScan() {
+    if (!state.projectDir) {
+      toastError(new Error('Select a project folder first.'));
+      return;
+    }
+    const remote = $('scan-remote-select').value;
+    if (!remote) {
+      toastError(new Error('Register a remote first (Settings).'));
+      return;
+    }
+
+    const btn = $('scan-run-btn');
+    await withBusy(btn, 'Scanning...', async () => {
+      await beginProgress();
+      try {
+        const candidates = await call('scan.run', { cwd: state.projectDir, remote });
+        endProgress(true);
+        renderScanResults(candidates);
+      } catch (err) {
+        endProgress(false);
+        toastError(err);
+      }
+    });
+  }
+
+  /** Navigates to Add New with id/kind/description/payload pre-filled from
+   * a scan candidate -- roles/teams/stacks are deliberately left blank for
+   * review (see scanForNewArtifacts's own doc comment for why), same as
+   * every other Add New field remains fully editable before Propose. Uses
+   * showViewRaw (not showView) so this can await the remote <select>
+   * populating BEFORE setting its value -- showView's own fire-and-forget
+   * load would otherwise race, leaving the select on its default option. */
+  async function openAddNewFromScanCandidate(candidate, remoteName) {
+    resetProgressPanel();
+    showViewRaw('addnew');
+    await loadRemotesForAddNewSelect();
+
+    $('addnew-form').reset();
+    $('f-id').value = candidate.id;
+    $('f-kind').value = candidate.kind;
+    $('f-description').value = candidate.description ?? '';
+    $('f-install-target').value = candidate.installTarget;
+    $('f-remote').value = remoteName;
+
+    pendingPayloadPath = candidate.payloadPath;
+    $('payload-path-display').textContent = candidate.payloadPath;
   }
 
   // ---------- settings ----------
@@ -1361,6 +1500,8 @@
     $('refresh-btn').addEventListener('click', () => void refreshCatalogFromRemotes());
     $('check-artifact-updates-btn').addEventListener('click', () => void handleCheckForArtifactUpdates());
     $('add-new-btn').addEventListener('click', () => showView('addnew'));
+    $('scan-btn').addEventListener('click', () => void openScanView());
+    $('scan-run-btn').addEventListener('click', () => void handleRunScan());
     $('tag-folder-pull-all-btn').addEventListener('click', () => void handleTagFolderPullAll());
     $('back-to-browse-btn').addEventListener('click', () => showView('browse'));
 

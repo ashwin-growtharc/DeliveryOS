@@ -4,6 +4,7 @@ import { registerListCommand } from './commands/list';
 import { registerPullCommand } from './commands/pull';
 import { registerPushCommand } from './commands/push';
 import { registerCheckUpdatesCommand } from './commands/checkUpdates';
+import { registerScanCommand } from './commands/scan';
 
 export function buildProgram(): Command {
   const program = new Command();
@@ -18,6 +19,7 @@ export function buildProgram(): Command {
   registerPullCommand(program);
   registerPushCommand(program);
   registerCheckUpdatesCommand(program);
+  registerScanCommand(program);
 
   return program;
 }

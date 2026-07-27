@@ -36,6 +36,7 @@ import { pristinePath } from './engine/paths';
 import { pullArtifact, ProgressCallback } from './engine/pull/pull';
 import { pushArtifact, PushOptions } from './engine/push/push';
 import { checkForUpdates, resolvePendingPushes } from './engine/sync/sync';
+import { scanForNewArtifacts } from './engine/scan/scan';
 import {
   listRemotes,
   addRemoteEntry,
@@ -236,6 +237,12 @@ const commands: Record<string, CommandHandler> = {
   'sync.resolvePendingPushes': (args, { onProgress }) => {
     const cwd = requireString(args, 'cwd');
     return resolvePendingPushes(cwd, onProgress);
+  },
+
+  'scan.run': (args, { onProgress }) => {
+    const cwd = requireString(args, 'cwd');
+    const remote = requireString(args, 'remote');
+    return scanForNewArtifacts(cwd, remote, onProgress);
   },
 };
 

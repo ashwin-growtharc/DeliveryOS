@@ -406,6 +406,20 @@ input, textarea, select {
   flex-shrink: 0;
 }
 
+.scan-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.scan-controls select {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  padding: 8px 12px;
+  background: var(--card);
+}
+
 .grouped-results {
   display: flex;
   flex-direction: column;

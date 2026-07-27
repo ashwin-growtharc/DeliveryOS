@@ -4,6 +4,25 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- Added `deliveryos scan` (CLI, sidecar, and a "Scan for new agents/skills"
+  button in Browse): finds agents/skills sitting in a project's
+  `.claude/agents` and `.claude/skills` that aren't tracked in the lockfile
+  yet and don't already exist (by id) in a chosen remote's catalog, with a
+  best-effort guessed `description` from each file's own frontmatter. The
+  CLI prints a ready-to-edit `push --new` command per candidate; the app
+  navigates each one into Add New with id/kind/description/payload
+  pre-filled, roles/teams/stacks left blank for review (no reliable
+  folder-category signal in a flat `.claude/agents/` directory to guess
+  those from). Added an optional Install Target field to Add New so a
+  scanned agent can actually round-trip back to `.claude/agents/<id>.md`
+  instead of always defaulting to a folder named after the id.
+
+  Verified fully end to end against the real growtharc-ai-helpers remote:
+  created a real local agent file, ran the real CLI's `scan`, edited its
+  guessed roles/stacks, pushed for real (PR #23), merged, pulled it back,
+  and confirmed it landed as a real file. Cleaned up the demo artifact
+  afterward.
+
 - Added remote removal: `deliveryos remote remove <name>` (CLI) and a
   "Delete" button per row in Settings (app), both unregistering the remote
   and deleting its local cache clone. Deliberately doesn't touch any

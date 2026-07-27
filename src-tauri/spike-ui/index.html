@@ -40,6 +40,7 @@
             <input id="search-input" type="text" placeholder="Search resources" />
             <button id="refresh-btn" class="btn">Refresh</button>
             <button id="check-artifact-updates-btn" class="btn">Check for updates</button>
+            <button id="scan-btn" class="btn">Scan for new agents/skills</button>
             <button id="add-new-btn" class="btn btn-primary">+ Add new</button>
           </div>
           <div id="chips" class="chips"></div>
@@ -64,6 +65,32 @@
             <button id="tag-folder-pull-all-btn" class="btn btn-sm" hidden></button>
           </div>
           <div id="tag-folder-results" class="grouped-results"></div>
+        </section>
+
+        <!-- Scan: finds agents/skills sitting in .claude/agents and
+             .claude/skills that aren't tracked yet and don't already exist
+             (by id) in the chosen remote's catalog. Each result's "Review &
+             propose" button navigates to Add New with id/kind/description/
+             payload pre-filled -- roles/stacks/teams are left for you to
+             fill in there (no reliable folder-category signal to guess them
+             from in a flat .claude/agents directory), same review-before-
+             push flow Add New already has, just not starting from blank. -->
+        <section id="view-scan" class="view" hidden>
+          <button class="btn back-btn" data-view="browse">&larr; Back to Browse</button>
+          <div class="tag-folder-header">
+            <h2 class="section-title">Scan for new agents/skills</h2>
+            <div class="scan-controls">
+              <select id="scan-remote-select"></select>
+              <button id="scan-run-btn" class="btn btn-primary">Scan</button>
+            </div>
+          </div>
+          <p class="field-hint">
+            Looks at <code>.claude/agents</code> and <code>.claude/skills</code> in the current
+            project folder for anything not yet tracked here and not already in the selected
+            remote's catalog.
+          </p>
+          <p id="scan-empty" class="empty-state" hidden>No new agents/skills found.</p>
+          <div id="scan-results" class="grouped-results"></div>
         </section>
 
         <!-- Detail -->
@@ -187,6 +214,11 @@
               <label for="f-teams">Team / project (comma-separated)</label>
               <input id="f-teams" type="text" placeholder="engagement, platform" />
               <p class="field-hint">Shows up under Browse's "project" tag folders.</p>
+            </div>
+            <div class="field">
+              <label for="f-install-target">Install target (optional)</label>
+              <input id="f-install-target" type="text" placeholder="e.g. .claude/agents/my-agent.md" />
+              <p class="field-hint">Where a pull lands this. Leave blank to default to a folder named after the Artifact ID.</p>
             </div>
             <div class="field">
               <label for="f-post-install">Setup command (optional)</label>
