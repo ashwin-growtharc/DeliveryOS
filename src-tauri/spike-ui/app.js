@@ -326,9 +326,10 @@
 
   /** Second tag row: every distinct value the active category has across
    * the catalog (e.g. category 'stacks' -> "python", "java", ...), rendered
-   * as a clean single-line list -- name left, a ">" chevron right -- not
-   * chips, not folder icons. Each row navigates into its own Tag Folder view
-   * (openTagFolder). Empty/hidden when no category is selected. */
+   * as a grid of cards (matching the app's own res-card look -- shadow,
+   * hover lift), each showing how many artifacts carry it. Each card
+   * navigates into its own Tag Folder view (openTagFolder). Empty/hidden
+   * when no category is selected. */
   function renderTagValueRow() {
     const container = $('tag-value-row');
     container.innerHTML = '';
@@ -344,12 +345,19 @@
     ).sort();
 
     for (const value of values) {
-      const row = document.createElement('div');
-      row.className = 'tag-folder-item';
-      row.innerHTML = `<span class="folder-name"></span><span class="chevron" aria-hidden="true">&rsaquo;</span>`;
-      row.querySelector('.folder-name').textContent = value;
-      row.addEventListener('click', () => openTagFolder(state.activeTagCategory, value));
-      container.appendChild(row);
+      const count = entriesForTag(state.activeTagCategory, value).length;
+      const card = document.createElement('div');
+      card.className = 'tag-folder-item';
+      card.innerHTML = `
+        <div class="folder-row-top">
+          <span class="folder-name"></span>
+          <span class="chevron" aria-hidden="true">&rsaquo;</span>
+        </div>
+        <span class="folder-count">${count} artifact${count === 1 ? '' : 's'}</span>
+      `;
+      card.querySelector('.folder-name').textContent = value;
+      card.addEventListener('click', () => openTagFolder(state.activeTagCategory, value));
+      container.appendChild(card);
     }
   }
 

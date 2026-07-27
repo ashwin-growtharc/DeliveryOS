@@ -318,42 +318,57 @@ input, textarea, select {
 }
 
 .tag-value-row {
-  /* A clean vertical list, not a chip row -- each value really does
-     navigate into its own view (openTagFolder in app.js), so it reads as a
-     breadcrumb-style drill-down ("name  >") rather than a filter pill. */
-  display: flex;
-  flex-direction: column;
-  margin-top: 4px;
+  /* A card grid, matching the app's own res-card language (shadow,
+     radius-lg, hover lift) -- not a bare list of thin lines. Each card
+     navigates into its own Tag Folder view (openTagFolder in app.js). */
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 14px;
+  margin-top: 8px;
   margin-bottom: 16px;
-  border-top: 1px solid var(--border-subtle);
-  max-width: 320px;
 }
 
 .tag-folder-item {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 10px 4px;
-  border-bottom: 1px solid var(--border-subtle);
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px 18px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
   cursor: pointer;
-  font-size: 13.5px;
-  transition: background-color .12s ease, padding-left .12s ease;
+  transition: box-shadow .15s ease, transform .15s ease, border-color .15s ease;
 }
 
 .tag-folder-item:hover {
-  background: var(--brand-100);
-  padding-left: 10px;
+  box-shadow: var(--shadow-2);
+  transform: translateY(-2px);
+  border-color: var(--brand-400);
+}
+
+.tag-folder-item .folder-row-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
 }
 
 .tag-folder-item .folder-name {
   font-family: 'JetBrains Mono', monospace;
+  font-weight: 600;
+  font-size: 15px;
 }
 
 .tag-folder-item .chevron {
   color: var(--brand-450);
-  font-size: 18px;
+  font-size: 20px;
   line-height: 1;
+}
+
+.tag-folder-item .folder-count {
+  font-size: 12px;
+  opacity: .6;
 }
 
 .tag-folder-header {

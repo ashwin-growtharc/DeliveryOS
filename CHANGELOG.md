@@ -4,6 +4,12 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- Restyled the tag value list again: the plain chevron-list read as dated
+  ("Windows XP style") and left most of the page empty. Now a card grid
+  matching the app's own res-card look (shadow, rounded corners, hover
+  lift, expands to fill the row), each card showing how many artifacts
+  carry that tag (e.g. "3 artifacts") instead of just a bare name.
+
 - Fixed the artifact grid still showing while a tag category was expanded,
   even after the previous fix that set `grid.hidden = true` for exactly that
   case. Root cause: `.grid { display: grid; }` (an author rule) beats the
