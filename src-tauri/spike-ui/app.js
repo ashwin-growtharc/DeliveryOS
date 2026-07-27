@@ -13,6 +13,10 @@
 
   const PROJECT_DIR_KEY = 'deliveryos.projectDir';
 
+  // Singular display prefix for each of manifest.tags's own (plural) keys --
+  // e.g. a `stacks: ['python']` tag renders as the chip "stack: python".
+  const TAG_CATEGORY_LABEL = { roles: 'role', teams: 'team', stacks: 'stack' };
+
   const STATUS_LABELS = {
     not_pulled: 'Not pulled',
     pulled: 'Pulled',
@@ -30,6 +34,9 @@
     catalog: [],
     search: '',
     activeKind: 'All',
+    // `${category}:${value}` (category is one of manifest.tags's own keys:
+    // 'roles' | 'teams' | 'stacks'), or 'All'. See renderTagChips/filteredEntries.
+    activeTag: 'All',
     selectedKey: null, // `${id}::${remoteName}` of the entry shown in Detail
     remotes: [],
   };
@@ -264,13 +271,70 @@
       });
       container.appendChild(chip);
     }
+
+    renderTagChips();
+  }
+
+  /** Every `${category}:${value}` pair present across the current catalog's
+   * `manifest.tags.{roles,teams,stacks}`, deduped and sorted -- one chip per
+   * pair, e.g. tags.stacks: ['python'] on any entry produces a "stack:
+   * python" chip. Selecting one filters Browse down to every artifact
+   * carrying that exact tag, across every kind/remote -- the actual feature
+   * being built here: "pull all the python-tagged artifacts" starts with
+   * finding them all in one place, regardless of what kind of artifact
+   * (agent, skill, template, ...) each one is. */
+  function renderTagChips() {
+    const pairs = new Set();
+    for (const entry of state.catalog) {
+      const tags = entry.manifest.tags ?? {};
+      for (const category of Object.keys(TAG_CATEGORY_LABEL)) {
+        for (const value of tags[category] ?? []) {
+          pairs.add(`${category}:${value}`);
+        }
+      }
+    }
+
+    const container = $('tag-chips');
+    container.innerHTML = '';
+
+    const allChip = document.createElement('span');
+    allChip.className = `chip ${state.activeTag === 'All' ? 'active' : ''}`;
+    allChip.textContent = 'All tags';
+    allChip.addEventListener('click', () => {
+      state.activeTag = 'All';
+      renderTagChips();
+      renderCards();
+    });
+    container.appendChild(allChip);
+
+    for (const pair of Array.from(pairs).sort()) {
+      const [category, value] = pair.split(':');
+      const chip = document.createElement('span');
+      chip.className = `chip ${state.activeTag === pair ? 'active' : ''}`;
+      chip.textContent = `${TAG_CATEGORY_LABEL[category]}: ${value}`;
+      chip.addEventListener('click', () => {
+        state.activeTag = state.activeTag === pair ? 'All' : pair;
+        renderTagChips();
+        renderCards();
+      });
+      container.appendChild(chip);
+    }
   }
 
   function filteredEntries() {
     const search = state.search.trim().toLowerCase();
+    const [activeTagCategory, activeTagValue] =
+      state.activeTag === 'All' ? [null, null] : state.activeTag.split(':');
+
     return state.catalog.filter((entry) => {
       if (state.activeKind !== 'All' && entry.manifest.kind !== state.activeKind) {
         return false;
+      }
+      if (activeTagCategory) {
+        const values = entry.manifest.tags?.[activeTagCategory] ?? [];
+        if (!values.includes(activeTagValue)) {
+          return false;
+        }
       }
       if (search.length === 0) {
         return true;
@@ -303,11 +367,72 @@
     return null; // 'pulled': nothing to do
   }
 
+  /** An entry is safe to fold into one bulk "Pull all" click iff a plain,
+   * unconfirmed pull is already what its own card would offer one at a time
+   * (see actionButtonFor) -- 'not_pulled' or 'update_available'. Deliberately
+   * excludes 'edited_locally'/'both_changed': those need their own explicit,
+   * per-artifact confirmation (Detail's drift-warning/overwrite flow), never
+   * something a bulk action silently steamrolls. */
+  function isBulkPullable(entry) {
+    const status = displayStatus(entry);
+    return status === 'not_pulled' || status === 'update_available';
+  }
+
+  function renderPullAllButton(entries) {
+    const btn = $('pull-all-btn');
+    const pullable = entries.filter(isBulkPullable);
+    if (pullable.length === 0) {
+      btn.hidden = true;
+      return;
+    }
+    btn.hidden = false;
+    if (btn.dataset.idleLabel === undefined || !btn._busyCount) {
+      btn.textContent = `Pull all (${pullable.length})`;
+      btn.dataset.idleLabel = `Pull all (${pullable.length})`;
+    }
+  }
+
+  async function handlePullAll() {
+    const btn = $('pull-all-btn');
+    const pullable = filteredEntries().filter(isBulkPullable);
+    if (pullable.length === 0) {
+      return;
+    }
+
+    await withBusy(btn, 'Pulling...', async () => {
+      let succeeded = 0;
+      const failures = [];
+      for (let i = 0; i < pullable.length; i += 1) {
+        const entry = pullable[i];
+        btn.textContent = `Pulling ${i + 1}/${pullable.length}: ${entry.manifest.id}`;
+        try {
+          await call('artifact.pull', {
+            id: entry.manifest.id,
+            remote: entry.remoteName,
+            cwd: state.projectDir,
+          });
+          succeeded += 1;
+        } catch (err) {
+          failures.push(`${entry.manifest.id}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+
+      if (succeeded > 0) {
+        toastSuccess(`Pulled ${succeeded} artifact${succeeded === 1 ? '' : 's'}`);
+      }
+      for (const failure of failures) {
+        toastError(new Error(failure));
+      }
+      await loadCatalog();
+    });
+  }
+
   function renderCards() {
     const entries = filteredEntries();
     const grid = $('card-grid');
     grid.innerHTML = '';
     $('browse-empty').hidden = entries.length !== 0;
+    renderPullAllButton(entries);
 
     for (const entry of entries) {
       const card = document.createElement('div');
@@ -954,6 +1079,7 @@
     $('refresh-btn').addEventListener('click', () => void refreshCatalogFromRemotes());
     $('check-artifact-updates-btn').addEventListener('click', () => void handleCheckForArtifactUpdates());
     $('add-new-btn').addEventListener('click', () => showView('addnew'));
+    $('pull-all-btn').addEventListener('click', () => void handlePullAll());
     $('back-to-browse-btn').addEventListener('click', () => showView('browse'));
 
     $('search-input').addEventListener('input', (ev) => {

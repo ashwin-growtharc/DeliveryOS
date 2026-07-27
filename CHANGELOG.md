@@ -4,6 +4,18 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- Added tag-based bulk pull in the app: Browse now has a second chip row
+  built from every `tags.roles`/`tags.teams`/`tags.stacks` value across the
+  catalog (e.g. "stack: python"), independent of the existing Kind chip row
+  and combinable with it and search. Whenever the current filter has one or
+  more not-yet-pulled (or update-available) artifacts, a "Pull all (N)"
+  button appears and pulls all of them sequentially, showing which one it's
+  on. Answers the actual request: pulling "python" should pull every
+  python-tagged agent/skill/template, not just one artifact at a time by id.
+  Artifacts that are `edited_locally`/`both_changed` are never swept into a
+  bulk pull -- those still go through Detail's existing per-artifact
+  confirmation, unchanged.
+
 - Fixed a crash proposing a new artifact whose payload is a single file
   (e.g. picking one `.md` file via the app's file picker instead of a
   folder): `Cannot overwrite directory ... with non-directory ...`.

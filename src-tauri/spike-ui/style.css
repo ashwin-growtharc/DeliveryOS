@@ -293,6 +293,16 @@ input, textarea, select {
   opacity: 1;
 }
 
+.tag-chips .chip {
+  /* Dashed border distinguishes tag chips (roles/teams/stacks) from the
+     Kind row above at a glance, without a second color to maintain. */
+  border-style: dashed;
+}
+
+#pull-all-btn {
+  margin-bottom: 16px;
+}
+
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
