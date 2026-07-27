@@ -283,6 +283,71 @@ design rationale.
   with a "Discard local edit and re-sync" button that re-pulls after an
   explicit confirmation.
 
+- Restyled the desktop app end to end against `DESIGN_SYSTEM.md` (the app's
+  own navigation/views are unchanged — Browse, Tag Folder, Detail, Add New,
+  Settings, Scan — only the visual language). The color palette in
+  `style.css` already matched the design system's hex values almost exactly;
+  the actual work was renaming every token to the design system's own names
+  (`--primary-700/800/900`, `--sage-*`, `--sand-*`, `--accent-500`, etc.),
+  setting headings to `font-weight: 400` per its typography table (previously
+  500), adding real `.btn-accent` (purple, AI-specific actions) and
+  `.btn-ghost` (text-only, inline actions) button variants alongside the
+  existing default/outline/danger-ghost ones, an accessible `:focus-visible`
+  ring, and a `prefers-reduced-motion` block disabling every animation.
+  Also caught and fixed 3 places that had been using an AI-reserved token
+  (cyan) for plain, non-AI status UI — the hint banner, the push-status
+  panel, and the "update available" badge — which the design system's own
+  "warm tones for regular UI, AI tones for AI-specific elements only" rule
+  explicitly calls out as wrong; all three now use the warm sand/gold tones
+  instead. Scan's frontmatter-guessed descriptions (the one place in the app
+  that's genuinely AI-driven inference) now get a small purple "AI guessed"
+  sparkle badge, and the Scan view's own "Scan" button uses the new
+  `.btn-accent` variant, matching the design system's guidance to reserve
+  the purple/glow treatment for AI-specific elements rather than applying it
+  app-wide.
+
+- Real filter/sort/search gaps closed in the app, on top of the restyle
+  above:
+  - Kind chips are now multi-select (e.g. view "agent" + "skill" together)
+    instead of one at a time, and the selection now also applies inside an
+    open Tag Folder, which previously ignored it entirely.
+  - Added a Remote filter (a `<select>`, populated from whatever remotes are
+    actually represented in the loaded catalog) and a Sort control (Name /
+    Kind / Status), both applying to Browse's grid and an open Tag Folder.
+  - Search now matches kind, owner, and every tag value, not just id and
+    description. Tag Folder gets its own scoped search box (independent of
+    Browse's), and the stack/role/project value list gets a "Filter
+    values..." box for categories with a lot of values.
+  - Generalized Tag Folder's "Pull all" into a shared `bulkPull()` and added
+    the same capability to Browse itself — "Pull all (N)" now pulls
+    everything currently matching the active Kind/Remote/search filters, not
+    only a tag folder's contents.
+  - Both empty states (Browse's grid, an open Tag Folder) now say so
+    explicitly when filters are the reason nothing's showing, instead of a
+    generic "no results".
+  - The Browse toolbar (search, filters, sort, pull-all, refresh, updates,
+    scan, add-new — 8 controls) was flattening into one cramped, wrapping
+    line; restructured into a search+primary-action row and a
+    filters-left/utilities-right row underneath.
+  - Renamed "Scan for new agents/skills" to "Scan for new content" — it's
+    covered commands/rules since the earlier scan-extension work, and the
+    button label had never been updated to match.
+  - Removed the lightning-bolt logo mark from the topbar per explicit
+    request; just the "DeliveryOS" wordmark remains.
+
+- Add New's Kind field is now a `<select>` populated from every distinct
+  kind already in the catalog, with a "+ New kind..." option that reveals a
+  text input for inventing one that doesn't exist yet — kind stays
+  open-ended by design (see ARCHITECTURE.md), this is just a convenience for
+  the common case of reusing "agent"/"skill"/etc. instead of retyping it
+  from memory. Roles/Stack/Team fields (in both Add New and Detail's Edit
+  form) became a small chip-picker component (`createTagPicker`) backed by a
+  `<datalist>` of values already used elsewhere in the catalog, replacing
+  the old raw "type a comma-separated list and hope you spell it the same
+  as last time" text inputs — still fully free-text (a new tag is just as
+  valid), just easier to reuse an existing one without a near-duplicate
+  typo ("python" vs "Python") creating a second, separate tag folder.
+
 ## Phase 5 — Polish (in progress)
 
 - Added drift detection: `deliveryos check-updates` (CLI) and a "Check for

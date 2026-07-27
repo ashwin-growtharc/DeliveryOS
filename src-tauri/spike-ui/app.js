@@ -35,7 +35,20 @@
     // localStatus, installTarget, availableVersion? }[]
     catalog: [],
     search: '',
-    activeKind: 'All',
+    // Multi-select kind filter -- empty set means "All". A Set (not a
+    // single string) so e.g. "agent" + "skill" can be viewed together; this
+    // is a global filter, applied both to Browse's own grid AND to a Tag
+    // Folder's grouped results (see applyKindFilter), so picking a kind in
+    // Browse and then drilling into a tag folder stays consistent instead
+    // of the kind filter silently having no effect there.
+    activeKinds: new Set(),
+    // '' means "all remotes" -- single-select (a <select>, matching every
+    // other remote picker already in this app: Add New, Scan) rather than
+    // chips like Kind, since an artifact only ever comes from exactly one
+    // remote (unlike kind/tags, picking more than one at a time isn't a
+    // meaningful combination here).
+    activeRemote: '',
+    sortBy: 'name', // 'name' | 'kind' | 'status' -- see sortEntries()
     // Two-level tag filter: pick a category first (stack/role/project),
     // which reveals that category's own values (e.g. stack -> python, java)
     // in Browse; picking a value navigates into the dedicated Tag Folder
@@ -43,6 +56,13 @@
     // inline filter of Browse's own grid.
     activeTagCategory: null, // 'stacks' | 'roles' | 'teams' | null
     activeTagValue: null,
+    // Filters the *value* chips shown under an active tag category (e.g.
+    // typing "py" under "stack" narrows a long value list to "python").
+    // Reset whenever the active category changes.
+    tagValueSearch: '',
+    // Filters *within* an open Tag Folder's own results, independent of
+    // Browse's own search box -- reset every time a new folder is opened.
+    tagFolderSearch: '',
     selectedKey: null, // `${id}::${remoteName}` of the entry shown in Detail
     remotes: [],
   };
@@ -209,6 +229,7 @@
       void loadRemotesForSettings();
     } else if (view === 'addnew') {
       void loadRemotesForAddNewSelect();
+      populateKindSelect();
     }
   }
 
@@ -220,6 +241,7 @@
       state.catalog = [];
       renderChips();
       renderCards();
+      refreshTagPickerSuggestions();
       return;
     }
     const refreshBtn = $('refresh-btn');
@@ -232,6 +254,7 @@
       }
       renderChips();
       renderCards();
+      refreshTagPickerSuggestions();
     });
   }
 
@@ -258,19 +281,30 @@
       }
       renderChips();
       renderCards();
+      refreshTagPickerSuggestions();
     });
   }
 
+  /** Kind chips are multi-select (e.g. "agent" + "skill" together) --
+   * "All" is just shorthand for "nothing specifically selected," so
+   * clicking it clears the whole set rather than being its own kind value.
+   * The kind vocabulary itself stays fully dynamic (derived from whatever
+   * kinds actually exist in the loaded catalog, same as before) rather than
+   * a hardcoded list -- `kind` is deliberately open-ended in the manifest
+   * schema (see ARCHITECTURE.md), so a fixed button set would either show
+   * dead buttons for kinds nobody uses yet or silently omit a real one
+   * someone invents later. This selection is also applied inside an open
+   * Tag Folder (see applyKindFilter), not just Browse's own grid. */
   function renderChips() {
     const kinds = Array.from(new Set(state.catalog.map((e) => e.manifest.kind))).sort();
     const container = $('chips');
     container.innerHTML = '';
 
     const allChip = document.createElement('span');
-    allChip.className = `chip ${state.activeKind === 'All' ? 'active' : ''}`;
+    allChip.className = `chip ${state.activeKinds.size === 0 ? 'active' : ''}`;
     allChip.textContent = 'All';
     allChip.addEventListener('click', () => {
-      state.activeKind = 'All';
+      state.activeKinds.clear();
       renderChips();
       renderCards();
     });
@@ -278,18 +312,115 @@
 
     for (const kind of kinds) {
       const chip = document.createElement('span');
-      chip.className = `chip ${state.activeKind === kind ? 'active' : ''}`;
+      chip.className = `chip ${state.activeKinds.has(kind) ? 'active' : ''}`;
       chip.textContent = kind;
       chip.addEventListener('click', () => {
-        state.activeKind = kind;
+        if (state.activeKinds.has(kind)) {
+          state.activeKinds.delete(kind);
+        } else {
+          state.activeKinds.add(kind);
+        }
         renderChips();
         renderCards();
       });
       container.appendChild(chip);
     }
 
+    renderRemoteFilterSelect();
     renderTagCategoryRow();
     renderTagValueRow();
+  }
+
+  /** Shared by Browse's grid and an open Tag Folder's grouped results --
+   * an empty `state.activeKinds` means no restriction (matches "All"). */
+  function applyKindFilter(entries) {
+    if (state.activeKinds.size === 0) {
+      return entries;
+    }
+    return entries.filter((entry) => state.activeKinds.has(entry.manifest.kind));
+  }
+
+  function applyRemoteFilter(entries) {
+    if (!state.activeRemote) {
+      return entries;
+    }
+    return entries.filter((entry) => entry.remoteName === state.activeRemote);
+  }
+
+  /** Every filter that applies globally (Browse's grid AND an open Tag
+   * Folder) chained together -- Kind and Remote. Search stays separate
+   * since Tag Folder has its own, differently-scoped search box (see
+   * filteredTagFolderEntries) rather than sharing Browse's. */
+  function applyGlobalFilters(entries) {
+    return applyRemoteFilter(applyKindFilter(entries));
+  }
+
+  /** (Re)populates the Remote filter <select> from whatever remotes are
+   * actually represented in the loaded catalog -- not the full registered-
+   * remotes list (Settings' own list), so this never offers a remote with
+   * zero artifacts in it as a filter option. Preserves the current
+   * selection across a catalog reload when that remote is still present;
+   * falls back to "All remotes" if it disappeared (e.g. the remote was
+   * removed in Settings). */
+  function renderRemoteFilterSelect() {
+    const select = $('remote-filter-select');
+    const remoteNames = Array.from(new Set(state.catalog.map((e) => e.remoteName))).sort();
+    if (state.activeRemote && !remoteNames.includes(state.activeRemote)) {
+      state.activeRemote = '';
+    }
+    select.innerHTML = '<option value="">All remotes</option>';
+    for (const name of remoteNames) {
+      const option = document.createElement('option');
+      option.value = name;
+      option.textContent = name;
+      select.appendChild(option);
+    }
+    select.value = state.activeRemote;
+  }
+
+  /** Case-insensitive match across everything a user would plausibly
+   * remember about an artifact -- id, description, kind, owner, and every
+   * tag value -- not just id+description. A search for "python" or
+   * "design" now finds artifacts by stack/role/project too, not only ones
+   * that happen to mention the word in their description. */
+  function matchesSearch(entry, search) {
+    const tags = entry.manifest.tags || {};
+    const haystack = [
+      entry.manifest.id,
+      entry.manifest.description,
+      entry.manifest.kind,
+      entry.manifest.owner,
+      ...(tags.roles || []),
+      ...(tags.stacks || []),
+      ...(tags.teams || []),
+    ]
+      .join(' ')
+      .toLowerCase();
+    return haystack.includes(search);
+  }
+
+  /** Shared ordering for Browse's grid and each kind-group's rows inside a
+   * Tag Folder. Doesn't mutate its input. 'status' orders by the same
+   * badge label the user actually sees (STATUS_LABELS), so the grouping
+   * reads the same as what's on screen, not an arbitrary internal enum
+   * order; ties within any mode fall back to id so the result is stable
+   * and reproducible rather than re-shuffling on every render. */
+  function sortEntries(entries) {
+    const sorted = [...entries];
+    sorted.sort((a, b) => {
+      if (state.sortBy === 'kind') {
+        return (
+          a.manifest.kind.localeCompare(b.manifest.kind) || a.manifest.id.localeCompare(b.manifest.id)
+        );
+      }
+      if (state.sortBy === 'status') {
+        const labelA = STATUS_LABELS[displayStatus(a)];
+        const labelB = STATUS_LABELS[displayStatus(b)];
+        return labelA.localeCompare(labelB) || a.manifest.id.localeCompare(b.manifest.id);
+      }
+      return a.manifest.id.localeCompare(b.manifest.id);
+    });
+    return sorted;
   }
 
   /** Top tag row: one chip per tags category that actually has at least one
@@ -312,6 +443,8 @@
     allChip.addEventListener('click', () => {
       state.activeTagCategory = null;
       state.activeTagValue = null;
+      state.tagValueSearch = '';
+      $('tag-value-search').value = '';
       renderTagCategoryRow();
       renderTagValueRow();
       renderCards();
@@ -326,6 +459,8 @@
         const collapsing = state.activeTagCategory === category;
         state.activeTagCategory = collapsing ? null : category;
         state.activeTagValue = null;
+        state.tagValueSearch = '';
+        $('tag-value-search').value = '';
         renderTagCategoryRow();
         renderTagValueRow();
         renderCards();
@@ -349,13 +484,18 @@
    * `entriesForTag`'s own case-insensitive matching below. */
   function renderTagValueRow() {
     const container = $('tag-value-row');
+    const searchInput = $('tag-value-search');
+    const emptyState = $('tag-value-empty');
     container.innerHTML = '';
 
     if (!state.activeTagCategory) {
+      searchInput.hidden = true;
+      emptyState.hidden = true;
       return;
     }
+    searchInput.hidden = false;
 
-    const values = Array.from(
+    const allValues = Array.from(
       new Set(
         state.catalog
           .flatMap((entry) => entry.manifest.tags?.[state.activeTagCategory] ?? [])
@@ -363,8 +503,14 @@
       ),
     ).sort();
 
+    const search = state.tagValueSearch.trim().toLowerCase();
+    const values = search.length === 0 ? allValues : allValues.filter((v) => v.includes(search));
+    emptyState.hidden = values.length !== 0;
+
     for (const value of values) {
-      const count = entriesForTag(state.activeTagCategory, value).length;
+      // Scoped to the active Kind/Remote selection too (if any), so this
+      // count matches what opening the folder will actually show.
+      const count = applyGlobalFilters(entriesForTag(state.activeTagCategory, value)).length;
       const card = document.createElement('div');
       card.className = 'tag-folder-item';
       card.innerHTML = `
@@ -382,17 +528,10 @@
 
   function filteredEntries() {
     const search = state.search.trim().toLowerCase();
-
-    return state.catalog.filter((entry) => {
-      if (state.activeKind !== 'All' && entry.manifest.kind !== state.activeKind) {
-        return false;
-      }
-      if (search.length === 0) {
-        return true;
-      }
-      const haystack = `${entry.manifest.id} ${entry.manifest.description}`.toLowerCase();
-      return haystack.includes(search);
-    });
+    const filtered = applyGlobalFilters(state.catalog).filter(
+      (entry) => search.length === 0 || matchesSearch(entry, search),
+    );
+    return sortEntries(filtered);
   }
 
   function actionButtonFor(entry) {
@@ -429,8 +568,12 @@
     return status === 'not_pulled' || status === 'update_available';
   }
 
-  function renderTagFolderPullAllButton(entries) {
-    const btn = $('tag-folder-pull-all-btn');
+  /** Shared by both bulk-pull entry points (Tag Folder's own button, and
+   * Browse's "Pull all (filtered)" button) -- just updates `btn`'s label/
+   * visibility to reflect how many of `entries` are actually pullable right
+   * now, leaving the button untouched (not re-labeled to its idle count)
+   * while a pull is already in flight on it. */
+  function renderPullAllButton(btn, entries) {
     const pullable = entries.filter(isBulkPullable);
     if (pullable.length === 0) {
       btn.hidden = true;
@@ -443,23 +586,21 @@
     }
   }
 
-  async function handleTagFolderPullAll() {
-    const btn = $('tag-folder-pull-all-btn');
-    const pullable = entriesForTag(state.activeTagCategory, state.activeTagValue).filter(isBulkPullable);
+  /** Pulls every entry in `pullable` one at a time (never overlapping),
+   * driving the shared progress/log panel around the whole batch -- one
+   * continuous history for the entire run, not reset between items. Shared
+   * by Tag Folder's "Pull all" and Browse's "Pull all (filtered)": both are
+   * just "everything currently on screen that's safe to pull with no
+   * confirmation" (see isBulkPullable), differing only in which entries
+   * that currently is. `onDone` re-renders whatever view-specific list
+   * needs a fresh render after `loadCatalog()`'s own refresh (Browse's grid
+   * already re-renders as part of loadCatalog; Tag Folder needs its own
+   * explicit re-render since it isn't part of Browse). */
+  async function bulkPull(pullable, btn, onDone) {
     if (pullable.length === 0) {
       return;
     }
-
     await withBusy(btn, 'Pulling...', async () => {
-      // beginProgress() once, before the loop, not per item -- each
-      // artifact.pull call is awaited fully (never overlapping with the
-      // next), so their progress lines land in the log strictly in order,
-      // one artifact's full resolve/copy/.../lockfile sequence after
-      // another's, giving one continuous "what's happening" history for the
-      // whole bulk pull instead of wiping it between items. Without this,
-      // "Pull all" ran the exact same sidecar calls but never showed the
-      // shared log at all -- only the button's own "Pulling i/N" label
-      // updated, which is what was actually missing.
       await beginProgress();
       let succeeded = 0;
       const failures = [];
@@ -485,13 +626,39 @@
       for (const failure of failures) {
         toastError(new Error(failure));
       }
-      // Catalog state (localStatus) changed for whatever was just pulled --
-      // loadCatalog() refreshes state.catalog and Browse's own (currently
-      // hidden, harmless to update) grid; this view needs its own explicit
-      // re-render from that same fresh data since it isn't part of Browse.
       await loadCatalog();
-      renderTagFolder();
+      onDone?.();
     });
+  }
+
+  function renderTagFolderPullAllButton(entries) {
+    renderPullAllButton($('tag-folder-pull-all-btn'), entries);
+  }
+
+  async function handleTagFolderPullAll() {
+    const btn = $('tag-folder-pull-all-btn');
+    const pullable = filteredTagFolderEntries().filter(isBulkPullable);
+    await bulkPull(pullable, btn, () => renderTagFolder());
+  }
+
+  /** Browse's own bulk action, generalizing the same capability Tag Folder
+   * already had to the plain artifact grid: pulls everything currently
+   * matching the active Kind selection + search box, not just a tag
+   * folder's contents. Hidden while a tag category is expanded (Browse's
+   * grid itself is hidden then too -- see renderCards). */
+  function renderBrowsePullAllButton() {
+    const btn = $('browse-pull-all-btn');
+    if (state.activeTagCategory) {
+      btn.hidden = true;
+      return;
+    }
+    renderPullAllButton(btn, filteredEntries());
+  }
+
+  async function handleBrowsePullAll() {
+    const btn = $('browse-pull-all-btn');
+    const pullable = filteredEntries().filter(isBulkPullable);
+    await bulkPull(pullable, btn);
   }
 
   /** Every entry in the catalog carrying `category:value` (e.g.
@@ -508,9 +675,23 @@
     );
   }
 
+  /** entriesForTag's results, further narrowed by the (global) active Kind
+   * selection, this folder's own search box, and sorted the same way
+   * Browse's grid is -- the single source of truth both renderTagFolder and
+   * the Tag Folder's own "Pull all" button use, so the button's count
+   * always matches what's actually on screen. */
+  function filteredTagFolderEntries() {
+    const base = applyGlobalFilters(entriesForTag(state.activeTagCategory, state.activeTagValue));
+    const search = state.tagFolderSearch.trim().toLowerCase();
+    const filtered = search.length === 0 ? base : base.filter((entry) => matchesSearch(entry, search));
+    return sortEntries(filtered);
+  }
+
   function openTagFolder(category, value) {
     state.activeTagCategory = category;
     state.activeTagValue = value;
+    state.tagFolderSearch = '';
+    $('tag-folder-search').value = '';
     resetProgressPanel();
     renderTagFolder();
     showViewRaw('tag-folder');
@@ -526,13 +707,15 @@
    * does from Detail. Clicking a row (not its button) opens the existing,
    * unchanged Detail view. */
   function renderTagFolder() {
-    const entries = entriesForTag(state.activeTagCategory, state.activeTagValue);
+    const allEntries = entriesForTag(state.activeTagCategory, state.activeTagValue);
+    const entries = filteredTagFolderEntries();
     $('tag-folder-title').textContent =
-      `${TAG_CATEGORY_LABEL[state.activeTagCategory]}: ${state.activeTagValue} (${entries.length})`;
+      `${TAG_CATEGORY_LABEL[state.activeTagCategory]}: ${state.activeTagValue} (${allEntries.length})`;
     renderTagFolderPullAllButton(entries);
 
     const container = $('tag-folder-results');
     container.innerHTML = '';
+    $('tag-folder-empty').hidden = entries.length !== 0;
 
     const byKind = new Map();
     for (const entry of entries) {
@@ -599,6 +782,7 @@
     const browsingTags = Boolean(state.activeTagCategory);
     grid.hidden = browsingTags;
     $('browse-empty').hidden = browsingTags;
+    renderBrowsePullAllButton();
     if (browsingTags) {
       return;
     }
@@ -606,6 +790,10 @@
     const entries = filteredEntries();
     grid.innerHTML = '';
     $('browse-empty').hidden = entries.length !== 0;
+    $('browse-empty').textContent =
+      state.search.trim() || state.activeKinds.size > 0
+        ? 'No artifacts match the current filters.'
+        : 'No artifacts match.';
 
     for (const entry of entries) {
       const card = document.createElement('div');
@@ -979,9 +1167,9 @@
       editBtn.hidden = false;
       editBtn.onclick = () => {
         $('edit-description').value = manifest.description;
-        $('edit-roles').value = (tags.roles || []).join(', ');
-        $('edit-teams').value = (tags.teams || []).join(', ');
-        $('edit-stacks').value = (tags.stacks || []).join(', ');
+        editRolesPicker.setValues(tags.roles || []);
+        editTeamsPicker.setValues(tags.teams || []);
+        editStacksPicker.setValues(tags.stacks || []);
         editForm.hidden = false;
       };
     } else {
@@ -992,9 +1180,9 @@
       ev.preventDefault();
       void handleSaveMetadataEdit(entry, {
         description: $('edit-description').value.trim(),
-        roles: parseCommaList($('edit-roles').value),
-        teams: parseCommaList($('edit-teams').value),
-        stacks: parseCommaList($('edit-stacks').value),
+        roles: editRolesPicker.getValues(),
+        teams: editTeamsPicker.getValues(),
+        stacks: editStacksPicker.getValues(),
       });
     };
     $('edit-cancel-btn').onclick = () => {
@@ -1084,6 +1272,187 @@
     }
   }
 
+  // ---------- tag picker (roles/stacks/teams input, Add New + Edit) ----------
+
+  /** A simple multi-value "chip" picker replacing a raw comma-separated
+   * text field: already-added values render as removable pills, and the
+   * text input suggests values already used elsewhere in the catalog via a
+   * native <datalist> -- picking a suggestion or just typing a brand-new
+   * value both work the same way (tags stay free-text by design, this only
+   * reduces retyping/typos for the common case of reusing an existing
+   * one). `container` is an otherwise-empty element this takes over
+   * entirely; `container.id` must be unique (used to build the <datalist>'s
+   * own id). Values are trimmed+lowercased on commit -- the same
+   * canonicalization the old raw comma-text fields used to apply, so e.g.
+   * "Python" still lands in the same "stack: python" folder as everything
+   * else instead of a separate, near-duplicate one. */
+  function createTagPicker(container) {
+    container.classList.add('tag-picker');
+    const datalistId = `${container.id}-datalist`;
+    container.innerHTML = `
+      <span class="tag-picker-chips"></span>
+      <input class="tag-picker-input" type="text" list="${datalistId}" placeholder="Type, then Enter or comma&hellip;" />
+      <datalist id="${datalistId}"></datalist>
+    `;
+    const chipsEl = container.querySelector('.tag-picker-chips');
+    const inputEl = container.querySelector('.tag-picker-input');
+    const datalistEl = container.querySelector('datalist');
+    let values = [];
+
+    function renderTagPickerChips() {
+      chipsEl.innerHTML = '';
+      for (const value of values) {
+        const chip = document.createElement('span');
+        chip.className = 'tag-chip';
+        chip.innerHTML =
+          '<span class="tag-chip-label"></span>'
+          + '<button type="button" class="tag-chip-remove" aria-label="Remove">&times;</button>';
+        chip.querySelector('.tag-chip-label').textContent = value;
+        chip.querySelector('.tag-chip-remove').addEventListener('click', () => {
+          values = values.filter((v) => v !== value);
+          renderTagPickerChips();
+        });
+        chipsEl.appendChild(chip);
+      }
+    }
+
+    function commit(raw) {
+      const value = raw.trim().toLowerCase();
+      inputEl.value = '';
+      if (value.length === 0 || values.includes(value)) {
+        return;
+      }
+      values.push(value);
+      renderTagPickerChips();
+    }
+
+    inputEl.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter' || ev.key === ',') {
+        ev.preventDefault();
+        commit(inputEl.value);
+      } else if (ev.key === 'Backspace' && inputEl.value.length === 0 && values.length > 0) {
+        values = values.slice(0, -1);
+        renderTagPickerChips();
+      }
+    });
+    // Committing on blur too -- otherwise text typed but not confirmed with
+    // Enter/comma would silently vanish if the user just clicks elsewhere
+    // (e.g. straight into Save/Propose).
+    inputEl.addEventListener('blur', () => {
+      if (inputEl.value.trim().length > 0) {
+        commit(inputEl.value);
+      }
+    });
+
+    return {
+      getValues: () => [...values],
+      setValues(next) {
+        values = [...next];
+        renderTagPickerChips();
+      },
+      setSuggestions(list) {
+        datalistEl.innerHTML = list.map((v) => `<option value="${escapeHtml(v)}"></option>`).join('');
+      },
+    };
+  }
+
+  /** Every distinct value (lowercased, matching how tags are stored) a
+   * given tags category has across the whole loaded catalog -- the
+   * suggestion source for that category's tag picker(s). */
+  function distinctTagValues(category) {
+    return Array.from(
+      new Set(state.catalog.flatMap((e) => e.manifest.tags?.[category] ?? []).map((v) => v.toLowerCase())),
+    ).sort();
+  }
+
+  let addNewRolesPicker, addNewStacksPicker, addNewTeamsPicker;
+  let editRolesPicker, editStacksPicker, editTeamsPicker;
+
+  /** Builds all 6 tag pickers once, at startup -- their containers are
+   * static elements already in index.html, never re-created, so this only
+   * ever runs once per app session. */
+  function initTagPickers() {
+    addNewRolesPicker = createTagPicker($('f-roles-picker'));
+    addNewStacksPicker = createTagPicker($('f-stacks-picker'));
+    addNewTeamsPicker = createTagPicker($('f-teams-picker'));
+    editRolesPicker = createTagPicker($('edit-roles-picker'));
+    editStacksPicker = createTagPicker($('edit-stacks-picker'));
+    editTeamsPicker = createTagPicker($('edit-teams-picker'));
+  }
+
+  /** Refreshes every tag picker's suggestion list from the current catalog
+   * -- called whenever state.catalog changes (loadCatalog), so newly
+   * pulled/proposed tags show up as suggestions without needing the app
+   * restarted. */
+  function refreshTagPickerSuggestions() {
+    const roles = distinctTagValues('roles');
+    const stacks = distinctTagValues('stacks');
+    const teams = distinctTagValues('teams');
+    addNewRolesPicker.setSuggestions(roles);
+    addNewStacksPicker.setSuggestions(stacks);
+    addNewTeamsPicker.setSuggestions(teams);
+    editRolesPicker.setSuggestions(roles);
+    editStacksPicker.setSuggestions(stacks);
+    editTeamsPicker.setSuggestions(teams);
+  }
+
+  // ---------- add new: kind select ----------
+
+  const NEW_KIND_OPTION = '__new_kind__';
+
+  /** (Re)populates Add New's Kind <select> from every distinct kind already
+   * in the catalog, plus a trailing "+ New kind..." option -- kind is
+   * open-ended by design (see ARCHITECTURE.md), so this is a convenience
+   * for the common case (reusing "agent", "skill", ...) that still allows
+   * inventing a brand-new one via the custom text input it reveals.
+   * Preserves the current selection across a catalog refresh when it's
+   * still a valid option. */
+  function populateKindSelect() {
+    const select = $('f-kind');
+    const previous = select.value;
+    const kinds = Array.from(new Set(state.catalog.map((e) => e.manifest.kind))).sort();
+
+    select.innerHTML = '';
+    for (const kind of kinds) {
+      const option = document.createElement('option');
+      option.value = kind;
+      option.textContent = kind;
+      select.appendChild(option);
+    }
+    const newKindOption = document.createElement('option');
+    newKindOption.value = NEW_KIND_OPTION;
+    newKindOption.textContent = '+ New kind…';
+    select.appendChild(newKindOption);
+
+    select.value = kinds.includes(previous) ? previous : (kinds[0] ?? NEW_KIND_OPTION);
+    $('f-kind-custom').hidden = select.value !== NEW_KIND_OPTION;
+  }
+
+  /** Selects `kind` in Add New's Kind <select>, adding it as a real option
+   * first if it isn't one already (e.g. a Scan candidate's kind, which is
+   * always one of agent/skill/command/rule but may not yet exist anywhere
+   * in the currently-loaded catalog). */
+  function setKindSelectValue(kind) {
+    const select = $('f-kind');
+    const exists = Array.from(select.options).some((opt) => opt.value === kind);
+    if (!exists) {
+      const option = document.createElement('option');
+      option.value = kind;
+      option.textContent = kind;
+      select.insertBefore(option, select.lastElementChild); // before "+ New kind..."
+    }
+    select.value = kind;
+    $('f-kind-custom').hidden = true;
+  }
+
+  /** Resolves Add New's Kind field to a plain string for submission --
+   * either the selected existing kind, or whatever was typed into the
+   * custom-kind text input when "+ New kind..." is selected. */
+  function resolveKindFieldValue() {
+    const select = $('f-kind').value;
+    return select === NEW_KIND_OPTION ? $('f-kind-custom').value.trim() : select;
+  }
+
   // ---------- add new ----------
 
   async function loadRemotesForAddNewSelect() {
@@ -1118,21 +1487,6 @@
     }
   }
 
-  /** Splits a comma-separated field (roles/stacks/teams) into trimmed,
-   * lowercased values -- lowercased so a newly-proposed artifact's tags are
-   * clean and canonical from the start (typing "Python" here still lands in
-   * the same "stack: python" folder as everything else, not a separate
-   * "stack: Python" one). Browse's own tag matching is also
-   * case-insensitive (see entriesForTag/renderTagValueRow) as a second line
-   * of defense for tags that arrive from outside this form (the CLI, or an
-   * existing manifest edited by hand). */
-  function parseCommaList(value) {
-    return value
-      .split(',')
-      .map((s) => s.trim().toLowerCase())
-      .filter((s) => s.length > 0);
-  }
-
   async function submitAddNew(ev) {
     ev.preventDefault();
     const submitBtn = $('addnew-submit-btn');
@@ -1147,12 +1501,12 @@
     }
 
     const id = $('f-id').value.trim();
-    const kind = $('f-kind').value.trim();
+    const kind = resolveKindFieldValue();
     const description = $('f-description').value.trim();
     const owner = $('f-owner').value.trim();
-    const roles = parseCommaList($('f-roles').value);
-    const stacks = parseCommaList($('f-stacks').value);
-    const teams = parseCommaList($('f-teams').value);
+    const roles = addNewRolesPicker.getValues();
+    const stacks = addNewStacksPicker.getValues();
+    const teams = addNewTeamsPicker.getValues();
     const remote = $('f-remote').value;
     const installTarget = $('f-install-target').value.trim() || undefined;
     const postInstall = $('f-post-install').value.trim() || undefined;
@@ -1167,6 +1521,10 @@
         `Artifact ID "${id}" must be lowercase letters, numbers, and hyphens only `
         + '(e.g. "growtharc-brand-guidelines"), no spaces.',
       ));
+      return;
+    }
+    if (!kind) {
+      toastError(new Error('Enter a kind (or pick an existing one).'));
       return;
     }
 
@@ -1191,6 +1549,10 @@
         });
         toastSuccess(`Proposed ${id}: opened PR #${result.number} (${result.url})`);
         $('addnew-form').reset();
+        addNewRolesPicker.setValues([]);
+        addNewStacksPicker.setValues([]);
+        addNewTeamsPicker.setValues([]);
+        $('f-kind-custom').value = '';
         pendingPayloadPath = null;
         $('payload-path-display').textContent = 'No file or folder selected';
         showView('browse');
@@ -1266,12 +1628,23 @@
         row.innerHTML = `
           <div class="row-main">
             <span class="name"></span>
-            <span class="summary"></span>
+            <span class="summary">
+              <span class="summary-text"></span>
+            </span>
           </div>
         `;
         row.querySelector('.name').textContent = candidate.id;
-        row.querySelector('.summary').textContent =
+        row.querySelector('.summary-text').textContent =
           candidate.description || '(no description found -- add one on the next screen)';
+        // A description guessed from the file's own frontmatter is
+        // inferred, not typed by anyone -- flag it as such rather than
+        // presenting it as if someone had written it deliberately.
+        if (candidate.description) {
+          const badge = document.createElement('span');
+          badge.className = 'ai-badge';
+          badge.innerHTML = '<span class="sparkle" aria-hidden="true">&#10022;</span> AI guessed';
+          row.querySelector('.summary').appendChild(badge);
+        }
 
         const btn = document.createElement('button');
         btn.className = 'btn btn-sm';
@@ -1327,8 +1700,12 @@
     await loadRemotesForAddNewSelect();
 
     $('addnew-form').reset();
+    populateKindSelect();
+    addNewRolesPicker.setValues([]);
+    addNewStacksPicker.setValues([]);
+    addNewTeamsPicker.setValues([]);
     $('f-id').value = candidate.id;
-    $('f-kind').value = candidate.kind;
+    setKindSelectValue(candidate.kind);
     $('f-description').value = candidate.description ?? '';
     $('f-install-target').value = candidate.installTarget;
     $('f-remote').value = remoteName;
@@ -1502,6 +1879,7 @@
     $('add-new-btn').addEventListener('click', () => showView('addnew'));
     $('scan-btn').addEventListener('click', () => void openScanView());
     $('scan-run-btn').addEventListener('click', () => void handleRunScan());
+    $('browse-pull-all-btn').addEventListener('click', () => void handleBrowsePullAll());
     $('tag-folder-pull-all-btn').addEventListener('click', () => void handleTagFolderPullAll());
     $('back-to-browse-btn').addEventListener('click', () => showView('browse'));
 
@@ -1509,10 +1887,39 @@
       state.search = ev.target.value;
       renderCards();
     });
+    $('sort-select').addEventListener('change', (ev) => {
+      state.sortBy = ev.target.value;
+      renderCards();
+      if (state.view === 'tag-folder') {
+        renderTagFolder();
+      }
+    });
+    $('remote-filter-select').addEventListener('change', (ev) => {
+      state.activeRemote = ev.target.value;
+      renderTagValueRow();
+      renderCards();
+      if (state.view === 'tag-folder') {
+        renderTagFolder();
+      }
+    });
+    $('tag-value-search').addEventListener('input', (ev) => {
+      state.tagValueSearch = ev.target.value;
+      renderTagValueRow();
+    });
+    $('tag-folder-search').addEventListener('input', (ev) => {
+      state.tagFolderSearch = ev.target.value;
+      renderTagFolder();
+    });
 
     $('addnew-form').addEventListener('submit', (ev) => void submitAddNew(ev));
     $('pick-payload-file-btn').addEventListener('click', () => void pickPayload(false));
     $('pick-payload-dir-btn').addEventListener('click', () => void pickPayload(true));
+    $('f-kind').addEventListener('change', () => {
+      $('f-kind-custom').hidden = $('f-kind').value !== NEW_KIND_OPTION;
+      if (!$('f-kind-custom').hidden) {
+        $('f-kind-custom').focus();
+      }
+    });
 
     $('remote-form').addEventListener('submit', (ev) => void submitAddRemote(ev));
 
@@ -1520,6 +1927,7 @@
   }
 
   async function init() {
+    initTagPickers();
     wireEvents();
 
     // One-time subscription for the whole app session -- unlike
@@ -1552,6 +1960,7 @@
     renderFolderDisplay();
     renderChips();
     renderCards();
+    refreshTagPickerSuggestions();
     showViewRaw('browse');
   }
 

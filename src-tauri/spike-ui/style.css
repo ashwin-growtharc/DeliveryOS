@@ -1,21 +1,35 @@
-/* DeliveryOS desktop UI -- tokens ported verbatim from the ArcFlow brand
- * reference (plans/arcflow/arcflow-roadmap.html's <style> block): the same
- * CSS custom properties and font choices, just applied to this app's own
- * component classes instead of that document's. Component shapes
+/* DeliveryOS desktop UI -- tokens match DESIGN_SYSTEM.md (repo root) exactly:
+ * same token names, same hex values, same "warm tones for regular UI, AI
+ * tones (purple/cyan/gradients) for AI-specific elements only" rule. Where
+ * the previous version of this file used an AI-accent token (cyan) for a
+ * plain status/info element (the hint banner, the push-status panel, the
+ * update-available badge), those have been moved to warm tones instead --
+ * see the comments at each of those rules below. Component shapes
  * (.res-card, .chip, .badge, .meta-grid, .install-path, .toast, ...) are
- * carried over from ui-mockup.html, restyled with the ArcFlow tokens below
- * instead of that mockup's blue palette. */
+ * DeliveryOS's own; only the tokens/typography/component styling come from
+ * the design system. */
 :root {
-  --brand-100: #F4F9EC; --brand-300: #D4E8B8; --brand-400: #ACC384; --brand-450: #7A9955;
-  --brand-500: #1E3C53; --brand-600: #162D3F; --brand-650: #0E1E2B;
-  --cyan-500: #0693E3; --cyan-600: #0577B8; --accent-500: #7A00DF; --mint-500: #00D084;
-  --surface: #FFFCF2; --surface-tertiary: #F6F1E9; --surface-inset: #EDE6DA; --card: #FFFFFF;
+  /* warm surfaces */
+  --surface: #FFFCF2; --surface-secondary: #FFFCF2; --surface-tertiary: #F6F1E9; --surface-inset: #EDE6DA;
+  --card: #FFFFFF;
+  /* warm borders */
   --border: #E0D9CE; --border-strong: #C9BFAF; --border-subtle: #EDE6DA;
-  --sand-100: #F6E8CC; --gold-500: #FBD17E; --sky-100: #DBE8F4;
+  /* sage green -- GrowthArc brand accent */
+  --sage-50: #F4F9EC; --sage-100: #EAF4DB; --sage-200: #D4E8B8; --sage-500: #ACC384; --sage-700: #7A9955;
+  /* sand -- GrowthArc warm accent */
+  --sand-100: #F6E8CC; --sand-200: #EDD9B3; --sand-500: #DBC6AB;
+  /* additional warm tones */
+  --gold-500: #FBD17E; --sky-100: #DBE8F4;
+  /* primary -- navy teal */
+  --primary-700: #1E3C53; --primary-800: #162D3F; --primary-900: #0E1E2B;
+  /* AI accent colors -- AI-specific elements only, see rule comments below */
+  --accent-500: #7A00DF; --accent-600: #6600B8; --cyan-500: #0693E3; --cyan-600: #0577B8; --mint-500: #00D084;
+  /* status */
   --success-100: #DCF8E6; --success-600: #236D40; --warning-100: #FFF4E0; --warning-600: #9C5D00;
   --danger-100: #FFE5E0; --danger-500: #E94E2D; --danger-600: #A2341F;
+  /* gradients */
   --gradient-brand: linear-gradient(90deg, #1E3C53, #162D3F);
-  --gradient-ai: linear-gradient(135deg, #0693E3, #9B51E0);
+  --gradient-ai: linear-gradient(135deg, #0693E3, #7A00DF);
   --gradient-mint: linear-gradient(135deg, #00D084, #0693E3);
   --shadow-1: 0 1px 3px rgb(0 0 0/0.04); --shadow-2: 0 4px 12px rgb(0 0 0/0.08);
   --radius-md: .5rem; --radius-lg: 1rem; --radius-xl: 1.25rem; --radius-pill: 31.25rem;
@@ -44,7 +58,7 @@ body {
   margin: 0;
   font-family: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
   background: var(--surface);
-  color: var(--brand-500);
+  color: var(--primary-700);
   line-height: 1.5;
   font-size: 14px;
   /* A global safety net: fixing each individual long-unbreakable-string
@@ -59,9 +73,13 @@ body {
   overflow-x: hidden;
 }
 
+/* Headings: EB Garamond, normal weight -- per DESIGN_SYSTEM.md's typography
+ * table, ALL headings (page titles, card titles, section headers) render at
+ * font-normal (400), not bold/medium -- the editorial feel comes from the
+ * serif face and size, not weight. */
 h1, h2, h3, h4 {
   font-family: 'EB Garamond', Georgia, serif;
-  font-weight: 500;
+  font-weight: 400;
   line-height: 1.2;
   margin: 0;
 }
@@ -76,7 +94,16 @@ button {
 
 input, textarea, select {
   font: inherit;
-  color: var(--brand-500);
+  color: var(--primary-700);
+}
+
+/* Accessibility: visible keyboard focus on every interactive element, 2px
+ * ring in primary-700 with offset, per DESIGN_SYSTEM.md's Accessibility
+ * section. `:focus-visible` (not `:focus`) so mouse/touch clicks don't get
+ * a ring, only keyboard/programmatic focus. */
+:focus-visible {
+  outline: 2px solid var(--primary-700);
+  outline-offset: 2px;
 }
 
 #app {
@@ -105,20 +132,9 @@ input, textarea, select {
   flex-shrink: 0;
 }
 
-.brand-mark {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 7px;
-  background: var(--gradient-mint);
-  font-size: 14px;
-}
-
 .brand-name {
   font-family: 'EB Garamond', Georgia, serif;
-  font-size: 19px;
+  font-size: 20px;
   font-weight: 600;
   letter-spacing: .2px;
 }
@@ -144,10 +160,16 @@ input, textarea, select {
   background: rgba(255, 255, 255, .08);
 }
 
+/* Active nav state: sage-100 background + navy text, exactly the pairing
+ * DESIGN_SYSTEM.md's Navigation section specifies for the active sidebar
+ * item -- translated onto DeliveryOS's own navy topbar instead of a white
+ * sidebar (DeliveryOS keeps its existing top-nav structure; only the
+ * styling comes from the design system). The light sage pill reads clearly
+ * against the dark topbar. */
 .nav-btn.active {
-  color: #fff;
-  background: rgba(255, 255, 255, .16);
-  border-color: rgba(255, 255, 255, .18);
+  color: var(--primary-700);
+  background: var(--sage-100);
+  border-color: transparent;
 }
 
 .folder-display {
@@ -164,6 +186,7 @@ input, textarea, select {
   text-transform: uppercase;
   letter-spacing: .8px;
   font-size: 10.5px;
+  font-weight: 500;
 }
 
 .folder-path {
@@ -179,17 +202,25 @@ input, textarea, select {
   white-space: nowrap;
 }
 
-/* ---------- generic buttons ---------- */
+/* ---------- generic buttons ----------
+ * 5 variants per DESIGN_SYSTEM.md's Component Inventory:
+ *   default  (.btn-primary) -- navy solid, primary actions
+ *   accent   (.btn-accent)  -- purple solid, AI-specific actions only
+ *   outline  (.btn)         -- white with warm border, secondary actions
+ *   ghost    (.btn-ghost / .btn-danger-ghost) -- text only, warm hover
+ * ("gradient" -- cyan-to-purple, for a chat-style send button -- has no
+ * counterpart in DeliveryOS's UI, so it isn't defined here.) */
 
 .btn {
   font-size: 13px;
+  font-weight: 500;
   background: var(--card);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
   padding: 7px 14px;
   cursor: pointer;
-  color: var(--brand-500);
-  transition: background .1s ease, opacity .1s ease;
+  color: var(--primary-700);
+  transition: background .1s ease, opacity .1s ease, box-shadow .15s ease;
 }
 
 .btn:hover:not(:disabled) {
@@ -202,13 +233,36 @@ input, textarea, select {
 }
 
 .btn-primary {
-  background: var(--brand-500);
-  border-color: var(--brand-500);
+  background: var(--primary-700);
+  border-color: var(--primary-700);
   color: #fff;
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: var(--brand-600);
+  background: var(--primary-800);
+}
+
+/* Purple solid -- reserved for genuinely AI-specific actions (here: running
+ * the frontmatter-guessing Scan). Not used for ordinary primary actions --
+ * see DESIGN_SYSTEM.md's "when to use warm vs AI tones" rule. */
+.btn-accent {
+  background: var(--accent-500);
+  border-color: var(--accent-500);
+  color: #fff;
+}
+
+.btn-accent:hover:not(:disabled) {
+  background: var(--accent-600);
+}
+
+.btn-ghost {
+  color: var(--primary-700);
+  border-color: transparent;
+  background: transparent;
+}
+
+.btn-ghost:hover:not(:disabled) {
+  background: var(--surface-tertiary);
 }
 
 .btn-sm {
@@ -266,15 +320,19 @@ input, textarea, select {
 }
 
 .empty-state {
-  color: var(--brand-500);
+  color: var(--primary-700);
   opacity: .6;
   font-size: 13.5px;
   padding: 24px 4px;
 }
 
+/* Informational banner (not a warning) -- warm sky-100 card tone with a
+ * gold-500 accent border. Previously used cyan-500 for the border, which
+ * DESIGN_SYSTEM.md reserves for AI-specific elements; this is a plain
+ * status hint, so it stays in the warm palette end to end. */
 .hint-banner {
   background: var(--sky-100);
-  border-left: 3px solid var(--cyan-500);
+  border-left: 3px solid var(--gold-500);
   border-radius: var(--radius-md);
   padding: 12px 16px;
   font-size: 13.5px;
@@ -283,19 +341,75 @@ input, textarea, select {
 
 /* ---------- browse ---------- */
 
+/* Two distinct rows, not one flat line of 8 mixed controls: search+primary
+ * action on top, filters (left) and secondary/utility actions (right)
+ * underneath -- grouping by role instead of cramming everything into a
+ * single row that either overflows or reads as clutter. */
 .browse-toolbar {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 10px;
   margin-bottom: 14px;
 }
 
-.browse-toolbar input[type="text"] {
+.toolbar-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.toolbar-row-filters {
+  justify-content: space-between;
+}
+
+.toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.toolbar-row-main input[type="text"] {
   flex: 1;
+  min-width: 200px;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
   padding: 8px 12px;
   background: var(--card);
+}
+
+/* Shared by every small bordered <select> in the Browse toolbar (Sort,
+ * Remote) -- one visual language for "pick one of a few options" instead
+ * of each toolbar control inventing its own look. */
+.toolbar-select {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  padding: 8px 12px;
+  background: var(--card);
+  color: var(--primary-700);
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+/* Small, generic search input reused wherever a scoped/secondary search box
+ * is needed outside the main Browse toolbar (Tag Folder's own search,
+ * filtering the stack/role/project value list) -- same visual language as
+ * the toolbar's own search input, just not forced to `flex: 1` since these
+ * sit alongside other controls in a tighter row. */
+.mini-search {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  padding: 7px 11px;
+  background: var(--card);
+  font-size: 12.5px;
+  min-width: 160px;
+}
+
+.tag-value-search {
+  margin: 4px 0 10px;
+  width: 100%;
+  max-width: 320px;
 }
 
 .chips {
@@ -307,19 +421,20 @@ input, textarea, select {
 
 .chip {
   font-size: 12.5px;
+  font-weight: 500;
   padding: 5px 12px;
   border-radius: var(--radius-md);
   border: 1px solid var(--border);
-  color: var(--brand-500);
+  color: var(--primary-700);
   opacity: .75;
   background: var(--card);
   cursor: pointer;
 }
 
 .chip.active {
-  background: var(--brand-500);
+  background: var(--primary-700);
   color: #fff;
-  border-color: var(--brand-500);
+  border-color: var(--primary-700);
   opacity: 1;
 }
 
@@ -361,7 +476,7 @@ input, textarea, select {
 .tag-folder-item:hover {
   box-shadow: var(--shadow-2);
   transform: translateY(-2px);
-  border-color: var(--brand-400);
+  border-color: var(--sage-500);
 }
 
 .tag-folder-item .folder-row-top {
@@ -378,7 +493,7 @@ input, textarea, select {
 }
 
 .tag-folder-item .chevron {
-  color: var(--brand-450);
+  color: var(--sage-700);
   font-size: 20px;
   line-height: 1;
 }
@@ -431,7 +546,7 @@ input, textarea, select {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: .04em;
-  color: var(--brand-500);
+  color: var(--primary-700);
   margin-bottom: 8px;
 }
 
@@ -481,6 +596,48 @@ input, textarea, select {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.kind-group-row .row-main .summary .summary-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/* ---------- AI badge (sparkle + label) ----------
+ * Marks content the app inferred automatically rather than content the user
+ * typed -- currently just Scan's frontmatter-guessed descriptions. Purple
+ * accent tone per DESIGN_SYSTEM.md's "AI tones... AI-specific elements
+ * only" rule; a plain "(no description found)" placeholder does NOT get
+ * this badge, since there's nothing AI-guessed about an empty guess. */
+.ai-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--accent-500);
+  background: linear-gradient(135deg, rgb(122 0 223 / .08), rgb(6 147 227 / .08));
+  border: 1px solid rgb(122 0 223 / .25);
+  border-radius: var(--radius-pill);
+  padding: 2px 9px 2px 7px;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.ai-badge .sparkle {
+  display: inline-block;
+  animation: neural-pulse 2.2s ease-in-out infinite;
+}
+
+@keyframes neural-pulse {
+  0%, 100% { opacity: .55; transform: scale(.9); }
+  50% { opacity: 1; transform: scale(1.05); }
 }
 
 .grid {
@@ -499,6 +656,7 @@ input, textarea, select {
   gap: 8px;
   box-shadow: var(--shadow-1);
   cursor: pointer;
+  transition: box-shadow .15s ease, border-color .15s ease;
 }
 
 .res-card:hover {
@@ -515,7 +673,8 @@ input, textarea, select {
 
 .res-card .kind {
   font-size: 11.5px;
-  color: var(--brand-500);
+  font-weight: 500;
+  color: var(--primary-700);
   opacity: .65;
   text-transform: uppercase;
   letter-spacing: .5px;
@@ -545,7 +704,7 @@ input, textarea, select {
   opacity: .55;
 }
 
-/* status badges -- 3 distinct colors from the ArcFlow palette */
+/* status badges -- 3 distinct colors from the warm/status palette */
 
 .badge {
   font-size: 10.5px;
@@ -559,7 +718,7 @@ input, textarea, select {
 
 .badge.not_pulled {
   background: var(--surface-inset);
-  color: var(--brand-500);
+  color: var(--primary-700);
   opacity: .8;
 }
 
@@ -575,9 +734,13 @@ input, textarea, select {
   opacity: 1;
 }
 
+/* "Update available" is a plain data-freshness signal, not an AI feature --
+ * uses the warm sand/gold tones instead of the AI-reserved sky/cyan pair
+ * this used to sit on, per DESIGN_SYSTEM.md's "warm tones for regular UI"
+ * rule. */
 .badge.update_available {
-  background: var(--sky-100);
-  color: var(--cyan-600);
+  background: var(--sand-200);
+  color: var(--primary-800);
   opacity: 1;
 }
 
@@ -607,6 +770,7 @@ input, textarea, select {
 
 .detail-title .kind-label {
   font-size: 11.5px;
+  font-weight: 500;
   text-transform: uppercase;
   letter-spacing: .5px;
   opacity: .6;
@@ -614,7 +778,7 @@ input, textarea, select {
 
 .detail-title .name {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 17px;
+  font-size: 18px;
   font-weight: 600;
 }
 
@@ -636,9 +800,10 @@ input, textarea, select {
 }
 
 .meta-grid .k {
-  color: var(--brand-500);
+  color: var(--primary-700);
   opacity: .55;
   font-size: 11.5px;
+  font-weight: 500;
   text-transform: uppercase;
   letter-spacing: .3px;
 }
@@ -650,17 +815,19 @@ input, textarea, select {
 .tag-pill {
   display: inline-block;
   font-size: 11px;
+  font-weight: 500;
   background: var(--surface-tertiary);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: 2px 9px;
   margin: 3px 5px 0 0;
-  color: var(--brand-500);
+  color: var(--primary-700);
   opacity: .85;
 }
 
 .install-path-label {
   font-size: 11.5px;
+  font-weight: 500;
   opacity: .55;
   text-transform: uppercase;
   letter-spacing: .3px;
@@ -674,7 +841,7 @@ input, textarea, select {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: 9px 11px;
-  color: var(--brand-500);
+  color: var(--primary-700);
   opacity: .85;
   word-break: break-all;
 }
@@ -721,18 +888,20 @@ input, textarea, select {
 }
 
 /* An informational (not alarming) counterpart to .drift-warning -- a push
- * that's still open or was resolved isn't a warning, just a status. */
+ * that's still open or was resolved isn't a warning, just a status. Warm
+ * sand/gold tones (not the AI-reserved sky/cyan pair this used to sit on),
+ * matching .badge.update_available's fix above for the same reason. */
 .push-status {
   margin-top: 14px;
-  background: var(--sky-100, var(--surface-tertiary));
-  border: 1px solid var(--cyan-500, var(--border));
+  background: var(--sand-100);
+  border: 1px solid var(--gold-500);
   border-radius: var(--radius-md);
   padding: 12px 14px;
 }
 
 .push-status-text {
   font-size: 13px;
-  color: var(--brand-500);
+  color: var(--primary-700);
   margin: 0 0 10px;
 }
 
@@ -768,7 +937,7 @@ input, textarea, select {
   height: 14px;
   border-radius: 50%;
   border: 2px solid var(--border-strong);
-  border-top-color: var(--brand-500);
+  border-top-color: var(--primary-700);
   animation: spin .7s linear infinite;
   flex-shrink: 0;
 }
@@ -850,6 +1019,7 @@ input, textarea, select {
 .field label {
   display: block;
   font-size: 12px;
+  font-weight: 500;
   opacity: .65;
   margin-bottom: 5px;
 }
@@ -872,6 +1042,70 @@ input, textarea, select {
 
 .field textarea {
   resize: vertical;
+}
+
+.field select + input[type="text"] {
+  margin-top: 8px;
+}
+
+/* ---------- tag picker (roles/stacks/teams) ----------
+ * Replaces a raw "type a comma-separated list and hope you spell it the
+ * same way as last time" text field with removable chips + a suggestion
+ * list (a <datalist>) of values already used elsewhere in the catalog --
+ * still fully free-text (a new value is just as valid), just easier to
+ * reuse an existing one without retyping/mistyping it. */
+.tag-picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  padding: 6px 8px;
+  background: var(--card);
+}
+
+.tag-picker-chips {
+  display: contents;
+}
+
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 500;
+  background: var(--surface-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  padding: 3px 6px 3px 10px;
+  color: var(--primary-700);
+}
+
+.tag-chip-remove {
+  border: none;
+  background: transparent;
+  color: var(--primary-700);
+  opacity: .55;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px;
+}
+
+.tag-chip-remove:hover {
+  opacity: 1;
+}
+
+.tag-picker-input {
+  flex: 1;
+  min-width: 120px;
+  border: none;
+  outline: none;
+  padding: 4px 2px;
+  background: transparent;
+  font-size: 13px;
+  color: var(--primary-700);
 }
 
 .payload-picker {
@@ -927,7 +1161,7 @@ input, textarea, select {
 
 .settings-row .n {
   font-size: 14px;
-  font-weight: 500;
+  font-weight: 600;
   font-family: 'JetBrains Mono', monospace;
 }
 
@@ -981,4 +1215,25 @@ input, textarea, select {
 @keyframes toast-in {
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+/* ---------- accessibility: reduced motion ----------
+ * Every animation defined above disabled outright, per DESIGN_SYSTEM.md's
+ * Accessibility section -- state changes (done/error/toast shown) are
+ * still communicated via color + text, never motion alone. */
+@media (prefers-reduced-motion: reduce) {
+  .spinner,
+  .ai-badge .sparkle {
+    animation: none;
+  }
+
+  .toast {
+    animation: none;
+  }
+
+  .tag-folder-item,
+  .res-card,
+  .btn {
+    transition: none;
+  }
 }

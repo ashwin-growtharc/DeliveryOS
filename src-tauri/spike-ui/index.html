@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+      href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="style.css" />
@@ -16,7 +16,6 @@
     <div id="app">
       <header class="topbar">
         <div class="brand">
-          <span class="brand-mark">&#9889;</span>
           <span class="brand-name">DeliveryOS</span>
         </div>
         <nav class="nav">
@@ -37,16 +36,45 @@
             Select a project folder to start browsing artifacts.
           </div>
           <div class="browse-toolbar">
-            <input id="search-input" type="text" placeholder="Search resources" />
-            <button id="refresh-btn" class="btn">Refresh</button>
-            <button id="check-artifact-updates-btn" class="btn">Check for updates</button>
-            <button id="scan-btn" class="btn">Scan for new agents/skills</button>
-            <button id="add-new-btn" class="btn btn-primary">+ Add new</button>
+            <div class="toolbar-row toolbar-row-main">
+              <input
+                id="search-input"
+                type="text"
+                placeholder="Search id, description, kind, owner, or tags"
+              />
+              <button id="add-new-btn" class="btn btn-primary">+ Add new</button>
+            </div>
+            <div class="toolbar-row toolbar-row-filters">
+              <div class="toolbar-group">
+                <select id="remote-filter-select" class="toolbar-select" aria-label="Filter by remote">
+                  <option value="">All remotes</option>
+                </select>
+                <select id="sort-select" class="toolbar-select" aria-label="Sort by">
+                  <option value="name">Sort: Name (A&ndash;Z)</option>
+                  <option value="kind">Sort: Kind</option>
+                  <option value="status">Sort: Status</option>
+                </select>
+                <button id="browse-pull-all-btn" class="btn" hidden></button>
+              </div>
+              <div class="toolbar-group">
+                <button id="refresh-btn" class="btn">Refresh</button>
+                <button id="check-artifact-updates-btn" class="btn">Check for updates</button>
+                <button id="scan-btn" class="btn btn-accent">Scan for new content</button>
+              </div>
+            </div>
           </div>
           <div id="chips" class="chips"></div>
           <div class="tags-section">
             <div id="tag-category-row" class="chips tag-category-row"></div>
+            <input
+              id="tag-value-search"
+              class="mini-search tag-value-search"
+              type="text"
+              placeholder="Filter values&hellip;"
+              hidden
+            />
             <div id="tag-value-row" class="chips tag-value-row"></div>
+            <p id="tag-value-empty" class="empty-state" hidden>No values match that filter.</p>
           </div>
           <div id="card-grid" class="grid"></div>
           <p id="browse-empty" class="empty-state" hidden>No artifacts match.</p>
@@ -62,9 +90,18 @@
           <button class="btn back-btn" data-view="browse">&larr; Back to Browse</button>
           <div class="tag-folder-header">
             <h2 id="tag-folder-title" class="section-title"></h2>
-            <button id="tag-folder-pull-all-btn" class="btn btn-sm" hidden></button>
+            <div class="scan-controls">
+              <input
+                id="tag-folder-search"
+                class="mini-search"
+                type="text"
+                placeholder="Search within this folder&hellip;"
+              />
+              <button id="tag-folder-pull-all-btn" class="btn btn-sm" hidden></button>
+            </div>
           </div>
           <div id="tag-folder-results" class="grouped-results"></div>
+          <p id="tag-folder-empty" class="empty-state" hidden>No artifacts match the current filters.</p>
         </section>
 
         <!-- Scan: finds agents/skills sitting in .claude/agents and
@@ -81,7 +118,7 @@
             <h2 class="section-title">Scan for new agents/skills</h2>
             <div class="scan-controls">
               <select id="scan-remote-select"></select>
-              <button id="scan-run-btn" class="btn btn-primary">Scan</button>
+              <button id="scan-run-btn" class="btn btn-accent">Scan</button>
             </div>
           </div>
           <p class="field-hint">
@@ -120,8 +157,8 @@
             <div class="install-path-label">Installs to</div>
             <div id="detail-install-path" class="install-path"></div>
             <div class="detail-secondary-actions">
-              <button id="detail-open-folder-btn" class="btn btn-sm" hidden>Open folder</button>
-              <button id="detail-edit-btn" class="btn btn-sm" hidden>Edit</button>
+              <button id="detail-open-folder-btn" class="btn btn-ghost btn-sm" hidden>Open folder</button>
+              <button id="detail-edit-btn" class="btn btn-ghost btn-sm" hidden>Edit</button>
             </div>
 
             <form id="detail-edit-form" class="edit-form" hidden>
@@ -130,21 +167,21 @@
                 <textarea id="edit-description" rows="3"></textarea>
               </div>
               <div class="field">
-                <label for="edit-roles">Roles (comma-separated)</label>
-                <input id="edit-roles" type="text" placeholder="pm, engagement-lead" />
+                <label>Roles</label>
+                <div id="edit-roles-picker"></div>
               </div>
               <div class="field">
-                <label for="edit-teams">Team / project (comma-separated)</label>
-                <input id="edit-teams" type="text" placeholder="engagement, platform" />
+                <label>Team / project</label>
+                <div id="edit-teams-picker"></div>
               </div>
               <div class="field">
-                <label for="edit-stacks">Stack (comma-separated)</label>
-                <input id="edit-stacks" type="text" placeholder="python, typescript" />
+                <label>Stack</label>
+                <div id="edit-stacks-picker"></div>
               </div>
               <p class="field-hint">Saving opens a PR against this field's manifest.yaml -- the payload/content is untouched.</p>
               <div class="edit-form-actions">
                 <button type="submit" id="edit-save-btn" class="btn btn-primary">Save (opens PR)</button>
-                <button type="button" id="edit-cancel-btn" class="btn btn-sm">Cancel</button>
+                <button type="button" id="edit-cancel-btn" class="btn btn-ghost btn-sm">Cancel</button>
               </div>
             </form>
 
@@ -160,7 +197,7 @@
 
             <div id="detail-push-status" class="push-status" hidden>
               <p id="detail-push-status-text" class="push-status-text"></p>
-              <button id="detail-check-push-status-btn" class="btn btn-sm">Check push status</button>
+              <button id="detail-check-push-status-btn" class="btn btn-ghost btn-sm">Check push status</button>
             </div>
           </div>
         </section>
@@ -184,7 +221,14 @@
             </div>
             <div class="field">
               <label for="f-kind">Kind</label>
-              <input id="f-kind" type="text" required placeholder="e.g. agent-asset" />
+              <select id="f-kind" required></select>
+              <input
+                id="f-kind-custom"
+                type="text"
+                placeholder="e.g. dataset, config, agent-asset"
+                hidden
+              />
+              <p class="field-hint">Pick a kind already in use, or "+ New kind&hellip;" to add one -- kind is open-ended, not a fixed list.</p>
             </div>
             <div class="field">
               <label>Payload</label>
@@ -203,17 +247,18 @@
               <input id="f-owner" type="text" required />
             </div>
             <div class="field">
-              <label for="f-roles">Who is this for (roles, comma-separated)</label>
-              <input id="f-roles" type="text" placeholder="pm, engagement-lead" />
+              <label>Who is this for (roles)</label>
+              <div id="f-roles-picker"></div>
+              <p class="field-hint">Pick from existing roles, or type a new one and press Enter or comma.</p>
             </div>
             <div class="field">
-              <label for="f-stacks">Stack (comma-separated)</label>
-              <input id="f-stacks" type="text" placeholder="python, typescript" />
+              <label>Stack</label>
+              <div id="f-stacks-picker"></div>
               <p class="field-hint">Shows up under Browse's "stack" tag folders (e.g. "stack: python") -- leave blank if this isn't tied to a particular stack.</p>
             </div>
             <div class="field">
-              <label for="f-teams">Team / project (comma-separated)</label>
-              <input id="f-teams" type="text" placeholder="engagement, platform" />
+              <label>Team / project</label>
+              <div id="f-teams-picker"></div>
               <p class="field-hint">Shows up under Browse's "project" tag folders.</p>
             </div>
             <div class="field">
