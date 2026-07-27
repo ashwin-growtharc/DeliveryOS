@@ -326,10 +326,9 @@
 
   /** Second tag row: every distinct value the active category has across
    * the catalog (e.g. category 'stacks' -> "python", "java", ...), rendered
-   * as a vertical list of folder-style rows (icon + name), not chips --
-   * each one really does open into its own folder-like view (openTagFolder),
-   * so it reads as "pick a folder to open" rather than "pick a filter pill".
-   * Empty/hidden when no category is selected. */
+   * as a clean single-line list -- name left, a ">" chevron right -- not
+   * chips, not folder icons. Each row navigates into its own Tag Folder view
+   * (openTagFolder). Empty/hidden when no category is selected. */
   function renderTagValueRow() {
     const container = $('tag-value-row');
     container.innerHTML = '';
@@ -347,7 +346,7 @@
     for (const value of values) {
       const row = document.createElement('div');
       row.className = 'tag-folder-item';
-      row.innerHTML = `<span class="folder-icon" aria-hidden="true">&#128193;</span><span class="folder-name"></span>`;
+      row.innerHTML = `<span class="folder-name"></span><span class="chevron" aria-hidden="true">&rsaquo;</span>`;
       row.querySelector('.folder-name').textContent = value;
       row.addEventListener('click', () => openTagFolder(state.activeTagCategory, value));
       container.appendChild(row);
@@ -547,8 +546,21 @@
   }
 
   function renderCards() {
-    const entries = filteredEntries();
+    // While a tag category is expanded (its value list is showing, even
+    // before a value is picked), hide the plain artifact grid below it --
+    // otherwise Browse shows both "pick a tag folder to open" AND an
+    // unrelated full artifact list at the same time, which just reads as
+    // clutter. Picking "All tags" (activeTagCategory back to null) restores
+    // the grid.
     const grid = $('card-grid');
+    const browsingTags = Boolean(state.activeTagCategory);
+    grid.hidden = browsingTags;
+    $('browse-empty').hidden = browsingTags;
+    if (browsingTags) {
+      return;
+    }
+
+    const entries = filteredEntries();
     grid.innerHTML = '';
     $('browse-empty').hidden = entries.length !== 0;
 

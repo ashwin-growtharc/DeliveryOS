@@ -4,10 +4,12 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
-- Restyled the tag value row (python/java/typescript/...) as a vertical list
-  of folder-style rows (icon + name) instead of chip pills -- each one really
-  does open into its own folder-like view, so it now reads that way instead
-  of looking like another filter pill.
+- Restyled the tag value row (python/java/typescript/...): first pass used
+  boxed folder icons, which read as heavy/cluttered; now a clean breadcrumb-
+  style list ("name  >") using the app's existing brand tokens, with the
+  main artifact grid hidden while a tag category is expanded (previously it
+  stayed visible underneath, showing an unrelated full artifact list at the
+  same time as the tag picker).
 
 - Added tag-based bulk pull in the app, as its own navigable Tag Folder view
   (not an inline filter of Browse's own grid). Browse gets a tag category row
