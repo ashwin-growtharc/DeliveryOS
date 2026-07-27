@@ -1191,6 +1191,20 @@ input, textarea, select {
   min-height: 120px;
 }
 
+/* Each step shows exactly one field, so its <label> is functionally this
+ * step's own heading, not a small caption sitting above a field in a dense
+ * multi-field form -- styled like one: EB Garamond serif, larger, normal
+ * weight, per DESIGN_SYSTEM.md's typography table (page/card titles use
+ * EB Garamond at font-normal, larger sizes than body text). */
+.wizard-step .field label {
+  font-family: 'EB Garamond', Georgia, serif;
+  font-size: 22px;
+  font-weight: 400;
+  color: var(--primary-700);
+  opacity: 1;
+  margin-bottom: 12px;
+}
+
 .wizard-nav {
   display: flex;
   align-items: center;

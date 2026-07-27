@@ -1584,6 +1584,13 @@
 
     const isReview = stepId === 'review';
     $('wizard-next-btn').hidden = isReview;
+    // A shortcut back to Review from anywhere -- without this, jumping back
+    // to fix one field via a Review row's own "Edit" button left no way
+    // back except clicking Next through every remaining step again.
+    // Skipping straight there bypasses per-step validation, but that's
+    // fine: submitAddNew re-validates every required field on its own and
+    // jumps back to whichever one is actually blank.
+    $('wizard-review-btn').hidden = isReview;
     $('addnew-submit-btn').hidden = !isReview;
     if (isReview) {
       renderAddNewReview();
@@ -2132,6 +2139,7 @@
 
     $('wizard-next-btn').addEventListener('click', () => wizardGoNext());
     $('wizard-back-btn').addEventListener('click', () => wizardGoBack());
+    $('wizard-review-btn').addEventListener('click', () => goToWizardStep('review'));
     // Enter anywhere in the form advances to the next step instead of
     // submitting early -- except inside a tag picker's own text input,
     // where Enter already means "commit this chip, keep typing the next
