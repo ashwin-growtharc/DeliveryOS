@@ -4,13 +4,37 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
-- Fixed the shared progress/log panel's alignment being broken (full window
-  width, no longer lined up with the content above it) ever since it was
-  moved out of Detail's card to be shared across views. Wrapped it in a new
-  `.content-width` rule mirroring `#main`'s own max-width/centering/side-
-  padding exactly, so it lines up with whichever view (Detail, a Tag Folder,
-  ...) is showing above it, the way it did back when it only ever lived
-  inside Detail's own card.
+- Full review pass over the tag-folder/bulk-pull work after repeated
+  layout complaints, and fixed everything found:
+  - **"Pull all" in a Tag Folder never showed the progress log at all** --
+    `handleTagFolderPullAll` called `artifact.pull` directly in a loop
+    without ever calling `beginProgress()`/`endProgress()`, unlike every
+    other action in the app. Only the button's own "Pulling i/N" label
+    updated; the shared log panel just never turned on. Now begins once
+    before the loop (each pull is awaited fully before the next starts, so
+    their stage lines land in order with no interleaving) and ends once
+    after, giving one continuous log across the whole bulk pull.
+  - **The progress log overflowed past the page edge** on a long Windows
+    path (e.g. `Copying payload files to
+    C:\Users\...\Project-test\.claude\skills\engagement-kickoff`). Root
+    cause: `.progress-line`'s `.msg` is a flex child with no `min-width: 0`,
+    so it refused to shrink below its own unbroken content width (backslash
+    -separated paths have no natural break point) and forced the whole
+    panel wider than its container. Fixed with `min-width: 0` +
+    `overflow-wrap: anywhere` on the message, plus defensive `overflow-x:
+    hidden` on the panel and log.
+  - Moved the shared progress panel from a sibling of `<main>` to a plain
+    child of it (last thing inside `<main>`, after every `.view` section).
+    It's not part of the `.view` rotation (no `view` class, so view-
+    switching never touches it), but `#main` has `flex: 1`, so as a sibling
+    it was pinned to the very bottom of the window regardless of how little
+    content was above it -- moving it inside `#main` means it now appears
+    directly under whichever view is showing, and picks up `#main`'s own
+    width/centering/padding for free (the now-removed `.content-width`
+    rule was a workaround for the wrong problem).
+  - Stale comments referring to "Detail's action button is the sole
+    trigger" (no longer true since Tag Folder rows/Pull-all also drive the
+    same shared panel) corrected.
 
 - Restyled the tag value list again: the plain chevron-list read as dated
   ("Windows XP style") and left most of the page empty. Now a card grid

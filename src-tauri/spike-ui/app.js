@@ -49,9 +49,10 @@
 
   // Unlisten function for the current `sidecar-progress` event subscription,
   // if one is active -- there is at most one live subscription at a time
-  // (Detail's action button is the sole trigger for pull/push now), torn
-  // down and re-created fresh every time a new action starts or a new
-  // Detail view is opened.
+  // (only one pull/push runs at once, whether triggered from Detail's action
+  // button or a row/Pull-all button in a Tag Folder view), torn down and
+  // re-created fresh every time a new action starts or a new Detail view is
+  // opened.
   let progressUnlisten = null;
 
   // ---------- small DOM helpers ----------
@@ -432,6 +433,16 @@
     }
 
     await withBusy(btn, 'Pulling...', async () => {
+      // beginProgress() once, before the loop, not per item -- each
+      // artifact.pull call is awaited fully (never overlapping with the
+      // next), so their progress lines land in the log strictly in order,
+      // one artifact's full resolve/copy/.../lockfile sequence after
+      // another's, giving one continuous "what's happening" history for the
+      // whole bulk pull instead of wiping it between items. Without this,
+      // "Pull all" ran the exact same sidecar calls but never showed the
+      // shared log at all -- only the button's own "Pulling i/N" label
+      // updated, which is what was actually missing.
+      await beginProgress();
       let succeeded = 0;
       const failures = [];
       for (let i = 0; i < pullable.length; i += 1) {
@@ -448,6 +459,7 @@
           failures.push(`${entry.manifest.id}: ${err instanceof Error ? err.message : String(err)}`);
         }
       }
+      endProgress(failures.length === 0);
 
       if (succeeded > 0) {
         toastSuccess(`Pulled ${succeeded} artifact${succeeded === 1 ? '' : 's'}`);
@@ -598,12 +610,11 @@
     }
   }
 
-  /** Runs `action` ('pull' or 'push') for `entry`, driving the Detail
-   * view's progress panel (see beginProgress/endProgress) around the call.
-   * This is the single call site for both actions now that cards no longer
-   * have their own action button -- previously doPull/doPush were each
-   * called from both a card's button and Detail's button; now Detail's
-   * action button is the only trigger, so one function covers it. */
+  /** Runs `action` ('pull' or 'push') for `entry`, driving the shared
+   * progress/log panel (see beginProgress/endProgress) around the call.
+   * The single call site for both actions everywhere they can be
+   * triggered one-at-a-time: Detail's action button, and a row's own
+   * inline button inside a Tag Folder view. */
   async function runArtifactAction(entry, action, button) {
     await withBusy(button, 'Working...', async () => {
       await beginProgress();

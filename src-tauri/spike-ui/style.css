@@ -230,17 +230,6 @@ input, textarea, select {
   padding: 24px 24px 60px;
 }
 
-/* Same horizontal box model as #main (max-width/centering/side-padding),
-   for elements that must line up with it but live outside <main> itself --
-   currently just the shared progress panel, see its comment in index.html. */
-.content-width {
-  max-width: 1080px;
-  width: 100%;
-  margin: 0 auto;
-  padding: 0 24px;
-  box-sizing: border-box;
-}
-
 .view[hidden] {
   display: none;
 }
@@ -392,6 +381,12 @@ input, textarea, select {
 
 .tag-folder-header .section-title {
   margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.tag-folder-header .btn {
+  flex-shrink: 0;
 }
 
 .grouped-results {
@@ -704,6 +699,8 @@ input, textarea, select {
   border-radius: var(--radius-md);
   background: var(--surface-tertiary);
   padding: 12px 14px;
+  box-sizing: border-box;
+  overflow-x: hidden;
 }
 
 .progress-header {
@@ -756,6 +753,7 @@ input, textarea, select {
   margin-top: 10px;
   max-height: 160px;
   overflow-y: auto;
+  overflow-x: hidden;
   font-family: 'JetBrains Mono', monospace;
   font-size: 11.5px;
 }
@@ -765,6 +763,12 @@ input, textarea, select {
   gap: 8px;
   padding: 3px 0;
   border-bottom: 1px solid var(--border-subtle);
+  /* A flex item's default min-width is `auto`, meaning it won't shrink
+     below its own content's intrinsic width -- a long, backslash-separated
+     Windows path (no natural word-break points) has no upper bound on that
+     intrinsic width, so without this the whole row (and the panel, and the
+     page) got forced wider than the container instead of wrapping. */
+  min-width: 0;
 }
 
 .progress-line:last-child {
@@ -781,7 +785,9 @@ input, textarea, select {
 
 .progress-line .msg {
   opacity: .9;
-  word-break: break-word;
+  overflow-wrap: anywhere;
+  min-width: 0;
+  flex: 1;
 }
 
 /* ---------- forms (add-new / remote) ---------- */

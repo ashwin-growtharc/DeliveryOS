@@ -186,19 +186,20 @@
             <p id="update-status" class="field-hint"></p>
           </div>
         </section>
-      </main>
 
-      <!-- Shared progress/log panel -- lives outside both Browse and Detail
-           so it's the one "log screen at the bottom" for whichever view
-           triggered the in-flight pull/push (Detail's action button, or a
-           row/Pull-all button in a Tag Folder view). Its own `hidden`
-           attribute (toggled by beginProgress/endProgress in app.js)
-           controls visibility, independent of view switching. Wrapped in
-           `.content-width` so its edges line up with #main's own
-           max-width/centering/side-padding -- being a sibling of <main>
-           (not inside it) means it otherwise stretches full window width,
-           misaligned with whatever view is showing above it. -->
-      <div class="content-width">
+        <!-- Shared progress/log panel -- a plain child of <main>, right
+             after every .view section, so it appears directly under
+             whichever view is showing (Detail, a Tag Folder, ...) instead
+             of detached at the very bottom of the window (#main has
+             flex:1, so a panel placed OUTSIDE <main> ends up pinned to the
+             bottom of the viewport regardless of how little content is
+             above it -- that was the bug). Its own `hidden` attribute
+             (toggled by beginProgress/endProgress in app.js) controls
+             visibility, independent of view switching -- it has no `view`
+             class, so showView()/showViewRaw() never touch it. Being a
+             normal child of #main also means it automatically gets #main's
+             own max-width/centering/side-padding, no separate wrapper
+             needed. -->
         <div id="detail-progress" class="progress-panel" hidden>
           <div class="progress-header">
             <span class="spinner" aria-hidden="true"></span>
@@ -206,7 +207,7 @@
           </div>
           <div id="progress-log" class="progress-log"></div>
         </div>
-      </div>
+      </main>
 
       <div id="toast-stack" class="toast-stack"></div>
     </div>
