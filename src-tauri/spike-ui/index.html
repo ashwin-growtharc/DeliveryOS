@@ -191,15 +191,21 @@
       <!-- Shared progress/log panel -- lives outside both Browse and Detail
            so it's the one "log screen at the bottom" for whichever view
            triggered the in-flight pull/push (Detail's action button, or a
-           row/Pull-all button in Browse's grouped tag results). Its own
-           `hidden` attribute (toggled by beginProgress/endProgress in
-           app.js) controls visibility, independent of view switching. -->
-      <div id="detail-progress" class="progress-panel" hidden>
-        <div class="progress-header">
-          <span class="spinner" aria-hidden="true"></span>
-          <span id="progress-status" class="progress-status">Working&hellip;</span>
+           row/Pull-all button in a Tag Folder view). Its own `hidden`
+           attribute (toggled by beginProgress/endProgress in app.js)
+           controls visibility, independent of view switching. Wrapped in
+           `.content-width` so its edges line up with #main's own
+           max-width/centering/side-padding -- being a sibling of <main>
+           (not inside it) means it otherwise stretches full window width,
+           misaligned with whatever view is showing above it. -->
+      <div class="content-width">
+        <div id="detail-progress" class="progress-panel" hidden>
+          <div class="progress-header">
+            <span class="spinner" aria-hidden="true"></span>
+            <span id="progress-status" class="progress-status">Working&hellip;</span>
+          </div>
+          <div id="progress-log" class="progress-log"></div>
         </div>
-        <div id="progress-log" class="progress-log"></div>
       </div>
 
       <div id="toast-stack" class="toast-stack"></div>

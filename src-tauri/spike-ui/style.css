@@ -230,6 +230,17 @@ input, textarea, select {
   padding: 24px 24px 60px;
 }
 
+/* Same horizontal box model as #main (max-width/centering/side-padding),
+   for elements that must line up with it but live outside <main> itself --
+   currently just the shared progress panel, see its comment in index.html. */
+.content-width {
+  max-width: 1080px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 0 24px;
+  box-sizing: border-box;
+}
+
 .view[hidden] {
   display: none;
 }

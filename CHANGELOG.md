@@ -4,6 +4,14 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- Fixed the shared progress/log panel's alignment being broken (full window
+  width, no longer lined up with the content above it) ever since it was
+  moved out of Detail's card to be shared across views. Wrapped it in a new
+  `.content-width` rule mirroring `#main`'s own max-width/centering/side-
+  padding exactly, so it lines up with whichever view (Detail, a Tag Folder,
+  ...) is showing above it, the way it did back when it only ever lived
+  inside Detail's own card.
+
 - Restyled the tag value list again: the plain chevron-list read as dated
   ("Windows XP style") and left most of the page empty. Now a card grid
   matching the app's own res-card look (shadow, rounded corners, hover
