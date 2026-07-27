@@ -43,10 +43,27 @@
             <button id="add-new-btn" class="btn btn-primary">+ Add new</button>
           </div>
           <div id="chips" class="chips"></div>
-          <div id="tag-chips" class="chips tag-chips"></div>
-          <button id="pull-all-btn" class="btn btn-sm" hidden></button>
+          <div class="tags-section">
+            <div id="tag-category-row" class="chips tag-category-row"></div>
+            <div id="tag-value-row" class="chips tag-value-row"></div>
+          </div>
           <div id="card-grid" class="grid"></div>
           <p id="browse-empty" class="empty-state" hidden>No artifacts match.</p>
+        </section>
+
+        <!-- Tag folder: opened by picking a tag VALUE (e.g. "stack: python")
+             in Browse -- its own navigable view (back button, like Detail),
+             not an inline filter of Browse's own grid. Lists every artifact
+             carrying that tag, grouped by kind, each with its own inline
+             action button; clicking a row opens the existing Detail view
+             unchanged. -->
+        <section id="view-tag-folder" class="view" hidden>
+          <button class="btn back-btn" data-view="browse">&larr; Back to Browse</button>
+          <div class="tag-folder-header">
+            <h2 id="tag-folder-title" class="section-title"></h2>
+            <button id="tag-folder-pull-all-btn" class="btn btn-sm" hidden></button>
+          </div>
+          <div id="tag-folder-results" class="grouped-results"></div>
         </section>
 
         <!-- Detail -->
@@ -89,14 +106,6 @@
             <div id="detail-push-status" class="push-status" hidden>
               <p id="detail-push-status-text" class="push-status-text"></p>
               <button id="detail-check-push-status-btn" class="btn btn-sm">Check push status</button>
-            </div>
-
-            <div id="detail-progress" class="progress-panel" hidden>
-              <div class="progress-header">
-                <span class="spinner" aria-hidden="true"></span>
-                <span id="progress-status" class="progress-status">Working&hellip;</span>
-              </div>
-              <div id="progress-log" class="progress-log"></div>
             </div>
           </div>
         </section>
@@ -178,6 +187,20 @@
           </div>
         </section>
       </main>
+
+      <!-- Shared progress/log panel -- lives outside both Browse and Detail
+           so it's the one "log screen at the bottom" for whichever view
+           triggered the in-flight pull/push (Detail's action button, or a
+           row/Pull-all button in Browse's grouped tag results). Its own
+           `hidden` attribute (toggled by beginProgress/endProgress in
+           app.js) controls visibility, independent of view switching. -->
+      <div id="detail-progress" class="progress-panel" hidden>
+        <div class="progress-header">
+          <span class="spinner" aria-hidden="true"></span>
+          <span id="progress-status" class="progress-status">Working&hellip;</span>
+        </div>
+        <div id="progress-log" class="progress-log"></div>
+      </div>
 
       <div id="toast-stack" class="toast-stack"></div>
     </div>

@@ -4,13 +4,18 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
-- Added tag-based bulk pull in the app: Browse now has a second chip row
-  built from every `tags.roles`/`tags.teams`/`tags.stacks` value across the
-  catalog (e.g. "stack: python"), independent of the existing Kind chip row
-  and combinable with it and search. Whenever the current filter has one or
-  more not-yet-pulled (or update-available) artifacts, a "Pull all (N)"
-  button appears and pulls all of them sequentially, showing which one it's
-  on. Answers the actual request: pulling "python" should pull every
+- Added tag-based bulk pull in the app, as its own navigable Tag Folder view
+  (not an inline filter of Browse's own grid). Browse gets a tag category row
+  (stack/role/project); picking one reveals that category's own values (e.g.
+  stack → python, java). Picking a value opens a dedicated view -- its own
+  "← Back to Browse", same pattern as Detail -- listing every artifact with
+  that tag grouped by kind (agent/skill/template/...), each row with its own
+  inline Pull/Push/Update button so acting on one doesn't require opening
+  Detail first, plus a "Pull all (N)" button for the whole folder. Clicking a
+  row opens the existing, unchanged Detail view. The shared progress/log
+  panel (previously only reachable from Detail) was moved to be page-level
+  so it lights up the same way regardless of which view triggered the
+  pull/push. Answers the actual request: pulling "python" should pull every
   python-tagged agent/skill/template, not just one artifact at a time by id.
   Artifacts that are `edited_locally`/`both_changed` are never swept into a
   bulk pull -- those still go through Detail's existing per-artifact

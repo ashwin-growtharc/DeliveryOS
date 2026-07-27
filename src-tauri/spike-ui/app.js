@@ -13,9 +13,11 @@
 
   const PROJECT_DIR_KEY = 'deliveryos.projectDir';
 
-  // Singular display prefix for each of manifest.tags's own (plural) keys --
-  // e.g. a `stacks: ['python']` tag renders as the chip "stack: python".
-  const TAG_CATEGORY_LABEL = { roles: 'role', teams: 'team', stacks: 'stack' };
+  // Display order + label for each of manifest.tags's own (plural) keys --
+  // e.g. a `stacks: ['python']` tag shows under the "stack" category.
+  // "project" (not "team") is the deliberate display label for `teams`.
+  const TAG_CATEGORIES = ['stacks', 'roles', 'teams'];
+  const TAG_CATEGORY_LABEL = { stacks: 'stack', roles: 'role', teams: 'project' };
 
   const STATUS_LABELS = {
     not_pulled: 'Not pulled',
@@ -34,9 +36,13 @@
     catalog: [],
     search: '',
     activeKind: 'All',
-    // `${category}:${value}` (category is one of manifest.tags's own keys:
-    // 'roles' | 'teams' | 'stacks'), or 'All'. See renderTagChips/filteredEntries.
-    activeTag: 'All',
+    // Two-level tag filter: pick a category first (stack/role/project),
+    // which reveals that category's own values (e.g. stack -> python, java)
+    // in Browse; picking a value navigates into the dedicated Tag Folder
+    // view (openTagFolder/renderTagFolder), grouped by kind -- not an
+    // inline filter of Browse's own grid.
+    activeTagCategory: null, // 'stacks' | 'roles' | 'teams' | null
+    activeTagValue: null,
     selectedKey: null, // `${id}::${remoteName}` of the entry shown in Detail
     remotes: [],
   };
@@ -272,69 +278,86 @@
       container.appendChild(chip);
     }
 
-    renderTagChips();
+    renderTagCategoryRow();
+    renderTagValueRow();
   }
 
-  /** Every `${category}:${value}` pair present across the current catalog's
-   * `manifest.tags.{roles,teams,stacks}`, deduped and sorted -- one chip per
-   * pair, e.g. tags.stacks: ['python'] on any entry produces a "stack:
-   * python" chip. Selecting one filters Browse down to every artifact
-   * carrying that exact tag, across every kind/remote -- the actual feature
-   * being built here: "pull all the python-tagged artifacts" starts with
-   * finding them all in one place, regardless of what kind of artifact
-   * (agent, skill, template, ...) each one is. */
-  function renderTagChips() {
-    const pairs = new Set();
-    for (const entry of state.catalog) {
-      const tags = entry.manifest.tags ?? {};
-      for (const category of Object.keys(TAG_CATEGORY_LABEL)) {
-        for (const value of tags[category] ?? []) {
-          pairs.add(`${category}:${value}`);
-        }
-      }
-    }
+  /** Top tag row: one chip per tags category that actually has at least one
+   * value somewhere in the catalog (stack/role/project), plus "All tags".
+   * Picking a category doesn't filter anything by itself -- it just reveals
+   * that category's own values in renderTagValueRow, e.g. clicking "stack"
+   * reveals "python", "java", etc. underneath. Picking the same category
+   * again collapses it back (and clears any value already picked under it). */
+  function renderTagCategoryRow() {
+    const presentCategories = TAG_CATEGORIES.filter((category) =>
+      state.catalog.some((entry) => (entry.manifest.tags?.[category] ?? []).length > 0),
+    );
 
-    const container = $('tag-chips');
+    const container = $('tag-category-row');
     container.innerHTML = '';
 
     const allChip = document.createElement('span');
-    allChip.className = `chip ${state.activeTag === 'All' ? 'active' : ''}`;
+    allChip.className = `chip ${state.activeTagCategory === null ? 'active' : ''}`;
     allChip.textContent = 'All tags';
     allChip.addEventListener('click', () => {
-      state.activeTag = 'All';
-      renderTagChips();
+      state.activeTagCategory = null;
+      state.activeTagValue = null;
+      renderTagCategoryRow();
+      renderTagValueRow();
       renderCards();
     });
     container.appendChild(allChip);
 
-    for (const pair of Array.from(pairs).sort()) {
-      const [category, value] = pair.split(':');
+    for (const category of presentCategories) {
       const chip = document.createElement('span');
-      chip.className = `chip ${state.activeTag === pair ? 'active' : ''}`;
-      chip.textContent = `${TAG_CATEGORY_LABEL[category]}: ${value}`;
+      chip.className = `chip ${state.activeTagCategory === category ? 'active' : ''}`;
+      chip.textContent = TAG_CATEGORY_LABEL[category];
       chip.addEventListener('click', () => {
-        state.activeTag = state.activeTag === pair ? 'All' : pair;
-        renderTagChips();
+        const collapsing = state.activeTagCategory === category;
+        state.activeTagCategory = collapsing ? null : category;
+        state.activeTagValue = null;
+        renderTagCategoryRow();
+        renderTagValueRow();
         renderCards();
       });
       container.appendChild(chip);
     }
   }
 
+  /** Second tag row: every distinct value the active category has across
+   * the catalog (e.g. category 'stacks' -> "python", "java", ...). Empty/
+   * hidden when no category is selected. Picking a value navigates into the
+   * dedicated Tag Folder view (openTagFolder) -- it's its own page, like
+   * Detail, not an inline filter of Browse's own grid. */
+  function renderTagValueRow() {
+    const container = $('tag-value-row');
+    container.innerHTML = '';
+
+    if (!state.activeTagCategory) {
+      return;
+    }
+
+    const values = Array.from(
+      new Set(
+        state.catalog.flatMap((entry) => entry.manifest.tags?.[state.activeTagCategory] ?? []),
+      ),
+    ).sort();
+
+    for (const value of values) {
+      const chip = document.createElement('span');
+      chip.className = 'chip';
+      chip.textContent = value;
+      chip.addEventListener('click', () => openTagFolder(state.activeTagCategory, value));
+      container.appendChild(chip);
+    }
+  }
+
   function filteredEntries() {
     const search = state.search.trim().toLowerCase();
-    const [activeTagCategory, activeTagValue] =
-      state.activeTag === 'All' ? [null, null] : state.activeTag.split(':');
 
     return state.catalog.filter((entry) => {
       if (state.activeKind !== 'All' && entry.manifest.kind !== state.activeKind) {
         return false;
-      }
-      if (activeTagCategory) {
-        const values = entry.manifest.tags?.[activeTagCategory] ?? [];
-        if (!values.includes(activeTagValue)) {
-          return false;
-        }
       }
       if (search.length === 0) {
         return true;
@@ -378,8 +401,8 @@
     return status === 'not_pulled' || status === 'update_available';
   }
 
-  function renderPullAllButton(entries) {
-    const btn = $('pull-all-btn');
+  function renderTagFolderPullAllButton(entries) {
+    const btn = $('tag-folder-pull-all-btn');
     const pullable = entries.filter(isBulkPullable);
     if (pullable.length === 0) {
       btn.hidden = true;
@@ -392,9 +415,9 @@
     }
   }
 
-  async function handlePullAll() {
-    const btn = $('pull-all-btn');
-    const pullable = filteredEntries().filter(isBulkPullable);
+  async function handleTagFolderPullAll() {
+    const btn = $('tag-folder-pull-all-btn');
+    const pullable = entriesForTag(state.activeTagCategory, state.activeTagValue).filter(isBulkPullable);
     if (pullable.length === 0) {
       return;
     }
@@ -423,8 +446,102 @@
       for (const failure of failures) {
         toastError(new Error(failure));
       }
+      // Catalog state (localStatus) changed for whatever was just pulled --
+      // loadCatalog() refreshes state.catalog and Browse's own (currently
+      // hidden, harmless to update) grid; this view needs its own explicit
+      // re-render from that same fresh data since it isn't part of Browse.
       await loadCatalog();
+      renderTagFolder();
     });
+  }
+
+  /** Every entry in the catalog carrying `category:value` (e.g.
+   * 'stacks','python') -- the actual feature requested: find every
+   * python-tagged artifact, regardless of kind/remote, ignoring whatever
+   * Kind chip/search happens to be active in Browse (this is its own page,
+   * not a filter layered on top of Browse's grid). */
+  function entriesForTag(category, value) {
+    return state.catalog.filter((entry) => (entry.manifest.tags?.[category] ?? []).includes(value));
+  }
+
+  function openTagFolder(category, value) {
+    state.activeTagCategory = category;
+    state.activeTagValue = value;
+    resetProgressPanel();
+    renderTagFolder();
+    showViewRaw('tag-folder');
+  }
+
+  /** Grouped-by-kind results for the active tag folder -- one section per
+   * kind ("skill", "agent", ...) with each artifact as a row carrying its
+   * own inline action button (Pull/Push/Update), so acting on one doesn't
+   * require opening Detail first. Reuses `runArtifactAction` unchanged --
+   * it only ever needed a button element and an entry, never anything
+   * Detail-specific -- so the shared progress/log panel (moved out to be
+   * page-level, see index.html) lights up here exactly the same way it
+   * does from Detail. Clicking a row (not its button) opens the existing,
+   * unchanged Detail view. */
+  function renderTagFolder() {
+    const entries = entriesForTag(state.activeTagCategory, state.activeTagValue);
+    $('tag-folder-title').textContent =
+      `${TAG_CATEGORY_LABEL[state.activeTagCategory]}: ${state.activeTagValue} (${entries.length})`;
+    renderTagFolderPullAllButton(entries);
+
+    const container = $('tag-folder-results');
+    container.innerHTML = '';
+
+    const byKind = new Map();
+    for (const entry of entries) {
+      const kind = entry.manifest.kind;
+      if (!byKind.has(kind)) {
+        byKind.set(kind, []);
+      }
+      byKind.get(kind).push(entry);
+    }
+
+    for (const kind of Array.from(byKind.keys()).sort()) {
+      const group = byKind.get(kind);
+
+      const groupEl = document.createElement('div');
+      groupEl.className = 'kind-group';
+      groupEl.innerHTML = `
+        <div class="kind-group-header">${escapeHtml(kind)} <span class="count">(${group.length})</span></div>
+      `;
+
+      const list = document.createElement('div');
+      list.className = 'kind-group-list';
+
+      for (const entry of group) {
+        const status = displayStatus(entry);
+        const row = document.createElement('div');
+        row.className = 'kind-group-row';
+        row.innerHTML = `
+          <div class="row-main">
+            <span class="name">${escapeHtml(entry.manifest.id)}</span>
+            <span class="badge ${status}">${STATUS_LABELS[status]}</span>
+            <span class="summary">${escapeHtml(entry.manifest.description)}</span>
+          </div>
+        `;
+        row.addEventListener('click', () => openDetail(entry));
+
+        const action = actionButtonFor(entry);
+        if (action) {
+          const btn = document.createElement('button');
+          btn.className = 'btn btn-sm';
+          btn.textContent = action.label;
+          btn.addEventListener('click', (ev) => {
+            ev.stopPropagation(); // don't also trigger the row's openDetail
+            void runArtifactAction(entry, action.action, btn);
+          });
+          row.appendChild(btn);
+        }
+
+        list.appendChild(row);
+      }
+
+      groupEl.appendChild(list);
+      container.appendChild(groupEl);
+    }
   }
 
   function renderCards() {
@@ -432,7 +549,6 @@
     const grid = $('card-grid');
     grid.innerHTML = '';
     $('browse-empty').hidden = entries.length !== 0;
-    renderPullAllButton(entries);
 
     for (const entry of entries) {
       const card = document.createElement('div');
@@ -1079,7 +1195,7 @@
     $('refresh-btn').addEventListener('click', () => void refreshCatalogFromRemotes());
     $('check-artifact-updates-btn').addEventListener('click', () => void handleCheckForArtifactUpdates());
     $('add-new-btn').addEventListener('click', () => showView('addnew'));
-    $('pull-all-btn').addEventListener('click', () => void handlePullAll());
+    $('tag-folder-pull-all-btn').addEventListener('click', () => void handleTagFolderPullAll());
     $('back-to-browse-btn').addEventListener('click', () => showView('browse'));
 
     $('search-input').addEventListener('input', (ev) => {
