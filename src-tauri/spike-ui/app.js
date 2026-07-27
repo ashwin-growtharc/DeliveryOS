@@ -339,7 +339,14 @@
    * as a grid of cards (matching the app's own res-card look -- shadow,
    * hover lift), each showing how many artifacts carry it. Each card
    * navigates into its own Tag Folder view (openTagFolder). Empty/hidden
-   * when no category is selected. */
+   * when no category is selected.
+   *
+   * Deduped case-insensitively (`.toLowerCase()`) -- tag values come from
+   * free-text comma-separated input (Add New's Stack/Team fields, or the
+   * CLI's --stacks/--teams flags), so "python" and "Python" typed on two
+   * different pushes must still land in the same folder, not two separate
+   * ones. The lowercase form is also what's actually displayed, matching
+   * `entriesForTag`'s own case-insensitive matching below. */
   function renderTagValueRow() {
     const container = $('tag-value-row');
     container.innerHTML = '';
@@ -350,7 +357,9 @@
 
     const values = Array.from(
       new Set(
-        state.catalog.flatMap((entry) => entry.manifest.tags?.[state.activeTagCategory] ?? []),
+        state.catalog
+          .flatMap((entry) => entry.manifest.tags?.[state.activeTagCategory] ?? [])
+          .map((value) => value.toLowerCase()),
       ),
     ).sort();
 
@@ -489,9 +498,14 @@
    * 'stacks','python') -- the actual feature requested: find every
    * python-tagged artifact, regardless of kind/remote, ignoring whatever
    * Kind chip/search happens to be active in Browse (this is its own page,
-   * not a filter layered on top of Browse's grid). */
+   * not a filter layered on top of Browse's grid). Case-insensitive for the
+   * same reason renderTagValueRow dedupes case-insensitively -- "python" and
+   * "Python" are the same folder, not two. */
   function entriesForTag(category, value) {
-    return state.catalog.filter((entry) => (entry.manifest.tags?.[category] ?? []).includes(value));
+    const target = value.toLowerCase();
+    return state.catalog.filter((entry) =>
+      (entry.manifest.tags?.[category] ?? []).some((v) => v.toLowerCase() === target),
+    );
   }
 
   function openTagFolder(category, value) {
@@ -1041,10 +1055,18 @@
     }
   }
 
+  /** Splits a comma-separated field (roles/stacks/teams) into trimmed,
+   * lowercased values -- lowercased so a newly-proposed artifact's tags are
+   * clean and canonical from the start (typing "Python" here still lands in
+   * the same "stack: python" folder as everything else, not a separate
+   * "stack: Python" one). Browse's own tag matching is also
+   * case-insensitive (see entriesForTag/renderTagValueRow) as a second line
+   * of defense for tags that arrive from outside this form (the CLI, or an
+   * existing manifest edited by hand). */
   function parseCommaList(value) {
     return value
       .split(',')
-      .map((s) => s.trim())
+      .map((s) => s.trim().toLowerCase())
       .filter((s) => s.length > 0);
   }
 
@@ -1066,6 +1088,8 @@
     const description = $('f-description').value.trim();
     const owner = $('f-owner').value.trim();
     const roles = parseCommaList($('f-roles').value);
+    const stacks = parseCommaList($('f-stacks').value);
+    const teams = parseCommaList($('f-teams').value);
     const remote = $('f-remote').value;
     const postInstall = $('f-post-install').value.trim() || undefined;
 
@@ -1095,6 +1119,8 @@
             owner,
             description,
             roles,
+            stacks,
+            teams,
             postInstall,
           },
         });

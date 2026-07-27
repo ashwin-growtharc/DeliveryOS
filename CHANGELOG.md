@@ -4,6 +4,23 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- Add New (propose-new) could only tag a new artifact with `roles` -- there
+  was no way to set `stacks`/`teams` from the app at all, so anything
+  proposed through the UI could never show up under Browse's "stack" or
+  "project" tag folders. Added matching Stack and Team/project fields to the
+  form.
+
+- Tag values (stacks/roles/teams) now normalize case consistently end to
+  end: "python" and "Python" pushed on different occasions previously
+  produced two separate tag folders instead of one. Add New's form fields
+  and the CLI's `--roles`/`--teams`/`--stacks` flags now lowercase on the
+  way in (canonical data at the source), and Browse's own tag
+  matching/deduping (`entriesForTag`, the tag value list) is
+  case-insensitive as a second line of defense for tags from outside this
+  app (an existing manifest, a hand-edited one). Covered by a new unit test
+  for the CLI's flag-to-`PushOptions` mapping, which had no test coverage
+  at all before this.
+
 - Fixed the shared progress panel staying visible after navigating away
   from the artifact/folder it belonged to. `openDetail`/`openTagFolder`
   already reset it on the way *in*; nothing reset it on the way *out* --

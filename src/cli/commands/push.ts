@@ -1,13 +1,17 @@
 import { Command } from 'commander';
 import { pushArtifact, PushOptions } from '../../engine/push/push';
 
-/** Splits a comma-separated CLI flag value into a trimmed, non-empty string
- * array, or returns undefined if the flag wasn't passed at all. */
+/** Splits a comma-separated --roles/--teams/--stacks flag into trimmed,
+ * lowercased values -- lowercased so "python" and "Python" pushed on
+ * different occasions land under the same tag, not two distinct ones (the
+ * app's Browse view groups artifacts by these tags case-insensitively; this
+ * keeps the underlying manifest data itself canonical rather than relying
+ * solely on the app-side matching to paper over inconsistent casing). */
 function parseList(value?: string): string[] | undefined {
   if (value === undefined) return undefined;
   return value
     .split(',')
-    .map((s) => s.trim())
+    .map((s) => s.trim().toLowerCase())
     .filter((s) => s.length > 0);
 }
 

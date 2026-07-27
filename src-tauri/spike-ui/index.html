@@ -152,6 +152,16 @@
               <input id="f-roles" type="text" placeholder="pm, engagement-lead" />
             </div>
             <div class="field">
+              <label for="f-stacks">Stack (comma-separated)</label>
+              <input id="f-stacks" type="text" placeholder="python, typescript" />
+              <p class="field-hint">Shows up under Browse's "stack" tag folders (e.g. "stack: python") -- leave blank if this isn't tied to a particular stack.</p>
+            </div>
+            <div class="field">
+              <label for="f-teams">Team / project (comma-separated)</label>
+              <input id="f-teams" type="text" placeholder="engagement, platform" />
+              <p class="field-hint">Shows up under Browse's "project" tag folders.</p>
+            </div>
+            <div class="field">
               <label for="f-post-install">Setup command (optional)</label>
               <input id="f-post-install" type="text" placeholder="e.g. npm install, pip install -e &quot;.[dev]&quot;" />
               <p class="field-hint">Runs automatically right after someone pulls this, in the folder it lands in. Leave blank if nothing needs to be installed.</p>
