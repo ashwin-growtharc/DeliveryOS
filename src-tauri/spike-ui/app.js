@@ -228,8 +228,10 @@
     } else if (view === 'settings') {
       void loadRemotesForSettings();
     } else if (view === 'addnew') {
+      resetAddNewForm();
       void loadRemotesForAddNewSelect();
-      populateKindSelect();
+      populateKindPicker();
+      resetWizard();
     }
   }
 
@@ -1378,6 +1380,15 @@
     editRolesPicker = createTagPicker($('edit-roles-picker'));
     editStacksPicker = createTagPicker($('edit-stacks-picker'));
     editTeamsPicker = createTagPicker($('edit-teams-picker'));
+
+    addNewKindPicker = createSingleChipPicker($('f-kind-picker'));
+    addNewKindPicker.onChange((value) => {
+      $('f-kind-custom').hidden = value !== NEW_KIND_OPTION;
+      if (!$('f-kind-custom').hidden) {
+        $('f-kind-custom').focus();
+      }
+    });
+    addNewRemotePicker = createSingleChipPicker($('f-remote-picker'));
   }
 
   /** Refreshes every tag picker's suggestion list from the current catalog
@@ -1396,83 +1407,255 @@
     editTeamsPicker.setSuggestions(teams);
   }
 
-  // ---------- add new: kind select ----------
+  // ---------- single-select chip picker (Kind, Remote) ----------
+
+  /** A single-select equivalent of createTagPicker, styled as clickable
+   * `.chip` buttons (the same look Browse's own Kind filter uses) instead
+   * of a native <select> -- for low-cardinality fields where seeing every
+   * option at a glance beats hiding them behind a dropdown. `container`
+   * is taken over entirely. */
+  function createSingleChipPicker(container) {
+    container.classList.add('chip-picker');
+    let options = []; // { value, label }[]
+    let selected = null;
+    let onChangeCb = null;
+
+    function render() {
+      container.innerHTML = '';
+      for (const opt of options) {
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = `chip ${selected === opt.value ? 'active' : ''}`;
+        chip.textContent = opt.label;
+        chip.addEventListener('click', () => {
+          selected = opt.value;
+          render();
+          onChangeCb?.(selected);
+        });
+        container.appendChild(chip);
+      }
+    }
+
+    return {
+      setOptions(nextOptions, fallbackSelected) {
+        options = nextOptions;
+        if (!options.some((opt) => opt.value === selected)) {
+          selected = fallbackSelected ?? options[0]?.value ?? null;
+        }
+        render();
+      },
+      /** Selects `value`, adding it as a real option first if it isn't one
+       * already (e.g. a Scan candidate's kind that doesn't exist in the
+       * currently-loaded catalog yet). `label` defaults to `value` itself. */
+      selectValue(value, label) {
+        if (!options.some((opt) => opt.value === value)) {
+          options = [...options, { value, label: label ?? value }];
+        }
+        selected = value;
+        render();
+      },
+      getValue: () => selected,
+      onChange(cb) {
+        onChangeCb = cb;
+      },
+    };
+  }
+
+  // ---------- add new: kind + remote pickers ----------
 
   const NEW_KIND_OPTION = '__new_kind__';
 
-  /** (Re)populates Add New's Kind <select> from every distinct kind already
-   * in the catalog, plus a trailing "+ New kind..." option -- kind is
+  let addNewKindPicker, addNewRemotePicker;
+
+  /** (Re)populates Add New's Kind chip-picker from every distinct kind
+   * already in the catalog, plus a trailing "+ New kind..." chip -- kind is
    * open-ended by design (see ARCHITECTURE.md), so this is a convenience
    * for the common case (reusing "agent", "skill", ...) that still allows
-   * inventing a brand-new one via the custom text input it reveals.
-   * Preserves the current selection across a catalog refresh when it's
-   * still a valid option. */
-  function populateKindSelect() {
-    const select = $('f-kind');
-    const previous = select.value;
+   * inventing a brand-new one via the custom text input it reveals. */
+  function populateKindPicker() {
     const kinds = Array.from(new Set(state.catalog.map((e) => e.manifest.kind))).sort();
-
-    select.innerHTML = '';
-    for (const kind of kinds) {
-      const option = document.createElement('option');
-      option.value = kind;
-      option.textContent = kind;
-      select.appendChild(option);
-    }
-    const newKindOption = document.createElement('option');
-    newKindOption.value = NEW_KIND_OPTION;
-    newKindOption.textContent = '+ New kind…';
-    select.appendChild(newKindOption);
-
-    select.value = kinds.includes(previous) ? previous : (kinds[0] ?? NEW_KIND_OPTION);
-    $('f-kind-custom').hidden = select.value !== NEW_KIND_OPTION;
-  }
-
-  /** Selects `kind` in Add New's Kind <select>, adding it as a real option
-   * first if it isn't one already (e.g. a Scan candidate's kind, which is
-   * always one of agent/skill/command/rule but may not yet exist anywhere
-   * in the currently-loaded catalog). */
-  function setKindSelectValue(kind) {
-    const select = $('f-kind');
-    const exists = Array.from(select.options).some((opt) => opt.value === kind);
-    if (!exists) {
-      const option = document.createElement('option');
-      option.value = kind;
-      option.textContent = kind;
-      select.insertBefore(option, select.lastElementChild); // before "+ New kind..."
-    }
-    select.value = kind;
-    $('f-kind-custom').hidden = true;
+    addNewKindPicker.setOptions(
+      [...kinds.map((k) => ({ value: k, label: k })), { value: NEW_KIND_OPTION, label: '+ New kind…' }],
+      kinds[0] ?? NEW_KIND_OPTION,
+    );
+    $('f-kind-custom').hidden = addNewKindPicker.getValue() !== NEW_KIND_OPTION;
   }
 
   /** Resolves Add New's Kind field to a plain string for submission --
    * either the selected existing kind, or whatever was typed into the
    * custom-kind text input when "+ New kind..." is selected. */
   function resolveKindFieldValue() {
-    const select = $('f-kind').value;
-    return select === NEW_KIND_OPTION ? $('f-kind-custom').value.trim() : select;
+    const value = addNewKindPicker.getValue();
+    return value === NEW_KIND_OPTION ? $('f-kind-custom').value.trim() : (value ?? '');
   }
 
   // ---------- add new ----------
 
   async function loadRemotesForAddNewSelect() {
-    const select = $('f-remote');
-    select.innerHTML = '';
     try {
       state.remotes = await call('remote.list', {});
     } catch (err) {
       toastError(err);
       state.remotes = [];
     }
-    for (const remote of state.remotes) {
-      const option = document.createElement('option');
-      option.value = remote.name;
-      option.textContent = remote.name;
-      select.appendChild(option);
-    }
+    addNewRemotePicker.setOptions(state.remotes.map((r) => ({ value: r.name, label: r.name })));
+    $('f-remote-empty-hint').hidden = state.remotes.length !== 0;
   }
 
   let pendingPayloadPath = null;
+
+  /** Clears every Add New field back to blank -- shared by the plain "+ Add
+   * new" entry point (a fresh proposal) and a successful submit (ready for
+   * the next one). Deliberately NOT used by openAddNewFromScanCandidate,
+   * which resets the same fields but then immediately re-populates several
+   * of them from the scan candidate. */
+  function resetAddNewForm() {
+    $('addnew-form').reset();
+    addNewRolesPicker.setValues([]);
+    addNewStacksPicker.setValues([]);
+    addNewTeamsPicker.setValues([]);
+    $('f-kind-custom').value = '';
+    pendingPayloadPath = null;
+    $('payload-path-display').textContent = 'No file or folder selected';
+  }
+
+  // ---------- add new: wizard navigation ----------
+
+  /** One step per field/group, in the order they're shown -- matches the
+   * `.wizard-step[data-step="..."]` elements in index.html. 'review' is
+   * always last: a summary of everything entered, with the real Propose
+   * submit button. */
+  const ADDNEW_STEPS = [
+    'id',
+    'kind',
+    'payload',
+    'description',
+    'owner',
+    'roles',
+    'stacks',
+    'teams',
+    'install-target',
+    'post-install',
+    'remote',
+    'review',
+  ];
+
+  const ADDNEW_STEP_LABELS = {
+    id: 'an Artifact ID',
+    kind: 'a Kind',
+    payload: 'a payload file or folder',
+    description: 'a Description',
+    owner: 'an Owner',
+    remote: 'a Remote',
+  };
+
+  let wizardStepIndex = 0;
+
+  /** Only the required steps actually block "Next" -- roles/stacks/teams/
+   * install-target/post-install are all optional, same as they always
+   * were, so Next just moves on for those without checking anything. */
+  function validateWizardStep(stepId) {
+    switch (stepId) {
+      case 'id':
+        return /^[a-z0-9]+(-[a-z0-9]+)*$/.test($('f-id').value.trim());
+      case 'kind':
+        return resolveKindFieldValue().length > 0;
+      case 'payload':
+        return Boolean(pendingPayloadPath);
+      case 'description':
+        return $('f-description').value.trim().length > 0;
+      case 'owner':
+        return $('f-owner').value.trim().length > 0;
+      case 'remote':
+        return Boolean(addNewRemotePicker.getValue());
+      default:
+        return true;
+    }
+  }
+
+  function renderWizardStep() {
+    const stepId = ADDNEW_STEPS[wizardStepIndex];
+    for (const el of document.querySelectorAll('.wizard-step')) {
+      el.hidden = el.dataset.step !== stepId;
+    }
+    $('wizard-progress-label').textContent = `Step ${wizardStepIndex + 1} of ${ADDNEW_STEPS.length}`;
+    $('wizard-progress-bar').style.width = `${((wizardStepIndex + 1) / ADDNEW_STEPS.length) * 100}%`;
+    $('wizard-back-btn').hidden = wizardStepIndex === 0;
+
+    const isReview = stepId === 'review';
+    $('wizard-next-btn').hidden = isReview;
+    $('addnew-submit-btn').hidden = !isReview;
+    if (isReview) {
+      renderAddNewReview();
+    }
+  }
+
+  function resetWizard() {
+    wizardStepIndex = 0;
+    renderWizardStep();
+  }
+
+  function goToWizardStep(stepId) {
+    const index = ADDNEW_STEPS.indexOf(stepId);
+    if (index !== -1) {
+      wizardStepIndex = index;
+      renderWizardStep();
+    }
+  }
+
+  function wizardGoNext() {
+    const stepId = ADDNEW_STEPS[wizardStepIndex];
+    if (!validateWizardStep(stepId)) {
+      toastError(new Error(`Enter ${ADDNEW_STEP_LABELS[stepId] ?? stepId} before continuing.`));
+      return;
+    }
+    if (wizardStepIndex < ADDNEW_STEPS.length - 1) {
+      wizardStepIndex += 1;
+      renderWizardStep();
+    }
+  }
+
+  function wizardGoBack() {
+    if (wizardStepIndex > 0) {
+      wizardStepIndex -= 1;
+      renderWizardStep();
+    }
+  }
+
+  /** The Review step's summary -- every field's current value, each with
+   * its own "Edit" button jumping straight back to that step rather than
+   * forcing a click through every step in between. */
+  function renderAddNewReview() {
+    const rows = [
+      ['id', 'Artifact ID', $('f-id').value.trim()],
+      ['kind', 'Kind', resolveKindFieldValue()],
+      ['payload', 'Payload', pendingPayloadPath || '(none chosen)'],
+      ['description', 'Description', $('f-description').value.trim()],
+      ['owner', 'Owner', $('f-owner').value.trim()],
+      ['roles', 'Roles', addNewRolesPicker.getValues().join(', ') || '(none)'],
+      ['stacks', 'Stack', addNewStacksPicker.getValues().join(', ') || '(none)'],
+      ['teams', 'Team / project', addNewTeamsPicker.getValues().join(', ') || '(none)'],
+      ['install-target', 'Install target', $('f-install-target').value.trim() || '(default)'],
+      ['post-install', 'Setup command', $('f-post-install').value.trim() || '(none)'],
+      ['remote', 'Remote', addNewRemotePicker.getValue() || '(none)'],
+    ];
+
+    const container = $('addnew-review');
+    container.innerHTML = '';
+    for (const [stepId, label, value] of rows) {
+      const row = document.createElement('div');
+      row.className = 'wizard-review-row';
+      row.innerHTML = `
+        <span class="wizard-review-label"></span>
+        <span class="wizard-review-value"></span>
+        <button type="button" class="btn btn-ghost btn-sm">Edit</button>
+      `;
+      row.querySelector('.wizard-review-label').textContent = label;
+      row.querySelector('.wizard-review-value').textContent = value;
+      row.querySelector('button').addEventListener('click', () => goToWizardStep(stepId));
+      container.appendChild(row);
+    }
+  }
 
   async function pickPayload(directory) {
     try {
@@ -1497,6 +1680,7 @@
     }
     if (!pendingPayloadPath) {
       toastError(new Error('Choose a payload file or folder first.'));
+      goToWizardStep('payload');
       return;
     }
 
@@ -1507,7 +1691,7 @@
     const roles = addNewRolesPicker.getValues();
     const stacks = addNewStacksPicker.getValues();
     const teams = addNewTeamsPicker.getValues();
-    const remote = $('f-remote').value;
+    const remote = addNewRemotePicker.getValue();
     const installTarget = $('f-install-target').value.trim() || undefined;
     const postInstall = $('f-post-install').value.trim() || undefined;
 
@@ -1516,15 +1700,42 @@
     // crash ("not a valid branch name") -- caught here, before the push even
     // starts, with a message that says why instead of surfacing a raw git
     // error.
+    //
+    // Every one of these re-checks what validateWizardStep already
+    // enforces per-step on the way to Review -- necessary because
+    // openAddNewFromScanCandidate jumps straight to Review (skipping the
+    // step-by-step Next validation), and because a required field on a
+    // *hidden* wizard step is exempt from the browser's own native
+    // validation (an element not being rendered is barred from constraint
+    // validation), so nothing else would catch a blank one here. Each
+    // failure also jumps back to the offending step so there's something
+    // to actually fix, not just a toast.
     if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(id)) {
       toastError(new Error(
         `Artifact ID "${id}" must be lowercase letters, numbers, and hyphens only `
         + '(e.g. "growtharc-brand-guidelines"), no spaces.',
       ));
+      goToWizardStep('id');
       return;
     }
     if (!kind) {
       toastError(new Error('Enter a kind (or pick an existing one).'));
+      goToWizardStep('kind');
+      return;
+    }
+    if (!description) {
+      toastError(new Error('Enter a description.'));
+      goToWizardStep('description');
+      return;
+    }
+    if (!owner) {
+      toastError(new Error('Enter an owner.'));
+      goToWizardStep('owner');
+      return;
+    }
+    if (!remote) {
+      toastError(new Error('Register a remote first (Settings), then pick one.'));
+      goToWizardStep('remote');
       return;
     }
 
@@ -1548,13 +1759,7 @@
           },
         });
         toastSuccess(`Proposed ${id}: opened PR #${result.number} (${result.url})`);
-        $('addnew-form').reset();
-        addNewRolesPicker.setValues([]);
-        addNewStacksPicker.setValues([]);
-        addNewTeamsPicker.setValues([]);
-        $('f-kind-custom').value = '';
-        pendingPayloadPath = null;
-        $('payload-path-display').textContent = 'No file or folder selected';
+        resetAddNewForm();
         showView('browse');
       } catch (err) {
         toastError(err);
@@ -1697,21 +1902,31 @@
   async function openAddNewFromScanCandidate(candidate, remoteName) {
     resetProgressPanel();
     showViewRaw('addnew');
+    resetAddNewForm();
+    populateKindPicker();
+    // Synchronously hides every step but the first, same as a fresh visit
+    // would -- without this, `#view-addnew` becomes visible right above
+    // with every .wizard-step still unhidden from before renderWizardStep
+    // has ever run, and the `await` below would leave that fully-stacked
+    // view flashing on screen until goToWizardStep('review') finally runs.
+    resetWizard();
     await loadRemotesForAddNewSelect();
 
-    $('addnew-form').reset();
-    populateKindSelect();
-    addNewRolesPicker.setValues([]);
-    addNewStacksPicker.setValues([]);
-    addNewTeamsPicker.setValues([]);
     $('f-id').value = candidate.id;
-    setKindSelectValue(candidate.kind);
+    addNewKindPicker.selectValue(candidate.kind);
     $('f-description').value = candidate.description ?? '';
     $('f-install-target').value = candidate.installTarget;
-    $('f-remote').value = remoteName;
+    addNewRemotePicker.selectValue(remoteName);
 
     pendingPayloadPath = candidate.payloadPath;
     $('payload-path-display').textContent = candidate.payloadPath;
+    // Jump straight to Review -- everything a scan candidate can prefill is
+    // already filled in (roles/stacks/teams are deliberately left blank for
+    // manual review, same as before), so forcing a click through 9 empty-
+    // looking steps just to reach Propose would be worse than the old flat
+    // form, not better. The Edit button on any review row still jumps back
+    // to fill in something more, roles/stacks/teams included.
+    goToWizardStep('review');
   }
 
   // ---------- settings ----------
@@ -1914,11 +2129,26 @@
     $('addnew-form').addEventListener('submit', (ev) => void submitAddNew(ev));
     $('pick-payload-file-btn').addEventListener('click', () => void pickPayload(false));
     $('pick-payload-dir-btn').addEventListener('click', () => void pickPayload(true));
-    $('f-kind').addEventListener('change', () => {
-      $('f-kind-custom').hidden = $('f-kind').value !== NEW_KIND_OPTION;
-      if (!$('f-kind-custom').hidden) {
-        $('f-kind-custom').focus();
+
+    $('wizard-next-btn').addEventListener('click', () => wizardGoNext());
+    $('wizard-back-btn').addEventListener('click', () => wizardGoBack());
+    // Enter anywhere in the form advances to the next step instead of
+    // submitting early -- except inside a tag picker's own text input,
+    // where Enter already means "commit this chip, keep typing the next
+    // one" (see createTagPicker), and except on the Review step, where
+    // Enter doing nothing is safer than accidentally proposing something.
+    $('addnew-form').addEventListener('keydown', (ev) => {
+      if (ev.key !== 'Enter') {
+        return;
       }
+      if (ev.target.classList.contains('tag-picker-input') || ev.target.tagName === 'TEXTAREA') {
+        return;
+      }
+      if (ADDNEW_STEPS[wizardStepIndex] === 'review') {
+        return;
+      }
+      ev.preventDefault();
+      wizardGoNext();
     });
 
     $('remote-form').addEventListener('submit', (ev) => void submitAddRemote(ev));

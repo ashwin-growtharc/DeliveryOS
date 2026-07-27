@@ -335,18 +335,42 @@ design rationale.
   - Removed the lightning-bolt logo mark from the topbar per explicit
     request; just the "DeliveryOS" wordmark remains.
 
-- Add New's Kind field is now a `<select>` populated from every distinct
-  kind already in the catalog, with a "+ New kind..." option that reveals a
-  text input for inventing one that doesn't exist yet — kind stays
-  open-ended by design (see ARCHITECTURE.md), this is just a convenience for
-  the common case of reusing "agent"/"skill"/etc. instead of retyping it
-  from memory. Roles/Stack/Team fields (in both Add New and Detail's Edit
-  form) became a small chip-picker component (`createTagPicker`) backed by a
-  `<datalist>` of values already used elsewhere in the catalog, replacing
-  the old raw "type a comma-separated list and hope you spell it the same
-  as last time" text inputs — still fully free-text (a new tag is just as
-  valid), just easier to reuse an existing one without a near-duplicate
-  typo ("python" vs "Python") creating a second, separate tag folder.
+- Add New's Kind field is now populated from every distinct kind already in
+  the catalog, with a "+ New kind..." option that reveals a text input for
+  inventing one that doesn't exist yet — kind stays open-ended by design
+  (see ARCHITECTURE.md), this is just a convenience for the common case of
+  reusing "agent"/"skill"/etc. instead of retyping it from memory.
+  Roles/Stack/Team fields (in both Add New and Detail's Edit form) became a
+  small chip-picker component (`createTagPicker`) backed by a `<datalist>`
+  of values already used elsewhere in the catalog, replacing the old raw
+  "type a comma-separated list and hope you spell it the same as last time"
+  text inputs — still fully free-text (a new tag is just as valid), just
+  easier to reuse an existing one without a near-duplicate typo ("python" vs
+  "Python") creating a second, separate tag folder.
+
+- Turned Add New into a step-by-step wizard instead of one long scrolling
+  form: one field/group visible at a time, a progress bar, Next/Back, and a
+  final Review step (every field summarized, each with its own "Edit"
+  button jumping straight back to that step) before the real Propose
+  submit. Kind and Remote — both low-cardinality, fixed-ish choices —
+  became clickable `.chip` buttons (the same look Browse's own Kind filter
+  already uses) instead of native `<select>` elements, which render with
+  OS-default chrome that doesn't match the rest of the app and hide every
+  option behind a click to open the dropdown; a new `createSingleChipPicker`
+  is the single-select counterpart to the existing multi-value
+  `createTagPicker`. Enter anywhere in the form now advances to the next
+  step (except inside a tag picker's own input, where Enter means "commit
+  this chip and keep typing," and except on Review, where Enter doing
+  nothing is safer than an accidental submit). Scan's "Review & propose"
+  jumps straight to the Review step instead of forcing a click through 9
+  mostly-empty-looking steps, since most required fields are already
+  prefilled — worth flagging: Owner is never prefilled by Scan, and a
+  required field on a hidden wizard step is exempt from the browser's own
+  native validation (an element that isn't rendered is barred from
+  constraint validation), so `submitAddNew` now re-checks
+  description/owner/kind/remote explicitly and jumps back to whichever step
+  is actually blank, rather than silently letting an empty required field
+  slip through to the engine.
 
 ## Phase 5 — Polish (in progress)
 

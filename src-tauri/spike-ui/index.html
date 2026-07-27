@@ -202,82 +202,138 @@
           </div>
         </section>
 
-        <!-- Add new -->
+        <!-- Add new: a step-by-step wizard (one field/group per step, Next/
+             Back, a progress bar, and a final Review step before Propose)
+             instead of one long scrolling form. Every .wizard-step's own
+             `hidden` is driven entirely by app.js's renderWizardStep() --
+             not by showView()'s .view hiding, which only touches the
+             top-level #view-addnew section. -->
         <section id="view-addnew" class="view" hidden>
           <button class="btn back-btn" data-view="browse">&larr; Back to Browse</button>
-          <form id="addnew-form" class="card form-grid">
+          <form id="addnew-form" class="card wizard-card">
             <h2 class="section-title">Propose a new artifact</h2>
-            <div class="field">
-              <label for="f-id">Artifact ID</label>
-              <input
-                id="f-id"
-                type="text"
-                required
-                placeholder="e.g. code-reviewer"
-                pattern="[a-z0-9]+(-[a-z0-9]+)*"
-                title="Lowercase letters, numbers, and hyphens only, e.g. growtharc-brand-guidelines"
-              />
-              <p class="field-hint">Lowercase, hyphen-separated, no spaces -- this becomes a folder name and a git branch name.</p>
+            <div class="wizard-progress">
+              <div class="wizard-progress-track">
+                <div id="wizard-progress-bar" class="wizard-progress-bar"></div>
+              </div>
+              <span id="wizard-progress-label" class="wizard-progress-label"></span>
             </div>
-            <div class="field">
-              <label for="f-kind">Kind</label>
-              <select id="f-kind" required></select>
-              <input
-                id="f-kind-custom"
-                type="text"
-                placeholder="e.g. dataset, config, agent-asset"
-                hidden
-              />
-              <p class="field-hint">Pick a kind already in use, or "+ New kind&hellip;" to add one -- kind is open-ended, not a fixed list.</p>
-            </div>
-            <div class="field">
-              <label>Payload</label>
-              <div class="payload-picker">
-                <button type="button" id="pick-payload-file-btn" class="btn btn-sm">Choose file&hellip;</button>
-                <button type="button" id="pick-payload-dir-btn" class="btn btn-sm">Choose folder&hellip;</button>
-                <span id="payload-path-display" class="install-path">No file or folder selected</span>
+
+            <div class="wizard-step" data-step="id">
+              <div class="field">
+                <label for="f-id">Artifact ID</label>
+                <input
+                  id="f-id"
+                  type="text"
+                  required
+                  placeholder="e.g. code-reviewer"
+                  pattern="[a-z0-9]+(-[a-z0-9]+)*"
+                  title="Lowercase letters, numbers, and hyphens only, e.g. growtharc-brand-guidelines"
+                />
+                <p class="field-hint">Lowercase, hyphen-separated, no spaces -- this becomes a folder name and a git branch name.</p>
               </div>
             </div>
-            <div class="field">
-              <label for="f-description">Description</label>
-              <textarea id="f-description" required rows="3"></textarea>
+
+            <div class="wizard-step" data-step="kind">
+              <div class="field">
+                <label>Kind</label>
+                <div id="f-kind-picker" class="chip-picker"></div>
+                <input
+                  id="f-kind-custom"
+                  type="text"
+                  placeholder="e.g. dataset, config, agent-asset"
+                  hidden
+                />
+                <p class="field-hint">Pick a kind already in use, or "+ New kind&hellip;" to add one -- kind is open-ended, not a fixed list.</p>
+              </div>
             </div>
-            <div class="field">
-              <label for="f-owner">Owner</label>
-              <input id="f-owner" type="text" required />
+
+            <div class="wizard-step" data-step="payload">
+              <div class="field">
+                <label>Payload</label>
+                <div class="payload-picker">
+                  <button type="button" id="pick-payload-file-btn" class="btn btn-sm">Choose file&hellip;</button>
+                  <button type="button" id="pick-payload-dir-btn" class="btn btn-sm">Choose folder&hellip;</button>
+                  <span id="payload-path-display" class="install-path">No file or folder selected</span>
+                </div>
+              </div>
             </div>
-            <div class="field">
-              <label>Who is this for (roles)</label>
-              <div id="f-roles-picker"></div>
-              <p class="field-hint">Pick from existing roles, or type a new one and press Enter or comma.</p>
+
+            <div class="wizard-step" data-step="description">
+              <div class="field">
+                <label for="f-description">Description</label>
+                <textarea id="f-description" required rows="3"></textarea>
+              </div>
             </div>
-            <div class="field">
-              <label>Stack</label>
-              <div id="f-stacks-picker"></div>
-              <p class="field-hint">Shows up under Browse's "stack" tag folders (e.g. "stack: python") -- leave blank if this isn't tied to a particular stack.</p>
+
+            <div class="wizard-step" data-step="owner">
+              <div class="field">
+                <label for="f-owner">Owner</label>
+                <input id="f-owner" type="text" required />
+              </div>
             </div>
-            <div class="field">
-              <label>Team / project</label>
-              <div id="f-teams-picker"></div>
-              <p class="field-hint">Shows up under Browse's "project" tag folders.</p>
+
+            <div class="wizard-step" data-step="roles">
+              <div class="field">
+                <label>Who is this for (roles)</label>
+                <div id="f-roles-picker"></div>
+                <p class="field-hint">Pick from existing roles, or type a new one and press Enter or comma. Optional -- Next to skip.</p>
+              </div>
             </div>
-            <div class="field">
-              <label for="f-install-target">Install target (optional)</label>
-              <input id="f-install-target" type="text" placeholder="e.g. .claude/agents/my-agent.md" />
-              <p class="field-hint">Where a pull lands this. Leave blank to default to a folder named after the Artifact ID.</p>
+
+            <div class="wizard-step" data-step="stacks">
+              <div class="field">
+                <label>Stack</label>
+                <div id="f-stacks-picker"></div>
+                <p class="field-hint">Shows up under Browse's "stack" tag folders (e.g. "stack: python"). Optional -- Next to skip.</p>
+              </div>
             </div>
-            <div class="field">
-              <label for="f-post-install">Setup command (optional)</label>
-              <input id="f-post-install" type="text" placeholder="e.g. npm install, pip install -e &quot;.[dev]&quot;" />
-              <p class="field-hint">Runs automatically right after someone pulls this, in the folder it lands in. Leave blank if nothing needs to be installed.</p>
+
+            <div class="wizard-step" data-step="teams">
+              <div class="field">
+                <label>Team / project</label>
+                <div id="f-teams-picker"></div>
+                <p class="field-hint">Shows up under Browse's "project" tag folders. Optional -- Next to skip.</p>
+              </div>
             </div>
-            <div class="field">
-              <label for="f-remote">Remote</label>
-              <select id="f-remote" required></select>
+
+            <div class="wizard-step" data-step="install-target">
+              <div class="field">
+                <label for="f-install-target">Install target (optional)</label>
+                <input id="f-install-target" type="text" placeholder="e.g. .claude/agents/my-agent.md" />
+                <p class="field-hint">Where a pull lands this. Leave blank to default to a folder named after the Artifact ID.</p>
+              </div>
             </div>
-            <button type="submit" id="addnew-submit-btn" class="btn btn-primary" style="align-self:flex-start;">
-              Propose
-            </button>
+
+            <div class="wizard-step" data-step="post-install">
+              <div class="field">
+                <label for="f-post-install">Setup command (optional)</label>
+                <input id="f-post-install" type="text" placeholder="e.g. npm install, pip install -e &quot;.[dev]&quot;" />
+                <p class="field-hint">Runs automatically right after someone pulls this, in the folder it lands in. Leave blank if nothing needs to be installed.</p>
+              </div>
+            </div>
+
+            <div class="wizard-step" data-step="remote">
+              <div class="field">
+                <label>Remote</label>
+                <div id="f-remote-picker" class="chip-picker"></div>
+                <p class="field-hint" id="f-remote-empty-hint" hidden>No remotes registered yet -- add one in Settings first.</p>
+              </div>
+            </div>
+
+            <div class="wizard-step" data-step="review">
+              <div class="field">
+                <label>Review</label>
+                <div id="addnew-review" class="wizard-review"></div>
+              </div>
+            </div>
+
+            <div class="wizard-nav">
+              <button type="button" id="wizard-back-btn" class="btn btn-ghost">&larr; Back</button>
+              <span class="wizard-nav-spacer"></span>
+              <button type="button" id="wizard-next-btn" class="btn btn-primary">Next &rarr;</button>
+              <button type="submit" id="addnew-submit-btn" class="btn btn-primary" hidden>Propose</button>
+            </div>
           </form>
         </section>
 
