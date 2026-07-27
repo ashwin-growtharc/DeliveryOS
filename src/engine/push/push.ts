@@ -175,6 +175,40 @@ export async function pushArtifact(
       );
     }
 
+    if (!fs.existsSync(options.payloadPath)) {
+      throw new ManifestValidationError(`--path "${options.payloadPath}" does not exist`);
+    }
+    // `listFilesRecursive`/`listPayloadFiles` return [''] as a sentinel for a
+    // single-file root (see its own doc comment) -- normalize that into the
+    // file's real basename here, once, so every downstream use (the actual
+    // copy below, the git commit path list, and the PR body's "new files"
+    // list) refers to a real path instead of an empty string.
+    const payloadIsFile = fs.statSync(options.payloadPath).isFile();
+    // `listPayloadFiles` (not the raw `listFilesRecursive`) for a directory
+    // payload: proposing a whole project folder (e.g. a template/scaffold,
+    // not just a single doc) would otherwise copy EVERYTHING underneath it
+    // verbatim, including a nested `.git/` (which git would try to treat as
+    // an embedded repo/gitlink rather than plain files once committed here)
+    // and whatever the project's own .gitignore excludes (node_modules/,
+    // build output, caches). listFilesRecursive alone already skips `.git`
+    // unconditionally at the walk level; listPayloadFiles adds the
+    // .gitignore filtering on top.
+    const payloadFiles = payloadIsFile
+      ? [path.basename(options.payloadPath)]
+      : listPayloadFiles(options.payloadPath);
+
+    // A single-file payload gets `payload_path` pointing at a real, stable
+    // location (`files/<id>/<basename>`) instead of the standard
+    // `artifacts/<id>/payload/` wrapper. This matters the moment
+    // `install_target` is itself a file path (e.g. `.claude/agents/<id>.md`,
+    // as `deliveryos scan` sets for a discovered agent): pullArtifact's
+    // `fs.cpSync` creates `install_target` as a DIRECTORY when the payload
+    // source is a directory, even one containing just a single file -- the
+    // exact bug found and fixed for the growtharc-ai-helpers agent import.
+    // Directory payloads keep the standard convention unchanged; a
+    // directory-shaped `install_target` has no such mismatch to avoid.
+    const payloadPathOverride = payloadIsFile ? `files/${id}/${payloadFiles[0]}` : undefined;
+
     const candidateManifest = {
       id,
       kind: options.kind,
@@ -195,6 +229,7 @@ export async function pushArtifact(
       // an empty string) when the proposer doesn't set one, so pull's
       // `if (manifest.post_install)` check skips it cleanly.
       ...(options.postInstall ? { post_install: options.postInstall } : {}),
+      ...(payloadPathOverride ? { payload_path: payloadPathOverride } : {}),
     };
 
     const result = ManifestSchema.safeParse(candidateManifest);
@@ -206,38 +241,16 @@ export async function pushArtifact(
     }
     const manifest: Manifest = result.data;
 
-    if (!fs.existsSync(options.payloadPath)) {
-      throw new ManifestValidationError(`--path "${options.payloadPath}" does not exist`);
-    }
-    // `listFilesRecursive`/`listPayloadFiles` return [''] as a sentinel for a
-    // single-file root (see its own doc comment) -- normalize that into the
-    // file's real basename here, once, so every downstream use (the actual
-    // copy below, the git commit path list, and the PR body's "new files"
-    // list) refers to a real path under payload/ instead of an empty string.
-    const payloadIsFile = fs.statSync(options.payloadPath).isFile();
-    // `listPayloadFiles` (not the raw `listFilesRecursive`) for a directory
-    // payload: proposing a whole project folder (e.g. a template/scaffold,
-    // not just a single doc) would otherwise copy EVERYTHING underneath it
-    // verbatim, including a nested `.git/` (which git would try to treat as
-    // an embedded repo/gitlink rather than plain files once committed here)
-    // and whatever the project's own .gitignore excludes (node_modules/,
-    // build output, caches). listFilesRecursive alone already skips `.git`
-    // unconditionally at the walk level; listPayloadFiles adds the
-    // .gitignore filtering on top.
-    const payloadFiles = payloadIsFile
-      ? [path.basename(options.payloadPath)]
-      : listPayloadFiles(options.payloadPath);
-
     onProgress?.('stage', `Staging payload files for "${id}"...`);
     const artifactDir = path.join(cacheDir, 'artifacts', id);
-    const payloadDestDir = path.join(artifactDir, 'payload');
-    fs.mkdirSync(payloadDestDir, { recursive: true });
+    fs.mkdirSync(artifactDir, { recursive: true });
     if (payloadIsFile) {
-      // fs.cpSync can't copy a single file onto a path that already exists
-      // as a directory (payloadDestDir, just created above) -- it needs an
-      // actual destination FILE path, not the directory itself.
-      fs.copyFileSync(options.payloadPath, path.join(payloadDestDir, payloadFiles[0]));
+      const fileDestDir = path.join(cacheDir, 'files', id);
+      fs.mkdirSync(fileDestDir, { recursive: true });
+      fs.copyFileSync(options.payloadPath, path.join(fileDestDir, payloadFiles[0]));
     } else {
+      const payloadDestDir = path.join(artifactDir, 'payload');
+      fs.mkdirSync(payloadDestDir, { recursive: true });
       // Copied file-by-file (reusing the same helper edit-mode push already
       // uses) rather than one bulk `fs.cpSync` of the whole source
       // directory, so what's physically copied always matches `payloadFiles`
@@ -249,9 +262,10 @@ export async function pushArtifact(
     }
     fs.writeFileSync(path.join(artifactDir, 'manifest.yaml'), stringifyYaml(manifest), 'utf-8');
 
+    const payloadGitRoot = payloadPathOverride ? `files/${id}` : `artifacts/${id}/payload`;
     filesToCommit = [
       `artifacts/${id}/manifest.yaml`,
-      ...payloadFiles.map((relPath) => `artifacts/${id}/payload/${relPath}`),
+      ...payloadFiles.map((relPath) => path.posix.join(payloadGitRoot, relPath)),
     ];
     commitMessage = `DeliveryOS push: propose new artifact ${id}`;
 
@@ -265,6 +279,7 @@ export async function pushArtifact(
       gitUserName: identity.name,
       gitUserEmail: identity.email,
       payloadFiles,
+      payloadRoot: payloadPathOverride ? `files/${id}` : undefined,
     });
     prTitle = content.title;
     prBody = content.body;

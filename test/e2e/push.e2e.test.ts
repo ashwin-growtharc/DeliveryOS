@@ -5,7 +5,8 @@ import * as path from 'path';
 import simpleGit from 'simple-git';
 import { createTestRemote, teardownTestRemote, TEST_ARTIFACTS } from '../fixtures/testRemote';
 import { addRemoteEntry } from '../../src/engine/remote/remoteRegistry';
-import { cloneRemote } from '../../src/engine/remote/remoteCache';
+import { cloneRemote, cachePath } from '../../src/engine/remote/remoteCache';
+import { fetchAndReset } from '../../src/engine/git/git';
 import { pullArtifact } from '../../src/engine/pull/pull';
 import { pushArtifact } from '../../src/engine/push/push';
 import { NoLocalChangesError, IdCollisionError } from '../../src/engine/errors';
@@ -355,6 +356,10 @@ describe('push e2e', () => {
       // used to crash with "Cannot overwrite directory ... with
       // non-directory ..." -- fs.cpSync can't copy a file onto a path that
       // already exists as a directory (the freshly-created payload/ dir).
+      // Single-file payloads now use payload_path -> files/<id>/<basename>
+      // instead of the standard artifacts/<id>/payload/ wrapper (see the
+      // next test for why: a directory-shaped payload wrapper breaks pull
+      // for any install_target that's itself a file path).
       const remoteName = 'test-remote-new-singlefile';
       await registerAndClone(remoteName, fixtureRemoteDir);
 
@@ -384,13 +389,86 @@ describe('push e2e', () => {
       expect(await branchExistsInFixture(fixtureRemoteDir, result.branch)).toBe(true);
 
       const fixtureGit = simpleGit(fixtureRemoteDir);
-      const fileContent = await fixtureGit.show([
-        `${result.branch}:artifacts/${id}/payload/guidelines.md`,
-      ]);
+      const fileContent = await fixtureGit.show([`${result.branch}:files/${id}/guidelines.md`]);
       expect(fileContent).toBe('# Brand Guidelines\n\nContent here.\n');
 
+      const manifestContent = await fixtureGit.show([
+        `${result.branch}:artifacts/${id}/manifest.yaml`,
+      ]);
+      expect(manifestContent).toContain(`payload_path: files/${id}/guidelines.md`);
+
       const call = octokit.rest.pulls.create.mock.calls[0][0];
-      expect(call.body).toContain(`artifacts/${id}/payload/guidelines.md`);
+      expect(call.body).toContain(`files/${id}/guidelines.md`);
+    },
+    30_000,
+  );
+
+  it(
+    'propose-new mode with a SINGLE-FILE payload and a file-shaped install_target actually pulls back correctly (the real regression)',
+    async () => {
+      // This is the scenario the payload_path override above exists for:
+      // deliveryos scan proposes a discovered .claude/agents/<id>.md with
+      // install_target set to that same file path. Before the fix, this
+      // combination (file-shaped install_target + directory-shaped
+      // artifacts/<id>/payload/ source) made pullArtifact's cpSync create
+      // install_target AS A DIRECTORY containing the file, instead of the
+      // file itself -- exactly the bug found in the growtharc-ai-helpers
+      // agent import. Proves the fix end-to-end: propose, then actually
+      // pull, and assert install_target is a real file, not a directory.
+      const remoteName = 'test-remote-new-file-install-target';
+      await registerAndClone(remoteName, fixtureRemoteDir);
+
+      const id = 'scanned-agent';
+      const pushCwd = newScratchCwd('propose-new-file-install-target-push');
+
+      const payloadDir = fs.mkdtempSync(path.join(scratchRoot, 'payload-agent-'));
+      const payloadFile = path.join(payloadDir, `${id}.md`);
+      fs.writeFileSync(payloadFile, '# Scanned Agent\n\nAgent instructions here.\n', 'utf-8');
+
+      const pushResult = await pushArtifact(
+        id,
+        {
+          isNew: true,
+          remote: remoteName,
+          payloadPath: payloadFile,
+          kind: 'agent',
+          owner: 'someone',
+          description: 'A scanned local agent',
+          version: '1.0.0',
+          installTarget: `.claude/agents/${id}.md`,
+        },
+        pushCwd,
+        makeFakeOctokit(),
+      );
+
+      // Merge isn't part of this flow (PR creation is a fake Octokit here)
+      // -- simulate it directly against the fixture repo, the same way a
+      // real GitHub merge would update the default branch before anyone
+      // could pull it. FAKE_DEFAULT_BRANCH is just the fake Octokit's
+      // mocked API response, not necessarily this fixture's actual git
+      // branch name (that depends on the local git install's
+      // init.defaultBranch) -- query the real current branch instead of
+      // assuming it matches.
+      const fixtureGit = simpleGit(fixtureRemoteDir);
+      const realDefaultBranch = (await fixtureGit.status()).current!;
+      await fixtureGit.checkout(realDefaultBranch);
+      await fixtureGit.merge([pushResult.branch]);
+
+      // pullArtifact resolves against the LOCAL cache clone, which was made
+      // before this artifact even existed -- refresh it first, the same
+      // way a real "Check for updates"/re-pull would before ever seeing a
+      // newly-merged artifact for the first time.
+      await fetchAndReset(cachePath(remoteName));
+
+      const pullCwd = newScratchCwd('propose-new-file-install-target-pull');
+      const pullResult = pullArtifact(id, remoteName, pullCwd);
+
+      const installedPath = pullResult.installTarget;
+      expect(fs.existsSync(installedPath)).toBe(true);
+      expect(fs.statSync(installedPath).isFile()).toBe(true);
+      expect(fs.readFileSync(installedPath, 'utf-8')).toBe(
+        '# Scanned Agent\n\nAgent instructions here.\n',
+      );
     },
     30_000,
   );

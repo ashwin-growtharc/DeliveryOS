@@ -121,6 +121,11 @@ export interface ProposeNewPrContentParams {
   gitUserName: string;
   gitUserEmail: string;
   payloadFiles: string[];
+  // Git-relative root the new payload files are reported under: the
+  // historical `artifacts/<id>/payload` by default, or `files/<id>` for a
+  // single-file payload (see push.ts's payload_path override), so the PR
+  // body names the real committed path instead of a shadow one.
+  payloadRoot?: string;
 }
 
 /** Builds the PR title/body for a propose-new-mode push (a brand-new
@@ -136,13 +141,15 @@ export function buildProposeNewPrContent(params: ProposeNewPrContentParams): PrC
     gitUserName,
     gitUserEmail,
     payloadFiles,
+    payloadRoot,
   } = params;
 
   const title = `[DeliveryOS] Propose new artifact: ${id}`;
 
+  const root = payloadRoot ?? `artifacts/${id}/payload`;
   const newFilesLines = [
     `- artifacts/${id}/manifest.yaml`,
-    ...payloadFiles.map((relPath) => `- artifacts/${id}/payload/${relPath}`),
+    ...payloadFiles.map((relPath) => `- ${path.posix.join(root, relPath)}`),
   ].join('\n');
 
   const body = `## DeliveryOS push: propose new artifact \`${id}\`
