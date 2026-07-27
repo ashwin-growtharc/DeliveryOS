@@ -162,4 +162,41 @@ describe('pull e2e', () => {
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain('nonexistent-id');
   });
+
+  it('remote remove unregisters a remote and deletes its cache clone via the real CLI, without disturbing test-remote', () => {
+    // A separate remote name, not the shared `test-remote` every other test
+    // in this file depends on -- this scenario shouldn't disturb it.
+    const addResult = runCli(
+      ['remote', 'add', fixtureRemoteDir, '--name', 'test-remote-to-remove'],
+      scratchCwd,
+      deliveryOsHome,
+    );
+    expect(addResult.status).toBe(0);
+
+    const cachePath = path.join(deliveryOsHome, 'remotes', 'test-remote-to-remove');
+    expect(fs.existsSync(cachePath)).toBe(true);
+
+    const removeResult = runCli(
+      ['remote', 'remove', 'test-remote-to-remove'],
+      scratchCwd,
+      deliveryOsHome,
+    );
+    expect(removeResult.stderr).toBe('');
+    expect(removeResult.status).toBe(0);
+    expect(removeResult.stdout).toContain('Removed remote "test-remote-to-remove"');
+    expect(fs.existsSync(cachePath)).toBe(false);
+
+    const registry = JSON.parse(
+      fs.readFileSync(path.join(deliveryOsHome, 'remotes.json'), 'utf-8'),
+    ) as { remotes: { name: string }[] };
+    expect(registry.remotes.find((r) => r.name === 'test-remote-to-remove')).toBeUndefined();
+    // The original test-remote every earlier test in this file relies on is untouched.
+    expect(registry.remotes.find((r) => r.name === 'test-remote')).toBeDefined();
+  });
+
+  it('remote remove on an unregistered name hard-errors cleanly via the real CLI', () => {
+    const result = runCli(['remote', 'remove', 'never-registered'], scratchCwd, deliveryOsHome);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('never-registered');
+  });
 });

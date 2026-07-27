@@ -86,3 +86,20 @@ export function addRemoteEntry(entry: RemoteEntry): void {
 export function listRemotes(): RemoteEntry[] {
   return readRegistry().remotes;
 }
+
+/**
+ * Removes a remote entry from the registry. Throws RemoteRegistryError if
+ * `name` isn't registered. Only touches `remotes.json` -- the caller (CLI
+ * command / sidecar) is responsible for also deleting that remote's local
+ * cache clone (`cachePath(name)`), the same layering `remote add` already
+ * uses (clone + registry-write are two separate calls at the call site,
+ * not bundled into one function).
+ */
+export function removeRemoteEntry(name: string): void {
+  const registry = readRegistry();
+  if (!registry.remotes.some((r) => r.name === name)) {
+    throw new RemoteRegistryError(`No remote named "${name}" is registered`);
+  }
+  registry.remotes = registry.remotes.filter((r) => r.name !== name);
+  writeRegistry(registry);
+}

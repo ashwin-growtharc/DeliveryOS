@@ -4,6 +4,29 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- Added remote removal: `deliveryos remote remove <name>` (CLI) and a
+  "Delete" button per row in Settings (app), both unregistering the remote
+  and deleting its local cache clone. Deliberately doesn't touch any
+  project's lockfile/pulled files -- those stay on disk exactly as pulled;
+  only the ability to pull/push against that remote again (until it's
+  re-added) goes away. Confirm-gated in the app. Covered by new sidecar and
+  real-CLI-subprocess e2e tests (success, cache-deletion, and the
+  unregistered-name error case).
+
+- Fixed a latent bug in `push --new` (propose-new): a single-file payload
+  was always wrapped in the standard `artifacts/<id>/payload/` convention
+  (a directory, even for one file), which broke `pull` the moment
+  `install_target` was itself a file path (e.g. `.claude/agents/<id>.md`)
+  -- `pullArtifact`'s `fs.cpSync` created `install_target` as a directory
+  containing the file instead of the file itself. This is the exact bug
+  found and fixed as a one-off data correction for the
+  growtharc-ai-helpers agent import; this fixes it in the engine itself so
+  it can't recur. Single-file payloads now get `payload_path` pointing at
+  a real, stable location (`files/<id>/<basename>`) instead of the
+  wrapper. Directory payloads are unaffected. Covered by a new e2e test
+  that actually pushes, merges, and pulls back a file-shaped
+  `install_target` end to end (not just asserting the commit contents).
+
 - Added an Edit button to Detail: description/roles/teams/stacks can now be
   changed on an already-tracked artifact without touching its payload at
   all -- opens a PR against just `manifest.yaml`, same PR/pendingPr/"Check

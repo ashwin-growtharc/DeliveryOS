@@ -1214,22 +1214,57 @@
 
   function renderRemotesList() {
     const list = $('remotes-list');
+    list.innerHTML = '';
     if (state.remotes.length === 0) {
       list.innerHTML = '<p class="empty-state">No remotes registered yet.</p>';
       return;
     }
-    list.innerHTML = state.remotes
-      .map(
-        (remote) => `
-        <div class="settings-row">
-          <div>
-            <div class="n">${escapeHtml(remote.name)}</div>
-            <div class="s">${escapeHtml(remote.url)} &middot; added ${escapeHtml(remote.addedAt)}</div>
-          </div>
+    for (const remote of state.remotes) {
+      const row = document.createElement('div');
+      row.className = 'settings-row';
+      row.innerHTML = `
+        <div>
+          <div class="n"></div>
+          <div class="s"></div>
         </div>
-      `,
+      `;
+      row.querySelector('.n').textContent = remote.name;
+      row.querySelector('.s').textContent = `${remote.url} · added ${remote.addedAt}`;
+
+      const deleteBtn = document.createElement('button');
+      deleteBtn.className = 'btn btn-sm btn-danger-ghost';
+      deleteBtn.textContent = 'Delete';
+      deleteBtn.addEventListener('click', () => void handleRemoveRemote(remote, deleteBtn));
+      row.appendChild(deleteBtn);
+
+      list.appendChild(row);
+    }
+  }
+
+  /** Unregisters a remote and deletes its local cache clone. Doesn't touch
+   * any project's lockfile/pulled files -- those stay on disk exactly as
+   * pulled; only the ability to pull/push against this remote again (until
+   * it's re-added) goes away. Confirm-gated since re-adding means a fresh
+   * clone, not an instant undo. */
+  async function handleRemoveRemote(remote, button) {
+    if (
+      !window.confirm(
+        `Remove remote "${remote.name}"? This deletes its local cache clone. `
+        + `Any artifacts already pulled from it stay exactly as they are -- `
+        + `you just won't be able to pull/push against it again until you re-add it.`,
       )
-      .join('');
+    ) {
+      return;
+    }
+    await withBusy(button, 'Removing...', async () => {
+      try {
+        await call('remote.remove', { name: remote.name });
+        toastSuccess(`Removed remote "${remote.name}"`);
+        await loadRemotesForSettings();
+      } catch (err) {
+        toastError(err);
+      }
+    });
   }
 
   async function submitAddRemote(ev) {

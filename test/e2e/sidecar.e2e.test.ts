@@ -7,7 +7,7 @@ import * as readline from 'readline';
 import simpleGit from 'simple-git';
 import { createTestRemote, teardownTestRemote, TEST_ARTIFACTS } from '../fixtures/testRemote';
 import { addRemoteEntry } from '../../src/engine/remote/remoteRegistry';
-import { cloneRemote } from '../../src/engine/remote/remoteCache';
+import { cloneRemote, cachePath } from '../../src/engine/remote/remoteCache';
 
 // This e2e test drives `src/sidecar.ts` as a real subprocess, exactly the
 // way the Tauri host (src-tauri/src/lib.rs's `sidecar_call`) does: spawn it,
@@ -252,6 +252,56 @@ describe('sidecar e2e', () => {
         expect(matches[0].url).toBe(fixtureRemoteDir);
       } finally {
         await session.close();
+      }
+    },
+    30_000,
+  );
+
+  it(
+    'remote.remove unregisters a remote, deletes its local cache clone, and a subsequent remote.list no longer shows it',
+    async () => {
+      const cwd = newScratchCwd('remote-remove');
+      const session = new SidecarSession(cwd, deliveryOsHome);
+      try {
+        const addResp = await session.request('remote.add', {
+          url: fixtureRemoteDir,
+          name: 'sidecar-remote-to-remove',
+        });
+        expect(addResp.ok).toBe(true);
+        const dest = cachePath('sidecar-remote-to-remove');
+        expect(fs.existsSync(dest)).toBe(true);
+
+        const removeResp = await session.request('remote.remove', {
+          name: 'sidecar-remote-to-remove',
+        });
+        expect(removeResp.ok).toBe(true);
+        expect(removeResp.result).toMatchObject({ name: 'sidecar-remote-to-remove' });
+
+        // The local cache clone is actually deleted, not just unregistered.
+        expect(fs.existsSync(dest)).toBe(false);
+
+        const listResp = await session.request('remote.list', {});
+        const remotes = listResp.result as Array<{ name: string; url: string }>;
+        expect(remotes.find((r) => r.name === 'sidecar-remote-to-remove')).toBeUndefined();
+      } finally {
+        expect(await session.close()).toBe(0);
+      }
+    },
+    30_000,
+  );
+
+  it(
+    'remote.remove on a name that was never registered fails cleanly with RemoteRegistryError',
+    async () => {
+      const cwd = newScratchCwd('remote-remove-missing');
+      const session = new SidecarSession(cwd, deliveryOsHome);
+      try {
+        const removeResp = await session.request('remote.remove', { name: 'never-registered' });
+        expect(removeResp.ok).toBe(false);
+        expect(removeResp.error?.type).toBe('RemoteRegistryError');
+        expect(removeResp.error?.message).toContain('never-registered');
+      } finally {
+        expect(await session.close()).toBe(0);
       }
     },
     30_000,

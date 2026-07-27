@@ -39,10 +39,12 @@ import { checkForUpdates, resolvePendingPushes } from './engine/sync/sync';
 import {
   listRemotes,
   addRemoteEntry,
+  removeRemoteEntry,
   findRemote,
   deriveNameFromUrl,
 } from './engine/remote/remoteRegistry';
-import { cloneRemote } from './engine/remote/remoteCache';
+import { cloneRemote, cachePath } from './engine/remote/remoteCache';
+import * as fs from 'fs';
 import { RemoteRegistryError } from './engine/errors';
 import { Manifest } from './engine/manifest/schema';
 
@@ -186,6 +188,20 @@ async function remoteAdd(
   return { name, url, dest };
 }
 
+/** Unregisters a remote and deletes its local cache clone -- mirrors
+ * `runRemoteRemove`'s order exactly (src/cli/commands/remoteAdd.ts).
+ * Doesn't touch any project's lockfile/pulled files, only this remote's
+ * own registration + cache. */
+function remoteRemove(args: Record<string, unknown>): { name: string } {
+  const name = requireString(args, 'name');
+  removeRemoteEntry(name); // throws RemoteRegistryError if not registered
+  const dest = cachePath(name);
+  if (fs.existsSync(dest)) {
+    fs.rmSync(dest, { recursive: true, force: true });
+  }
+  return { name };
+}
+
 /** Command map: every command the frontend/Tauri layer can invoke. */
 const commands: Record<string, CommandHandler> = {
   'catalog.list': (args) => catalogList(args),
@@ -209,6 +225,8 @@ const commands: Record<string, CommandHandler> = {
   'remote.list': () => listRemotes(),
 
   'remote.add': async (args) => remoteAdd(args),
+
+  'remote.remove': (args) => remoteRemove(args),
 
   'sync.checkForUpdates': (args, { onProgress }) => {
     const cwd = requireString(args, 'cwd');
