@@ -335,18 +335,110 @@ design rationale.
   - Removed the lightning-bolt logo mark from the topbar per explicit
     request; just the "DeliveryOS" wordmark remains.
 
-- Add New's Kind field is now a `<select>` populated from every distinct
-  kind already in the catalog, with a "+ New kind..." option that reveals a
-  text input for inventing one that doesn't exist yet — kind stays
-  open-ended by design (see ARCHITECTURE.md), this is just a convenience for
-  the common case of reusing "agent"/"skill"/etc. instead of retyping it
-  from memory. Roles/Stack/Team fields (in both Add New and Detail's Edit
-  form) became a small chip-picker component (`createTagPicker`) backed by a
-  `<datalist>` of values already used elsewhere in the catalog, replacing
-  the old raw "type a comma-separated list and hope you spell it the same
-  as last time" text inputs — still fully free-text (a new tag is just as
-  valid), just easier to reuse an existing one without a near-duplicate
-  typo ("python" vs "Python") creating a second, separate tag folder.
+- Add New's Kind field is now populated from every distinct kind already in
+  the catalog, with a "+ New kind..." option that reveals a text input for
+  inventing one that doesn't exist yet — kind stays open-ended by design
+  (see ARCHITECTURE.md), this is just a convenience for the common case of
+  reusing "agent"/"skill"/etc. instead of retyping it from memory.
+  Roles/Stack/Team fields (in both Add New and Detail's Edit form) became a
+  small chip-picker component (`createTagPicker`) backed by a `<datalist>`
+  of values already used elsewhere in the catalog, replacing the old raw
+  "type a comma-separated list and hope you spell it the same as last time"
+  text inputs — still fully free-text (a new tag is just as valid), just
+  easier to reuse an existing one without a near-duplicate typo ("python" vs
+  "Python") creating a second, separate tag folder.
+
+- Turned Add New into a step-by-step wizard instead of one long scrolling
+  form: one field/group visible at a time, a progress bar, Next/Back, and a
+  final Review step (every field summarized, each with its own "Edit"
+  button jumping straight back to that step) before the real Propose
+  submit. Kind and Remote — both low-cardinality, fixed-ish choices —
+  became clickable `.chip` buttons (the same look Browse's own Kind filter
+  already uses) instead of native `<select>` elements, which render with
+  OS-default chrome that doesn't match the rest of the app and hide every
+  option behind a click to open the dropdown; a new `createSingleChipPicker`
+  is the single-select counterpart to the existing multi-value
+  `createTagPicker`. Enter anywhere in the form now advances to the next
+  step (except inside a tag picker's own input, where Enter means "commit
+  this chip and keep typing," and except on Review, where Enter doing
+  nothing is safer than an accidental submit). Scan's "Review & propose"
+  jumps straight to the Review step instead of forcing a click through 9
+  mostly-empty-looking steps, since most required fields are already
+  prefilled — worth flagging: Owner is never prefilled by Scan, and a
+  required field on a hidden wizard step is exempt from the browser's own
+  native validation (an element that isn't rendered is barred from
+  constraint validation), so `submitAddNew` now re-checks
+  description/owner/kind/remote explicitly and jumps back to whichever step
+  is actually blank, rather than silently letting an empty required field
+  slip through to the engine.
+
+- Full sidebar-based shell, replacing the top bar (`branch: sidebar-revamp`,
+  built from a static mockup iterated with the user and design-researched
+  against real products before any real code changed):
+  - `#app` restructured from `header.topbar + main` into a left
+    `nav.sidebar` (Browse, Browse by tag, Settings, a divider, Scan, Add
+    New — every one a real destination, `showView()`-driven) plus a
+    `.content-shell` (a slim context strip holding the project folder +
+    Change folder, then `main`). Every `[data-view]` element (sidebar
+    items and every view's own "← Back to ..." button) is now wired
+    identically in `wireEvents()`, rather than special-casing the sidebar
+    separately from back-buttons.
+  - **Browse by tag** is a new, real sidebar destination/view — not an
+    inline expansion of Browse's own grid (dumped variable-length tag data
+    next to stable content), not a permanently-expanded sidebar section
+    (same problem, different container), and not a flyout popover
+    (inconsistent with every other sidebar item, which all go to a real
+    page). Category tabs (stack/role/project, single-select, whichever
+    actually have values) plus a plain list of that category's values,
+    sorted by count descending, each row reusing Browse's own `.res-card`
+    visual language with a real icon per value (`tagValueIconParts` — a
+    small curated map for common stack values like python/java/rust/
+    typescript, generic fallbacks for role/project and any unrecognized
+    stack). Clicking a value opens the existing, unchanged Tag Folder
+    view. The old inline `tag-category-row`/`tag-value-row` machinery in
+    Browse is gone.
+  - Kind filtering is now an underline tab bar (`.tab-row`/`.tab`) instead
+    of pill chips, reading as a deliberate filter control rather than a
+    generic row of buttons — pure CSS/markup change, the existing
+    multi-select `state.activeKinds` Set logic is untouched.
+  - Added a real kind-icon system (`kindIcon`/`kindSwatchHtml` in
+    `app.js`, `KIND_ICON` map with a neutral-diamond fallback for any kind
+    not listed, since kind stays open-ended per ARCHITECTURE.md) — used on
+    Browse's cards, Detail's header, and every kind-grouped row (Tag
+    Folder, Scan). Browse's cards themselves got a richer treatment to
+    match: icon swatch + EB Garamond name/kind-label pair up top, matching
+    the exact same card language now reused by Browse-by-tag's list rows.
+  - Removed the redundant "Scan for new content" toolbar button from
+    Browse now that Scan is a first-class sidebar destination; kept "+ Add
+    new" in the toolbar as a quick-access shortcut alongside its own
+    sidebar item, since proposing something is common enough to warrant
+    both entry points.
+
+- Removed the "AI guessed" sparkle badge from Scan results entirely — on
+  reflection it read as a gimmick rather than useful signal, and every
+  candidate's description is editable in Add New/the wizard's Review step
+  anyway, so flagging which ones were guessed didn't change what anyone
+  would do next. Deleted `.ai-badge`/`.ai-badge .sparkle`/`@keyframes
+  neural-pulse` from `style.css` (including their mention in the
+  `prefers-reduced-motion` block) and the badge-building block from
+  `renderScanResults()`.
+
+- Add New is now two modes sharing one form and one `submitAddNew`, not one
+  fixed flow: direct entry (sidebar "Add New", Browse's "+ Add new") shows
+  every field at once, flat, no wizard chrome — real feedback on the
+  step-by-step wizard above was that stepping through mostly-blank fields
+  by hand felt like too many steps ("add new gives the step by step, i
+  dont feel its so good"). Scan's "Review & propose" still gets the full
+  step-by-step wizard (progress bar, Next/Back, a final Review step with
+  per-field Edit) — the one place it was already agreed to be an
+  improvement, since most fields arrive prefilled and Review's per-row Edit
+  is what actually saves a click. Implementation: the same `.wizard-step`-
+  wrapped fields now render either all-at-once or one-at-a-time depending
+  on a new `addNewWizardMode` flag (`false` for direct entry, `true` for
+  Scan's flow) — `renderWizardStep()` branches on it to decide which
+  `.wizard-step`s are hidden and whether the progress bar/nav/Review show
+  up, so there's exactly one copy of every field's markup and one
+  `submitAddNew` validation path regardless of mode.
 
 ## Phase 5 — Polish (in progress)
 

@@ -112,88 +112,126 @@ input, textarea, select {
   min-height: 100vh;
 }
 
-/* ---------- shell chrome ---------- */
-
-.topbar {
+/* ---------- shell chrome: sidebar + content ----------
+ * Was a navy top bar (Browse/Settings tabs, folder display on the right).
+ * Per DESIGN_SYSTEM.md's own original Navigation spec -- a white sidebar,
+ * sage-100 active state -- and per explicit direction to make the app read
+ * as a real desktop tool rather than a webpage with a top bar: Browse,
+ * Browse by tag, Settings, Scan, and Add New are now sidebar destinations.
+ * The one thing the old top bar held that isn't navigation -- the current
+ * project folder + Change folder -- moved into a slim context strip above
+ * the content area instead. */
+.app-shell {
   display: flex;
-  align-items: center;
-  gap: 20px;
-  padding: 14px 24px;
-  background: var(--gradient-brand);
-  color: #fff;
-  box-shadow: var(--shadow-1);
-  flex-wrap: wrap;
+  align-items: stretch;
+  flex: 1;
+  min-height: 0;
 }
 
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.sidebar {
+  width: 236px;
   flex-shrink: 0;
+  background: var(--card);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  padding: 22px 16px;
+  overflow-y: auto;
 }
 
-.brand-name {
+.sidebar-brand {
   font-family: 'EB Garamond', Georgia, serif;
-  font-size: 20px;
-  font-weight: 600;
+  font-size: 23px;
+  color: var(--primary-700);
+  padding: 0 8px 22px;
   letter-spacing: .2px;
 }
 
-.nav {
+.sidebar-nav {
   display: flex;
-  gap: 4px;
+  flex-direction: column;
+  gap: 2px;
 }
 
-.nav-btn {
-  background: transparent;
-  border: 1px solid transparent;
-  color: rgba(255, 255, 255, .7);
-  padding: 7px 14px;
+.sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
   border-radius: var(--radius-md);
-  cursor: pointer;
-  font-size: 13px;
+  color: var(--primary-700);
+  opacity: .7;
   font-weight: 500;
+  font-size: 13.5px;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  text-align: left;
+  width: 100%;
 }
 
-.nav-btn:hover {
-  color: #fff;
-  background: rgba(255, 255, 255, .08);
+.sidebar-item:hover {
+  opacity: 1;
+  background: var(--surface-tertiary);
 }
 
 /* Active nav state: sage-100 background + navy text, exactly the pairing
  * DESIGN_SYSTEM.md's Navigation section specifies for the active sidebar
- * item -- translated onto DeliveryOS's own navy topbar instead of a white
- * sidebar (DeliveryOS keeps its existing top-nav structure; only the
- * styling comes from the design system). The light sage pill reads clearly
- * against the dark topbar. */
-.nav-btn.active {
-  color: var(--primary-700);
+ * item. */
+.sidebar-item.active {
+  opacity: 1;
   background: var(--sage-100);
-  border-color: transparent;
+  color: var(--primary-700);
+  font-weight: 600;
 }
 
-.folder-display {
-  margin-left: auto;
+.sidebar-item .glyph {
+  width: 17px;
+  height: 17px;
+  flex-shrink: 0;
+  opacity: .8;
+}
+
+.sidebar-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 14px 8px;
+}
+
+.content-shell {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.context-strip {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 12.5px;
-  color: rgba(255, 255, 255, .6);
-  flex-wrap: wrap;
+  gap: 10px;
+  padding: 13px 28px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 12px;
+}
+
+.context-strip-spacer {
+  flex: 1;
 }
 
 .folder-label {
   text-transform: uppercase;
   letter-spacing: .8px;
   font-size: 10.5px;
-  font-weight: 500;
+  font-weight: 600;
+  opacity: .5;
 }
 
 .folder-path {
   font-family: 'JetBrains Mono', monospace;
-  color: rgba(255, 255, 255, .92);
-  background: rgba(255, 255, 255, .08);
-  border: 1px solid rgba(255, 255, 255, .15);
+  color: var(--primary-700);
+  background: var(--surface-tertiary);
+  border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: 5px 10px;
   max-width: 320px;
@@ -288,11 +326,12 @@ input, textarea, select {
 
 #main {
   flex: 1;
-  /* #app is display:flex/column, so #main is itself a flex item -- a flex
-     item's default min-width is `auto` (shrink-to-fit its own content),
-     not 0, so a wide-enough descendant (e.g. an unbroken path in the
-     progress log) could still force #main itself wider than the viewport
-     even after that descendant's own overflow is otherwise handled. */
+  /* .content-shell is display:flex/column, so #main is itself a flex item
+     -- a flex item's default min-width is `auto` (shrink-to-fit its own
+     content), not 0, so a wide-enough descendant (e.g. an unbroken path in
+     the progress log) could still force #main itself wider than its
+     container even after that descendant's own overflow is otherwise
+     handled. */
   min-width: 0;
   max-width: 1080px;
   width: 100%;
@@ -412,13 +451,6 @@ input, textarea, select {
   max-width: 320px;
 }
 
-.chips {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-bottom: 16px;
-}
-
 .chip {
   font-size: 12.5px;
   font-weight: 500;
@@ -438,69 +470,180 @@ input, textarea, select {
   opacity: 1;
 }
 
-.tags-section {
-  margin-bottom: 4px;
-}
-
-.tag-category-row .chip {
-  /* Dashed border distinguishes the tag category row (stack/role/project)
-     from the Kind row above at a glance, without a second color to
-     maintain. */
-  border-style: dashed;
-}
-
-.tag-value-row {
-  /* A card grid, matching the app's own res-card language (shadow,
-     radius-lg, hover lift) -- not a bare list of thin lines. Each card
-     navigates into its own Tag Folder view (openTagFolder in app.js). */
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-  gap: 14px;
-  margin-top: 8px;
+/* ---------- filter tabs (Kind, Browse-by-tag categories) ----------
+ * Equal-weight pill chips read generically for what's actually a page's
+ * primary filter/navigation control -- an underline tab bar reads as a
+ * deliberate control instead. Kind stays multi-select (more than one tab
+ * can be "active" at once, matching state.activeKinds being a Set);
+ * Browse-by-tag's category tabs are single-select. */
+.tab-row {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
   margin-bottom: 16px;
 }
 
-.tag-folder-item {
+.tab-row .tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  padding: 9px 15px 11px;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--primary-700);
+  opacity: .5;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.tab-row .tab:hover {
+  opacity: .8;
+}
+
+.tab-row .tab.active {
+  opacity: 1;
+  font-weight: 600;
+  border-bottom-color: var(--primary-700);
+}
+
+.page-head {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 16px 18px;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.page-head .count {
+  font-size: 13px;
+  opacity: .5;
+}
+
+/* ---------- kind swatch (icon + warm accent tint) ----------
+ * A small, distinct abstract mark per kind (agent/skill/command/rule/
+ * template/doc, see kindIcon() in app.js), used on Browse's cards, Detail,
+ * and every kind-grouped row (Tag Folder, Scan) -- so scanning a list by
+ * kind is a glance, not a read. Falls back to a neutral diamond
+ * (i-kind-default) for any kind not in the map, since kind stays
+ * open-ended by design. Never the AI-reserved purple/cyan tokens, only the
+ * warm palette already used everywhere else. */
+.kind-swatch {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.kind-swatch svg {
+  width: 18px;
+  height: 18px;
+}
+
+.kind-swatch.sm {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+}
+
+.kind-swatch.sm svg {
+  width: 15px;
+  height: 15px;
+}
+
+/* ---------- Browse by tag (its own page) ----------
+ * Tried inline in Browse, tried permanently expanded in the sidebar, tried
+ * a flyout popover off a sidebar row -- all three either dumped
+ * variable-length data next to stable content, or were visually
+ * inconsistent with every other sidebar item (which all go to a real
+ * page). This is just that: a normal page. A plain list -- each value its
+ * own real card (same padding/shadow/hover-lift/serif-name treatment as
+ * Browse's own .res-card), not a grid of tiles or a stacked bar; the count
+ * is real, sorted by count descending so the most-populous value leads. */
+/* Two columns, not one long single-file list -- a category can easily
+ * have a dozen-plus real values (stack especially), and stacking all of
+ * them one-per-row made the page absurdly tall. #main's own max-width is
+ * fixed (1080px), so minmax(380px, 1fr) reliably yields exactly 2 columns
+ * at that width rather than accidentally wrapping to 1 or 3 depending on
+ * window size. */
+.tag-list-panel {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+  gap: 14px;
+}
+
+.tag-item-row {
+  display: flex;
+  align-items: center;
+  gap: 18px;
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
+  padding: 20px 24px;
   box-shadow: var(--shadow-1);
   cursor: pointer;
   transition: box-shadow .15s ease, transform .15s ease, border-color .15s ease;
 }
 
-.tag-folder-item:hover {
+.tag-item-row:hover {
   box-shadow: var(--shadow-2);
-  transform: translateY(-2px);
-  border-color: var(--sage-500);
+  transform: translateY(-3px);
+  border-color: var(--border-strong);
 }
 
-.tag-folder-item .folder-row-top {
+.tag-item-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  justify-content: center;
+  flex-shrink: 0;
 }
 
-.tag-folder-item .folder-name {
+.tag-item-icon svg {
+  width: 22px;
+  height: 22px;
+}
+
+/* A curated few stack values (TypeScript, JavaScript, ...) use their real
+ * mark as literal letters rather than a hand-drawn path -- simpler AND
+ * more accurate, since that IS their real logo. */
+.tag-item-icon-text {
   font-family: 'JetBrains Mono', monospace;
-  font-weight: 600;
-  font-size: 15px;
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: -.02em;
 }
 
-.tag-folder-item .chevron {
-  color: var(--sage-700);
+.tag-item-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.tag-item-name {
+  font-family: 'EB Garamond', Georgia, serif;
   font-size: 20px;
-  line-height: 1;
+  line-height: 1.2;
 }
 
-.tag-folder-item .folder-count {
-  font-size: 12px;
-  opacity: .6;
+.tag-item-count {
+  font-size: 11.5px;
+  opacity: .55;
+  font-family: 'JetBrains Mono', monospace;
+  margin-top: 4px;
+}
+
+.tag-item-chev {
+  opacity: .3;
+  font-size: 22px;
+  line-height: 1;
+  flex-shrink: 0;
 }
 
 .tag-folder-header {
@@ -609,81 +752,53 @@ input, textarea, select {
   min-width: 0;
 }
 
-/* ---------- AI badge (sparkle + label) ----------
- * Marks content the app inferred automatically rather than content the user
- * typed -- currently just Scan's frontmatter-guessed descriptions. Purple
- * accent tone per DESIGN_SYSTEM.md's "AI tones... AI-specific elements
- * only" rule; a plain "(no description found)" placeholder does NOT get
- * this badge, since there's nothing AI-guessed about an empty guess. */
-.ai-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--accent-500);
-  background: linear-gradient(135deg, rgb(122 0 223 / .08), rgb(6 147 227 / .08));
-  border: 1px solid rgb(122 0 223 / .25);
-  border-radius: var(--radius-pill);
-  padding: 2px 9px 2px 7px;
-  flex-shrink: 0;
-  white-space: nowrap;
-}
-
-.ai-badge .sparkle {
-  display: inline-block;
-  animation: neural-pulse 2.2s ease-in-out infinite;
-}
-
-@keyframes neural-pulse {
-  0%, 100% { opacity: .55; transform: scale(.9); }
-  50% { opacity: 1; transform: scale(1.05); }
-}
-
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
   gap: 14px;
 }
 
+/* Icon-led: a kind swatch + serif name/kind-label pair up top (row1), the
+ * same treatment Browse-by-tag's own list rows use, so both read as one
+ * consistent card language instead of two different ones. */
 .res-card {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: 15px 17px;
+  padding: 18px 19px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
   box-shadow: var(--shadow-1);
   cursor: pointer;
-  transition: box-shadow .15s ease, border-color .15s ease;
+  transition: box-shadow .15s ease, transform .15s ease, border-color .15s ease;
 }
 
 .res-card:hover {
   border-color: var(--border-strong);
   box-shadow: var(--shadow-2);
+  transform: translateY(-3px);
 }
 
 .res-card .row1 {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.res-card .kind {
-  font-size: 11.5px;
-  font-weight: 500;
-  color: var(--primary-700);
-  opacity: .65;
-  text-transform: uppercase;
-  letter-spacing: .5px;
+  align-items: flex-start;
+  gap: 12px;
 }
 
 .res-card .name {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'EB Garamond', Georgia, serif;
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+.res-card .kind-label {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  opacity: .5;
   font-weight: 600;
-  font-size: 14px;
+  margin-top: 2px;
 }
 
 .res-card .summary {
@@ -702,6 +817,7 @@ input, textarea, select {
 .res-card .meta {
   font-size: 11px;
   opacity: .55;
+  font-family: 'JetBrains Mono', monospace;
 }
 
 /* status badges -- 3 distinct colors from the warm/status palette */
@@ -759,6 +875,24 @@ input, textarea, select {
   gap: 12px;
   margin-bottom: 14px;
   flex-wrap: wrap;
+}
+
+.detail-title-group {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.kind-swatch.lg {
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
+}
+
+.kind-swatch.lg svg {
+  width: 26px;
+  height: 26px;
 }
 
 .detail-title {
@@ -1044,16 +1178,26 @@ input, textarea, select {
   resize: vertical;
 }
 
-.field select + input[type="text"] {
+.field select + input[type="text"],
+.field .chip-picker + input[type="text"] {
   margin-top: 8px;
 }
 
 /* ---------- tag picker (roles/stacks/teams) ----------
  * Replaces a raw "type a comma-separated list and hope you spell it the
- * same way as last time" text field with removable chips + a suggestion
- * list (a <datalist>) of values already used elsewhere in the catalog --
- * still fully free-text (a new value is just as valid), just easier to
- * reuse an existing one without retyping/mistyping it. */
+ * same way as last time" text field with removable chips for what's
+ * already added, plus a row of clickable, visible suggestion chips for
+ * values already used elsewhere in the catalog -- not a native <datalist>
+ * popup, which is hidden behind the browser's own autocomplete UI and
+ * doesn't match the rest of the app. Still fully free-text (typing a new
+ * value and pressing Enter/comma works the same way); the suggestions are
+ * just a faster way to reuse an existing one without retyping it. */
+.tag-picker-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .tag-picker {
   display: flex;
   flex-wrap: wrap;
@@ -1067,6 +1211,33 @@ input, textarea, select {
 
 .tag-picker-chips {
   display: contents;
+}
+
+.tag-picker-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tag-picker-suggestions:empty {
+  display: none;
+}
+
+/* A suggestion is "click to add," not yet part of the value -- dashed
+ * border keeps it visually distinct from an already-added .tag-chip
+ * (solid fill) and from a single-select .chip-picker option (solid
+ * border), at a glance. */
+.chip.tag-picker-suggestion {
+  border: 1px dashed var(--border-strong);
+  background: transparent;
+  color: var(--primary-700);
+  opacity: .8;
+}
+
+.chip.tag-picker-suggestion:hover {
+  opacity: 1;
+  background: var(--surface-tertiary);
+  border-color: var(--sage-500);
 }
 
 .tag-chip {
@@ -1142,6 +1313,137 @@ input, textarea, select {
 .remote-form input#r-name {
   flex: 1;
   min-width: 140px;
+}
+
+/* ---------- add new: step wizard ----------
+ * One field/group visible at a time (see app.js's renderWizardStep), with a
+ * progress bar, Next/Back, and a final Review step before the real submit
+ * -- replacing one long scrolling form with something more guided and
+ * interactive, matching the app's own card/chip visual language rather
+ * than leaning on native <select>/browser-default form chrome. */
+
+.wizard-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wizard-progress {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 4px 0 18px;
+}
+
+.wizard-progress-track {
+  flex: 1;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-inset);
+  overflow: hidden;
+}
+
+.wizard-progress-bar {
+  height: 100%;
+  background: var(--gradient-brand);
+  border-radius: var(--radius-pill);
+  transition: width .2s ease;
+}
+
+.wizard-progress-label {
+  font-size: 12px;
+  font-weight: 500;
+  opacity: .6;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.wizard-step {
+  min-height: 120px;
+}
+
+/* Each step shows exactly one field, so its <label> is functionally this
+ * step's own heading, not a small caption sitting above a field in a dense
+ * multi-field form -- styled like one: EB Garamond serif, larger, normal
+ * weight, per DESIGN_SYSTEM.md's typography table (page/card titles use
+ * EB Garamond at font-normal, larger sizes than body text). */
+.wizard-step .field label {
+  font-family: 'EB Garamond', Georgia, serif;
+  font-size: 22px;
+  font-weight: 400;
+  color: var(--primary-700);
+  opacity: 1;
+  margin-bottom: 12px;
+}
+
+.wizard-nav {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.wizard-nav-spacer {
+  flex: 1;
+}
+
+/* Low-cardinality single-select fields (Kind, Remote) as clickable chips --
+ * the same `.chip` look Browse's own Kind filter uses -- instead of a
+ * native <select>, which renders with OS-default chrome that doesn't match
+ * the rest of the app and hides every option behind a click to open it. */
+.chip-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip-picker .chip {
+  border: none;
+  font: inherit;
+}
+
+.wizard-review {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.wizard-review-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--card);
+}
+
+.wizard-review-row:last-child {
+  border-bottom: none;
+}
+
+.wizard-review-label {
+  flex-shrink: 0;
+  width: 120px;
+  font-size: 11.5px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: .3px;
+  opacity: .55;
+}
+
+.wizard-review-value {
+  flex: 1;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.wizard-review-row .btn {
+  flex-shrink: 0;
 }
 
 /* ---------- settings ---------- */
@@ -1222,8 +1524,7 @@ input, textarea, select {
  * Accessibility section -- state changes (done/error/toast shown) are
  * still communicated via color + text, never motion alone. */
 @media (prefers-reduced-motion: reduce) {
-  .spinner,
-  .ai-badge .sparkle {
+  .spinner {
     animation: none;
   }
 
@@ -1231,7 +1532,7 @@ input, textarea, select {
     animation: none;
   }
 
-  .tag-folder-item,
+  .tag-item-row,
   .res-card,
   .btn {
     transition: none;

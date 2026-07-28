@@ -13,23 +13,107 @@
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
-    <div id="app">
-      <header class="topbar">
-        <div class="brand">
-          <span class="brand-name">DeliveryOS</span>
-        </div>
-        <nav class="nav">
-          <button class="nav-btn" data-view="browse">Browse</button>
-          <button class="nav-btn" data-view="settings">Settings</button>
-        </nav>
-        <div class="folder-display">
-          <span class="folder-label">Project</span>
-          <span id="folder-path" class="folder-path">No folder selected</span>
-          <button id="change-folder-btn" class="btn btn-sm">Change folder</button>
-        </div>
-      </header>
+    <!-- Icon defs used throughout via <svg><use href="#i-..."/></svg> --
+         kept as one hidden sprite sheet instead of inlining full paths
+         wherever an icon appears. Kind stays open-ended (no hardcoded
+         enum elsewhere in the app), so kindIcon() in app.js falls back to
+         i-kind-default for any kind not listed here. -->
+    <svg width="0" height="0" style="position: absolute">
+      <defs>
+        <symbol id="i-kind-agent" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+          <circle cx="10" cy="10" r="6.5" />
+          <circle cx="10" cy="10" r="1.4" fill="currentColor" stroke="none" />
+          <circle cx="15.3" cy="6.6" r="1.3" fill="currentColor" stroke="none" />
+          <circle cx="4.7" cy="14.4" r="1.3" fill="currentColor" stroke="none" />
+        </symbol>
+        <symbol id="i-kind-skill" viewBox="0 0 20 20" fill="currentColor">
+          <path d="M10 1.5 L12 8 L18.5 10 L12 12 L10 18.5 L8 12 L1.5 10 L8 8 Z" />
+        </symbol>
+        <symbol id="i-kind-command" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2.2" y="3.5" width="15.6" height="13" rx="2.4" />
+          <path d="M6 8.2 L9 10 L6 11.8" />
+          <path d="M10.4 12 H13.6" />
+        </symbol>
+        <symbol id="i-kind-rule" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+          <path d="M3.2 5.5 H15.3" />
+          <path d="M3.2 10 H17" />
+          <path d="M3.2 14.5 H11.2" />
+        </symbol>
+        <symbol id="i-kind-template" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round">
+          <rect x="6" y="2.5" width="11.3" height="11.3" rx="1.6" />
+          <rect x="2.5" y="6" width="11.3" height="11.3" rx="1.6" fill="var(--card, #fff)" />
+        </symbol>
+        <symbol id="i-kind-doc" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round">
+          <path d="M4.8 2.2 H12 L15.3 5.5 V17.3 H4.8 Z" />
+          <path d="M12 2.2 V5.5 H15.3" />
+          <path d="M7.2 9.5 H12.8 M7.2 12.6 H12.8" />
+        </symbol>
+        <symbol id="i-kind-default" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round">
+          <path d="M10 2.5 L17.5 10 L10 17.5 L2.5 10 Z" />
+        </symbol>
+        <symbol id="i-folder" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round">
+          <path d="M2.5 5.5 h5 l1.6 2h8.4 v9 h-15 z" />
+        </symbol>
+        <symbol id="i-settings" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round">
+          <circle cx="10" cy="10" r="2.6" />
+          <path d="M10 3v2.2M10 14.8V17M17 10h-2.2M5.2 10H3M14.9 5.1l-1.5 1.5M6.6 13.4l-1.5 1.5M14.9 14.9l-1.5-1.5M6.6 6.6L5.1 5.1" />
+        </symbol>
+        <symbol id="i-scan" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round">
+          <path d="M2.5 6V3.5a1 1 0 0 1 1-1H6M14 2.5h2.5a1 1 0 0 1 1 1V6M17.5 14v2.5a1 1 0 0 1-1 1H14M6 17.5H3.5a1 1 0 0 1-1-1V14" />
+          <circle cx="10" cy="10" r="3.1" />
+        </symbol>
+        <symbol id="i-plus" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+          <path d="M10 4v12M4 10h12" />
+        </symbol>
+        <symbol id="i-tag" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round">
+          <path d="M2.3 2.3 H9.5 L17.7 10.5 L10.5 17.7 L2.3 9.5 Z" />
+          <circle cx="6.2" cy="6.2" r="1.15" fill="currentColor" stroke="none" />
+        </symbol>
+        <symbol id="i-role" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round">
+          <circle cx="10" cy="7" r="3" />
+          <path d="M3.5 17c0-3.3 2.9-6 6.5-6s6.5 2.7 6.5 6" />
+        </symbol>
+        <symbol id="i-lang-python" viewBox="0 0 20 20" fill="currentColor">
+          <path d="M9.9 2.2c-3.6 0-3.4 1.6-3.4 1.6l0 1.6h3.5v.5H5.1S2.2 5.6 2.2 9.2s2.6 3.5 2.6 3.5h1.5v-2s-.1-2.6 2.5-2.6h3.4s2.4 0 2.4-2.4V4.6s.4-2.4-4.7-2.4Zm-1.9 1.1a.7.7 0 1 1 0 1.4.7.7 0 0 1 0-1.4Z"/>
+          <path d="M10.1 17.8c3.6 0 3.4-1.6 3.4-1.6l0-1.6h-3.5v-.5h4.9s2.9.3 2.9-3.3-2.6-3.5-2.6-3.5h-1.5v2s.1 2.6-2.5 2.6H7.8s-2.4 0-2.4 2.4v2.6s-.4 2.4 4.7 2.4Zm1.9-1.1a.7.7 0 1 1 0-1.4.7.7 0 0 1 0 1.4Z"/>
+        </symbol>
+        <symbol id="i-lang-java" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M6 11.5c0 1.8 2 2.6 4 2.6s4-.8 4-2.6" />
+          <path d="M5.3 14.8c0 1.4 2.1 2 4.7 2s4.7-.6 4.7-2" />
+          <path d="M8.3 2.5c-2 1.7 1.4 3-.2 4.6" />
+          <path d="M7 8.2c-2.6.3-4.4 1-4.4 1.8 0 1.1 3.3 2 7.4 2s7.4-.9 7.4-2c0-.8-1.8-1.5-4.4-1.8" />
+        </symbol>
+        <symbol id="i-lang-rust" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round">
+          <circle cx="10" cy="10" r="4.2" />
+          <circle cx="10" cy="10" r="1.1" fill="currentColor" stroke="none" />
+          <path d="M10 3.5v1.4M10 15.1v1.4M16.5 10h-1.4M4.9 10H3.5M14.6 5.4l-1 1M6.4 13.6l-1 1M14.6 14.6l-1-1M6.4 6.4l-1-1" />
+        </symbol>
+      </defs>
+    </svg>
 
-      <main id="main">
+    <div id="app">
+      <div class="app-shell">
+        <nav class="sidebar">
+          <div class="sidebar-brand">DeliveryOS</div>
+          <div class="sidebar-nav">
+            <button class="sidebar-item" data-view="browse"><svg class="glyph"><use href="#i-folder"/></svg>Browse</button>
+            <button class="sidebar-item" data-view="tags"><svg class="glyph"><use href="#i-tag"/></svg>Browse by tag</button>
+            <button class="sidebar-item" data-view="settings"><svg class="glyph"><use href="#i-settings"/></svg>Settings</button>
+            <div class="sidebar-divider"></div>
+            <button class="sidebar-item" data-view="scan"><svg class="glyph"><use href="#i-scan"/></svg>Scan</button>
+            <button class="sidebar-item" data-view="addnew"><svg class="glyph"><use href="#i-plus"/></svg>Add New</button>
+          </div>
+        </nav>
+
+        <div class="content-shell">
+          <div class="context-strip">
+            <span class="folder-label">Project</span>
+            <span id="folder-path" class="folder-path">No folder selected</span>
+            <span class="context-strip-spacer"></span>
+            <button id="change-folder-btn" class="btn btn-sm">Change folder</button>
+          </div>
+
+          <main id="main">
         <!-- Browse -->
         <section id="view-browse" class="view">
           <div id="browse-no-folder" class="hint-banner" hidden>
@@ -53,41 +137,58 @@
                   <option value="name">Sort: Name (A&ndash;Z)</option>
                   <option value="kind">Sort: Kind</option>
                   <option value="status">Sort: Status</option>
+                  <option value="edited">Sort: Locally edited first</option>
                 </select>
                 <button id="browse-pull-all-btn" class="btn" hidden></button>
               </div>
               <div class="toolbar-group">
                 <button id="refresh-btn" class="btn">Refresh</button>
                 <button id="check-artifact-updates-btn" class="btn">Check for updates</button>
-                <button id="scan-btn" class="btn btn-accent">Scan for new content</button>
               </div>
             </div>
           </div>
-          <div id="chips" class="chips"></div>
-          <div class="tags-section">
-            <div id="tag-category-row" class="chips tag-category-row"></div>
-            <input
-              id="tag-value-search"
-              class="mini-search tag-value-search"
-              type="text"
-              placeholder="Filter values&hellip;"
-              hidden
-            />
-            <div id="tag-value-row" class="chips tag-value-row"></div>
-            <p id="tag-value-empty" class="empty-state" hidden>No values match that filter.</p>
-          </div>
+          <div id="chips" class="tab-row"></div>
           <div id="card-grid" class="grid"></div>
           <p id="browse-empty" class="empty-state" hidden>No artifacts match.</p>
         </section>
 
+        <!-- Browse by tag: its own sidebar destination and page (not an
+             inline expansion of Browse's own grid, and not a popover --
+             both were tried and both read as clutter/inconsistent with the
+             sidebar's other real destinations, which all go to a real
+             page). One category tab row (stack/role/project, whichever
+             actually have values in the loaded catalog), and a plain list
+             of that category's values -- icon-led rows reusing the exact
+             same visual language as Browse's own artifact cards. Clicking
+             a value opens the existing, unchanged Tag Folder view. -->
+        <section id="view-tags" class="view" hidden>
+          <div id="tags-no-folder" class="hint-banner" hidden>
+            Select a project folder to browse by tag.
+          </div>
+          <div class="page-head">
+            <h2 class="section-title">Browse by tag</h2>
+            <span id="tags-count" class="count"></span>
+          </div>
+          <div id="tags-cat-tabs" class="tab-row" style="margin-bottom: 16px;"></div>
+          <input
+            id="tags-value-search"
+            class="mini-search tag-value-search"
+            type="text"
+            placeholder="Filter values&hellip;"
+            hidden
+          />
+          <div id="tags-list" class="tag-list-panel"></div>
+          <p id="tags-empty" class="empty-state" hidden>No values in this category yet.</p>
+        </section>
+
         <!-- Tag folder: opened by picking a tag VALUE (e.g. "stack: python")
-             in Browse -- its own navigable view (back button, like Detail),
-             not an inline filter of Browse's own grid. Lists every artifact
-             carrying that tag, grouped by kind, each with its own inline
-             action button; clicking a row opens the existing Detail view
-             unchanged. -->
+             from Browse by tag -- its own navigable view (back button, like
+             Detail), not an inline filter of Browse's own grid. Lists every
+             artifact carrying that tag, grouped by kind, each with its own
+             inline action button; clicking a row opens the existing Detail
+             view unchanged. -->
         <section id="view-tag-folder" class="view" hidden>
-          <button class="btn back-btn" data-view="browse">&larr; Back to Browse</button>
+          <button class="btn back-btn" data-view="tags">&larr; Back to Browse by tag</button>
           <div class="tag-folder-header">
             <h2 id="tag-folder-title" class="section-title"></h2>
             <div class="scan-controls">
@@ -115,7 +216,7 @@
         <section id="view-scan" class="view" hidden>
           <button class="btn back-btn" data-view="browse">&larr; Back to Browse</button>
           <div class="tag-folder-header">
-            <h2 class="section-title">Scan for new agents/skills</h2>
+            <h2 class="section-title">Scan for new content</h2>
             <div class="scan-controls">
               <select id="scan-remote-select"></select>
               <button id="scan-run-btn" class="btn btn-accent">Scan</button>
@@ -136,10 +237,13 @@
           <button id="back-to-browse-btn" class="btn back-btn">&larr; Back to Browse</button>
           <div class="card detail-card">
             <div class="detail-header">
-              <div class="detail-title">
-                <span id="detail-kind" class="kind-label"></span>
-                <span id="detail-name" class="name"></span>
-                <span id="detail-badge" class="badge"></span>
+              <div class="detail-title-group">
+                <div id="detail-kind-icon" class="kind-swatch lg"></div>
+                <div class="detail-title">
+                  <span id="detail-kind" class="kind-label"></span>
+                  <span id="detail-name" class="name"></span>
+                  <span id="detail-badge" class="badge"></span>
+                </div>
               </div>
               <button id="detail-action-btn" class="btn btn-primary" hidden></button>
             </div>
@@ -202,79 +306,146 @@
           </div>
         </section>
 
-        <!-- Add new -->
+        <!-- Add new: one shared form, two modes (see addNewWizardMode in
+             app.js). Entered directly (sidebar "Add New", Browse's "+ Add
+             new") it's a flat form -- every .wizard-step visible at once,
+             wizard chrome (progress bar/Next/Back/Review) hidden -- after
+             real feedback that stepping through mostly-blank fields one at
+             a time felt like too many steps for filling this out by hand.
+             Entered from Scan's "Review & propose" (most fields already
+             known), it stays the step-by-step wizard it always was,
+             landing straight on the Review step -- the one place stepping
+             through genuinely helps, since almost everything is already
+             filled in and Review's per-field "Edit" jumps back to fix
+             just one thing. -->
         <section id="view-addnew" class="view" hidden>
           <button class="btn back-btn" data-view="browse">&larr; Back to Browse</button>
           <form id="addnew-form" class="card form-grid">
             <h2 class="section-title">Propose a new artifact</h2>
-            <div class="field">
-              <label for="f-id">Artifact ID</label>
-              <input
-                id="f-id"
-                type="text"
-                required
-                placeholder="e.g. code-reviewer"
-                pattern="[a-z0-9]+(-[a-z0-9]+)*"
-                title="Lowercase letters, numbers, and hyphens only, e.g. growtharc-brand-guidelines"
-              />
-              <p class="field-hint">Lowercase, hyphen-separated, no spaces -- this becomes a folder name and a git branch name.</p>
+
+            <div id="addnew-wizard-progress" class="wizard-progress" hidden>
+              <div class="wizard-progress-track">
+                <div id="wizard-progress-bar" class="wizard-progress-bar"></div>
+              </div>
+              <span id="wizard-progress-label" class="wizard-progress-label"></span>
             </div>
-            <div class="field">
-              <label for="f-kind">Kind</label>
-              <select id="f-kind" required></select>
-              <input
-                id="f-kind-custom"
-                type="text"
-                placeholder="e.g. dataset, config, agent-asset"
-                hidden
-              />
-              <p class="field-hint">Pick a kind already in use, or "+ New kind&hellip;" to add one -- kind is open-ended, not a fixed list.</p>
-            </div>
-            <div class="field">
-              <label>Payload</label>
-              <div class="payload-picker">
-                <button type="button" id="pick-payload-file-btn" class="btn btn-sm">Choose file&hellip;</button>
-                <button type="button" id="pick-payload-dir-btn" class="btn btn-sm">Choose folder&hellip;</button>
-                <span id="payload-path-display" class="install-path">No file or folder selected</span>
+
+            <div class="wizard-step" data-step="id">
+              <div class="field">
+                <label for="f-id">Artifact ID</label>
+                <input
+                  id="f-id"
+                  type="text"
+                  required
+                  placeholder="e.g. code-reviewer"
+                  pattern="[a-z0-9]+(-[a-z0-9]+)*"
+                  title="Lowercase letters, numbers, and hyphens only, e.g. growtharc-brand-guidelines"
+                />
+                <p class="field-hint">Lowercase, hyphen-separated, no spaces -- this becomes a folder name and a git branch name.</p>
               </div>
             </div>
-            <div class="field">
-              <label for="f-description">Description</label>
-              <textarea id="f-description" required rows="3"></textarea>
+
+            <div class="wizard-step" data-step="kind">
+              <div class="field">
+                <label>Kind</label>
+                <div id="f-kind-picker" class="chip-picker"></div>
+                <input
+                  id="f-kind-custom"
+                  type="text"
+                  placeholder="e.g. dataset, config, agent-asset"
+                  hidden
+                />
+                <p class="field-hint">Pick a kind already in use, or "+ New kind&hellip;" to add one -- kind is open-ended, not a fixed list.</p>
+              </div>
             </div>
-            <div class="field">
-              <label for="f-owner">Owner</label>
-              <input id="f-owner" type="text" required />
+
+            <div class="wizard-step" data-step="payload">
+              <div class="field">
+                <label>Payload</label>
+                <div class="payload-picker">
+                  <button type="button" id="pick-payload-file-btn" class="btn btn-sm">Choose file&hellip;</button>
+                  <button type="button" id="pick-payload-dir-btn" class="btn btn-sm">Choose folder&hellip;</button>
+                  <span id="payload-path-display" class="install-path">No file or folder selected</span>
+                </div>
+              </div>
             </div>
-            <div class="field">
-              <label>Who is this for (roles)</label>
-              <div id="f-roles-picker"></div>
-              <p class="field-hint">Pick from existing roles, or type a new one and press Enter or comma.</p>
+
+            <div class="wizard-step" data-step="description">
+              <div class="field">
+                <label for="f-description">Description</label>
+                <textarea id="f-description" required rows="3"></textarea>
+              </div>
             </div>
-            <div class="field">
-              <label>Stack</label>
-              <div id="f-stacks-picker"></div>
-              <p class="field-hint">Shows up under Browse's "stack" tag folders (e.g. "stack: python") -- leave blank if this isn't tied to a particular stack.</p>
+
+            <div class="wizard-step" data-step="owner">
+              <div class="field">
+                <label for="f-owner">Owner</label>
+                <input id="f-owner" type="text" required />
+              </div>
             </div>
-            <div class="field">
-              <label>Team / project</label>
-              <div id="f-teams-picker"></div>
-              <p class="field-hint">Shows up under Browse's "project" tag folders.</p>
+
+            <div class="wizard-step" data-step="roles">
+              <div class="field">
+                <label>Who is this for (roles)</label>
+                <div id="f-roles-picker"></div>
+                <p class="field-hint">Pick from existing roles, or type a new one and press Enter or comma.</p>
+              </div>
             </div>
-            <div class="field">
-              <label for="f-install-target">Install target (optional)</label>
-              <input id="f-install-target" type="text" placeholder="e.g. .claude/agents/my-agent.md" />
-              <p class="field-hint">Where a pull lands this. Leave blank to default to a folder named after the Artifact ID.</p>
+
+            <div class="wizard-step" data-step="stacks">
+              <div class="field">
+                <label>Stack</label>
+                <div id="f-stacks-picker"></div>
+                <p class="field-hint">Shows up under Browse's "stack" tag folders (e.g. "stack: python") -- leave blank if this isn't tied to a particular stack.</p>
+              </div>
             </div>
-            <div class="field">
-              <label for="f-post-install">Setup command (optional)</label>
-              <input id="f-post-install" type="text" placeholder="e.g. npm install, pip install -e &quot;.[dev]&quot;" />
-              <p class="field-hint">Runs automatically right after someone pulls this, in the folder it lands in. Leave blank if nothing needs to be installed.</p>
+
+            <div class="wizard-step" data-step="teams">
+              <div class="field">
+                <label>Team / project</label>
+                <div id="f-teams-picker"></div>
+                <p class="field-hint">Shows up under Browse's "project" tag folders.</p>
+              </div>
             </div>
-            <div class="field">
-              <label for="f-remote">Remote</label>
-              <select id="f-remote" required></select>
+
+            <div class="wizard-step" data-step="install-target">
+              <div class="field">
+                <label for="f-install-target">Install target (optional)</label>
+                <input id="f-install-target" type="text" placeholder="e.g. .claude/agents/my-agent.md" />
+                <p class="field-hint">Where a pull lands this. Leave blank to default to a folder named after the Artifact ID.</p>
+              </div>
             </div>
+
+            <div class="wizard-step" data-step="post-install">
+              <div class="field">
+                <label for="f-post-install">Setup command (optional)</label>
+                <input id="f-post-install" type="text" placeholder="e.g. npm install, pip install -e &quot;.[dev]&quot;" />
+                <p class="field-hint">Runs automatically right after someone pulls this, in the folder it lands in. Leave blank if nothing needs to be installed.</p>
+              </div>
+            </div>
+
+            <div class="wizard-step" data-step="remote">
+              <div class="field">
+                <label>Remote</label>
+                <div id="f-remote-picker" class="chip-picker"></div>
+                <p class="field-hint" id="f-remote-empty-hint" hidden>No remotes registered yet -- add one in Settings first.</p>
+              </div>
+            </div>
+
+            <div class="wizard-step" data-step="review" hidden>
+              <div class="field">
+                <label>Review</label>
+                <div id="addnew-review" class="wizard-review"></div>
+              </div>
+            </div>
+
+            <div id="addnew-wizard-nav" class="wizard-nav" hidden>
+              <button type="button" id="wizard-back-btn" class="btn btn-ghost">&larr; Back</button>
+              <span class="wizard-nav-spacer"></span>
+              <button type="button" id="wizard-review-btn" class="btn btn-ghost">Review &rarr;</button>
+              <button type="button" id="wizard-next-btn" class="btn btn-primary">Next &rarr;</button>
+            </div>
+
             <button type="submit" id="addnew-submit-btn" class="btn btn-primary" style="align-self:flex-start;">
               Propose
             </button>
@@ -322,7 +493,9 @@
           </div>
           <div id="progress-log" class="progress-log"></div>
         </div>
-      </main>
+          </main>
+        </div>
+      </div>
 
       <div id="toast-stack" class="toast-stack"></div>
     </div>
