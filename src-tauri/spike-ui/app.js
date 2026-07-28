@@ -27,6 +27,84 @@
     both_changed: 'Both changed',
   };
 
+  // ---------- kind icon (Browse's cards, Detail, Tag Folder/Scan rows) ----------
+  //
+  // A small, distinct mark per kind, plus a warm accent tint -- never the
+  // AI-reserved purple/cyan tokens, matching the rule already applied
+  // elsewhere in this app. Kind stays open-ended (z.string() in the
+  // manifest schema, not a closed enum -- see ARCHITECTURE.md), so this is
+  // a convenience lookup, not a whitelist: any kind not listed here falls
+  // back to a neutral diamond glyph rather than a broken/missing icon.
+  const KIND_ICON = {
+    agent: { icon: 'i-kind-agent', bg: 'var(--sage-100)', fg: 'var(--sage-700)' },
+    skill: { icon: 'i-kind-skill', bg: 'var(--sand-100)', fg: '#8A5A2B' },
+    command: { icon: 'i-kind-command', bg: 'var(--sky-100)', fg: '#2E5E82' },
+    rule: { icon: 'i-kind-rule', bg: 'var(--sage-50)', fg: 'var(--primary-700)' },
+    template: { icon: 'i-kind-template', bg: 'var(--gold-500)', fg: '#6B4A00' },
+    doc: { icon: 'i-kind-doc', bg: 'var(--surface-inset)', fg: 'var(--primary-700)' },
+  };
+  const KIND_ICON_FALLBACK = { icon: 'i-kind-default', bg: 'var(--surface-inset)', fg: 'var(--primary-700)' };
+
+  /** Returns the inner HTML for a `.kind-swatch` element (a colored,
+   * rounded icon tile) for `kind` -- append `' sm'`/`' lg'` to `sizeClass`
+   * for the smaller (kind-group rows) or larger (Detail header) variants;
+   * default size is Browse's own card treatment. Callers set the class on
+   * their own wrapper element and use this just for the inner
+   * background/color/icon. */
+  function kindIconParts(kind) {
+    return KIND_ICON[kind] ?? KIND_ICON_FALLBACK;
+  }
+
+  function kindSwatchHtml(kind, extraClass) {
+    const entry = kindIconParts(kind);
+    const cls = `kind-swatch${extraClass ? ` ${extraClass}` : ''}`;
+    return (
+      `<div class="${cls}" style="background:${entry.bg};color:${entry.fg};">`
+      + `<svg><use href="#${entry.icon}"/></svg></div>`
+    );
+  }
+
+  // ---------- tag value icon (Browse by tag's list rows) ----------
+  //
+  // Real research (GitHub's own topic-browsing page) confirms a
+  // recognizable icon per item is what makes a "browse by category" list
+  // feel rich, not a chart device. Only a curated few stack values get
+  // their own mark (simplified, not a trademarked logo, or -- for
+  // TypeScript/JavaScript -- literal lettering, since that IS their real
+  // mark); anything else, and every role/project value, gets a sensible
+  // generic icon instead of an empty/broken one. Tag values are free-text
+  // (see Add New's Stack field), so this is deliberately a small curated
+  // convenience, not an attempt to cover every possible value.
+  const STACK_ICON = {
+    python: { icon: 'i-lang-python', bg: 'var(--sage-100)', fg: 'var(--sage-700)' },
+    java: { icon: 'i-lang-java', bg: 'var(--sand-100)', fg: '#8A5A2B' },
+    rust: { icon: 'i-lang-rust', bg: 'var(--gold-500)', fg: '#6B4A00' },
+    typescript: { text: 'TS', bg: 'var(--sky-100)', fg: '#2E5E82' },
+    javascript: { text: 'JS', bg: 'var(--gold-500)', fg: '#6B4A00' },
+    go: { text: 'Go', bg: 'var(--sky-100)', fg: '#2E5E82' },
+    ruby: { text: 'Rb', bg: 'var(--danger-100)', fg: 'var(--danger-600)' },
+  };
+
+  /** Returns `{ bg, fg, html }` for a `.tag-item-icon` -- `category` is one
+   * of the raw manifest.tags keys ('stacks'/'roles'/'teams'). */
+  function tagValueIconParts(category, value) {
+    if (category === 'stacks') {
+      const entry = STACK_ICON[value.toLowerCase()];
+      if (entry) {
+        const html = entry.icon
+          ? `<svg><use href="#${entry.icon}"/></svg>`
+          : `<span class="tag-item-icon-text">${escapeHtml(entry.text)}</span>`;
+        return { bg: entry.bg, fg: entry.fg, html };
+      }
+      return { bg: 'var(--surface-inset)', fg: 'var(--primary-700)', html: '<svg><use href="#i-tag"/></svg>' };
+    }
+    if (category === 'roles') {
+      return { bg: 'var(--sage-100)', fg: 'var(--sage-700)', html: '<svg><use href="#i-role"/></svg>' };
+    }
+    // 'teams' (displayed as "project")
+    return { bg: 'var(--sky-100)', fg: '#2E5E82', html: '<svg><use href="#i-folder"/></svg>' };
+  }
+
   const state = {
     view: 'browse',
     projectDir: null,
@@ -48,17 +126,21 @@
     // remote (unlike kind/tags, picking more than one at a time isn't a
     // meaningful combination here).
     activeRemote: '',
-    sortBy: 'name', // 'name' | 'kind' | 'status' -- see sortEntries()
-    // Two-level tag filter: pick a category first (stack/role/project),
-    // which reveals that category's own values (e.g. stack -> python, java)
-    // in Browse; picking a value navigates into the dedicated Tag Folder
-    // view (openTagFolder/renderTagFolder), grouped by kind -- not an
-    // inline filter of Browse's own grid.
+    sortBy: 'name', // 'name' | 'kind' | 'status' | 'edited' -- see sortEntries()
+    // Which category tab is active on the Browse-by-tag page (its own
+    // sidebar destination/view, see renderTagsPage) -- independent of
+    // activeTagCategory/activeTagValue below, which track whichever Tag
+    // Folder is currently *open*, not which tab is showing on the page one
+    // navigates there from.
+    tagsPageCategory: null, // 'stacks' | 'roles' | 'teams' | null
+    // Set when a tag VALUE is picked (from the Browse-by-tag page),
+    // opening the dedicated Tag Folder view (openTagFolder/renderTagFolder),
+    // grouped by kind.
     activeTagCategory: null, // 'stacks' | 'roles' | 'teams' | null
     activeTagValue: null,
-    // Filters the *value* chips shown under an active tag category (e.g.
-    // typing "py" under "stack" narrows a long value list to "python").
-    // Reset whenever the active category changes.
+    // Filters the value list shown for the active category on the
+    // Browse-by-tag page (e.g. typing "py" narrows a long "stack" value
+    // list to "python"). Reset whenever the active category changes.
     tagValueSearch: '',
     // Filters *within* an open Tag Folder's own results, independent of
     // Browse's own search box -- reset every time a new folder is opened.
@@ -102,6 +184,15 @@
       return 'update_available';
     }
     return entry.localStatus;
+  }
+
+  /** Whether an entry has an uncommitted local edit -- true for both
+   * 'edited_locally' and 'both_changed' (both_changed is still a local
+   * edit, just one that also has an upstream update sitting on top of it).
+   * Used by the "Locally edited first" sort so both statuses bubble up
+   * together, not just whichever one alphabetizes first. */
+  function hasLocalEdit(entry) {
+    return displayStatus(entry) === 'edited_locally' || displayStatus(entry) === 'both_changed';
   }
 
   function escapeHtml(value) {
@@ -220,17 +311,22 @@
     for (const section of document.querySelectorAll('.view')) {
       section.hidden = section.id !== `view-${view}`;
     }
-    for (const btn of document.querySelectorAll('.nav-btn')) {
+    for (const btn of document.querySelectorAll('.sidebar-item')) {
       btn.classList.toggle('active', btn.dataset.view === view);
     }
     if (view === 'browse') {
       void loadCatalog();
+    } else if (view === 'tags') {
+      renderTagsPage();
     } else if (view === 'settings') {
       void loadRemotesForSettings();
+    } else if (view === 'scan') {
+      void openScanView();
     } else if (view === 'addnew') {
       resetAddNewForm();
       void loadRemotesForAddNewSelect();
       populateKindPicker();
+      addNewWizardMode = false;
       resetWizard();
     }
   }
@@ -287,12 +383,14 @@
     });
   }
 
-  /** Kind chips are multi-select (e.g. "agent" + "skill" together) --
-   * "All" is just shorthand for "nothing specifically selected," so
-   * clicking it clears the whole set rather than being its own kind value.
-   * The kind vocabulary itself stays fully dynamic (derived from whatever
-   * kinds actually exist in the loaded catalog, same as before) rather than
-   * a hardcoded list -- `kind` is deliberately open-ended in the manifest
+  /** Kind tabs (an underline tab bar, not pill chips -- reads as a
+   * deliberate filter control instead of a generic row of buttons) are
+   * multi-select (e.g. "agent" + "skill" together) -- "All" is just
+   * shorthand for "nothing specifically selected," so clicking it clears
+   * the whole set rather than being its own kind value. The kind
+   * vocabulary itself stays fully dynamic (derived from whatever kinds
+   * actually exist in the loaded catalog, same as before) rather than a
+   * hardcoded list -- `kind` is deliberately open-ended in the manifest
    * schema (see ARCHITECTURE.md), so a fixed button set would either show
    * dead buttons for kinds nobody uses yet or silently omit a real one
    * someone invents later. This selection is also applied inside an open
@@ -302,21 +400,21 @@
     const container = $('chips');
     container.innerHTML = '';
 
-    const allChip = document.createElement('span');
-    allChip.className = `chip ${state.activeKinds.size === 0 ? 'active' : ''}`;
-    allChip.textContent = 'All';
-    allChip.addEventListener('click', () => {
+    const allTab = document.createElement('button');
+    allTab.className = `tab ${state.activeKinds.size === 0 ? 'active' : ''}`;
+    allTab.textContent = 'All';
+    allTab.addEventListener('click', () => {
       state.activeKinds.clear();
       renderChips();
       renderCards();
     });
-    container.appendChild(allChip);
+    container.appendChild(allTab);
 
     for (const kind of kinds) {
-      const chip = document.createElement('span');
-      chip.className = `chip ${state.activeKinds.has(kind) ? 'active' : ''}`;
-      chip.textContent = kind;
-      chip.addEventListener('click', () => {
+      const tab = document.createElement('button');
+      tab.className = `tab ${state.activeKinds.has(kind) ? 'active' : ''}`;
+      tab.textContent = kind;
+      tab.addEventListener('click', () => {
         if (state.activeKinds.has(kind)) {
           state.activeKinds.delete(kind);
         } else {
@@ -325,12 +423,10 @@
         renderChips();
         renderCards();
       });
-      container.appendChild(chip);
+      container.appendChild(tab);
     }
 
     renderRemoteFilterSelect();
-    renderTagCategoryRow();
-    renderTagValueRow();
   }
 
   /** Shared by Browse's grid and an open Tag Folder's grouped results --
@@ -420,111 +516,116 @@
         const labelB = STATUS_LABELS[displayStatus(b)];
         return labelA.localeCompare(labelB) || a.manifest.id.localeCompare(b.manifest.id);
       }
+      if (state.sortBy === 'edited') {
+        const editedA = hasLocalEdit(a) ? 0 : 1;
+        const editedB = hasLocalEdit(b) ? 0 : 1;
+        return editedA - editedB || a.manifest.id.localeCompare(b.manifest.id);
+      }
       return a.manifest.id.localeCompare(b.manifest.id);
     });
     return sorted;
   }
 
-  /** Top tag row: one chip per tags category that actually has at least one
-   * value somewhere in the catalog (stack/role/project), plus "All tags".
-   * Picking a category doesn't filter anything by itself -- it just reveals
-   * that category's own values in renderTagValueRow, e.g. clicking "stack"
-   * reveals "python", "java", etc. underneath. Picking the same category
-   * again collapses it back (and clears any value already picked under it). */
-  function renderTagCategoryRow() {
+  // ---------- browse by tag (its own sidebar destination/view) ----------
+  //
+  // Tried inline in Browse's own grid, tried permanently expanded in the
+  // sidebar, tried a flyout popover off a sidebar row -- all three either
+  // dumped variable-length tag data next to stable content, or were
+  // inconsistent with every other sidebar item (which all go to a real
+  // page). This is just that: a normal page, entered via showView('tags').
+
+  /** Populates the category tab row (stack/role/project, whichever
+   * actually have at least one value in the loaded catalog) and renders
+   * the currently-active one's value list. Falls back to the first
+   * present category if the previously-active one no longer has any
+   * values (e.g. the catalog just reloaded). */
+  function renderTagsPage() {
+    $('tags-no-folder').hidden = Boolean(state.projectDir);
+
     const presentCategories = TAG_CATEGORIES.filter((category) =>
       state.catalog.some((entry) => (entry.manifest.tags?.[category] ?? []).length > 0),
     );
-
-    const container = $('tag-category-row');
-    container.innerHTML = '';
-
-    const allChip = document.createElement('span');
-    allChip.className = `chip ${state.activeTagCategory === null ? 'active' : ''}`;
-    allChip.textContent = 'All tags';
-    allChip.addEventListener('click', () => {
-      state.activeTagCategory = null;
-      state.activeTagValue = null;
-      state.tagValueSearch = '';
-      $('tag-value-search').value = '';
-      renderTagCategoryRow();
-      renderTagValueRow();
-      renderCards();
-    });
-    container.appendChild(allChip);
-
-    for (const category of presentCategories) {
-      const chip = document.createElement('span');
-      chip.className = `chip ${state.activeTagCategory === category ? 'active' : ''}`;
-      chip.textContent = TAG_CATEGORY_LABEL[category];
-      chip.addEventListener('click', () => {
-        const collapsing = state.activeTagCategory === category;
-        state.activeTagCategory = collapsing ? null : category;
-        state.activeTagValue = null;
-        state.tagValueSearch = '';
-        $('tag-value-search').value = '';
-        renderTagCategoryRow();
-        renderTagValueRow();
-        renderCards();
-      });
-      container.appendChild(chip);
+    if (!state.tagsPageCategory || !presentCategories.includes(state.tagsPageCategory)) {
+      state.tagsPageCategory = presentCategories[0] ?? null;
     }
+
+    const tabsContainer = $('tags-cat-tabs');
+    tabsContainer.innerHTML = '';
+    for (const category of presentCategories) {
+      const tab = document.createElement('button');
+      tab.className = `tab ${state.tagsPageCategory === category ? 'active' : ''}`;
+      tab.textContent = TAG_CATEGORY_LABEL[category];
+      tab.addEventListener('click', () => {
+        state.tagsPageCategory = category;
+        state.tagValueSearch = '';
+        $('tags-value-search').value = '';
+        renderTagsPage();
+      });
+      tabsContainer.appendChild(tab);
+    }
+
+    renderTagsPageList();
   }
 
-  /** Second tag row: every distinct value the active category has across
-   * the catalog (e.g. category 'stacks' -> "python", "java", ...), rendered
-   * as a grid of cards (matching the app's own res-card look -- shadow,
-   * hover lift), each showing how many artifacts carry it. Each card
-   * navigates into its own Tag Folder view (openTagFolder). Empty/hidden
-   * when no category is selected.
-   *
-   * Deduped case-insensitively (`.toLowerCase()`) -- tag values come from
-   * free-text comma-separated input (Add New's Stack/Team fields, or the
-   * CLI's --stacks/--teams flags), so "python" and "Python" typed on two
+  /** The active category's values as a plain list -- icon-led rows (see
+   * tagValueIconParts) reusing the exact same card language as Browse's
+   * own .res-card, sorted by count descending so the most-populous value
+   * leads (a plain alphabetical list doesn't actually show what's worth
+   * looking at first). Deduped case-insensitively -- tag values come from
+   * free-text input (Add New's Stack/Team fields, or the CLI's
+   * --stacks/--teams flags), so "python" and "Python" typed on two
    * different pushes must still land in the same folder, not two separate
-   * ones. The lowercase form is also what's actually displayed, matching
-   * `entriesForTag`'s own case-insensitive matching below. */
-  function renderTagValueRow() {
-    const container = $('tag-value-row');
-    const searchInput = $('tag-value-search');
-    const emptyState = $('tag-value-empty');
+   * ones. */
+  function renderTagsPageList() {
+    const container = $('tags-list');
+    const emptyState = $('tags-empty');
+    const searchInput = $('tags-value-search');
+    const category = state.tagsPageCategory;
     container.innerHTML = '';
 
-    if (!state.activeTagCategory) {
+    if (!category) {
       searchInput.hidden = true;
-      emptyState.hidden = true;
+      emptyState.hidden = false;
+      $('tags-count').textContent = '';
       return;
     }
     searchInput.hidden = false;
 
     const allValues = Array.from(
       new Set(
-        state.catalog
-          .flatMap((entry) => entry.manifest.tags?.[state.activeTagCategory] ?? [])
-          .map((value) => value.toLowerCase()),
+        state.catalog.flatMap((entry) => entry.manifest.tags?.[category] ?? []).map((v) => v.toLowerCase()),
       ),
-    ).sort();
-
+    );
     const search = state.tagValueSearch.trim().toLowerCase();
-    const values = search.length === 0 ? allValues : allValues.filter((v) => v.includes(search));
-    emptyState.hidden = values.length !== 0;
+    const filteredValues = search.length === 0 ? allValues : allValues.filter((v) => v.includes(search));
 
-    for (const value of values) {
+    const withCounts = filteredValues.map((value) => ({
+      value,
       // Scoped to the active Kind/Remote selection too (if any), so this
       // count matches what opening the folder will actually show.
-      const count = applyGlobalFilters(entriesForTag(state.activeTagCategory, value)).length;
-      const card = document.createElement('div');
-      card.className = 'tag-folder-item';
-      card.innerHTML = `
-        <div class="folder-row-top">
-          <span class="folder-name"></span>
-          <span class="chevron" aria-hidden="true">&rsaquo;</span>
+      count: applyGlobalFilters(entriesForTag(category, value)).length,
+    }));
+    withCounts.sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
+
+    emptyState.hidden = withCounts.length !== 0;
+    $('tags-count').textContent = `${withCounts.length} value${withCounts.length === 1 ? '' : 's'}`;
+
+    for (const { value, count } of withCounts) {
+      const icon = tagValueIconParts(category, value);
+      const row = document.createElement('div');
+      row.className = 'tag-item-row';
+      row.innerHTML = `
+        <div class="tag-item-icon" style="background:${icon.bg};color:${icon.fg};">${icon.html}</div>
+        <div class="tag-item-body">
+          <div class="tag-item-name"></div>
+          <div class="tag-item-count"></div>
         </div>
-        <span class="folder-count">${count} artifact${count === 1 ? '' : 's'}</span>
+        <span class="tag-item-chev" aria-hidden="true">&rsaquo;</span>
       `;
-      card.querySelector('.folder-name').textContent = value;
-      card.addEventListener('click', () => openTagFolder(state.activeTagCategory, value));
-      container.appendChild(card);
+      row.querySelector('.tag-item-name').textContent = value;
+      row.querySelector('.tag-item-count').textContent = `${count} artifact${count === 1 ? '' : 's'}`;
+      row.addEventListener('click', () => openTagFolder(category, value));
+      container.appendChild(row);
     }
   }
 
@@ -646,14 +747,9 @@
   /** Browse's own bulk action, generalizing the same capability Tag Folder
    * already had to the plain artifact grid: pulls everything currently
    * matching the active Kind selection + search box, not just a tag
-   * folder's contents. Hidden while a tag category is expanded (Browse's
-   * grid itself is hidden then too -- see renderCards). */
+   * folder's contents. */
   function renderBrowsePullAllButton() {
     const btn = $('browse-pull-all-btn');
-    if (state.activeTagCategory) {
-      btn.hidden = true;
-      return;
-    }
     renderPullAllButton(btn, filteredEntries());
   }
 
@@ -668,8 +764,8 @@
    * python-tagged artifact, regardless of kind/remote, ignoring whatever
    * Kind chip/search happens to be active in Browse (this is its own page,
    * not a filter layered on top of Browse's grid). Case-insensitive for the
-   * same reason renderTagValueRow dedupes case-insensitively -- "python" and
-   * "Python" are the same folder, not two. */
+   * same reason renderTagsPageList dedupes case-insensitively -- "python"
+   * and "Python" are the same folder, not two. */
   function entriesForTag(category, value) {
     const target = value.toLowerCase();
     return state.catalog.filter((entry) =>
@@ -745,6 +841,7 @@
         const row = document.createElement('div');
         row.className = 'kind-group-row';
         row.innerHTML = `
+          ${kindSwatchHtml(entry.manifest.kind, 'sm')}
           <div class="row-main">
             <span class="name">${escapeHtml(entry.manifest.id)}</span>
             <span class="badge ${status}">${STATUS_LABELS[status]}</span>
@@ -774,20 +871,8 @@
   }
 
   function renderCards() {
-    // While a tag category is expanded (its value list is showing, even
-    // before a value is picked), hide the plain artifact grid below it --
-    // otherwise Browse shows both "pick a tag folder to open" AND an
-    // unrelated full artifact list at the same time, which just reads as
-    // clutter. Picking "All tags" (activeTagCategory back to null) restores
-    // the grid.
     const grid = $('card-grid');
-    const browsingTags = Boolean(state.activeTagCategory);
-    grid.hidden = browsingTags;
-    $('browse-empty').hidden = browsingTags;
     renderBrowsePullAllButton();
-    if (browsingTags) {
-      return;
-    }
 
     const entries = filteredEntries();
     grid.innerHTML = '';
@@ -804,15 +889,23 @@
       const status = displayStatus(entry);
       card.innerHTML = `
         <div class="row1">
-          <span class="kind">${escapeHtml(entry.manifest.kind)}</span>
-          <span class="badge ${status}">${STATUS_LABELS[status]}</span>
+          ${kindSwatchHtml(entry.manifest.kind)}
+          <div>
+            <div class="name"></div>
+            <div class="kind-label"></div>
+          </div>
         </div>
-        <div class="name">${escapeHtml(entry.manifest.id)}</div>
-        <div class="summary">${escapeHtml(entry.manifest.description)}</div>
+        <div class="summary"></div>
         <div class="row2">
-          <span class="meta">v${escapeHtml(entry.manifest.version)} &middot; ${escapeHtml(entry.manifest.owner)}</span>
+          <span class="meta"></span>
+          <span class="badge ${status}"></span>
         </div>
       `;
+      card.querySelector('.name').textContent = entry.manifest.id;
+      card.querySelector('.kind-label').textContent = entry.manifest.kind;
+      card.querySelector('.summary').textContent = entry.manifest.description;
+      card.querySelector('.meta').textContent = `v${entry.manifest.version} · ${entry.manifest.owner}`;
+      card.querySelector('.badge').textContent = STATUS_LABELS[status];
 
       // The whole card is the click target now -- Pull/Push moved into
       // Detail, so there's no inner action button to carve out a
@@ -1118,7 +1211,7 @@
     for (const section of document.querySelectorAll('.view')) {
       section.hidden = section.id !== `view-${view}`;
     }
-    for (const btn of document.querySelectorAll('.nav-btn')) {
+    for (const btn of document.querySelectorAll('.sidebar-item')) {
       btn.classList.toggle('active', btn.dataset.view === view);
     }
   }
@@ -1126,6 +1219,11 @@
   function renderDetail(entry) {
     const { manifest } = entry;
     const status = displayStatus(entry);
+    const kindIcon = kindIconParts(manifest.kind);
+    const kindIconEl = $('detail-kind-icon');
+    kindIconEl.style.background = kindIcon.bg;
+    kindIconEl.style.color = kindIcon.fg;
+    kindIconEl.innerHTML = `<svg><use href="#${kindIcon.icon}"/></svg>`;
     $('detail-kind').textContent = manifest.kind;
     $('detail-name').textContent = manifest.id;
     $('detail-badge').textContent = STATUS_LABELS[status];
@@ -1543,101 +1641,173 @@
     $('payload-path-display').textContent = 'No file or folder selected';
   }
 
-  // ---------- add new: wizard navigation ----------
+  // ---------- add new: field helpers ----------
+  //
+  // This maps a field's logical name to its actual DOM element, purely so
+  // submitAddNew's validation can scroll to and focus whichever one is
+  // actually blank/invalid instead of just a toast with nothing to click.
+  const ADDNEW_FIELD_ELEMENT_ID = {
+    id: 'f-id',
+    kind: 'f-kind-picker',
+    payload: 'pick-payload-file-btn',
+    description: 'f-description',
+    owner: 'f-owner',
+    remote: 'f-remote-picker',
+  };
 
-  /** One step per field/group, in the order they're shown -- matches the
-   * `.wizard-step[data-step="..."]` elements in index.html. 'review' is
-   * always last: a summary of everything entered, with the real Propose
-   * submit button. */
+  function focusAddNewField(fieldName) {
+    const el = $(ADDNEW_FIELD_ELEMENT_ID[fieldName]);
+    if (!el) {
+      return;
+    }
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    el.focus();
+  }
+
+  // ---------- add new: wizard mode ----------
+  //
+  // One shared form, two ways to move through it. A step-by-step wizard
+  // (one field/group per screen, Next/Back, a final Review step) was tried
+  // for every Add New entry point and then reverted -- real feedback was
+  // that it felt like too many steps for filling this out by hand from
+  // scratch. But Scan's "Review & propose" already knows most of the
+  // answers, so stepping through everything just to reach a Review screen
+  // that lets you fix any one thing is genuinely useful there. addNewWizardMode
+  // picks which behavior renderWizardStep() below produces; direct entry
+  // (showView('addnew')) sets it false, openAddNewFromScanCandidate sets it
+  // true. Same fields, same DOM, same submitAddNew -- only how much of the
+  // form is visible at once differs.
+  let addNewWizardMode = false;
+  let wizardStepIndex = 0;
+
   const ADDNEW_STEPS = [
-    'id',
-    'kind',
-    'payload',
-    'description',
-    'owner',
-    'roles',
-    'stacks',
-    'teams',
-    'install-target',
-    'post-install',
-    'remote',
+    'id', 'kind', 'payload', 'description', 'owner',
+    'roles', 'stacks', 'teams', 'install-target', 'post-install', 'remote',
     'review',
   ];
 
   const ADDNEW_STEP_LABELS = {
-    id: 'an Artifact ID',
-    kind: 'a Kind',
-    payload: 'a payload file or folder',
-    description: 'a Description',
-    owner: 'an Owner',
-    remote: 'a Remote',
+    id: 'Artifact ID',
+    kind: 'Kind',
+    payload: 'Payload',
+    description: 'Description',
+    owner: 'Owner',
+    roles: 'Who is this for',
+    stacks: 'Stack',
+    teams: 'Team / project',
+    'install-target': 'Install target',
+    'post-install': 'Setup command',
+    remote: 'Remote',
+    review: 'Review',
   };
 
-  let wizardStepIndex = 0;
-
-  /** Only the required steps actually block "Next" -- roles/stacks/teams/
-   * install-target/post-install are all optional, same as they always
-   * were, so Next just moves on for those without checking anything. */
-  function validateWizardStep(stepId) {
-    switch (stepId) {
-      case 'id':
-        return /^[a-z0-9]+(-[a-z0-9]+)*$/.test($('f-id').value.trim());
-      case 'kind':
-        return resolveKindFieldValue().length > 0;
-      case 'payload':
-        return Boolean(pendingPayloadPath);
-      case 'description':
-        return $('f-description').value.trim().length > 0;
-      case 'owner':
-        return $('f-owner').value.trim().length > 0;
-      case 'remote':
-        return Boolean(addNewRemotePicker.getValue());
-      default:
-        return true;
-    }
-  }
-
+  /** Shows/hides .wizard-step elements and the progress bar/nav to match
+   * addNewWizardMode + wizardStepIndex. In flat mode every step but Review
+   * is visible at once, nav/progress stay hidden, and Propose is always
+   * visible -- Review would just be a redundant restatement of a form
+   * that's already fully on screen, so it stays hidden even in flat mode.
+   * In wizard mode exactly one step is visible, Propose only appears on
+   * Review, and Back/Next/Review-jump reflect where wizardStepIndex is. */
   function renderWizardStep() {
-    const stepId = ADDNEW_STEPS[wizardStepIndex];
-    for (const el of document.querySelectorAll('.wizard-step')) {
-      el.hidden = el.dataset.step !== stepId;
-    }
-    $('wizard-progress-label').textContent = `Step ${wizardStepIndex + 1} of ${ADDNEW_STEPS.length}`;
-    $('wizard-progress-bar').style.width = `${((wizardStepIndex + 1) / ADDNEW_STEPS.length) * 100}%`;
-    $('wizard-back-btn').hidden = wizardStepIndex === 0;
+    const stepEls = document.querySelectorAll('#addnew-form .wizard-step');
+    const currentStep = ADDNEW_STEPS[wizardStepIndex];
 
-    const isReview = stepId === 'review';
-    $('wizard-next-btn').hidden = isReview;
-    // A shortcut back to Review from anywhere -- without this, jumping back
-    // to fix one field via a Review row's own "Edit" button left no way
-    // back except clicking Next through every remaining step again.
-    // Skipping straight there bypasses per-step validation, but that's
-    // fine: submitAddNew re-validates every required field on its own and
-    // jumps back to whichever one is actually blank.
-    $('wizard-review-btn').hidden = isReview;
-    $('addnew-submit-btn').hidden = !isReview;
-    if (isReview) {
+    if (!addNewWizardMode) {
+      for (const stepEl of stepEls) {
+        stepEl.hidden = stepEl.dataset.step === 'review';
+      }
+      $('addnew-wizard-progress').hidden = true;
+      $('addnew-wizard-nav').hidden = true;
+      $('addnew-submit-btn').hidden = false;
+      return;
+    }
+
+    for (const stepEl of stepEls) {
+      stepEl.hidden = stepEl.dataset.step !== currentStep;
+    }
+    $('addnew-wizard-progress').hidden = false;
+    $('addnew-wizard-nav').hidden = false;
+    $('addnew-submit-btn').hidden = currentStep !== 'review';
+
+    const stepNumber = wizardStepIndex + 1;
+    const totalSteps = ADDNEW_STEPS.length;
+    $('wizard-progress-label').textContent =
+      `Step ${stepNumber} of ${totalSteps}: ${ADDNEW_STEP_LABELS[currentStep]}`;
+    $('wizard-progress-bar').style.width = `${(stepNumber / totalSteps) * 100}%`;
+
+    $('wizard-back-btn').hidden = wizardStepIndex === 0;
+    $('wizard-next-btn').hidden = currentStep === 'review';
+    $('wizard-review-btn').hidden = currentStep === 'review';
+
+    if (currentStep === 'review') {
       renderAddNewReview();
     }
   }
 
+  /** Resets to the first step and re-renders -- doesn't touch
+   * addNewWizardMode itself, since the caller (showView vs.
+   * openAddNewFromScanCandidate) already set that to whichever mode this
+   * visit needs before calling this. */
   function resetWizard() {
     wizardStepIndex = 0;
     renderWizardStep();
   }
 
-  function goToWizardStep(stepId) {
-    const index = ADDNEW_STEPS.indexOf(stepId);
-    if (index !== -1) {
-      wizardStepIndex = index;
-      renderWizardStep();
+  function goToWizardStep(stepName) {
+    const index = ADDNEW_STEPS.indexOf(stepName);
+    if (index === -1) {
+      return;
     }
+    wizardStepIndex = index;
+    renderWizardStep();
+  }
+
+  /** Validates only the field(s) on the current wizard step, same rules
+   * submitAddNew enforces for the whole form -- steps with nothing
+   * required (roles/stacks/teams/install-target/post-install) always pass,
+   * since Next shouldn't block on optional fields. */
+  function validateWizardStep() {
+    const step = ADDNEW_STEPS[wizardStepIndex];
+    if (step === 'id') {
+      const id = $('f-id').value.trim();
+      if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(id)) {
+        toastError(new Error(
+          `Artifact ID "${id}" must be lowercase letters, numbers, and hyphens only `
+          + '(e.g. "growtharc-brand-guidelines"), no spaces.',
+        ));
+        return false;
+      }
+    } else if (step === 'kind') {
+      if (!resolveKindFieldValue()) {
+        toastError(new Error('Enter a kind (or pick an existing one).'));
+        return false;
+      }
+    } else if (step === 'payload') {
+      if (!pendingPayloadPath) {
+        toastError(new Error('Choose a payload file or folder first.'));
+        return false;
+      }
+    } else if (step === 'description') {
+      if (!$('f-description').value.trim()) {
+        toastError(new Error('Enter a description.'));
+        return false;
+      }
+    } else if (step === 'owner') {
+      if (!$('f-owner').value.trim()) {
+        toastError(new Error('Enter an owner.'));
+        return false;
+      }
+    } else if (step === 'remote') {
+      if (!addNewRemotePicker.getValue()) {
+        toastError(new Error('Register a remote first (Settings), then pick one.'));
+        return false;
+      }
+    }
+    return true;
   }
 
   function wizardGoNext() {
-    const stepId = ADDNEW_STEPS[wizardStepIndex];
-    if (!validateWizardStep(stepId)) {
-      toastError(new Error(`Enter ${ADDNEW_STEP_LABELS[stepId] ?? stepId} before continuing.`));
+    if (!validateWizardStep()) {
       return;
     }
     if (wizardStepIndex < ADDNEW_STEPS.length - 1) {
@@ -1653,37 +1823,45 @@
     }
   }
 
-  /** The Review step's summary -- every field's current value, each with
-   * its own "Edit" button jumping straight back to that step rather than
-   * forcing a click through every step in between. */
+  /** Populates the Review step with every field's current value and an
+   * Edit button that jumps straight back to that field's own step --
+   * rebuilt fresh each time goToWizardStep('review') runs, since any field
+   * may have changed since the last visit to Review. */
   function renderAddNewReview() {
+    const container = $('addnew-review');
+    container.innerHTML = '';
+
     const rows = [
       ['id', 'Artifact ID', $('f-id').value.trim()],
       ['kind', 'Kind', resolveKindFieldValue()],
-      ['payload', 'Payload', pendingPayloadPath || '(none chosen)'],
+      ['payload', 'Payload', pendingPayloadPath || '(none selected)'],
       ['description', 'Description', $('f-description').value.trim()],
       ['owner', 'Owner', $('f-owner').value.trim()],
-      ['roles', 'Roles', addNewRolesPicker.getValues().join(', ') || '(none)'],
+      ['roles', 'Who is this for', addNewRolesPicker.getValues().join(', ') || '(none)'],
       ['stacks', 'Stack', addNewStacksPicker.getValues().join(', ') || '(none)'],
       ['teams', 'Team / project', addNewTeamsPicker.getValues().join(', ') || '(none)'],
       ['install-target', 'Install target', $('f-install-target').value.trim() || '(default)'],
       ['post-install', 'Setup command', $('f-post-install').value.trim() || '(none)'],
-      ['remote', 'Remote', addNewRemotePicker.getValue() || '(none)'],
+      ['remote', 'Remote', addNewRemotePicker.getValue() || '(none selected)'],
     ];
 
-    const container = $('addnew-review');
-    container.innerHTML = '';
-    for (const [stepId, label, value] of rows) {
+    for (const [step, label, value] of rows) {
       const row = document.createElement('div');
       row.className = 'wizard-review-row';
       row.innerHTML = `
         <span class="wizard-review-label"></span>
         <span class="wizard-review-value"></span>
-        <button type="button" class="btn btn-ghost btn-sm">Edit</button>
       `;
       row.querySelector('.wizard-review-label').textContent = label;
       row.querySelector('.wizard-review-value').textContent = value;
-      row.querySelector('button').addEventListener('click', () => goToWizardStep(stepId));
+
+      const editBtn = document.createElement('button');
+      editBtn.type = 'button';
+      editBtn.className = 'btn btn-sm btn-ghost';
+      editBtn.textContent = 'Edit';
+      editBtn.addEventListener('click', () => goToWizardStep(step));
+      row.appendChild(editBtn);
+
       container.appendChild(row);
     }
   }
@@ -1711,7 +1889,7 @@
     }
     if (!pendingPayloadPath) {
       toastError(new Error('Choose a payload file or folder first.'));
-      goToWizardStep('payload');
+      focusAddNewField('payload');
       return;
     }
 
@@ -1732,41 +1910,36 @@
     // starts, with a message that says why instead of surfacing a raw git
     // error.
     //
-    // Every one of these re-checks what validateWizardStep already
-    // enforces per-step on the way to Review -- necessary because
-    // openAddNewFromScanCandidate jumps straight to Review (skipping the
-    // step-by-step Next validation), and because a required field on a
-    // *hidden* wizard step is exempt from the browser's own native
-    // validation (an element not being rendered is barred from constraint
-    // validation), so nothing else would catch a blank one here. Each
-    // failure also jumps back to the offending step so there's something
-    // to actually fix, not just a toast.
+    // Kind and Remote are chip-pickers, not native form controls, so
+    // there's no browser constraint validation to lean on for those --
+    // each failure scrolls to and focuses the actual offending field
+    // (focusAddNewField) instead of just a toast with nothing to click.
     if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(id)) {
       toastError(new Error(
         `Artifact ID "${id}" must be lowercase letters, numbers, and hyphens only `
         + '(e.g. "growtharc-brand-guidelines"), no spaces.',
       ));
-      goToWizardStep('id');
+      focusAddNewField('id');
       return;
     }
     if (!kind) {
       toastError(new Error('Enter a kind (or pick an existing one).'));
-      goToWizardStep('kind');
+      focusAddNewField('kind');
       return;
     }
     if (!description) {
       toastError(new Error('Enter a description.'));
-      goToWizardStep('description');
+      focusAddNewField('description');
       return;
     }
     if (!owner) {
       toastError(new Error('Enter an owner.'));
-      goToWizardStep('owner');
+      focusAddNewField('owner');
       return;
     }
     if (!remote) {
       toastError(new Error('Register a remote first (Settings), then pick one.'));
-      goToWizardStep('remote');
+      focusAddNewField('remote');
       return;
     }
 
@@ -1800,16 +1973,17 @@
 
   // ---------- scan ----------
 
-  /** Entry point for the "Scan for new agents/skills" toolbar button --
-   * resets any leftover results/progress from a previous visit, then loads
-   * the remote picker. Doesn't run the scan itself yet; that's a separate,
-   * explicit "Scan" button click (a remote fetch every time you open this
-   * view, even with nothing changed, would be wasted network activity). */
+  /** Setup for the Scan view, called from showView('scan') (the sidebar's
+   * "Scan" item) -- resets any leftover results/progress from a previous
+   * visit, then loads the remote picker. Doesn't run the scan itself yet;
+   * that's a separate, explicit "Scan" button click (a remote fetch every
+   * time you open this view, even with nothing changed, would be wasted
+   * network activity). The actual view-section toggle already happened in
+   * showView() before this runs. */
   async function openScanView() {
     resetProgressPanel();
     $('scan-results').innerHTML = '';
     $('scan-empty').hidden = true;
-    showViewRaw('scan');
     await loadRemotesForScanSelect();
   }
 
@@ -1862,6 +2036,7 @@
         const row = document.createElement('div');
         row.className = 'kind-group-row';
         row.innerHTML = `
+          ${kindSwatchHtml(candidate.kind, 'sm')}
           <div class="row-main">
             <span class="name"></span>
             <span class="summary">
@@ -1872,15 +2047,6 @@
         row.querySelector('.name').textContent = candidate.id;
         row.querySelector('.summary-text').textContent =
           candidate.description || '(no description found -- add one on the next screen)';
-        // A description guessed from the file's own frontmatter is
-        // inferred, not typed by anyone -- flag it as such rather than
-        // presenting it as if someone had written it deliberately.
-        if (candidate.description) {
-          const badge = document.createElement('span');
-          badge.className = 'ai-badge';
-          badge.innerHTML = '<span class="sparkle" aria-hidden="true">&#10022;</span> AI guessed';
-          row.querySelector('.summary').appendChild(badge);
-        }
 
         const btn = document.createElement('button');
         btn.className = 'btn btn-sm';
@@ -1935,11 +2101,13 @@
     showViewRaw('addnew');
     resetAddNewForm();
     populateKindPicker();
-    // Synchronously hides every step but the first, same as a fresh visit
-    // would -- without this, `#view-addnew` becomes visible right above
-    // with every .wizard-step still unhidden from before renderWizardStep
-    // has ever run, and the `await` below would leave that fully-stacked
-    // view flashing on screen until goToWizardStep('review') finally runs.
+    // Turn wizard mode on and synchronously collapse to just the first
+    // step, same as a fresh visit would -- without this, `#view-addnew`
+    // becomes visible right above still in flat mode (or with every
+    // .wizard-step still unhidden from a previous visit), and the `await`
+    // below would leave that fully-stacked view flashing on screen until
+    // goToWizardStep('review') finally runs.
+    addNewWizardMode = true;
     resetWizard();
     await loadRemotesForAddNewSelect();
 
@@ -2110,20 +2278,19 @@
   // ---------- wiring ----------
 
   function wireEvents() {
-    for (const btn of document.querySelectorAll('.nav-btn')) {
+    // Every element carrying a data-view -- the sidebar's own nav items,
+    // plus every "← Back to ..." button scattered across the other views
+    // -- is wired the same way: click it, show that view. showView()
+    // itself is what actually decides which sidebar item ends up
+    // highlighted active, regardless of which element triggered it.
+    for (const btn of document.querySelectorAll('[data-view]')) {
       btn.addEventListener('click', () => showView(btn.dataset.view));
-    }
-    for (const btn of document.querySelectorAll('[data-view="browse"]')) {
-      if (!btn.classList.contains('nav-btn')) {
-        btn.addEventListener('click', () => showView('browse'));
-      }
     }
 
     $('change-folder-btn').addEventListener('click', () => void changeFolder());
     $('refresh-btn').addEventListener('click', () => void refreshCatalogFromRemotes());
     $('check-artifact-updates-btn').addEventListener('click', () => void handleCheckForArtifactUpdates());
     $('add-new-btn').addEventListener('click', () => showView('addnew'));
-    $('scan-btn').addEventListener('click', () => void openScanView());
     $('scan-run-btn').addEventListener('click', () => void handleRunScan());
     $('browse-pull-all-btn').addEventListener('click', () => void handleBrowsePullAll());
     $('tag-folder-pull-all-btn').addEventListener('click', () => void handleTagFolderPullAll());
@@ -2142,15 +2309,16 @@
     });
     $('remote-filter-select').addEventListener('change', (ev) => {
       state.activeRemote = ev.target.value;
-      renderTagValueRow();
       renderCards();
       if (state.view === 'tag-folder') {
         renderTagFolder();
+      } else if (state.view === 'tags') {
+        renderTagsPageList();
       }
     });
-    $('tag-value-search').addEventListener('input', (ev) => {
+    $('tags-value-search').addEventListener('input', (ev) => {
       state.tagValueSearch = ev.target.value;
-      renderTagValueRow();
+      renderTagsPageList();
     });
     $('tag-folder-search').addEventListener('input', (ev) => {
       state.tagFolderSearch = ev.target.value;
