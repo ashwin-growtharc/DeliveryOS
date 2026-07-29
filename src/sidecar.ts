@@ -48,7 +48,7 @@ import { cloneRemote, cachePath } from './engine/remote/remoteCache';
 import * as fs from 'fs';
 import { RemoteRegistryError } from './engine/errors';
 import { Manifest } from './engine/manifest/schema';
-import { compilePreviewHtml } from './engine/preview/compile';
+import { compileArtifactPreview } from './engine/preview/resolveArtifactPreview';
 
 interface SidecarRequest {
   id: string;
@@ -246,18 +246,15 @@ const commands: Record<string, CommandHandler> = {
     return scanForNewArtifacts(cwd, remote, onProgress);
   },
 
-  // TEMPORARY, Phase A debug-only command -- not part of the real Phase B
-  // "UI Components" feature, and not meant to survive to that point. Exists
-  // solely so `compilePreviewHtml()` can be exercised from inside the real
-  // packaged sidecar .exe (via the real Tauri app, with no node_modules
-  // nearby), not just from vitest/dev mode where node_modules is always
-  // present -- the one thing Phase A's spike could NOT yet prove on its
-  // own. Remove once Phase B wires a real preview-compile command in for
-  // the actual feature; see docs/phase-A-preview-packaging-spike.md.
-  'preview.compileDebug': async (args) => {
-    const previewPath = requireString(args, 'previewPath');
-    const { html } = await compilePreviewHtml(previewPath);
-    return { success: true, byteLength: html.length, html };
+  // Real preview-compile command (Phase 6, Phase B), replacing Phase A's
+  // temporary `preview.compileDebug`. Reads directly from the named
+  // remote's own cloned cache (no pull required) -- the UI Components
+  // page can show a live preview for anything in the catalog, not just
+  // artifacts already pulled into the current project.
+  'preview.compile': (args) => {
+    const remote = requireString(args, 'remote');
+    const id = requireString(args, 'id');
+    return compileArtifactPreview(remote, id);
   },
 };
 

@@ -16,8 +16,12 @@
   // Display order + label for each of manifest.tags's own (plural) keys --
   // e.g. a `stacks: ['python']` tag shows under the "stack" category.
   // "project" (not "team") is the deliberate display label for `teams`.
-  const TAG_CATEGORIES = ['stacks', 'roles', 'teams'];
-  const TAG_CATEGORY_LABEL = { stacks: 'stack', roles: 'role', teams: 'project' };
+  // componentTypes rides along here too, so Browse-by-tag picks it up
+  // automatically -- the dedicated "UI Components" page (renderUiComponentsPage)
+  // is a separate, richer view specifically for kind:"ui-component" cards
+  // with live previews, not a replacement for this generic one.
+  const TAG_CATEGORIES = ['stacks', 'roles', 'teams', 'componentTypes'];
+  const TAG_CATEGORY_LABEL = { stacks: 'stack', roles: 'role', teams: 'project', componentTypes: 'component type' };
 
   const STATUS_LABELS = {
     not_pulled: 'Not pulled',
@@ -132,7 +136,11 @@
     // activeTagCategory/activeTagValue below, which track whichever Tag
     // Folder is currently *open*, not which tab is showing on the page one
     // navigates there from.
-    tagsPageCategory: null, // 'stacks' | 'roles' | 'teams' | null
+    tagsPageCategory: null, // 'stacks' | 'roles' | 'teams' | 'componentTypes' | null
+    // Which componentTypes VALUE tab is active on the UI Components page --
+    // a separate concern from tagsPageCategory (that's the Browse-by-tag
+    // page's DIMENSION tab; this page only ever has one dimension).
+    uiComponentsPageCategory: null,
     // Set when a tag VALUE is picked (from the Browse-by-tag page),
     // opening the dedicated Tag Folder view (openTagFolder/renderTagFolder),
     // grouped by kind.
@@ -318,6 +326,8 @@
       void loadCatalog();
     } else if (view === 'tags') {
       renderTagsPage();
+    } else if (view === 'ui-components') {
+      renderUiComponentsPage();
     } else if (view === 'settings') {
       void loadRemotesForSettings();
     } else if (view === 'scan') {
@@ -626,6 +636,157 @@
       row.querySelector('.tag-item-count').textContent = `${count} artifact${count === 1 ? '' : 's'}`;
       row.addEventListener('click', () => openTagFolder(category, value));
       container.appendChild(row);
+    }
+  }
+
+  // ---------- UI Components (its own sidebar page, live previews) ----------
+  //
+  // See docs/ui-components-feature-design.md. Category tabs here are the
+  // componentTypes VALUES themselves (Buttons/Navbars/Cards/...), not a
+  // dimension-picker the way Browse-by-tag's stack/role/project tabs work
+  // -- there's only one relevant tag dimension on this page. Reuses the
+  // global remote filter (applyRemoteFilter) but deliberately NOT Browse's
+  // own Kind tab-row filter (state.activeKinds/applyKindFilter) -- that's a
+  // different page's own control; kind is implicitly always "ui-component"
+  // here, not something this page lets you toggle.
+
+  /** Populates the category tab row and renders the card grid. */
+  function renderUiComponentsPage() {
+    $('ui-components-no-folder').hidden = Boolean(state.projectDir);
+
+    const uiComponentEntries = applyRemoteFilter(
+      state.catalog.filter((entry) => entry.manifest.kind === 'ui-component'),
+    );
+    const presentTypes = Array.from(
+      new Set(uiComponentEntries.flatMap((entry) => entry.manifest.tags?.componentTypes ?? [])),
+    ).sort();
+
+    if (state.uiComponentsPageCategory && !presentTypes.includes(state.uiComponentsPageCategory)) {
+      state.uiComponentsPageCategory = null;
+    }
+
+    const tabsContainer = $('ui-components-cat-tabs');
+    tabsContainer.innerHTML = '';
+
+    const allTab = document.createElement('button');
+    allTab.className = `tab ${!state.uiComponentsPageCategory ? 'active' : ''}`;
+    allTab.textContent = 'All';
+    allTab.addEventListener('click', () => {
+      state.uiComponentsPageCategory = null;
+      renderUiComponentsPage();
+    });
+    tabsContainer.appendChild(allTab);
+
+    for (const type of presentTypes) {
+      const tab = document.createElement('button');
+      tab.className = `tab ${state.uiComponentsPageCategory === type ? 'active' : ''}`;
+      tab.textContent = type;
+      tab.addEventListener('click', () => {
+        state.uiComponentsPageCategory = type;
+        renderUiComponentsPage();
+      });
+      tabsContainer.appendChild(tab);
+    }
+
+    renderUiComponentsGrid(uiComponentEntries);
+  }
+
+  /** The active category's cards, each a live sandboxed-iframe preview.
+   * Lazy-rendered via IntersectionObserver -- a grid of many components
+   * shouldn't eagerly call preview.compile for every single one the
+   * moment the page opens, only the ones actually scrolled into view. */
+  // Tracks the grid's current IntersectionObserver so a re-render (e.g.
+  // clicking a different category tab) can disconnect the previous one
+  // first -- without this, every re-render's `container.innerHTML = ''`
+  // detaches the old cards from the DOM but leaves the old observer still
+  // holding references to them (and their closures) indefinitely, since
+  // nothing ever called .disconnect() on it.
+  let uiComponentsGridObserver = null;
+
+  function renderUiComponentsGrid(uiComponentEntries) {
+    const container = $('ui-components-grid');
+    const emptyState = $('ui-components-empty');
+    container.innerHTML = '';
+
+    if (uiComponentsGridObserver) {
+      uiComponentsGridObserver.disconnect();
+    }
+
+    const category = state.uiComponentsPageCategory;
+    const filtered = category
+      ? uiComponentEntries.filter((entry) => (entry.manifest.tags?.componentTypes ?? []).includes(category))
+      : uiComponentEntries;
+
+    emptyState.hidden = filtered.length !== 0;
+    $('ui-components-count').textContent = `${filtered.length} component${filtered.length === 1 ? '' : 's'}`;
+
+    const entryByCard = new Map();
+    const observer = new IntersectionObserver((observedEntries) => {
+      for (const observedEntry of observedEntries) {
+        if (!observedEntry.isIntersecting) {
+          continue;
+        }
+        const card = observedEntry.target;
+        observer.unobserve(card);
+        const entry = entryByCard.get(card);
+        void loadUiComponentPreview(card, entry);
+      }
+    });
+    uiComponentsGridObserver = observer;
+
+    for (const entry of filtered) {
+      const card = document.createElement('div');
+      card.className = 'ui-component-card';
+      card.innerHTML = `
+        <div class="ui-component-preview-frame">
+          <span class="ui-component-preview-loading">Loading preview&hellip;</span>
+        </div>
+        <div class="ui-component-card-body">
+          <div class="name"></div>
+          <div class="meta"></div>
+        </div>
+      `;
+      card.querySelector('.name').textContent = entry.manifest.id;
+      card.querySelector('.meta').textContent =
+        (entry.manifest.tags?.componentTypes ?? []).join(', ') || entry.manifest.kind;
+      // Only the card BODY opens Detail, not the whole card -- the preview
+      // frame above it gets a real, interactive <iframe> once loaded, and
+      // clicks landing inside an iframe (a separate browsing context)
+      // don't bubble to a listener on an ancestor element anyway. Keeping
+      // the live preview fully interactive (hover states etc. actually
+      // working) matters more here than the whole card being one giant
+      // click target.
+      card.querySelector('.ui-component-card-body').addEventListener('click', () => openDetail(entry));
+      container.appendChild(card);
+
+      entryByCard.set(card, entry);
+      observer.observe(card);
+    }
+  }
+
+  /** Fetches the compiled preview for one card and drops it into a
+   * sandboxed iframe -- sandbox="allow-scripts" only, deliberately never
+   * allow-same-origin (see docs/ui-components-feature-design.md §3: that's
+   * what keeps the frame's origin opaque, so a pushed component's own code
+   * can never reach window.parent, cookies, or localStorage). A compile
+   * failure degrades to a text placeholder, never breaks the whole grid --
+   * same "preview fails soft" principle as every other known limitation
+   * in this feature. */
+  async function loadUiComponentPreview(card, entry) {
+    const frame = card.querySelector('.ui-component-preview-frame');
+    try {
+      const result = await call('preview.compile', { remote: entry.remoteName, id: entry.manifest.id });
+      const iframe = document.createElement('iframe');
+      iframe.sandbox = 'allow-scripts';
+      iframe.srcdoc = result.html;
+      frame.innerHTML = '';
+      frame.appendChild(iframe);
+    } catch (err) {
+      frame.innerHTML = '';
+      const placeholder = document.createElement('span');
+      placeholder.className = 'ui-component-preview-loading';
+      placeholder.textContent = 'Preview unavailable';
+      frame.appendChild(placeholder);
     }
   }
 
@@ -1234,11 +1395,12 @@
     $('meta-owner').textContent = manifest.owner;
     $('meta-refresh').textContent = manifest.refresh || '—';
 
-    const tags = manifest.tags || { roles: [], teams: [], stacks: [] };
+    const tags = manifest.tags || { roles: [], teams: [], stacks: [], componentTypes: [] };
     const pills = [
       ...(tags.roles || []),
       ...(tags.teams || []),
       ...(tags.stacks || []).map((s) => `stack: ${s}`),
+      ...(tags.componentTypes || []).map((c) => `component: ${c}`),
     ];
     $('meta-tags').innerHTML = pills.length
       ? pills.map((p) => `<span class="tag-pill">${escapeHtml(p)}</span>`).join('')
@@ -1270,6 +1432,7 @@
         editRolesPicker.setValues(tags.roles || []);
         editTeamsPicker.setValues(tags.teams || []);
         editStacksPicker.setValues(tags.stacks || []);
+        editComponentTypesPicker.setValues(tags.componentTypes || []);
         editForm.hidden = false;
       };
     } else {
@@ -1283,6 +1446,7 @@
         roles: editRolesPicker.getValues(),
         teams: editTeamsPicker.getValues(),
         stacks: editStacksPicker.getValues(),
+        componentTypes: editComponentTypesPicker.getValues(),
       });
     };
     $('edit-cancel-btn').onclick = () => {
@@ -1489,19 +1653,21 @@
     ).sort();
   }
 
-  let addNewRolesPicker, addNewStacksPicker, addNewTeamsPicker;
-  let editRolesPicker, editStacksPicker, editTeamsPicker;
+  let addNewRolesPicker, addNewStacksPicker, addNewTeamsPicker, addNewComponentTypesPicker;
+  let editRolesPicker, editStacksPicker, editTeamsPicker, editComponentTypesPicker;
 
-  /** Builds all 6 tag pickers once, at startup -- their containers are
+  /** Builds all 8 tag pickers once, at startup -- their containers are
    * static elements already in index.html, never re-created, so this only
    * ever runs once per app session. */
   function initTagPickers() {
     addNewRolesPicker = createTagPicker($('f-roles-picker'));
     addNewStacksPicker = createTagPicker($('f-stacks-picker'));
     addNewTeamsPicker = createTagPicker($('f-teams-picker'));
+    addNewComponentTypesPicker = createTagPicker($('f-component-types-picker'));
     editRolesPicker = createTagPicker($('edit-roles-picker'));
     editStacksPicker = createTagPicker($('edit-stacks-picker'));
     editTeamsPicker = createTagPicker($('edit-teams-picker'));
+    editComponentTypesPicker = createTagPicker($('edit-component-types-picker'));
 
     addNewKindPicker = createSingleChipPicker($('f-kind-picker'));
     addNewKindPicker.onChange((value) => {
@@ -1524,9 +1690,12 @@
     addNewRolesPicker.setSuggestions(roles);
     addNewStacksPicker.setSuggestions(stacks);
     addNewTeamsPicker.setSuggestions(teams);
+    const componentTypes = distinctTagValues('componentTypes');
+    addNewComponentTypesPicker.setSuggestions(componentTypes);
     editRolesPicker.setSuggestions(roles);
     editStacksPicker.setSuggestions(stacks);
     editTeamsPicker.setSuggestions(teams);
+    editComponentTypesPicker.setSuggestions(componentTypes);
   }
 
   // ---------- single-select chip picker (Kind, Remote) ----------
@@ -1636,6 +1805,7 @@
     addNewRolesPicker.setValues([]);
     addNewStacksPicker.setValues([]);
     addNewTeamsPicker.setValues([]);
+    addNewComponentTypesPicker.setValues([]);
     $('f-kind-custom').value = '';
     pendingPayloadPath = null;
     $('payload-path-display').textContent = 'No file or folder selected';
@@ -1682,7 +1852,7 @@
 
   const ADDNEW_STEPS = [
     'id', 'kind', 'payload', 'description', 'owner',
-    'roles', 'stacks', 'teams', 'install-target', 'post-install', 'remote',
+    'roles', 'stacks', 'teams', 'component-types', 'install-target', 'post-install', 'remote',
     'review',
   ];
 
@@ -1695,6 +1865,7 @@
     roles: 'Who is this for',
     stacks: 'Stack',
     teams: 'Team / project',
+    'component-types': 'Component type',
     'install-target': 'Install target',
     'post-install': 'Setup command',
     remote: 'Remote',
@@ -1840,6 +2011,7 @@
       ['roles', 'Who is this for', addNewRolesPicker.getValues().join(', ') || '(none)'],
       ['stacks', 'Stack', addNewStacksPicker.getValues().join(', ') || '(none)'],
       ['teams', 'Team / project', addNewTeamsPicker.getValues().join(', ') || '(none)'],
+      ['component-types', 'Component type', addNewComponentTypesPicker.getValues().join(', ') || '(none)'],
       ['install-target', 'Install target', $('f-install-target').value.trim() || '(default)'],
       ['post-install', 'Setup command', $('f-post-install').value.trim() || '(none)'],
       ['remote', 'Remote', addNewRemotePicker.getValue() || '(none selected)'],
@@ -1900,6 +2072,7 @@
     const roles = addNewRolesPicker.getValues();
     const stacks = addNewStacksPicker.getValues();
     const teams = addNewTeamsPicker.getValues();
+    const componentTypes = addNewComponentTypesPicker.getValues();
     const remote = addNewRemotePicker.getValue();
     const installTarget = $('f-install-target').value.trim() || undefined;
     const postInstall = $('f-post-install').value.trim() || undefined;
@@ -1958,6 +2131,7 @@
             roles,
             stacks,
             teams,
+            componentTypes,
             installTarget,
             postInstall,
           },

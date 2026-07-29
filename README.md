@@ -9,7 +9,11 @@ same engine. See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design and
 **Status:** Phases 0-2 (engine: `remote add`/`list`/`pull`/`push`) are done
 and verified against real GitHub. Phase 3 (desktop app) has a working UI —
 Browse, Pull, Push, Settings, a live progress log, Open Folder — built on
-top of the same engine via a sidecar process. See
+top of the same engine via a sidecar process. A "UI Components" page
+(live, sandboxed-iframe previews of pushed React/TS and plain-HTML
+components, grouped by a `componentTypes` tag) is also done — see
+[docs/ui-components-feature-design.md](docs/ui-components-feature-design.md)
+and `PLAN.md`'s Phase A/B entries. See
 [CHANGELOG.md](CHANGELOG.md) for what's shipped, [PLAN.md](PLAN.md) for
 what's left, and the [docs index](#docs-index) below for everything else.
 
@@ -40,7 +44,7 @@ deliveryos push <id> --new --remote <name> --path <dir> --kind <kind> \
   --owner <owner> --description <text> [--install-target <path>] \
   [--artifact-version <semver>] [--review-required] \
   [--roles a,b] [--teams a,b] [--stacks a,b] \
-  [--post-install <cmd>]                            # propose a new artifact as a PR
+  [--component-types a,b] [--post-install <cmd>]    # propose a new artifact as a PR
 ```
 
 `push` opens a real GitHub pull request (via `gh auth token` — run
@@ -153,6 +157,8 @@ The frontend (`src-tauri/spike-ui/*.js`) has no automated test coverage
 | [docs/phase-2-retro.md](docs/phase-2-retro.md) | What broke proving the engine against real ArcOS catalog content |
 | [docs/artifact-arcos-cli-retro.md](docs/artifact-arcos-cli-retro.md) | Adding a whole-repo, Pull-only artifact (`arcos-cli`) |
 | [docs/artifact-launchpad-template-retro.md](docs/artifact-launchpad-template-retro.md) | Adding an artifact from a non-ArcOS project (`launchpad-template`) |
+| [docs/ui-components-feature-design.md](docs/ui-components-feature-design.md) | Design for the "UI Components" preview pipeline and sidebar page (see `PLAN.md` Phase A/B) |
+| [docs/phase-A-preview-packaging-spike.md](docs/phase-A-preview-packaging-spike.md) | Phase A spike write-up: proving the sandboxed-iframe + esbuild preview pipeline survives the sidecar's Node SEA packaging |
 | [docs/phase-3-spike-results.md](docs/phase-3-spike-results.md) | Sidecar-packaging feasibility spike: size/latency numbers |
 | [docs/phase-3-ui-scope.md](docs/phase-3-ui-scope.md) | What the desktop app UI does and deliberately doesn't do yet, and why |
 | [docs/release-process.md](docs/release-process.md) | Manual runbook for cutting a signed release with working auto-update (no CI exists yet) |

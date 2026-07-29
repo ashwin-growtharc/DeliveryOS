@@ -44,6 +44,7 @@ export interface MetadataEditOptions {
   roles?: string[];
   teams?: string[];
   stacks?: string[];
+  componentTypes?: string[];
 }
 
 export interface PushOptions {
@@ -60,6 +61,7 @@ export interface PushOptions {
   roles?: string[];
   teams?: string[];
   stacks?: string[];
+  componentTypes?: string[];
   postInstall?: string;
   // edit mode only, mutually exclusive with a payload-content diff push:
   // changes description/roles/teams/stacks on an already-tracked artifact's
@@ -219,6 +221,7 @@ export async function pushArtifact(
         roles: options.roles ?? [],
         teams: options.teams ?? [],
         stacks: options.stacks ?? [],
+        componentTypes: options.componentTypes ?? [],
       },
       source_repo: remoteEntry.url,
       install_target: options.installTarget ?? id,
@@ -297,24 +300,26 @@ export async function pushArtifact(
       roles: current.tags.roles,
       teams: current.tags.teams,
       stacks: current.tags.stacks,
+      componentTypes: current.tags.componentTypes,
     };
     const after: MetadataFields = {
       description: options.metadataEdit.description ?? before.description,
       roles: options.metadataEdit.roles ?? before.roles,
       teams: options.metadataEdit.teams ?? before.teams,
       stacks: options.metadataEdit.stacks ?? before.stacks,
+      componentTypes: options.metadataEdit.componentTypes ?? before.componentTypes,
     };
 
     if (JSON.stringify(before) === JSON.stringify(after)) {
       throw new NoLocalChangesError(
-        `No metadata changes for "${id}" -- description/roles/teams/stacks are all identical to what's currently on the remote.`,
+        `No metadata changes for "${id}" -- description/roles/teams/stacks/componentTypes are all identical to what's currently on the remote.`,
       );
     }
 
     const updatedManifest = {
       ...current,
       description: after.description,
-      tags: { roles: after.roles, teams: after.teams, stacks: after.stacks },
+      tags: { roles: after.roles, teams: after.teams, stacks: after.stacks, componentTypes: after.componentTypes },
     };
     const validated = ManifestSchema.safeParse(updatedManifest);
     if (!validated.success) {

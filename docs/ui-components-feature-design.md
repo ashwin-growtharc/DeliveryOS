@@ -166,7 +166,11 @@ react-live/react-runner, Web Components/Shadow DOM). Summary:
                  |
                  v
    single self-contained HTML doc
-   (<style> + <script type="module">)
+   (<style> + plain <script> IIFEs —
+    see §7.5's Phase B note: no
+    "type=module", since an IIFE has
+    no module system to satisfy any
+    import/require at all)
                  |
                  v
    <iframe sandbox="allow-scripts">   <- opaque origin: NO allow-same-origin
@@ -415,11 +419,42 @@ blocker.
 The compiled `srcdoc` bundle from §4's pipeline is a derived build
 artifact, not source — it must **never** be committed to the remote and
 never appears in the manifest. It lives purely in a local cache keyed by
-`(artifact id, version)`, computed on first view (or pre-warmed at pull
-time), invalidated on version bump. Same shape as the existing
-`pristinePath(cwd, id)` helper in `src/engine/paths.ts` — a sibling
-`previewCachePath(cwd, id, version)` is the natural home, not a new
-subsystem.
+`(remote name, artifact id, version)`, computed on first view, invalidated
+on version bump (a stale entry is simply never looked up again — nothing
+explicitly prunes it off disk; see the still-open gap noted in `PLAN.md`'s
+Phase B entry).
+
+**Phase B correction to this section's original phrasing**: the cache is
+**global** (`previewCachePath(remoteName, id, version)` under
+`deliveryOsHome()`, alongside `remotesCacheRoot()`), **not** a
+`pristinePath`-style sibling scoped to the cwd's `.deliveryos/` directory
+as originally proposed here. The reasoning: `pristinePath` only makes
+sense for an artifact that's already been *pulled* into a specific
+project — but the whole point of the "UI Components" page is showing a
+live preview of catalog entries **before** anyone decides to pull them,
+read directly off the remote's own cache. A compiled preview for a given
+`(remote, id, version)` is identical no matter which project folder
+happens to be open, so a cwd-scoped cache would just recompile the same
+output pointlessly per project.
+
+**Phase B correction on vendoring**: React 19 ships no UMD build at all
+(only `cjs/`, confirmed by inspecting `node_modules/react/umd/` — it
+doesn't exist), so "vendored framework runtime" isn't a prebuilt file
+DeliveryOS ships and loads as a global script the way this section
+originally implied. Instead, `scripts/generate-vendored-react-runtime.mjs`
+uses esbuild itself, ahead of time, to bundle a tiny shim (`import React
+from 'react'; import { createRoot } from 'react-dom/client'; window.X =
+{...}`) into one minified browser-safe IIFE, written to a gitignored
+generated `.ts` file as a plain string constant and imported normally —
+compiled directly into the sidecar bundle at build time, so there's no
+runtime file resolution needed even inside the packaged, no-`node_modules`
+`.exe`. The component's own bundle then uses a classic JSX transform
+(`jsx: 'transform'` + a custom `jsxFactory`/`jsxFragment`) pointing at that
+vendored global, rather than a real `import`/`require` of react/react-dom
+— an IIFE has no module system at runtime, so marking those packages
+`external` (this section's original assumption) doesn't work at all for a
+non-ESM output format; there's nothing at runtime to satisfy an
+unresolved `require('react')`.
 
 ## 8. Security notes (summary)
 
@@ -443,7 +478,7 @@ subsystem.
 | Phase | Scope |
 |---|---|
 | **A — Spike** | Prototype the sandboxed-iframe + local-esbuild pipeline end to end for one hardcoded example component. De-risk packaging size/latency before committing further (same spirit as ARCHITECTURE.md risk #11's sidecar-packaging spike). |
-| **B — React + TS adapter, fixed preview** | Ship `kind: ui-component`, the new `tags.componentTypes` dimension, the "UI Components" sidebar page, and the React/TS + plain-HTML compiler adapters with a single default-state preview (no controls yet). |
+| **B — React + TS adapter, fixed preview** | **Done** — see `PLAN.md`'s Phase B entry. Shipped `tags.componentTypes`, the "UI Components" sidebar page, and the React/TS + plain-HTML compiler adapters with a single default-state preview (no controls yet). |
 | **C — Storybook-style controls** | Add `react-docgen-typescript` prop-schema extraction, CSF-style named variants in `preview.tsx`, and the postMessage-driven controls panel. |
 | **D — Scan integration** | Extend Scan with the component-detection heuristic (glob-based, not frontmatter), auto-scaffolded `preview.tsx` stubs, and the live-preview Review step. |
 | **E — Additional framework adapters** | Vue (via `@vue/compiler-sfc`), then Svelte/Angular as needed — each is one more adapter behind the same interface, not a redesign. |
@@ -451,9 +486,11 @@ subsystem.
 
 ## 10. Open questions carried forward
 
-- ~~Caching location/invalidation.~~ **Resolved (§7.5):** a
-  `previewCachePath(cwd, id, version)` sibling to the existing
-  `pristinePath` helper, keyed by (id, version), never pushed/pulled.
+- ~~Caching location/invalidation.~~ **Resolved (§7.5):** a global
+  `previewCachePath(remoteName, id, version)` under `deliveryOsHome()`
+  (not cwd-scoped — see §7.5's Phase B correction for why), keyed by
+  (remote, id, version), never pushed/pulled. Explicit pruning of
+  superseded versions' cached HTML is still an open gap, not solved here.
 - How much of the docgen/compile step should happen at **pull** time
   (pre-warm the cache) vs. lazily at first **view**? Still open.
 - ~~Does `install_target` need special handling for a UI component?~~

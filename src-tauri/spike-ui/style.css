@@ -646,6 +646,88 @@ input, textarea, select {
   flex-shrink: 0;
 }
 
+/* ---------- UI Components (its own page, live sandboxed-iframe previews)
+ * ---------- */
+
+.ui-component-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+.ui-component-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  box-shadow: var(--shadow-1);
+  transition: box-shadow .15s ease, transform .15s ease, border-color .15s ease;
+  display: flex;
+  flex-direction: column;
+}
+
+.ui-component-card:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-2);
+  transform: translateY(-3px);
+}
+
+/* The live-preview slot -- an iframe fills this once IntersectionObserver
+ * fires and the compiled preview.tsx/preview.html comes back from
+ * `preview.compile`. Fixed height (not aspect-ratio) so the grid stays
+ * evenly ruled regardless of what a component's own content does. */
+.ui-component-preview-frame {
+  height: 160px;
+  background: var(--surface-inset);
+  border-bottom: 1px solid var(--border);
+  position: relative;
+  /* Only .ui-component-card-body opens Detail (see app.js) -- an explicit
+   * default cursor here stops this area from visually promising a click
+   * that goes nowhere, since the pointer cursor used to live on the whole
+   * card before the click-target fix scoped the listener down to the body. */
+  cursor: default;
+}
+
+.ui-component-preview-frame iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+  display: block;
+}
+
+/* Shown until the lazy-loaded iframe's srcdoc actually lands -- avoids a
+ * blank/empty-looking tile while `preview.compile` is in flight. */
+.ui-component-preview-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  opacity: .4;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.ui-component-card-body {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  cursor: pointer;
+}
+
+.ui-component-card .name {
+  font-family: 'EB Garamond', Georgia, serif;
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.ui-component-card .meta {
+  font-size: 11px;
+  opacity: .55;
+  font-family: 'JetBrains Mono', monospace;
+}
+
 .tag-folder-header {
   display: flex;
   align-items: center;

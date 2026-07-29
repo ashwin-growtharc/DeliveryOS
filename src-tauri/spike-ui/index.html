@@ -73,6 +73,12 @@
           <circle cx="10" cy="7" r="3" />
           <path d="M3.5 17c0-3.3 2.9-6 6.5-6s6.5 2.7 6.5 6" />
         </symbol>
+        <symbol id="i-components" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round">
+          <rect x="2.5" y="2.5" width="6" height="6" rx="1.2" />
+          <rect x="11.5" y="2.5" width="6" height="6" rx="1.2" />
+          <rect x="2.5" y="11.5" width="6" height="6" rx="1.2" />
+          <rect x="11.5" y="11.5" width="6" height="6" rx="1.2" />
+        </symbol>
         <symbol id="i-lang-python" viewBox="0 0 20 20" fill="currentColor">
           <path d="M9.9 2.2c-3.6 0-3.4 1.6-3.4 1.6l0 1.6h3.5v.5H5.1S2.2 5.6 2.2 9.2s2.6 3.5 2.6 3.5h1.5v-2s-.1-2.6 2.5-2.6h3.4s2.4 0 2.4-2.4V4.6s.4-2.4-4.7-2.4Zm-1.9 1.1a.7.7 0 1 1 0 1.4.7.7 0 0 1 0-1.4Z"/>
           <path d="M10.1 17.8c3.6 0 3.4-1.6 3.4-1.6l0-1.6h-3.5v-.5h4.9s2.9.3 2.9-3.3-2.6-3.5-2.6-3.5h-1.5v2s.1 2.6-2.5 2.6H7.8s-2.4 0-2.4 2.4v2.6s-.4 2.4 4.7 2.4Zm1.9-1.1a.7.7 0 1 1 0-1.4.7.7 0 0 1 0 1.4Z"/>
@@ -98,6 +104,7 @@
           <div class="sidebar-nav">
             <button class="sidebar-item" data-view="browse"><svg class="glyph"><use href="#i-folder"/></svg>Browse</button>
             <button class="sidebar-item" data-view="tags"><svg class="glyph"><use href="#i-tag"/></svg>Browse by tag</button>
+            <button class="sidebar-item" data-view="ui-components"><svg class="glyph"><use href="#i-components"/></svg>UI Components</button>
             <button class="sidebar-item" data-view="settings"><svg class="glyph"><use href="#i-settings"/></svg>Settings</button>
             <div class="sidebar-divider"></div>
             <button class="sidebar-item" data-view="scan"><svg class="glyph"><use href="#i-scan"/></svg>Scan</button>
@@ -179,6 +186,29 @@
           />
           <div id="tags-list" class="tag-list-panel"></div>
           <p id="tags-empty" class="empty-state" hidden>No values in this category yet.</p>
+        </section>
+
+        <!-- UI Components: a new artifact kind (kind: ui-component) with a
+             real, interactive live preview, not a screenshot -- see
+             docs/ui-components-feature-design.md. Category tabs are the
+             component-type VALUES themselves (Buttons/Navbars/Cards/...),
+             not a dimension-picker the way Browse-by-tag's stack/role/
+             project tabs work -- there's only one relevant tag dimension
+             here (componentTypes). Each card renders a live sandboxed
+             iframe (sandbox="allow-scripts", never allow-same-origin),
+             lazy-loaded via IntersectionObserver so an off-screen card
+             never eagerly compiles a preview it isn't showing yet. -->
+        <section id="view-ui-components" class="view" hidden>
+          <div id="ui-components-no-folder" class="hint-banner" hidden>
+            Select a project folder to browse UI components.
+          </div>
+          <div class="page-head">
+            <h2 class="section-title">UI Components</h2>
+            <span id="ui-components-count" class="count"></span>
+          </div>
+          <div id="ui-components-cat-tabs" class="tab-row" style="margin-bottom: 16px;"></div>
+          <div id="ui-components-grid" class="ui-component-grid"></div>
+          <p id="ui-components-empty" class="empty-state" hidden>No UI components yet -- Add New or Scan to propose one.</p>
         </section>
 
         <!-- Tag folder: opened by picking a tag VALUE (e.g. "stack: python")
@@ -281,6 +311,10 @@
               <div class="field">
                 <label>Stack</label>
                 <div id="edit-stacks-picker"></div>
+              </div>
+              <div class="field">
+                <label>Component type</label>
+                <div id="edit-component-types-picker"></div>
               </div>
               <p class="field-hint">Saving opens a PR against this field's manifest.yaml -- the payload/content is untouched.</p>
               <div class="edit-form-actions">
@@ -405,6 +439,14 @@
                 <label>Team / project</label>
                 <div id="f-teams-picker"></div>
                 <p class="field-hint">Shows up under Browse's "project" tag folders.</p>
+              </div>
+            </div>
+
+            <div class="wizard-step" data-step="component-types">
+              <div class="field">
+                <label>Component type</label>
+                <div id="f-component-types-picker"></div>
+                <p class="field-hint">For "UI Components" artifacts (e.g. "button", "navbar", "card") -- leave blank for every other kind.</p>
               </div>
             </div>
 

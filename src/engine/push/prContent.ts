@@ -55,6 +55,7 @@ export interface MetadataFields {
   roles: string[];
   teams: string[];
   stacks: string[];
+  componentTypes: string[];
 }
 
 export interface MetadataEditPrContentParams {
@@ -94,6 +95,9 @@ export function buildMetadataEditPrContent(params: MetadataEditPrContentParams):
   if (JSON.stringify(before.stacks) !== JSON.stringify(after.stacks)) {
     lines.push(`- **stacks**: ${formatTagList(before.stacks)} -> ${formatTagList(after.stacks)}`);
   }
+  if (JSON.stringify(before.componentTypes) !== JSON.stringify(after.componentTypes)) {
+    lines.push(`- **componentTypes**: ${formatTagList(before.componentTypes)} -> ${formatTagList(after.componentTypes)}`);
+  }
 
   const body = `## DeliveryOS push: update \`${id}\` metadata
 
@@ -117,7 +121,7 @@ export interface ProposeNewPrContentParams {
   owner: string;
   version: string;
   installTarget: string;
-  tags: { roles: string[]; teams: string[]; stacks: string[] };
+  tags: { roles: string[]; teams: string[]; stacks: string[]; componentTypes: string[] };
   gitUserName: string;
   gitUserEmail: string;
   payloadFiles: string[];
@@ -156,7 +160,7 @@ export function buildProposeNewPrContent(params: ProposeNewPrContentParams): PrC
 
 **Kind:** ${kind}   **Owner:** ${owner}   **Version:** ${version}
 **Install target:** ${installTarget}
-**Tags:** roles=[${tags.roles.join(', ')}], teams=[${tags.teams.join(', ')}], stacks=[${tags.stacks.join(', ')}]
+**Tags:** roles=[${tags.roles.join(', ')}], teams=[${tags.teams.join(', ')}], stacks=[${tags.stacks.join(', ')}], componentTypes=[${tags.componentTypes.join(', ')}]
 **Pushed by:** ${gitUserName} <${gitUserEmail}>
 
 ### New files

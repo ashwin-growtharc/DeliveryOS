@@ -18,7 +18,7 @@ describe('ManifestSchema', () => {
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.data.id).toBe('my-artifact');
-      expect(result.data.tags).toEqual({ roles: [], teams: [], stacks: [] });
+      expect(result.data.tags).toEqual({ roles: [], teams: [], stacks: [], componentTypes: [] });
     }
   });
 

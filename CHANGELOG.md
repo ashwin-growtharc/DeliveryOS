@@ -4,6 +4,43 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- Added the "UI Components" feature (design in
+  `docs/ui-components-feature-design.md`; full write-up in `PLAN.md`'s
+  Phase A/B entries): a new sidebar page shows real pushed React/TS and
+  plain-HTML/CSS/JS components as live, interactive preview cards, grouped
+  by a new `tags.componentTypes` dimension (threaded end to end -- schema,
+  `push`/CLI `--component-types`, Add New's tag-picker, and Detail's Edit
+  form, matching roles/teams/stacks).
+  - Each preview compiles via native `esbuild` (not `esbuild-wasm`, whose
+    only Node path can't survive the sidecar's Node SEA packaging) into a
+    single self-contained HTML document, genuinely self-contained: React
+    19 ships no UMD build, so a one-time build script
+    (`scripts/generate-vendored-react-runtime.mjs`) bundles React/ReactDOM
+    into a vendored IIFE runtime baked into the sidecar itself, with no
+    `node_modules` resolution at preview-compile time at all -- proven by
+    an isolation test that hides `node_modules/react`+`react-dom` entirely
+    and confirms compilation still succeeds.
+  - Renders inside a `sandbox="allow-scripts"` iframe (no
+    `allow-same-origin`) with a strict injected CSP (`default-src 'none'`),
+    closing the gap where the sandbox attribute alone blocks DOM/cookie
+    access but not outbound network calls. Relative imports are sandboxed
+    to the component's own directory (rejects any path-traversal import),
+    proven by a dedicated fixture.
+  - Compiled previews are cached globally (keyed by remote/id/version, not
+    per-project) with an atomic, path-traversal-guarded write, so browsing
+    the same catalog from a different project never pointlessly recompiles.
+  - All 125 tests pass; typecheck/lint clean; a code-review pass (and a
+    second pass over that pass's own fixes) caught and fixed 7 further
+    issues (an `IntersectionObserver` leak across re-renders, a
+    click-target dead zone over the live preview plus its own leftover
+    "clickable" cursor/hover styling, missing `--component-types` CLI test
+    coverage, the vendored-runtime generator not chained into
+    `build`/`test`, Detail not showing/editing `componentTypes`, and an
+    orphaned `.tmp` file left behind if the atomic cache write ever fails
+    mid-way). Two gaps left deliberately open (not silently
+    dropped): the preview cache has no explicit pruning of superseded
+    versions, and the import sandbox isn't symlink-aware.
+
 - Reworked the growtharc-ai-helpers import for real structural fidelity to
   the source backup:
   - Fixed the 67 agents, which had pulled flat into `.claude/agents/<id>.md`,

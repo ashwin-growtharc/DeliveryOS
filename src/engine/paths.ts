@@ -56,3 +56,39 @@ export function pristineDir(cwd: string): string {
 export function pristinePath(cwd: string, id: string): string {
   return path.join(pristineDir(cwd), id);
 }
+
+/** Root directory for cached compiled UI-component previews (Phase 6).
+ * Deliberately global (under `deliveryOsHome()`, alongside
+ * `remotesCacheRoot()`), NOT cwd-scoped like `pristineDir` -- a compiled
+ * preview needs to be viewable for a catalog entry that hasn't been
+ * pulled into any project yet (the whole point of browsing live previews
+ * before deciding to pull), and a compiled preview for the same
+ * (remote, id, version) is identical regardless of which project folder
+ * happens to be open, so caching it per-project would just recompile the
+ * same output pointlessly for every different project. */
+export function previewCacheRoot(): string {
+  return path.join(deliveryOsHome(), 'preview-cache');
+}
+
+/** Rejects any path segment that could escape `previewCacheRoot()` via
+ * `path.join` -- e.g. a manifest `id` of `../../../etc` or a remote name
+ * containing a path separator. `remoteName`/`id`/`version` all ultimately
+ * originate from data DeliveryOS doesn't fully control (a pushed
+ * manifest, a remote's own name) rather than a fixed internal enum, so
+ * this is a real boundary, not defense-in-depth for its own sake. */
+function assertSafePathSegment(segment: string, label: string): void {
+  if (segment.length === 0 || segment.includes('/') || segment.includes('\\') || segment === '.' || segment === '..') {
+    throw new Error(`Invalid ${label}: "${segment}"`);
+  }
+}
+
+/** Path to a specific compiled preview's cached HTML file, keyed by
+ * (remote, id, version) so a version bump naturally invalidates the
+ * cache (a stale entry is simply never looked up again, not explicitly
+ * deleted) -- never pushed or pulled, purely a local derived artifact. */
+export function previewCachePath(remoteName: string, id: string, version: string): string {
+  assertSafePathSegment(remoteName, 'remote name');
+  assertSafePathSegment(id, 'artifact id');
+  assertSafePathSegment(version, 'version');
+  return path.join(previewCacheRoot(), remoteName, id, version, 'index.html');
+}

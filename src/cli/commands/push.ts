@@ -28,6 +28,7 @@ export interface PushCommandFlags {
   roles?: string;
   teams?: string;
   stacks?: string;
+  componentTypes?: string;
   postInstall?: string;
 }
 
@@ -46,8 +47,9 @@ export function toPushOptions(flags: PushCommandFlags): PushOptions {
   const roles = parseList(flags.roles);
   const teams = parseList(flags.teams);
   const stacks = parseList(flags.stacks);
+  const componentTypes = parseList(flags.componentTypes);
   const hasMetadataEdit =
-    !isNew && (flags.description !== undefined || roles !== undefined || teams !== undefined || stacks !== undefined);
+    !isNew && (flags.description !== undefined || roles !== undefined || teams !== undefined || stacks !== undefined || componentTypes !== undefined);
 
   return {
     remote: flags.remote,
@@ -62,9 +64,10 @@ export function toPushOptions(flags: PushCommandFlags): PushOptions {
     roles: isNew ? roles : undefined,
     teams: isNew ? teams : undefined,
     stacks: isNew ? stacks : undefined,
+    componentTypes: isNew ? componentTypes : undefined,
     postInstall: flags.postInstall,
     metadataEdit: hasMetadataEdit
-      ? { description: flags.description, roles, teams, stacks }
+      ? { description: flags.description, roles, teams, stacks, componentTypes }
       : undefined,
   };
 }
@@ -106,6 +109,12 @@ export function registerPushCommand(program: Command): void {
       '--stacks <list>',
       'Comma-separated stacks tag. With --new, seeds the new manifest; without --new, edits '
         + 'an already-tracked artifact\'s stacks tag.',
+    )
+    .option(
+      '--component-types <list>',
+      'Comma-separated component-category tag (e.g. "button,card"), for kind: ui-component '
+        + 'artifacts. With --new, seeds the new manifest; without --new, edits an '
+        + 'already-tracked artifact\'s componentTypes tag.',
     )
     .option(
       '--post-install <cmd>',

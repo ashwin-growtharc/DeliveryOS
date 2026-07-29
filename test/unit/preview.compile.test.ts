@@ -1,10 +1,19 @@
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { JSDOM } from 'jsdom';
-import { compilePreviewHtml, listVariantNames } from '../../src/engine/preview/compile';
+import { compilePreviewHtml, getOrCompilePreview, listVariantNames } from '../../src/engine/preview/compile';
 
 const fixtureDir = path.join(__dirname, '..', 'fixtures', 'preview-spike', 'Button');
 const previewPath = path.join(fixtureDir, 'preview.tsx');
+const htmlPreviewPath = path.join(
+  __dirname, '..', 'fixtures', 'preview-spike', 'HtmlButton', 'preview.html',
+);
+const maliciousPreviewPath = path.join(
+  __dirname, '..', 'fixtures', 'preview-spike', 'Malicious', 'preview.tsx',
+);
+const repoRoot = path.join(__dirname, '..', '..');
 
 describe('listVariantNames', () => {
   it('returns exported variant names in real source declaration order', () => {
@@ -93,5 +102,136 @@ describe('compilePreviewHtml (Phase A spike)', () => {
     // sanity ceiling, not a tight budget; Phase A's real size/latency check
     // happens against the packaged sidecar, not this unit test.
     expect(html.length).toBeLessThan(500_000);
+  });
+});
+
+describe('vendored React runtime (Phase B)', () => {
+  it('compiles successfully even with react/react-dom entirely absent from node_modules', async () => {
+    // The actual claim this test exists to prove: React/ReactDOM are
+    // genuinely vendored (embedded via VENDORED_REACT_RUNTIME_JS), not
+    // just coincidentally resolving because the fixture happens to sit
+    // inside this monorepo's own node_modules. Temporarily hides both
+    // packages so that coincidental fallback genuinely cannot succeed --
+    // mirrors the exact isolation-testing discipline Phase A used for the
+    // native esbuild binary itself. Always restores in `finally`, even if
+    // the compile throws unexpectedly.
+    const reactDir = path.join(repoRoot, 'node_modules', 'react');
+    const reactDomDir = path.join(repoRoot, 'node_modules', 'react-dom');
+    const reactHidden = `${reactDir}.hidden-for-test`;
+    const reactDomHidden = `${reactDomDir}.hidden-for-test`;
+
+    fs.renameSync(reactDir, reactHidden);
+    fs.renameSync(reactDomDir, reactDomHidden);
+    try {
+      const { html } = await compilePreviewHtml(previewPath);
+      expect(html.length).toBeGreaterThan(0);
+      expect(html).toContain('__DeliveryOSReactRuntime');
+    } finally {
+      fs.renameSync(reactHidden, reactDir);
+      fs.renameSync(reactDomHidden, reactDomDir);
+    }
+  });
+});
+
+describe('import sandboxing (Phase B)', () => {
+  it('rejects a relative import that escapes the artifact\'s own directory', async () => {
+    // test/fixtures/preview-spike/Malicious/preview.tsx imports
+    // '../../../../package.json' -- a real path-traversal attempt. Must
+    // fail loudly (a rejected promise), never silently inline content from
+    // outside the artifact's own folder.
+    await expect(compilePreviewHtml(maliciousPreviewPath)).rejects.toThrow(
+      /resolves outside this component's own directory/,
+    );
+  });
+});
+
+describe('compiler-adapter dispatch (Phase B)', () => {
+  it('routes a .tsx preview through the React adapter', async () => {
+    const { html } = await compilePreviewHtml(previewPath);
+    // The React adapter always produces a fresh HTML document wrapper +
+    // the vendored runtime -- present only because esbuild actually ran.
+    expect(html).toContain('<!DOCTYPE html>');
+    expect(html).toContain('__DeliveryOSReactRuntime');
+  });
+
+  it('routes a .html preview through the zero-build adapter, body untouched', async () => {
+    const rawFile = fs.readFileSync(htmlPreviewPath, 'utf-8');
+    const { html } = await compilePreviewHtml(htmlPreviewPath);
+
+    // Zero-build means no esbuild involvement, no vendored-runtime
+    // injection -- the file's own content is untouched. It's no longer
+    // byte-for-byte identical to the raw file, though: every adapter's
+    // output gets a CSP <meta> tag injected uniformly (see
+    // injectPreviewCsp), including this one.
+    expect(html).not.toContain('__DeliveryOSReactRuntime');
+    expect(html).toContain('Zero-build button');
+    expect(html).toContain('Content-Security-Policy');
+    // Everything else about the original file survives verbatim.
+    expect(html.replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/, '')).toBe(rawFile);
+  });
+});
+
+describe('injectPreviewCsp (Phase B)', () => {
+  it('every compiled preview includes a strict CSP meta tag', async () => {
+    const reactResult = await compilePreviewHtml(previewPath);
+    const htmlResult = await compilePreviewHtml(htmlPreviewPath);
+
+    for (const { html } of [reactResult, htmlResult]) {
+      expect(html).toContain('Content-Security-Policy');
+      expect(html).toContain("default-src 'none'");
+    }
+  });
+});
+
+describe('getOrCompilePreview caching (Phase B)', () => {
+  let deliveryOsHome: string;
+  let originalEnv: string | undefined;
+
+  beforeAll(() => {
+    originalEnv = process.env.DELIVERYOS_HOME;
+    deliveryOsHome = fs.mkdtempSync(path.join(os.tmpdir(), 'deliveryos-preview-cache-test-home-'));
+    process.env.DELIVERYOS_HOME = deliveryOsHome;
+  });
+
+  afterAll(() => {
+    if (originalEnv === undefined) {
+      delete process.env.DELIVERYOS_HOME;
+    } else {
+      process.env.DELIVERYOS_HOME = originalEnv;
+    }
+    fs.rmSync(deliveryOsHome, { recursive: true, force: true });
+  });
+
+  it('compiles on a cache miss, then serves a cache hit without recompiling', async () => {
+    const first = await getOrCompilePreview('test-remote', 'button', '1.0.0', previewPath);
+    expect(first.html.length).toBeGreaterThan(0);
+
+    // Proves the second call is a genuine cache hit, not a coincidental
+    // recompile: hides react/react-dom (mirroring the vendoring isolation
+    // test above) so a real recompile attempt would fail loudly. A cache
+    // hit must succeed anyway, since it never touches esbuild at all.
+    const reactDir = path.join(repoRoot, 'node_modules', 'react');
+    const reactDomDir = path.join(repoRoot, 'node_modules', 'react-dom');
+    const reactHidden = `${reactDir}.hidden-for-test`;
+    const reactDomHidden = `${reactDomDir}.hidden-for-test`;
+
+    fs.renameSync(reactDir, reactHidden);
+    fs.renameSync(reactDomDir, reactDomHidden);
+    try {
+      const second = await getOrCompilePreview('test-remote', 'button', '1.0.0', previewPath);
+      expect(second.html).toBe(first.html);
+    } finally {
+      fs.renameSync(reactHidden, reactDir);
+      fs.renameSync(reactDomHidden, reactDomDir);
+    }
+  });
+
+  it('a different version is a genuine cache miss, not accidentally shared with another version', async () => {
+    await getOrCompilePreview('test-remote', 'button', '1.0.0', previewPath);
+    // Different version -> different cache key -> this call actually
+    // recompiles (react/react-dom are NOT hidden here, so it can) rather
+    // than incorrectly returning the 1.0.0 entry.
+    const result = await getOrCompilePreview('test-remote', 'button', '2.0.0', previewPath);
+    expect(result.html.length).toBeGreaterThan(0);
   });
 });

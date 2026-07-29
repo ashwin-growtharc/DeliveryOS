@@ -194,26 +194,60 @@ demonstrably true, not just when every task box is checked.
         **Go** — unconditional. Both items this spike originally flagged
         as owed (the packaged-`.exe` acceptance test, and a real `cargo`
         compile check) are now resolved.
-- [ ] **Phase B — React + TS adapter, fixed preview**
+- [x] **Phase B — React + TS adapter, fixed preview**
       Goal: a person can open the "UI Components" sidebar page and see real
       pushed components rendered as live, interactive preview cards grouped
       by category — the full data-model/compiler-adapter plumbing needed to
       get a component from a pushed manifest onto that screen exists and
       works, for both React/TS and plain HTML/CSS/JS.
-  - [ ] `ManifestSchema.tags` gains `componentTypes: z.array(z.string()).default([])`
-        (the one real, optional schema addition — see design doc §2/§6.3)
-  - [ ] `PushOptions`/`push.ts`: thread `componentTypes` through propose-new,
-        and add it to `MetadataEditOptions` for later retagging
-  - [ ] `app.js`: fourth tag-picker in Add New (reusing `createTagPicker`),
-        `'componentTypes'` added to `TAG_CATEGORIES`
-  - [ ] New sidebar destination "UI Components": category tabs (reusing the
-        `.tab-row` pattern) + a grid of live-preview cards, lazy-rendered via
-        `IntersectionObserver`
-  - [ ] Compiler-adapter interface (`compile(source) → { bundle, propsSchema }`)
-        with the React/TypeScript adapter as the first implementation, plus
-        the zero-build plain-HTML/CSS/JS fast path
-  - [ ] Preview cache: `previewCachePath(cwd, id, version)` sibling to the
-        existing `pristinePath` helper — never pushed/pulled, purely local
+      Done. `ManifestSchema.tags.componentTypes` added end to end (schema →
+      `push.ts`/`prContent.ts` → CLI `--component-types` flag → Add New's
+      fourth tag-picker → Detail's Edit form, now with full read/write parity
+      alongside roles/teams/stacks, not just Add New). Both of Phase A's own
+      documented gaps are now genuinely fixed, not deferred again: React 19
+      ships no UMD build, so `scripts/generate-vendored-react-runtime.mjs`
+      uses esbuild itself to bundle a tiny shim into one IIFE (written to a
+      gitignored `vendoredReactRuntime.generated.ts`), and `compile.ts` uses
+      `jsx: 'transform'` + a custom `jsxFactory`/`jsxFragment` pointing at
+      that vendored global — proven by an isolation test that hides
+      `node_modules/react`+`react-dom` entirely and confirms compilation
+      still succeeds. Import resolution is now sandboxed to the artifact's
+      own directory (an `onLoad` esbuild plugin rejecting any path outside
+      it), proven by a fixture with a real path-traversal import. Added a
+      compiler-adapter dispatcher (`.tsx`/`.jsx` → esbuild adapter, `.html` →
+      zero-build pass-through) and a global (not cwd-scoped) read-through
+      preview cache under `previewCacheRoot()`, atomic (temp-file + rename)
+      so a concurrent reader never sees a torn write, with a path-traversal
+      guard on the `(remoteName, id, version)` cache key. Every compiled
+      preview gets a strict CSP `<meta>` tag (`default-src 'none'`) injected
+      uniformly, closing the gap where `sandbox="allow-scripts"` alone
+      blocks DOM/cookie access but not outbound network calls. New "UI
+      Components" sidebar page (category tabs + lazy `IntersectionObserver`-
+      rendered live-preview cards) shipped in `spike-ui`. A code-review pass
+      found and fixed 7 concrete issues beyond the above (an
+      `IntersectionObserver` never disconnected across re-renders; the whole
+      card, not just its body, swallowing clicks meant for the live-preview
+      iframe — and, caught by a second review pass over that first fix, the
+      card's own `cursor: pointer`/hover-lift styling still implying the
+      now-dead-zone preview area was clickable; the vendored-runtime
+      generator only chained into `prepare`, not `build`/`typecheck`/`test`;
+      missing CLI test coverage for `--component-types`; Detail view not
+      displaying/editing `componentTypes` at all; and the atomic cache
+      write leaving an orphaned `.tmp` file behind on a write/rename
+      failure). All 125 tests pass (109 Phase-A baseline + 3
+      new preview/resolveArtifactPreview tests + others); typecheck/lint
+      clean; `npm run build && npm run build:sidecar` verified end-to-end.
+      **Two gaps deliberately left open, not silently dropped**: (1) the
+      preview cache has no explicit invalidation — a version bump changes
+      the cache key so a stale entry is simply never looked up again, but
+      nothing ever prunes old versions' cached HTML off disk (already
+      flagged in the design doc §7.2, re-surfaced here since Phase B is
+      where it became a real, reachable code path instead of a theoretical
+      one); (2) the import-sandbox plugin's containment check is a string
+      prefix check on the resolved path, not symlink-aware — a symlink
+      planted inside an artifact's own directory but pointing outside it
+      would not be caught (untested edge case, no known way to plant one via
+      the normal push flow today).
 - [ ] **Phase C — Storybook-style controls**
       Goal: on a component's Detail view, a person can switch between named
       variants and tweak individual props via a generated controls panel,

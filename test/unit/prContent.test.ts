@@ -40,7 +40,7 @@ describe('buildProposeNewPrContent', () => {
       owner: 'platform-team',
       version: '1.0.0',
       installTarget: 'brand-new-artifact',
-      tags: { roles: ['eng'], teams: ['platform'], stacks: ['node'] },
+      tags: { roles: ['eng'], teams: ['platform'], stacks: ['node'], componentTypes: [] },
       gitUserName: 'Ashwin B',
       gitUserEmail: 'ashwin@example.com',
       payloadFiles: ['README.md', 'config.yaml'],

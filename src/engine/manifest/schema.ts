@@ -14,6 +14,12 @@ export const ManifestSchema = z.object({
       roles: z.array(z.string()).default([]),
       teams: z.array(z.string()).default([]),
       stacks: z.array(z.string()).default([]),
+      // Free-form category values for `kind: "ui-component"` artifacts
+      // (e.g. "button", "navbar", "card") -- same open-ended, free-text
+      // shape as roles/teams/stacks, just a distinct tag dimension. Empty
+      // for every other kind; never required, so this stays additive to
+      // every existing artifact's manifest.
+      componentTypes: z.array(z.string()).default([]),
     })
     .default({}),
   source_repo: z.string().min(1),
