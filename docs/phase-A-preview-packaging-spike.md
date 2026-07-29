@@ -188,26 +188,27 @@ sidecar binary, driven purely by an env var set before spawn — without
 needing a Rust toolchain at all, since the env var mechanism itself is
 OS-level and identical regardless of which process does the spawning.
 
-## What's still genuinely owed
+## `cargo` compile: confirmed by the user, resolving the last owed item
 
-**`cargo check` still hasn't run.** No Rust toolchain exists in the
-environment this spike was built in (confirmed: no `cargo`/`rustc` on
-`PATH`), so `src-tauri/src/lib.rs`'s actual Rust code — the
-`app.path().resolve(...)` / `BaseDirectory::Resource` / `.env(...)` calls
-that *produce* the env var the shell-level test above simulated by hand —
-has still never been compiled. Verified only against official `docs.rs`
-documentation and the real `tauri-plugin-shell` v2 source for the exact
-API signatures used. **Run `cargo check` (or `cargo tauri dev`) before
-Phase B starts** — the shell-level test above proves the *mechanism*
-works; it doesn't prove `lib.rs` itself compiles.
+No Rust toolchain existed in the environment this spike was built in
+(confirmed: no `cargo`/`rustc` on `PATH`), so `src-tauri/src/lib.rs`'s
+actual Rust code — the `app.path().resolve(...)` / `BaseDirectory::Resource`
+/ `.env(...)` calls that *produce* the env var the shell-level test above
+simulated by hand — could only be verified against official `docs.rs`
+documentation and the real `tauri-plugin-shell` v2 source, not an actual
+compile. The user ran `npx tauri dev` from `src-tauri/` on their own
+machine: `cargo run` compiled cleanly (`Finished `dev` profile
+[unoptimized + debuginfo] target(s) in 12.68s`, no errors) and launched
+the real app window. `lib.rs`'s changes are now confirmed to actually
+compile, not just plausible against documentation.
 
-## Recommendation: proceed to Phase B, with one item tracked
+## Recommendation: proceed to Phase B — nothing owed
 
-The core compile mechanism is proven, tested, and now verified against
-the real packaged binary under the exact failure-inducing condition
-(`node_modules` fallback unavailable) it needed to survive. Every
-fixable issue from the review pass is fixed. The one thing still
-genuinely owed — an actual `cargo check` — should happen before or early
-in Phase B, not be silently forgotten. The temporary
+The core compile mechanism is proven and tested, the packaging approach
+is verified against the real packaged binary under the exact
+failure-inducing condition (`node_modules` fallback unavailable) it
+needed to survive, every fixable issue from the review pass is fixed, and
+`lib.rs` is now confirmed to actually compile. Both items this spike
+originally flagged as owed are resolved. The temporary
 `preview.compileDebug` sidecar command should be removed once Phase B
 wires in the real one.

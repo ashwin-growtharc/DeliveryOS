@@ -142,7 +142,7 @@ proves it's actually done) before its task checklist, same discipline every
 earlier phase in this file already uses — a phase is done when the goal is
 demonstrably true, not just when every task box is checked.
 
-- [x] **Phase A — Spike (de-risk before committing further) — Done, one item owed**
+- [x] **Phase A — Spike (de-risk before committing further) — Done, nothing owed**
       Goal: a single hardcoded example React component renders as a live,
       interactive sandboxed-iframe preview (hover state real and working),
       compiled locally via esbuild with no crash, and packaging size/cold-render
@@ -172,12 +172,14 @@ demonstrably true, not just when every task box is checked.
       `node_modules/@esbuild/win32-x64` temporarily hidden to isolate the
       real risk, the packaged `.exe` compiled the fixture successfully; a
       negative control (env var unset) failed cleanly with esbuild's own
-      expected error, not a crash. **One item still genuinely owed**: no
-      Rust toolchain exists in the environment this was built in, so
-      `src-tauri/src/lib.rs`'s actual Rust code has never been compiled
-      (API calls confirmed against real docs.rs/source instead) — run
-      `cargo check` before Phase B starts. Remove the temporary
-      `preview.compileDebug` command once Phase B wires a real one in.
+      expected error, not a crash. **`cargo` compile confirmed by the
+      user**: `npx tauri dev` from `src-tauri/` compiled `lib.rs` cleanly
+      (`Finished `dev` profile... in 12.68s`, no errors) and launched the
+      real app — no Rust toolchain existed in the environment this was
+      built in, so this had been unverified by an actual compile until
+      now. Both items this spike originally flagged as owed are resolved.
+      Remove the temporary `preview.compileDebug` command once Phase B
+      wires a real one in.
   - [x] Prototype the sandboxed-iframe (`sandbox="allow-scripts"`, no
         `allow-same-origin`) + local-esbuild pipeline end to end for one
         hardcoded example React component
@@ -189,8 +191,9 @@ demonstrably true, not just when every task box is checked.
         latency follow-up.
   - [x] **Go/no-go checkpoint** before Phase B starts, same discipline Phase 3
         used for its own spike
-        **Go**, conditional on the one owed follow-up above (`cargo check`)
-        happening before or early in Phase B, not silently dropped.
+        **Go** — unconditional. Both items this spike originally flagged
+        as owed (the packaged-`.exe` acceptance test, and a real `cargo`
+        compile check) are now resolved.
 - [ ] **Phase B — React + TS adapter, fixed preview**
       Goal: a person can open the "UI Components" sidebar page and see real
       pushed components rendered as live, interactive preview cards grouped
