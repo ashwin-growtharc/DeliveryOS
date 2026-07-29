@@ -278,6 +278,18 @@
               <button id="detail-action-btn" class="btn btn-primary" hidden></button>
             </div>
             <p id="detail-description" class="detail-description"></p>
+
+            <!-- Live preview + variant tabs + generated props controls
+                 (Phase C) -- shown only for kind: ui-component artifacts.
+                 See renderDetail/loadDetailPreview in app.js. -->
+            <div id="detail-preview-section" hidden>
+              <div id="detail-preview-tabs" class="tab-row"></div>
+              <div id="detail-preview-frame" class="ui-component-preview-frame detail-preview-frame">
+                <span class="ui-component-preview-loading">Loading preview&hellip;</span>
+              </div>
+              <div id="detail-preview-controls" class="controls-panel"></div>
+            </div>
+
             <div class="meta-grid">
               <div><span class="k">Kind</span><br /><span id="meta-kind" class="v"></span></div>
               <div><span class="k">Version</span><br /><span id="meta-version" class="v"></span></div>

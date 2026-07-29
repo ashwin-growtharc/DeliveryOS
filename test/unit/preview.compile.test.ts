@@ -171,6 +171,97 @@ describe('compiler-adapter dispatch (Phase B)', () => {
   });
 });
 
+describe('variantNames + propsSchemas (Phase C)', () => {
+  it('the React adapter returns every CSF variant, in source declaration order', async () => {
+    const compiled = await compilePreviewHtml(previewPath);
+    expect(compiled.variantNames).toEqual(['Primary', 'Secondary', 'Disabled']);
+  });
+
+  it('the React adapter returns a real docgen-derived props schema for the underlying component', async () => {
+    const compiled = await compilePreviewHtml(previewPath);
+    expect(Object.keys(compiled.propsSchemas)).toEqual(['Button']);
+    const variant = compiled.propsSchemas.Button.find((p) => p.name === 'variant');
+    expect(variant).toMatchObject({ enumValues: ['primary', 'secondary'], defaultValue: 'primary' });
+  });
+
+  it('the zero-build HTML adapter returns empty variantNames/propsSchemas -- no CSF/docgen concept applies', async () => {
+    const compiled = await compilePreviewHtml(htmlPreviewPath);
+    expect(compiled.variantNames).toEqual([]);
+    expect(compiled.propsSchemas).toEqual({});
+  });
+});
+
+describe('postMessage protocol (Phase C)', () => {
+  it('reports the real component name via postMessage even though the bundle is minified (keepNames regression)', async () => {
+    // If `keepNames: true` were ever accidentally dropped from the
+    // esbuild.build() call, esbuild's minifier would rename `Button` to a
+    // single letter, and this assertion is what would catch it -- a plain
+    // `html.toContain('Button')` string check would NOT catch this
+    // regression, since "Button" also appears elsewhere in the bundle
+    // (e.g. inside the harness's own JSX call sites) regardless of
+    // whether the function's runtime `.name` itself survived minification.
+    const { html } = await compilePreviewHtml(previewPath);
+    const dom = new JSDOM(html, { runScripts: 'dangerously' });
+
+    const messages: Array<Record<string, unknown>> = [];
+    dom.window.addEventListener('message', (event) => {
+      messages.push(event.data as Record<string, unknown>);
+    });
+
+    const deadline = Date.now() + 2000;
+    while (Date.now() < deadline) {
+      const variantChanged = messages.find((m) => m.type === 'variantChanged');
+      if (variantChanged) {
+        expect(variantChanged.componentName).toBe('Button');
+        expect(variantChanged.variant).toBe('Primary');
+        expect(variantChanged.initialProps).toMatchObject({ children: 'Get started' });
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error('Expected a "variantChanged" postMessage within 2s -- keepNames regression, or the harness protocol broke');
+  });
+
+  it('ignores an incoming message whose source is not window.parent, even with a valid-looking payload (security boundary)', async () => {
+    // A real browser lets the harness legitimately receive a
+    // window.parent-sourced message; jsdom has no way to fake that
+    // relationship (confirmed empirically: a real `srcdoc` iframe never
+    // executes its inline <script> in jsdom's `runScripts: 'dangerously'`
+    // mode, and even a same-window self-post -- the only other way to
+    // trigger `window.addEventListener('message', ...)` here -- always
+    // comes back with `event.source === null`, never `window` itself).
+    // That limitation is exactly what this test turns into real coverage:
+    // it proves the harness's `event.source !== window.parent` guard
+    // actually rejects a same-shape `{type:'selectVariant', ...}` message
+    // from an untrusted source, rather than just asserting the check
+    // exists in the source text. The genuine "switch variant, watch it
+    // re-render" happy path needs a real two-window browser check instead
+    // (see this feature's manual-verification steps).
+    const { html } = await compilePreviewHtml(previewPath);
+    const dom = new JSDOM(html, { runScripts: 'dangerously' });
+
+    const messages: Array<Record<string, unknown>> = [];
+    dom.window.addEventListener('message', (event) => {
+      messages.push(event.data as Record<string, unknown>);
+    });
+
+    const deadline = Date.now() + 2000;
+    while (Date.now() < deadline && !messages.some((m) => m.type === 'variantChanged')) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(messages.filter((m) => m.type === 'variantChanged')).toHaveLength(1);
+
+    dom.window.postMessage({ type: 'selectVariant', variant: 'Disabled' }, '*');
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    // Still Primary, still non-disabled -- the untrusted message was
+    // dropped, not honored, and no second `variantChanged` was posted.
+    const button = dom.window.document.querySelector('button');
+    expect(button?.disabled).toBe(false);
+    expect(messages.filter((m) => m.type === 'variantChanged')).toHaveLength(1);
+  });
+});
+
 describe('injectPreviewCsp (Phase B)', () => {
   it('every compiled preview includes a strict CSP meta tag', async () => {
     const reactResult = await compilePreviewHtml(previewPath);
@@ -205,6 +296,12 @@ describe('getOrCompilePreview caching (Phase B)', () => {
   it('compiles on a cache miss, then serves a cache hit without recompiling', async () => {
     const first = await getOrCompilePreview('test-remote', 'button', '1.0.0', previewPath);
     expect(first.html.length).toBeGreaterThan(0);
+    // Phase C: the cache stores the WHOLE CompiledPreview as JSON now, not
+    // just the raw HTML string -- variantNames/propsSchemas have to
+    // actually survive a cache hit, or every request after the first
+    // compile would silently lose variant tabs and controls.
+    expect(first.variantNames).toEqual(['Primary', 'Secondary', 'Disabled']);
+    expect(first.propsSchemas.Button.length).toBeGreaterThan(0);
 
     // Proves the second call is a genuine cache hit, not a coincidental
     // recompile: hides react/react-dom (mirroring the vendoring isolation
@@ -219,7 +316,7 @@ describe('getOrCompilePreview caching (Phase B)', () => {
     fs.renameSync(reactDomDir, reactDomHidden);
     try {
       const second = await getOrCompilePreview('test-remote', 'button', '1.0.0', previewPath);
-      expect(second.html).toBe(first.html);
+      expect(second).toEqual(first);
     } finally {
       fs.renameSync(reactHidden, reactDir);
       fs.renameSync(reactDomHidden, reactDomDir);

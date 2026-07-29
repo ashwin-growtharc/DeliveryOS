@@ -728,6 +728,48 @@ input, textarea, select {
   font-family: 'JetBrains Mono', monospace;
 }
 
+/* ---------- Detail view: live preview + variant tabs + controls (Phase C) ---------- */
+
+/* Reuses .ui-component-preview-frame's own sizing/background/iframe rules
+ * as-is (see above) -- this class only adds Detail-specific overrides,
+ * not a parallel frame style. Taller than the grid card's preview slot:
+ * Detail is where a person actually interacts with a component, not just
+ * glances at its default state. */
+.detail-preview-frame {
+  height: 260px;
+  border: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  margin-bottom: 12px;
+}
+
+.controls-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.control-row label {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  opacity: .65;
+  margin-bottom: 5px;
+}
+
+.control-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.control-checkbox input[type="checkbox"] {
+  cursor: pointer;
+}
+
 .tag-folder-header {
   display: flex;
   align-items: center;

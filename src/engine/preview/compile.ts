@@ -3,9 +3,21 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { previewCachePath } from '../paths';
 import { VENDORED_REACT_RUNTIME_JS } from './vendoredReactRuntime.generated';
+import { extractPropsSchemas, PropSchemaEntry } from './docgen';
 
 export interface CompiledPreview {
   html: string;
+  /** Every CSF-style named variant exported by preview.tsx, in source
+   * declaration order (see `listVariantNames`) -- Phase C's variant tabs
+   * are built directly from this list, driving the embedded harness's
+   * `selectVariant` message (see `compileReactPreview`). Always `[]` for
+   * the zero-build HTML adapter -- there's no variant concept for a
+   * plain, already-complete HTML document. */
+  variantNames: string[];
+  /** Props-controls schema per component `displayName`, derived once at
+   * compile time by `extractPropsSchemas` -- never re-derived on the
+   * client. Always `{}` for the zero-build HTML adapter. */
+  propsSchemas: Record<string, PropSchemaEntry[]>;
 }
 
 /**
@@ -85,8 +97,11 @@ export function listVariantNames(previewSourcePath: string): string[] {
  * runtime, all bundled together) plus a minimal CSS reset. No external
  * module resolution happens once this HTML is handed to the sandboxed
  * iframe it eventually renders into -- everything it needs is already
- * inlined. Renders whichever variant is exported first; switching between
- * variants is Phase C's controls-panel concern, not this function's.
+ * inlined. Renders the first variant by default, then hands control to
+ * the parent DeliveryOS UI via `postMessage` (see the embedded harness
+ * below) -- switching variants and editing props both happen against
+ * this same already-loaded bundle, with no recompile and no further
+ * sidecar round-trip (Phase C).
  *
  * Uses native `esbuild` (not `esbuild-wasm`): the WASM build's only Node
  * code path hardcodes spawning a separate `node` binary on PATH, which
@@ -148,28 +163,124 @@ async function compileReactPreview(previewEntryPath: string): Promise<CompiledPr
   // file. Keeps the actual pushed preview.tsx untouched; DeliveryOS never
   // needs to rewrite an artifact's own source to make it previewable.
   //
-  // Imports the first variant BY ITS ACTUAL NAME (a named import), not via
-  // `import * as preview` + object-key indexing -- see listVariantNames's
-  // own doc comment for why that alternative silently picks the wrong
-  // variant. React/createRoot come from the vendored runtime's global
-  // (assigned by VENDORED_REACT_RUNTIME_JS, embedded ahead of this script
-  // in the generated HTML below), not an ES import -- IIFE output has no
-  // module system at runtime, so a real `import React from 'react'` (or
-  // marking 'react' `external`, which for a non-esm output format just
-  // becomes a `require(...)` call with nothing to satisfy it) can't work
-  // at all in a browser context. `jsx: 'transform'` + a custom
-  // jsxFactory/jsxFragment below makes every JSX call site in the
-  // COMPONENT's own source (Button.tsx/preview.tsx) compile directly to
+  // Imports the WHOLE preview module (`import * as PreviewModule`), not
+  // just the first variant by name -- Phase C's harness needs to be able
+  // to look up ANY variant by name at postMessage time, not only the one
+  // rendered by default. This does NOT reintroduce the enumeration-order
+  // bug `listVariantNames`'s own doc comment warns about: that bug is
+  // specifically about `Object.keys()` iteration order on the bundled
+  // namespace object, not indexed property access by an already-known
+  // string key (`PreviewModule[variantName]`, below) -- don't "fix" this
+  // back into a named import out of misplaced caution.
+  //
+  // React/createRoot come from the vendored runtime's global (assigned by
+  // VENDORED_REACT_RUNTIME_JS, embedded ahead of this script in the
+  // generated HTML below), not an ES import -- IIFE output has no module
+  // system at runtime, so a real `import React from 'react'` (or marking
+  // 'react' `external`, which for a non-esm output format just becomes a
+  // `require(...)` call with nothing to satisfy it) can't work at all in
+  // a browser context. `jsx: 'transform'` + a custom jsxFactory/
+  // jsxFragment below makes every JSX call site in the COMPONENT's own
+  // source (Button.tsx/preview.tsx) compile directly to
   // `window.__DeliveryOSReactRuntime.React.createElement(...)` calls --
   // pure textual substitution, no react-family import generated anywhere
   // in the output at all, avoiding this problem entirely rather than
   // working around it.
+  //
+  // Each CSF variant (`export const Primary = () => <Button .../>`) is a
+  // zero-arg function that returns a React element wrapping a SPECIFIC,
+  // already-instantiated set of props -- it does not itself accept props,
+  // so re-rendering `React.createElement(Primary, editedProps)` would
+  // silently ignore whatever props were edited. The harness below instead
+  // CALLS the variant function directly (a plain JS call, not through
+  // React) to get its real element, then reads `.type` (the actual
+  // component, e.g. Button) and `.props` (that variant's literal starting
+  // values) straight off it -- documented, stable React object shape, not
+  // an implementation detail. This is the mechanism that makes prop
+  // editing possible at all under the existing CSF authoring convention,
+  // not an optional embellishment. It relies on variant functions staying
+  // simple, synchronous, side-effect-free JSX factories with no hooks --
+  // the same shape every existing variant already has.
+  //
+  // Origin validation: a `srcdoc` iframe's `event.origin` is the opaque
+  // literal string `"null"` for every such iframe on the page (every grid
+  // card AND the Detail view's interactive one), so it cannot discriminate
+  // between them -- only `event.source` (a reference check) is sound.
+  // Inside the harness, `event.source === window.parent` is always safe
+  // regardless of how many other `srcdoc` iframes exist elsewhere in the
+  // parent document.
   const harness = `
-    import { ${firstVariantName} as FirstVariant } from './${entryBasename}';
+    import * as PreviewModule from './${entryBasename}';
 
     const { React, createRoot } = window.__DeliveryOSReactRuntime;
     const container = document.getElementById('root')!;
-    createRoot(container).render(React.createElement(FirstVariant));
+    const root = createRoot(container);
+
+    let currentType: any = null;
+
+    // A pushed component's own bug (throwing during render, or during the
+    // variant function call below) must not leave the iframe silently
+    // blank forever with no signal at all -- every failure path here
+    // reports {type:'error'} back to the parent, same "preview fails
+    // soft, but never SILENTLY" principle the rest of this feature
+    // follows for a preview.compile RPC failure.
+    function renderElement(type: any, props: any) {
+      try {
+        currentType = type;
+        root.render(React.createElement(type, props));
+      } catch (err: any) {
+        window.parent.postMessage({ type: 'error', message: String(err?.message ?? err) }, '*');
+      }
+    }
+
+    function selectVariant(variantName: string) {
+      const variantFn = PreviewModule[variantName];
+      if (typeof variantFn !== 'function') return;
+      let element: any;
+      try {
+        // Called directly, NOT rendered via React -- see this function's
+        // own doc comment above for why a zero-arg CSF variant has to be
+        // called to read its real component + starting props off the
+        // returned element, rather than wrapped as a component. A
+        // pushed/less-trusted variant function could throw here.
+        element = variantFn();
+      } catch (err: any) {
+        window.parent.postMessage(
+          { type: 'error', variant: variantName, message: String(err?.message ?? err) },
+          '*',
+        );
+        return;
+      }
+      if (!element || !element.type) {
+        // A variant is legally allowed to return null (a real React
+        // pattern) -- there's just nothing controllable to show for it.
+        window.parent.postMessage(
+          { type: 'error', variant: variantName, message: 'Variant returned no element' },
+          '*',
+        );
+        return;
+      }
+      const componentName = element.type.displayName || element.type.name || variantName;
+      renderElement(element.type, element.props);
+      window.parent.postMessage(
+        { type: 'variantChanged', variant: variantName, componentName, initialProps: element.props },
+        '*',
+      );
+    }
+
+    window.addEventListener('message', (event) => {
+      if (event.source !== window.parent) return;
+      const data = event.data;
+      if (!data || typeof data !== 'object') return;
+      if (data.type === 'selectVariant') {
+        selectVariant(data.variant);
+      } else if (data.type === 'setProps' && currentType) {
+        renderElement(currentType, data.props);
+      }
+    });
+
+    window.parent.postMessage({ type: 'ready' }, '*');
+    selectVariant('${firstVariantName}');
   `;
 
   const result = await esbuild.build({
@@ -188,6 +299,14 @@ async function compileReactPreview(previewEntryPath: string): Promise<CompiledPr
     jsxFactory: 'window.__DeliveryOSReactRuntime.React.createElement',
     jsxFragment: 'window.__DeliveryOSReactRuntime.React.Fragment',
     minify: true,
+    // esbuild's minifier renames top-level identifiers, which changes a
+    // function's own runtime `.name` -- since the harness above reports
+    // `element.type.name` back to the parent to look up that component's
+    // docgen-derived props schema, a minified name (e.g. "e" instead of
+    // "Button") would silently break that lookup. `keepNames` is
+    // esbuild's own documented escape hatch for exactly this class of
+    // problem; cheap, and doesn't touch the jsxFactory/jsxFragment config.
+    keepNames: true,
     plugins: [createDirectorySandboxPlugin(resolveDir)],
   });
 
@@ -229,7 +348,16 @@ async function compileReactPreview(previewEntryPath: string): Promise<CompiledPr
 </body>
 </html>`;
 
-  return { html };
+  // Docgen runs against the ORIGINAL, unbundled `.tsx` source via the real
+  // TypeScript compiler (see docgen.ts) -- a completely separate pass from
+  // esbuild's own compile above, which never type-checks at all. The
+  // schema never enters the bundle/iframe; it's returned here purely for
+  // the parent DeliveryOS UI to build control widgets from, matched at
+  // runtime against whatever `componentName` the harness's
+  // `variantChanged` message reports.
+  const propsSchemas = extractPropsSchemas(resolveDir, previewEntryPath);
+
+  return { html, variantNames, propsSchemas };
 }
 
 /**
@@ -240,10 +368,13 @@ async function compileReactPreview(previewEntryPath: string): Promise<CompiledPr
  * these IS the complete, already-self-contained document, exactly as the
  * artifact author wrote it. This is the "free" fast path the design doc
  * calls out; it exists specifically so a non-React, non-Vue submission
- * doesn't pay for a compile step it has no use for.
+ * doesn't pay for a compile step it has no use for. `variantNames`/
+ * `propsSchemas` are always empty -- there's no CSF variant concept or
+ * docgen-able component for an already-complete HTML document; the parent
+ * UI treats an empty `variantNames` as "no tabs/controls to show."
  */
 function compileHtmlPreview(previewEntryPath: string): CompiledPreview {
-  return { html: fs.readFileSync(previewEntryPath, 'utf-8') };
+  return { html: fs.readFileSync(previewEntryPath, 'utf-8'), variantNames: [], propsSchemas: {} };
 }
 
 /**
@@ -257,10 +388,10 @@ function compileHtmlPreview(previewEntryPath: string): CompiledPreview {
  * surface.
  */
 export async function compilePreviewHtml(previewEntryPath: string): Promise<CompiledPreview> {
-  const { html } = previewEntryPath.endsWith('.html')
+  const compiled = previewEntryPath.endsWith('.html')
     ? compileHtmlPreview(previewEntryPath)
     : await compileReactPreview(previewEntryPath);
-  return { html: injectPreviewCsp(html) };
+  return { ...compiled, html: injectPreviewCsp(compiled.html) };
 }
 
 /**
@@ -294,14 +425,18 @@ function injectPreviewCsp(html: string): string {
 /**
  * Cache-aware wrapper around `compilePreviewHtml`, keyed by
  * `(remoteName, id, version)` via `previewCachePath` -- a cache hit never
- * touches esbuild at all. Deliberately a thin wrapper around the pure
- * `compilePreviewHtml` rather than folding caching into it directly, so
- * that function stays simply testable ("given a file, produce HTML") and
- * this one owns exactly one additional concern (read-through caching).
- * The compiled cache entry is a derived build artifact, never pushed or
- * pulled (see `previewCachePath`'s own doc comment) -- a version bump
- * naturally invalidates it by changing the cache key, nothing is ever
- * explicitly deleted.
+ * touches esbuild (or docgen) at all. Deliberately a thin wrapper around
+ * the pure `compilePreviewHtml` rather than folding caching into it
+ * directly, so that function stays simply testable ("given a file,
+ * produce a CompiledPreview") and this one owns exactly one additional
+ * concern (read-through caching). Caches the ENTIRE `CompiledPreview`
+ * object as JSON (html + variantNames + propsSchemas), not just the raw
+ * HTML string -- Phase C's variant/props-schema data has to survive a
+ * cache hit too, or every request after the first compile would silently
+ * lose variant tabs and controls. The compiled cache entry is a derived
+ * build artifact, never pushed or pulled (see `previewCachePath`'s own
+ * doc comment) -- a version bump naturally invalidates it by changing the
+ * cache key, nothing is ever explicitly deleted.
  */
 export async function getOrCompilePreview(
   remoteName: string,
@@ -311,7 +446,7 @@ export async function getOrCompilePreview(
 ): Promise<CompiledPreview> {
   const cachePath = previewCachePath(remoteName, id, version);
   if (fs.existsSync(cachePath)) {
-    return { html: fs.readFileSync(cachePath, 'utf-8') };
+    return JSON.parse(fs.readFileSync(cachePath, 'utf-8')) as CompiledPreview;
   }
 
   const compiled = await compilePreviewHtml(previewEntryPath);
@@ -325,7 +460,7 @@ export async function getOrCompilePreview(
   // complete file, never a torn write.
   const tmpPath = path.join(cacheDir, `.${path.basename(cachePath)}.${process.pid}.${Date.now()}.tmp`);
   try {
-    fs.writeFileSync(tmpPath, compiled.html, 'utf-8');
+    fs.writeFileSync(tmpPath, JSON.stringify(compiled), 'utf-8');
     fs.renameSync(tmpPath, cachePath);
   } catch (err) {
     fs.rmSync(tmpPath, { force: true });

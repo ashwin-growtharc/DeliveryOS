@@ -790,6 +790,238 @@
     }
   }
 
+  // Tracks the Detail preview's current window-level message listener so
+  // opening a different (or the same) artifact's Detail can remove the
+  // previous one first -- same disconnect-before-replace discipline
+  // uiComponentsGridObserver already uses for its IntersectionObserver.
+  let detailPreviewMessageHandler = null;
+
+  // A monotonically increasing token identifying the MOST RECENT call to
+  // loadDetailPreview -- guards against a real race: loadDetailPreview is
+  // invoked from multiple call sites (renderDetail, refreshDetailIfShown),
+  // and the removeEventListener-then-await-then-addEventListener shape
+  // below has a window where a second call can start before the first
+  // one's `await call('preview.compile', ...)` resolves. Without this
+  // guard, both calls' completions could each set
+  // detailPreviewMessageHandler and call addEventListener, leaving the
+  // FIRST one's listener permanently unreachable (the module variable now
+  // points at the second) but still attached to `window` forever -- a
+  // real leak, and a real risk of a stale iframe's messages driving
+  // renderControlsPanel after its own iframe was already replaced.
+  // Checked once right after the `await` (the only place this function
+  // yields), so only the call that started MOST RECENTLY ever actually
+  // creates an iframe or attaches a listener; any superseded call simply
+  // stops before touching the DOM.
+  let detailPreviewRequestId = 0;
+
+  /** Clears any live Detail-preview iframe/listener -- called both at the
+   * top of loadDetailPreview (about to replace it with a new one) and
+   * from renderDetail when switching to a NON-ui-component artifact
+   * (which never calls loadDetailPreview at all, so without this the
+   * previous artifact's iframe/listener would otherwise just sit there,
+   * hidden but still live, until some later ui-component Detail happens
+   * to replace it). */
+  function clearDetailPreviewListener() {
+    if (detailPreviewMessageHandler) {
+      window.removeEventListener('message', detailPreviewMessageHandler);
+      detailPreviewMessageHandler = null;
+    }
+  }
+
+  /** Detail view's live, INTERACTIVE preview (Phase C): variant tabs +
+   * a generated props-controls panel, driven entirely by `postMessage`
+   * into ONE already-loaded iframe -- no re-fetch, no iframe reload, no
+   * extra sidecar round-trip per variant switch or prop edit. Mirrors
+   * `loadUiComponentPreview`'s iframe creation exactly (same `sandbox`
+   * attribute, same `srcdoc`, same fail-soft-to-placeholder), but wires up
+   * variant switching + controls on top -- Detail, unlike the grid, is
+   * where a person actually interacts with a component, not just glances
+   * at its default state. */
+  async function loadDetailPreview(entry) {
+    const requestId = ++detailPreviewRequestId;
+
+    const frame = $('detail-preview-frame');
+    const tabsContainer = $('detail-preview-tabs');
+    const controlsContainer = $('detail-preview-controls');
+
+    tabsContainer.innerHTML = '';
+    controlsContainer.innerHTML = '';
+    frame.innerHTML = '<span class="ui-component-preview-loading">Loading preview&hellip;</span>';
+    clearDetailPreviewListener();
+
+    let result;
+    try {
+      result = await call('preview.compile', { remote: entry.remoteName, id: entry.manifest.id });
+    } catch (err) {
+      if (requestId !== detailPreviewRequestId) return; // superseded while awaiting
+      frame.innerHTML = '';
+      const placeholder = document.createElement('span');
+      placeholder.className = 'ui-component-preview-loading';
+      placeholder.textContent = 'Preview unavailable';
+      frame.appendChild(placeholder);
+      return;
+    }
+    if (requestId !== detailPreviewRequestId) return; // superseded while awaiting
+
+    const iframe = document.createElement('iframe');
+    iframe.sandbox = 'allow-scripts';
+    iframe.srcdoc = result.html;
+    frame.innerHTML = '';
+    frame.appendChild(iframe);
+
+    // variantName -> tab element, so the message handler below can drive
+    // which tab looks "active" from the harness's own variantChanged
+    // reply rather than marking a tab active optimistically on click --
+    // if a variant's own render throws inside the sandboxed iframe (a
+    // pushed component bug, not a DeliveryOS bug), no variantChanged
+    // comes back, and the tab UI correctly stays on whichever variant is
+    // still actually showing instead of drifting out of sync with it.
+    const tabsByVariant = new Map();
+    // Only meaningful once variantNames is non-empty (the React adapter);
+    // the zero-build HTML adapter always returns [] (see compile.ts), so
+    // tabs/controls simply stay empty -- the same graceful-degrade
+    // pattern this feature already uses everywhere else.
+    result.variantNames.forEach((variantName) => {
+      const tab = document.createElement('button');
+      tab.className = 'tab';
+      tab.textContent = variantName;
+      tab.addEventListener('click', () => {
+        iframe.contentWindow.postMessage({ type: 'selectVariant', variant: variantName }, '*');
+      });
+      tabsContainer.appendChild(tab);
+      tabsByVariant.set(variantName, tab);
+    });
+
+    // event.source, not event.origin, is the only sound check here -- a
+    // srcdoc iframe's origin is the opaque literal string "null" for
+    // EVERY such iframe on the page (grid cards stay mounted-but-hidden
+    // behind Detail), so it can't discriminate between them. Checked
+    // against THIS specific iframe's own contentWindow, not any iframe.
+    detailPreviewMessageHandler = (event) => {
+      if (event.source !== iframe.contentWindow) return;
+      const data = event.data;
+      if (!data || typeof data !== 'object' || data.type !== 'variantChanged') return;
+      for (const [variantName, tab] of tabsByVariant) {
+        tab.classList.toggle('active', variantName === data.variant);
+      }
+      renderControlsPanel(result.propsSchemas, data.componentName, data.initialProps, (changedProps) => {
+        iframe.contentWindow.postMessage({ type: 'setProps', props: changedProps }, '*');
+      });
+    };
+    window.addEventListener('message', detailPreviewMessageHandler);
+  }
+
+  /** Builds the generated props-controls panel for whichever component is
+   * currently rendering inside the Detail preview iframe, looked up by
+   * `componentName` (as reported by the harness's own `variantChanged`
+   * message, matched against docgen's `displayName` -- see
+   * src/engine/preview/docgen.ts). Rebuilt from scratch on every variant
+   * switch, seeded from that variant's own starting prop values -- this
+   * is the "reset to the variant's own args" behavior, driven by the
+   * iframe's own reply rather than guessed client-side. Only props with a
+   * plain scalar/enum type get a widget at all (string-literal unions,
+   * `boolean`, `string`, `number`) -- function-typed, object-typed, and
+   * `ReactNode`-typed props (besides `children`, already excluded by
+   * docgen's own default filtering) have no generic widget yet and are
+   * skipped rather than rendering something broken. */
+  /** The value a control should display when first built: whatever the
+   * variant's own JSX call literally passed (`initialProps`) if present,
+   * else docgen's own extracted `defaultValue` -- otherwise a prop the
+   * component defaults internally (never set by the variant at all)
+   * would render its control blank/unchecked even though docgen captured
+   * exactly what that default really is. `defaultValue` is always a
+   * plain string (see docgen.ts's `String(prop.defaultValue.value)`), so
+   * boolean/number props need converting back from that string form. */
+  function resolveInitialValue(prop, initialProps) {
+    if (initialProps[prop.name] !== undefined) {
+      return initialProps[prop.name];
+    }
+    if (prop.defaultValue === undefined) {
+      return undefined;
+    }
+    if (prop.type === 'boolean') {
+      return prop.defaultValue === 'true';
+    }
+    if (prop.type === 'number') {
+      return Number(prop.defaultValue);
+    }
+    return prop.defaultValue;
+  }
+
+  function renderControlsPanel(propsSchemas, componentName, initialProps, onChange) {
+    const container = $('detail-preview-controls');
+    container.innerHTML = '';
+
+    const schema = propsSchemas[componentName] || [];
+    let currentProps = { ...initialProps };
+
+    for (const prop of schema) {
+      const isControllable =
+        Boolean(prop.enumValues) || prop.type === 'boolean' || prop.type === 'string' || prop.type === 'number';
+      if (!isControllable) {
+        continue;
+      }
+
+      const seedValue = resolveInitialValue(prop, initialProps);
+      const field = document.createElement('div');
+      field.className = 'field control-row';
+
+      if (prop.type === 'boolean') {
+        const checkboxLabel = document.createElement('label');
+        checkboxLabel.className = 'control-checkbox';
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = Boolean(seedValue);
+        checkbox.addEventListener('change', () => {
+          currentProps = { ...currentProps, [prop.name]: checkbox.checked };
+          onChange(currentProps);
+        });
+        checkboxLabel.appendChild(checkbox);
+        checkboxLabel.appendChild(document.createTextNode(` ${prop.name}`));
+        field.appendChild(checkboxLabel);
+        container.appendChild(field);
+        continue;
+      }
+
+      const label = document.createElement('label');
+      label.textContent = prop.name;
+      field.appendChild(label);
+
+      if (prop.enumValues) {
+        const pickerContainer = document.createElement('div');
+        field.appendChild(pickerContainer);
+        // Reuses createSingleChipPicker verbatim (already used for Add
+        // New's Kind/Remote pickers) -- its existing selectValue() method
+        // is exactly the "set the selection programmatically, without
+        // firing onChange" primitive needed to seed the panel from a
+        // variant's own starting value.
+        const picker = createSingleChipPicker(pickerContainer);
+        picker.setOptions(prop.enumValues.map((value) => ({ value, label: value })));
+        if (seedValue !== undefined) {
+          picker.selectValue(seedValue);
+        }
+        picker.onChange((value) => {
+          currentProps = { ...currentProps, [prop.name]: value };
+          onChange(currentProps);
+        });
+      } else {
+        const input = document.createElement('input');
+        input.type = prop.type === 'number' ? 'number' : 'text';
+        input.value = seedValue ?? '';
+        input.addEventListener('input', () => {
+          currentProps = {
+            ...currentProps,
+            [prop.name]: prop.type === 'number' ? Number(input.value) : input.value,
+          };
+          onChange(currentProps);
+        });
+        field.appendChild(input);
+      }
+
+      container.appendChild(field);
+    }
+  }
+
   function filteredEntries() {
     const search = state.search.trim().toLowerCase();
     const filtered = applyGlobalFilters(state.catalog).filter(
@@ -1405,6 +1637,19 @@
     $('meta-tags').innerHTML = pills.length
       ? pills.map((p) => `<span class="tag-pill">${escapeHtml(p)}</span>`).join('')
       : '<span class="tag-pill">none</span>';
+
+    const previewSection = $('detail-preview-section');
+    if (manifest.kind === 'ui-component') {
+      previewSection.hidden = false;
+      void loadDetailPreview(entry);
+    } else {
+      previewSection.hidden = true;
+      // loadDetailPreview is never called for a non-ui-component entry,
+      // so without this a previous ui-component Detail's still-live
+      // iframe/listener (just hidden, not removed) would otherwise sit
+      // around indefinitely instead of being cleaned up here.
+      clearDetailPreviewListener();
+    }
 
     $('detail-install-path').textContent = entry.installTarget;
 

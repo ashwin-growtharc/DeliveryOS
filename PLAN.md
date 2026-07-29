@@ -248,18 +248,115 @@ demonstrably true, not just when every task box is checked.
       planted inside an artifact's own directory but pointing outside it
       would not be caught (untested edge case, no known way to plant one via
       the normal push flow today).
-- [ ] **Phase C — Storybook-style controls**
+- [x] **Phase C — Storybook-style controls**
       Goal: on a component's Detail view, a person can switch between named
       variants and tweak individual props via a generated controls panel,
       watching the live preview update in real time — without anyone having
       hand-written a controls schema.
-  - [ ] `react-docgen-typescript` prop-schema extraction from the component's
-        own `Props` interface
-  - [ ] CSF-style named variants in `preview.tsx` (multiple exported demo
-        functions), each becoming a tab/dropdown
-  - [ ] postMessage-driven live prop editing (controls panel in the parent UI
-        → `{ props }` posted into the sandboxed iframe → re-render) — never
-        reaching directly into the iframe's `window`
+      Done. Gated on a Step 0 spike first (mirroring Phase A's own
+      discipline): `react-docgen-typescript` (real TypeScript-compiler-API
+      code, not a subprocess spawn like esbuild-wasm's Phase A mistake)
+      proved both correct against the real Button fixture AND survives the
+      packaged, no-`node_modules` `.exe` (verified twice — once for docgen
+      alone, once for the full esbuild+docgen+harness pipeline together
+      after the rest of Phase C landed). New `src/engine/preview/docgen.ts`
+      (`extractPropsSchemas`) derives a props schema (name/type/required/
+      default/enumValues) from every non-preview `.tsx`/`.jsx` file sibling
+      to `preview.tsx`, degrading to `{}` on any failure. `CompiledPreview`
+      gained `variantNames`/`propsSchemas`; the compiled bundle now
+      includes ALL variants (not just the first) plus an embedded
+      `postMessage` protocol (`selectVariant`/`setProps` in,
+      `ready`/`variantChanged` out) — variant switching and prop editing
+      both happen against the SAME already-loaded iframe, no recompile, no
+      further sidecar round-trip. Fixed two real gaps the original design
+      doc's §5 sketch didn't account for: (1) a CSF variant must be
+      **called**, not wrapped as a React component, since a zero-arg
+      variant function ignores whatever props it's re-rendered with — the
+      harness calls it directly and reads `.type`/`.props` off the
+      resulting element; (2) `keepNames: true` added to the `esbuild.build()`
+      call, since the minifier (`minify: true`, already on) renames
+      top-level identifiers, which would otherwise silently break the
+      name-based schema lookup. Also corrected the design doc's
+      `event.origin`/`event.source` validation guidance: a `srcdoc`
+      iframe's origin is the opaque literal `"null"` for every such iframe
+      on the page (grid cards stay mounted-but-hidden behind Detail), so
+      only `event.source` (a reference check against a specific
+      `contentWindow`) is sound. Preview cache now stores the whole
+      `CompiledPreview` as JSON (`previewCachePath`'s filename renamed
+      `index.html` → `compiled.json`), still keyed by `(remoteName, id,
+      version)`, no variant dimension added. New Detail-view UI: a live
+      preview iframe + variant tabs + a generated controls panel (reusing
+      `createSingleChipPicker` for enum props, a checkbox for booleans,
+      text/number inputs otherwise), wired via `loadDetailPreview`/
+      `renderControlsPanel` in `app.js`. An independent code-review pass
+      (Explore agent, instructed to verify claims against real code, not
+      take doc comments at face value) found and fixed 5 concrete issues,
+      one of them a genuine, reachable bug rather than a mere gap:
+      - **[Real bug, fixed]** `loadDetailPreview` had a real race: it's
+        invoked from multiple call sites (`renderDetail`,
+        `refreshDetailIfShown`), and its
+        remove-listener-then-`await`-compile-then-attach-listener shape
+        meant two overlapping invocations (e.g. opening Detail for one
+        component, then quickly opening a different one before the first
+        `preview.compile` call resolved) could each attach their own
+        `message` listener, leaving the first one permanently unreachable
+        but still attached to `window` forever — a real listener/closure
+        leak, and a real risk of a stale iframe's messages driving
+        `renderControlsPanel` after that iframe was already replaced.
+        Fixed with a monotonically increasing request-token guard: only
+        the MOST RECENTLY started call ever actually creates an iframe or
+        attaches a listener, checked right after the `await` (the only
+        point this function yields).
+      - **[Real bug, fixed]** The harness's `selectVariant` had no error
+        handling at all around calling a variant function or rendering —
+        a pushed component's own bug (throwing, or a variant legally
+        returning `null`) would leave the iframe silently blank forever,
+        breaking the "preview fails soft, never silently" principle the
+        rest of this feature follows. Fixed: every failure path now posts
+        `{type:'error', ...}` back to the parent instead of throwing
+        uncaught. Also stopped marking a variant tab "active" optimistically
+        on click — it's now driven by the harness's own `variantChanged`
+        reply, so a variant that fails to render doesn't leave the tab UI
+        out of sync with what's actually showing.
+      - **[Real bug, fixed]** The controls panel never consulted docgen's
+        own `defaultValue` — a prop a variant didn't explicitly set (e.g.
+        `disabled` on the `Primary` variant) rendered its control
+        blank/unchecked instead of showing the component's actual default,
+        even though docgen had captured that exact value. Fixed with a
+        `resolveInitialValue` fallback (`initialProps` first, else
+        `defaultValue`, converted back from docgen's always-string form for
+        boolean/number props).
+      - **[Real bug, fixed]** `docgen.ts`'s sibling-file discovery was a
+        flat, non-recursive `readdirSync` — but esbuild's own import
+        sandboxing scopes to the whole directory tree, so a
+        `preview.tsx` importing `./components/Button` from a subfolder
+        compiles fine today but would have silently found zero docgen
+        siblings (empty controls, no error). Fixed: recursive discovery,
+        plus parsing each sibling file separately (one syntactically
+        broken sibling no longer blanks out every other valid component's
+        schema in the same directory) and first-wins (not last-wins,
+        silent) on a same-`displayName` collision.
+      - **[Honest gap, description corrected]** The original claim that
+        "the initial auto-rendered first variant IS covered by a real
+        test" was too generous — confirmed no test anywhere exercises
+        `app.js`'s receiving side at all (`loadDetailPreview`,
+        `renderControlsPanel`); only `compile.ts`'s outgoing harness
+        messages are unit-tested. Matches this feature's existing,
+        already-documented constraint (`README.md`: the frontend has no
+        automated test coverage at all, verified by hand) — not a new gap,
+        but the Phase C write-up shouldn't have implied otherwise.
+      All 135 tests pass (109 Phase-B baseline + 26 new/updated);
+      typecheck/lint clean; `npm run build && npm run build:sidecar`
+      verified end-to-end, including a real packaged-`.exe`-with-hidden-
+      `node_modules` run of the full compile pipeline (esbuild + docgen +
+      harness together). **One gap still genuinely open, honestly
+      flagged**: the "select a variant via `postMessage`, watch the iframe
+      re-render, controls panel resets to the new variant's values" loop
+      has no automated test — jsdom cannot execute scripts inside a
+      `srcdoc` iframe and cannot fake a legitimate cross-window
+      `event.source` (confirmed empirically, not assumed). This needs a
+      real two-window browser check by the user in the running app before
+      being treated as fully proven.
 - [ ] **Phase D — Scan integration**
       Goal: running Scan against a real project with a mix of page-level and
       genuinely reusable components surfaces the reusable ones as proposal

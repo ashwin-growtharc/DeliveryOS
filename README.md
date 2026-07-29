@@ -11,9 +11,11 @@ and verified against real GitHub. Phase 3 (desktop app) has a working UI —
 Browse, Pull, Push, Settings, a live progress log, Open Folder — built on
 top of the same engine via a sidecar process. A "UI Components" page
 (live, sandboxed-iframe previews of pushed React/TS and plain-HTML
-components, grouped by a `componentTypes` tag) is also done — see
+components, grouped by a `componentTypes` tag) is also done, including
+Storybook-style variant tabs and a generated props-controls panel on a
+component's Detail view — see
 [docs/ui-components-feature-design.md](docs/ui-components-feature-design.md)
-and `PLAN.md`'s Phase A/B entries. See
+and `PLAN.md`'s Phase A/B/C entries. See
 [CHANGELOG.md](CHANGELOG.md) for what's shipped, [PLAN.md](PLAN.md) for
 what's left, and the [docs index](#docs-index) below for everything else.
 

@@ -4,6 +4,60 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- Added Storybook-style interactive controls to the "UI Components"
+  feature's Detail view (design in `docs/ui-components-feature-design.md`
+  §5; full write-up in `PLAN.md`'s Phase C entry): a component's Detail
+  page now shows a live preview with variant tabs and a generated
+  props-controls panel, instead of just a static first-variant preview.
+  - `react-docgen-typescript` derives a props schema (name/type/required/
+    default/enum values) from a component's own TypeScript `Props`
+    interface -- no hand-written controls schema. Gated on its own spike
+    first (mirroring Phase A's discipline): proved correct against the
+    real fixture AND verified twice to survive the packaged,
+    no-`node_modules` `.exe` (docgen alone, then the full pipeline).
+  - The compiled bundle now includes every CSF variant (not just the
+    first) plus an embedded `postMessage` protocol -- variant switching
+    and prop editing both happen against the same already-loaded iframe,
+    no recompile, no further sidecar round-trip. Fixed two real gaps the
+    original design left open: a CSF variant has to be *called* (not
+    wrapped as a component) to read its real component + starting props
+    off the resulting React element, since a zero-arg variant ignores
+    props passed via `React.createElement`; and `keepNames: true` had to
+    be added to the esbuild call, since minification (already on) renames
+    top-level identifiers and would otherwise silently break the
+    name-based schema lookup.
+  - Corrected the design doc's origin-validation guidance: a `srcdoc`
+    iframe's origin is the opaque literal `"null"` for every such iframe
+    on the page at once (grid cards stay mounted-but-hidden behind
+    Detail), so only `event.source` -- a reference check against a
+    specific `contentWindow` -- actually works.
+  - The preview cache now stores the whole compiled result (html +
+    variants + props schema) as JSON, not just raw HTML
+    (`previewCachePath`'s filename renamed `index.html` -> `compiled.json`).
+  - An independent code-review pass found and fixed 4 real bugs, not just
+    style nitpicks: a genuine race in `loadDetailPreview` (overlapping
+    calls -- e.g. quickly opening Detail for two different components in
+    a row -- could each attach their own `message` listener, permanently
+    leaking the first one), no error handling around calling a variant
+    function or rendering (a pushed component's own bug could leave the
+    iframe silently blank forever, and a failed variant switch left the
+    tab UI out of sync with what was actually showing), the controls
+    panel never falling back to docgen's own `defaultValue` for a prop a
+    variant didn't explicitly set, and `docgen.ts`'s sibling-file
+    discovery being non-recursive (silently missing a component living in
+    a subfolder, even though esbuild's own import sandboxing already
+    supports that layout). All fixed, plus new regression tests for the
+    nested-file and partial-parse-failure cases.
+  - All 135 tests pass; typecheck/lint clean; a real packaged-`.exe` run
+    with `node_modules` hidden confirmed the full pipeline (esbuild +
+    docgen + harness together). One gap honestly flagged, not silently
+    skipped: jsdom can't execute scripts inside a `srcdoc` iframe or fake
+    a legitimate cross-window `event.source`, so the actual "switch
+    variant, watch it re-render" loop -- and the app.js receiving side in
+    general, which has no automated coverage at all, same as every other
+    frontend function in this project -- needs a real two-window browser
+    check by hand.
+
 - Added the "UI Components" feature (design in
   `docs/ui-components-feature-design.md`; full write-up in `PLAN.md`'s
   Phase A/B entries): a new sidebar page shows real pushed React/TS and

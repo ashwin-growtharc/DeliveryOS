@@ -239,6 +239,49 @@ project-wide build):
 4. Vue's equivalent of docgen is parsing `defineProps`/`<script setup>`
    via `@vue/compiler-sfc` — same shape, a different adapter.
 
+**Phase C correction, real-implementation gaps this section's original
+sketch left open** (see `PLAN.md`'s Phase C entry for the full write-up):
+
+- **A CSF variant must be CALLED, not wrapped as a component.** Point 3's
+  `root.render(<Component {...props} />)` assumes something already knows
+  which `Component` and starting `props` a given variant represents — but
+  `export const Primary = () => <Button variant="primary">...</Button>`
+  is a zero-arg function; re-rendering it as `React.createElement(Primary,
+  editedProps)` would silently ignore whatever props were edited, since
+  `Primary` itself never reads props at all. The real mechanism: the
+  harness calls the variant function directly (a plain JS call, not
+  through React) and reads `.type`/`.props` off the returned element —
+  standard, documented React object shape, not a hack.
+- **`srcdoc` iframes have an opaque `"null"` origin** — this section's
+  "never reach directly into the iframe's `window`" is right, but §8's
+  `event.origin`/`event.source` validation guidance is imprecise: `origin`
+  is useless here (every `srcdoc` iframe on the page shares the same
+  opaque `"null"` string, including multiple grid cards mounted-but-hidden
+  behind Detail simultaneously). Only `event.source` — a reference check
+  against a specific `contentWindow`/`window.parent` — is sound.
+- **Minification breaks name-based matching.** The controls panel looks up
+  a props schema by the currently-rendering component's name; esbuild's
+  minifier (already on, `minify: true`) renames top-level identifiers,
+  which changes that runtime `.name`. Fixed with `keepNames: true` on the
+  `esbuild.build()` call — cheap, esbuild's own documented escape hatch
+  for exactly this problem.
+- **One compile call gets everything, upfront** — the bundle includes ALL
+  variants (not just one), and the whole point of bundling this way is
+  that variant switching and prop editing both happen against the same
+  already-loaded iframe via `postMessage`, with no recompile and no
+  further sidecar round-trip per interaction.
+- **The docgen schema never enters the iframe bundle.** It's derived once
+  server-side from the original unbundled `.tsx` source (the real
+  TypeScript compiler, unlike the esbuild adapter which never
+  type-checks) and returned in the sidecar's JSON response — the parent
+  UI builds control widgets from it directly; only plain prop *values*
+  (never the schema, never code) cross the `postMessage` boundary.
+- **Docgen file-discovery convention**: runs against every non-preview
+  `.tsx`/`.jsx` file sibling to `preview.tsx` in the artifact's own
+  payload directory, matched by docgen's `displayName` against whichever
+  component the harness reports rendering — avoids requiring `preview.tsx`
+  to explicitly declare its own Props interface.
+
 ## 6. Extraction / Scan flow
 
 Scan today parses frontmatter in `.claude/agents|skills|commands|rules`.
@@ -479,7 +522,7 @@ unresolved `require('react')`.
 |---|---|
 | **A — Spike** | Prototype the sandboxed-iframe + local-esbuild pipeline end to end for one hardcoded example component. De-risk packaging size/latency before committing further (same spirit as ARCHITECTURE.md risk #11's sidecar-packaging spike). |
 | **B — React + TS adapter, fixed preview** | **Done** — see `PLAN.md`'s Phase B entry. Shipped `tags.componentTypes`, the "UI Components" sidebar page, and the React/TS + plain-HTML compiler adapters with a single default-state preview (no controls yet). |
-| **C — Storybook-style controls** | Add `react-docgen-typescript` prop-schema extraction, CSF-style named variants in `preview.tsx`, and the postMessage-driven controls panel. |
+| **C — Storybook-style controls** | **Done** — see `PLAN.md`'s Phase C entry. Shipped `react-docgen-typescript` prop-schema extraction, all-variant bundling with a `postMessage` variant-switching/prop-editing protocol into Detail's new live preview, and the generated controls panel. |
 | **D — Scan integration** | Extend Scan with the component-detection heuristic (glob-based, not frontmatter), auto-scaffolded `preview.tsx` stubs, and the live-preview Review step. |
 | **E — Additional framework adapters** | Vue (via `@vue/compiler-sfc`), then Svelte/Angular as needed — each is one more adapter behind the same interface, not a redesign. |
 | **F — Preview for large artifacts (roadmap, not blocking)** | Everything above assumes one small, atomic component. A `template`/starter-kit artifact (a whole scaffolded project, not a single Button) needs a fundamentally different notion of "preview" — showing how to *use* it, not rendering it in an iframe. Explicitly deferred: keep in mind when designing §3's pipeline so it doesn't accidentally assume "always one component," but don't solve it now. |
@@ -491,8 +534,12 @@ unresolved `require('react')`.
   (not cwd-scoped — see §7.5's Phase B correction for why), keyed by
   (remote, id, version), never pushed/pulled. Explicit pruning of
   superseded versions' cached HTML is still an open gap, not solved here.
-- How much of the docgen/compile step should happen at **pull** time
-  (pre-warm the cache) vs. lazily at first **view**? Still open.
+- ~~How much of the docgen/compile step should happen at **pull** time
+  (pre-warm the cache) vs. lazily at first **view**?~~ **Resolved
+  (Phase C):** lazily, at first view — `getOrCompilePreview`'s existing
+  read-through cache already covers the "don't recompile every view"
+  concern; pre-warming at pull time was never actually implemented and
+  isn't needed for the interactive controls to work well in practice.
 - ~~Does `install_target` need special handling for a UI component?~~
   **Resolved (§7.1):** no — `pullArtifact` is fully kind-agnostic; a
   component installs exactly like every other kind.

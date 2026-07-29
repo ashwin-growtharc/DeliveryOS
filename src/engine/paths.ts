@@ -82,13 +82,19 @@ function assertSafePathSegment(segment: string, label: string): void {
   }
 }
 
-/** Path to a specific compiled preview's cached HTML file, keyed by
- * (remote, id, version) so a version bump naturally invalidates the
- * cache (a stale entry is simply never looked up again, not explicitly
- * deleted) -- never pushed or pulled, purely a local derived artifact. */
+/** Path to a specific compiled preview's cached entry, keyed by (remote,
+ * id, version) so a version bump naturally invalidates the cache (a stale
+ * entry is simply never looked up again, not explicitly deleted) --
+ * never pushed or pulled, purely a local derived artifact. Filename is
+ * `compiled.json`, not `index.html` (Phase B's original shape) -- Phase C
+ * caches the whole `CompiledPreview` object (html + variantNames +
+ * propsSchemas), not just a raw HTML string; old Phase-B-era cache
+ * entries simply become unreachable under this new filename, same
+ * "invalidated by the key changing, nothing explicitly deleted"
+ * philosophy as a version bump. */
 export function previewCachePath(remoteName: string, id: string, version: string): string {
   assertSafePathSegment(remoteName, 'remote name');
   assertSafePathSegment(id, 'artifact id');
   assertSafePathSegment(version, 'version');
-  return path.join(previewCacheRoot(), remoteName, id, version, 'index.html');
+  return path.join(previewCacheRoot(), remoteName, id, version, 'compiled.json');
 }
