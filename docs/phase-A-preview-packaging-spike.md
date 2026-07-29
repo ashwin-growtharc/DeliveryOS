@@ -32,6 +32,9 @@ the project's current overall scope.
   `src-tauri/src/lib.rs`'s `sidecar_call` resolves that bundled resource
   and sets `ESBUILD_BINARY_PATH` on the spawned sidecar's environment
   before `.spawn()`, if (and only if) it's actually found.
+- `src/sidecar.ts`'s `preview.compileDebug` — a **temporary, debug-only**
+  command (clearly marked for removal once Phase B wires a real one in)
+  that let the packaged-`.exe` acceptance test below actually happen.
 
 None of this touches `src/cli/`, existing `src/engine/` modules, or any
 existing test — confirmed additive-only; all 114 tests (109 pre-existing +
@@ -151,38 +154,60 @@ but correctly out of this spike's scope):
   "compile arbitrary source with no resource limits" is a candidate to
   run through this exact call path eventually.
 
-## What's still an owed manual step, not done in this pass
+## The packaged-`.exe` acceptance test: actually done, via a shell-level simulation
 
-**Not attempted**: a full real packaged-`.exe`-with-no-`node_modules`
-build-and-run cycle (`cargo tauri build`, then running the packaged app
-with `node_modules` absent and `node` stripped from `PATH`, confirming
-`compilePreviewHtml()` still succeeds end-to-end) — no Rust toolchain
-exists in the environment this spike was built in (confirmed: no
-`cargo`/`rustc` on `PATH`), so `src-tauri/src/lib.rs`'s changes have
-**not been compiled**, only verified against official `docs.rs`
+A temporary debug-only sidecar command, `preview.compileDebug` (in
+`src/sidecar.ts`, clearly marked for removal once Phase B wires a real
+command in), exercises `compilePreviewHtml()` end to end. Rather than
+wait on a full `cargo tauri build`, the exact runtime condition Rust's
+`.env("ESBUILD_BINARY_PATH", ...)` produces was reproduced directly at
+the shell level — an env var set on a spawned child process is identical
+regardless of whether Rust or a shell does the spawning:
+
+1. Temporarily renamed `node_modules/@esbuild/win32-x64` out of the way,
+   so native esbuild's own default `node_modules`-based fallback
+   genuinely could not succeed — isolating the exact risk this spike
+   exists to de-risk, not conflating it with the separately-documented
+   "React isn't vendored yet" gap (the fixture stays inside the monorepo,
+   so React itself still resolves normally).
+2. Ran the real packaged `build/deliveryos-engine-*.exe` directly, piping
+   in a `preview.compileDebug` request, with `ESBUILD_BINARY_PATH` set to
+   the staged `build/esbuild.exe` resource — **succeeded**:
+   `{"ok":true,"result":{"success":true,"byteLength":195034,...}}`.
+3. **Negative control**: same setup, `ESBUILD_BINARY_PATH` unset — failed
+   cleanly with esbuild's own clear, expected error ("The esbuild
+   JavaScript API cannot be bundled..."), not a crash or a corrupted
+   stdout stream. Confirms the fix is actually doing something, not
+   passing by coincidence.
+4. Restored `node_modules/@esbuild/win32-x64` immediately after each run;
+   full `npm test` (114 tests) re-confirmed green afterward.
+
+This proves the actual packaging risk this spike existed to de-risk —
+native esbuild really does work from inside the packaged, no-`node_modules`
+sidecar binary, driven purely by an env var set before spawn — without
+needing a Rust toolchain at all, since the env var mechanism itself is
+OS-level and identical regardless of which process does the spawning.
+
+## What's still genuinely owed
+
+**`cargo check` still hasn't run.** No Rust toolchain exists in the
+environment this spike was built in (confirmed: no `cargo`/`rustc` on
+`PATH`), so `src-tauri/src/lib.rs`'s actual Rust code — the
+`app.path().resolve(...)` / `BaseDirectory::Resource` / `.env(...)` calls
+that *produce* the env var the shell-level test above simulated by hand —
+has still never been compiled. Verified only against official `docs.rs`
 documentation and the real `tauri-plugin-shell` v2 source for the exact
-API signatures used (`Manager::path()`, `PathResolver::resolve()`,
-`Command::env()`). The TypeScript/Node half (`compile.ts`, its tests, the
-`build-sidecar.mjs` staging step) is fully verified: typecheck clean,
-lint clean, `npm run build && npm run build:sidecar` run end-to-end
-confirming `esbuild.exe` actually gets staged to `build/esbuild.exe`
-correctly.
+API signatures used. **Run `cargo check` (or `cargo tauri dev`) before
+Phase B starts** — the shell-level test above proves the *mechanism*
+works; it doesn't prove `lib.rs` itself compiles.
 
-**Before Phase B starts**, run:
-1. `cargo check` (or a full `cargo tauri build`) to confirm `lib.rs`
-   actually compiles — same spirit as Phase 3's own sidecar-packaging
-   spike sign-off.
-2. The real packaged-app acceptance test described above, once
-   `compile.ts` is actually wired into `sidecar.ts`'s command dispatch
-   (it isn't yet — this spike proves the mechanism and the packaging
-   approach in isolation, not the full wiring).
+## Recommendation: proceed to Phase B, with one item tracked
 
-## Recommendation: proceed to Phase B, with the above two items tracked
-
-Nothing found here blocks proceeding — the core compile mechanism is
-proven and tested, the packaging approach is verified against real
-`esbuild`/`tauri-plugin-shell` source (not just documentation), and every
-fixable issue from the review pass is fixed. The two explicitly-owed
-manual steps above (a real `cargo` compile check, and the full
-packaged-app run) should happen before or early in Phase B, not be
-silently forgotten.
+The core compile mechanism is proven, tested, and now verified against
+the real packaged binary under the exact failure-inducing condition
+(`node_modules` fallback unavailable) it needed to survive. Every
+fixable issue from the review pass is fixed. The one thing still
+genuinely owed — an actual `cargo check` — should happen before or early
+in Phase B, not be silently forgotten. The temporary
+`preview.compileDebug` sidecar command should be removed once Phase B
+wires in the real one.

@@ -142,7 +142,7 @@ proves it's actually done) before its task checklist, same discipline every
 earlier phase in this file already uses — a phase is done when the goal is
 demonstrably true, not just when every task box is checked.
 
-- [x] **Phase A — Spike (de-risk before committing further) — Done, with two owed follow-ups**
+- [x] **Phase A — Spike (de-risk before committing further) — Done, one item owed**
       Goal: a single hardcoded example React component renders as a live,
       interactive sandboxed-iframe preview (hover state real and working),
       compiled locally via esbuild with no crash, and packaging size/cold-render
@@ -164,27 +164,33 @@ demonstrably true, not just when every task box is checked.
       service process, and others — see the doc). All 114 tests
       (109 pre-existing + 5 new) pass; typecheck/lint clean;
       `npm run build && npm run build:sidecar` verified end-to-end.
-      **Two items explicitly owed, not silently forgotten**: no Rust
-      toolchain exists in the environment this was built in, so
-      `src-tauri/src/lib.rs`'s changes are unverified by an actual
-      compile (API calls confirmed against real docs.rs/source instead) —
-      run `cargo check` before Phase B starts. Also still owed: the real
-      packaged-`.exe`-with-no-`node_modules` acceptance test, once
-      `compile.ts` is actually wired into `sidecar.ts`'s command dispatch
-      (not done in this spike — it proves the mechanism in isolation).
+      **The packaged-`.exe`-with-no-`node_modules` acceptance test is
+      done**, via a temporary debug sidecar command
+      (`preview.compileDebug`) plus a shell-level simulation of Rust's
+      `.env("ESBUILD_BINARY_PATH", ...)` call (an env var set before spawn
+      is identical regardless of which process does the spawning) — with
+      `node_modules/@esbuild/win32-x64` temporarily hidden to isolate the
+      real risk, the packaged `.exe` compiled the fixture successfully; a
+      negative control (env var unset) failed cleanly with esbuild's own
+      expected error, not a crash. **One item still genuinely owed**: no
+      Rust toolchain exists in the environment this was built in, so
+      `src-tauri/src/lib.rs`'s actual Rust code has never been compiled
+      (API calls confirmed against real docs.rs/source instead) — run
+      `cargo check` before Phase B starts. Remove the temporary
+      `preview.compileDebug` command once Phase B wires a real one in.
   - [x] Prototype the sandboxed-iframe (`sandbox="allow-scripts"`, no
         `allow-same-origin`) + local-esbuild pipeline end to end for one
         hardcoded example React component
   - [x] Confirm packaging size/latency are acceptable — same spirit as the
         Phase 3 sidecar-packaging spike (§9 risk #11)
         Bundle size confirmed (190.5 KB minified). Cold-render latency
-        against the packaged app itself not yet measured — folded into the
-        owed manual acceptance test above, not measured against a real
-        `cargo tauri build` in this pass.
+        against the packaged app itself not yet measured — worth a real
+        sample once Phase B's actual UI exists, same as Phase 3's own
+        latency follow-up.
   - [x] **Go/no-go checkpoint** before Phase B starts, same discipline Phase 3
         used for its own spike
-        **Go**, conditional on the two owed follow-ups above happening
-        before or early in Phase B, not silently dropped.
+        **Go**, conditional on the one owed follow-up above (`cargo check`)
+        happening before or early in Phase B, not silently dropped.
 - [ ] **Phase B — React + TS adapter, fixed preview**
       Goal: a person can open the "UI Components" sidebar page and see real
       pushed components rendered as live, interactive preview cards grouped
