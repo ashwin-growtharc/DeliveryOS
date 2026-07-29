@@ -37,6 +37,9 @@
     "externalBin": [
       "../build/deliveryos-engine"
     ],
+    "resources": {
+      "../build/esbuild.exe": "esbuild.exe"
+    },
     "android": {
       "debugApplicationIdSuffix": ".debug"
     }

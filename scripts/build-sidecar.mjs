@@ -40,6 +40,14 @@ const bundlePath = path.join(buildDir, 'sidecar.cjs');
 const blobPath = path.join(buildDir, 'sidecar.blob');
 const seaConfigPath = path.join(repoRoot, 'sea-config.json');
 const exePath = path.join(buildDir, 'deliveryos-engine-x86_64-pc-windows-msvc.exe');
+// The preview-compile feature (Phase 6) needs native esbuild's binary at
+// runtime, but this packaged sidecar has no node_modules for esbuild's
+// default resolution to find it in. Staged here into build/ (same place
+// the packaged sidecar .exe itself lands) purely so tauri.conf.json's
+// `bundle.resources` has one stable path to reference, independent of
+// node_modules' own layout -- see docs/phase-A-preview-packaging-spike.md.
+const esbuildNativeSrc = path.join(repoRoot, 'node_modules', '@esbuild', 'win32-x64', 'esbuild.exe');
+const esbuildNativeDest = path.join(buildDir, 'esbuild.exe');
 
 function run(command, args, options = {}) {
   console.log(`> ${command} ${args.join(' ')}`);
@@ -63,6 +71,19 @@ async function main() {
     platform: 'node',
     format: 'cjs',
     target: 'node22',
+    // Deliberately NOT marked external: esbuild's own JS API refuses to run
+    // bundled into someone else's single file ("The esbuild JavaScript API
+    // cannot be bundled") UNLESS `ESBUILD_BINARY_PATH` is already set --
+    // read at module-top-level in esbuild's own source (`var
+    // ESBUILD_BINARY_PATH = process.env.ESBUILD_BINARY_PATH || ...`), so it
+    // must be present in THIS process's environment before this bundled
+    // code ever runs. src-tauri/src/lib.rs sets that env var via `.env()`
+    // on the Command builder before `.spawn()`, which is exactly "before
+    // this process's first instruction runs," not a runtime race. Marking
+    // 'esbuild' external instead would leave an unresolvable
+    // `require('esbuild')` in the packaged bundle, since the packaged
+    // sidecar ships with no node_modules at all -- bundling it IS the
+    // point; ESBUILD_BINARY_PATH is what makes that legal.
     outfile: bundlePath,
   });
 
@@ -79,6 +100,15 @@ async function main() {
   console.log(`Copying node executable (${process.execPath}) -> ${exePath}`);
   fs.copyFileSync(process.execPath, exePath);
   fs.chmodSync(exePath, 0o755);
+
+  console.log(`Staging native esbuild binary (${esbuildNativeSrc}) -> ${esbuildNativeDest}`);
+  if (!fs.existsSync(esbuildNativeSrc)) {
+    throw new Error(
+      `${esbuildNativeSrc} not found -- expected @esbuild/win32-x64 to already be installed ` +
+        '(it\'s an optionalDependency of the "esbuild" package in package.json).',
+    );
+  }
+  fs.copyFileSync(esbuildNativeSrc, esbuildNativeDest);
 
   console.log('Injecting SEA blob into the copied executable with postject...');
   // On Windows, `npx` resolves to `npx.cmd`, a batch-file shim rather than

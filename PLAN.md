@@ -142,19 +142,49 @@ proves it's actually done) before its task checklist, same discipline every
 earlier phase in this file already uses — a phase is done when the goal is
 demonstrably true, not just when every task box is checked.
 
-- [ ] **Phase A — Spike (de-risk before committing further)**
+- [x] **Phase A — Spike (de-risk before committing further) — Done, with two owed follow-ups**
       Goal: a single hardcoded example React component renders as a live,
       interactive sandboxed-iframe preview (hover state real and working),
       compiled locally via esbuild with no crash, and packaging size/cold-render
       latency are confirmed acceptable — proves the core rendering mechanism
       works before any surrounding feature gets built on top of it.
-  - [ ] Prototype the sandboxed-iframe (`sandbox="allow-scripts"`, no
+      Done — see [docs/phase-A-preview-packaging-spike.md](docs/phase-A-preview-packaging-spike.md)
+      for the full write-up. `src/engine/preview/compile.ts` compiles a
+      component + its `preview.tsx` into a self-contained, minified HTML
+      bundle (190.5 KB for the fixture) via native `esbuild`; a real
+      sandboxed-iframe browser check confirmed genuine hover interactivity.
+      Caught and fixed two real bugs along the way (esbuild alphabetizing
+      bundled export order, and a test-methodology flaw that couldn't
+      actually distinguish which variant rendered), plus a real
+      architectural correction (`esbuild-wasm` → native `esbuild` +
+      `ESBUILD_BINARY_PATH`, since the WASM build's Node path cannot
+      survive the sidecar's SEA packaging). An independent code-review
+      pass found and fixed 6 more issues (unescaped `</script>` injection,
+      unvalidated filename interpolation, an orphaned native `esbuild.exe`
+      service process, and others — see the doc). All 114 tests
+      (109 pre-existing + 5 new) pass; typecheck/lint clean;
+      `npm run build && npm run build:sidecar` verified end-to-end.
+      **Two items explicitly owed, not silently forgotten**: no Rust
+      toolchain exists in the environment this was built in, so
+      `src-tauri/src/lib.rs`'s changes are unverified by an actual
+      compile (API calls confirmed against real docs.rs/source instead) —
+      run `cargo check` before Phase B starts. Also still owed: the real
+      packaged-`.exe`-with-no-`node_modules` acceptance test, once
+      `compile.ts` is actually wired into `sidecar.ts`'s command dispatch
+      (not done in this spike — it proves the mechanism in isolation).
+  - [x] Prototype the sandboxed-iframe (`sandbox="allow-scripts"`, no
         `allow-same-origin`) + local-esbuild pipeline end to end for one
         hardcoded example React component
-  - [ ] Confirm packaging size/latency are acceptable — same spirit as the
+  - [x] Confirm packaging size/latency are acceptable — same spirit as the
         Phase 3 sidecar-packaging spike (§9 risk #11)
-  - [ ] **Go/no-go checkpoint** before Phase B starts, same discipline Phase 3
+        Bundle size confirmed (190.5 KB minified). Cold-render latency
+        against the packaged app itself not yet measured — folded into the
+        owed manual acceptance test above, not measured against a real
+        `cargo tauri build` in this pass.
+  - [x] **Go/no-go checkpoint** before Phase B starts, same discipline Phase 3
         used for its own spike
+        **Go**, conditional on the two owed follow-ups above happening
+        before or early in Phase B, not silently dropped.
 - [ ] **Phase B — React + TS adapter, fixed preview**
       Goal: a person can open the "UI Components" sidebar page and see real
       pushed components rendered as live, interactive preview cards grouped
