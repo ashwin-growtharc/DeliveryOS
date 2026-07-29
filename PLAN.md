@@ -123,3 +123,148 @@ exist but nobody's SSO'd in."
 - [ ] Lifecycle/deprecation states (§9 risk #5)
 - [ ] Success metrics, using the tiered metrics-ethics model (§9 risk #6) to avoid an accidental leaderboard
 - [ ] **End-to-end test:** simulate a full week of drift (someone stops syncing, a remote changes upstream, another person edits the same resource) and confirm drift detection, auto-sync, and notifications all surface correctly with no manual intervention required.
+
+## Phase 6 — UI Components — **Not started, brainstormed only**
+
+Goal: a UI-component artifact can be proposed (via Scan or CLI), reviewed
+with a real live interactive preview, merged as a normal GitHub PR (with an
+embedded preview image), and pulled into a *different* project where it
+renders live and interactively in the app — with drift detection correctly
+flagging future updates. Full design in
+[docs/ui-components-feature-design.md](docs/ui-components-feature-design.md)
+(and its companion [`.html`](docs/ui-components-feature-design.html)). Broken
+into the same A–E sub-phases the design doc itself lays out; **F (preview
+for large/multi-file `template` artifacts) is explicitly out of scope for
+this phase** — kept as a forward pointer only, see the design doc §13.
+
+Each sub-phase below states its own **Goal** (the observable outcome that
+proves it's actually done) before its task checklist, same discipline every
+earlier phase in this file already uses — a phase is done when the goal is
+demonstrably true, not just when every task box is checked.
+
+- [ ] **Phase A — Spike (de-risk before committing further)**
+      Goal: a single hardcoded example React component renders as a live,
+      interactive sandboxed-iframe preview (hover state real and working),
+      compiled locally via esbuild with no crash, and packaging size/cold-render
+      latency are confirmed acceptable — proves the core rendering mechanism
+      works before any surrounding feature gets built on top of it.
+  - [ ] Prototype the sandboxed-iframe (`sandbox="allow-scripts"`, no
+        `allow-same-origin`) + local-esbuild pipeline end to end for one
+        hardcoded example React component
+  - [ ] Confirm packaging size/latency are acceptable — same spirit as the
+        Phase 3 sidecar-packaging spike (§9 risk #11)
+  - [ ] **Go/no-go checkpoint** before Phase B starts, same discipline Phase 3
+        used for its own spike
+- [ ] **Phase B — React + TS adapter, fixed preview**
+      Goal: a person can open the "UI Components" sidebar page and see real
+      pushed components rendered as live, interactive preview cards grouped
+      by category — the full data-model/compiler-adapter plumbing needed to
+      get a component from a pushed manifest onto that screen exists and
+      works, for both React/TS and plain HTML/CSS/JS.
+  - [ ] `ManifestSchema.tags` gains `componentTypes: z.array(z.string()).default([])`
+        (the one real, optional schema addition — see design doc §2/§6.3)
+  - [ ] `PushOptions`/`push.ts`: thread `componentTypes` through propose-new,
+        and add it to `MetadataEditOptions` for later retagging
+  - [ ] `app.js`: fourth tag-picker in Add New (reusing `createTagPicker`),
+        `'componentTypes'` added to `TAG_CATEGORIES`
+  - [ ] New sidebar destination "UI Components": category tabs (reusing the
+        `.tab-row` pattern) + a grid of live-preview cards, lazy-rendered via
+        `IntersectionObserver`
+  - [ ] Compiler-adapter interface (`compile(source) → { bundle, propsSchema }`)
+        with the React/TypeScript adapter as the first implementation, plus
+        the zero-build plain-HTML/CSS/JS fast path
+  - [ ] Preview cache: `previewCachePath(cwd, id, version)` sibling to the
+        existing `pristinePath` helper — never pushed/pulled, purely local
+- [ ] **Phase C — Storybook-style controls**
+      Goal: on a component's Detail view, a person can switch between named
+      variants and tweak individual props via a generated controls panel,
+      watching the live preview update in real time — without anyone having
+      hand-written a controls schema.
+  - [ ] `react-docgen-typescript` prop-schema extraction from the component's
+        own `Props` interface
+  - [ ] CSF-style named variants in `preview.tsx` (multiple exported demo
+        functions), each becoming a tab/dropdown
+  - [ ] postMessage-driven live prop editing (controls panel in the parent UI
+        → `{ props }` posted into the sandboxed iframe → re-render) — never
+        reaching directly into the iframe's `window`
+- [ ] **Phase D — Scan integration**
+      Goal: running Scan against a real project with a mix of page-level and
+      genuinely reusable components surfaces the reusable ones as proposal
+      candidates (each with a working `preview.tsx`, auto-scaffolded if one
+      doesn't already exist), routed through the existing Review & Propose
+      wizard — with zero behavior change to Scan's existing agent/skill/
+      command/rule detection.
+  - [ ] Broad structural detection (`src/**/*.{tsx,jsx}`, filtered by "returns
+        JSX with a co-located `Props` type") — **not** a hardcoded folder-name
+        glob (design doc §6, the `src/ui/` flat-convention finding)
+  - [ ] Same-batch id dedupe by folder path (`forms-button` vs.
+        `marketing-button`) — distinct from the existing remote-catalog
+        `IdCollisionError`
+  - [ ] Static check for relative imports escaping the payload root, surfaced
+        in Review *before* proposing, not as an opaque compile failure
+  - [ ] Auto-scaffolded `preview.tsx` stub when one doesn't exist yet
+  - [ ] Route through the **existing** Scan → Review & Propose → wizard
+        pipeline (no parallel UI) — Review's live preview becomes a genuine
+        visual check, not just a text read
+- [ ] **Phase E — PR preview image + the version-bump fix**
+      Goal: every proposed or edited UI component's PR contains a real
+      preview image (visible both inline in the PR body and in the
+      Files-changed diff), and editing an already-pushed component's payload
+      can actually bump its version — so `checkForUpdates` and the preview
+      cache both correctly detect the change downstream, for every kind, not
+      silently only for propose-new.
+  - [ ] Headless-render the default/first CSF variant to `preview.png`,
+        committed alongside the payload — gated on file-presence
+        (`preview.*` exists), not a `kind` check, matching how `post_install`
+        already works
+  - [ ] GUI path reuses the Tauri webview already rendering Review's live
+        preview; CLI path needs a real headless render (Playwright,
+        `channel: 'chrome'` — not bundling its own Chromium)
+  - [ ] PR body embeds the image via `raw.githubusercontent.com/.../<branch>/...`
+  - [ ] **Real gap, must be fixed here, not deferred:** give edit-mode push a
+        way to bump `version` at all — today there is none (manifest.yaml
+        isn't even part of what's copied to `install_target`, so there's no
+        local copy to edit). Without this, `checkForUpdates` can never detect
+        a UI-component edit, and the preview cache (keyed on `id + version`)
+        never invalidates either. A `--bump patch|minor|major` flag / a
+        Detail-Edit-form field, defaulting to an automatic patch bump on any
+        payload-content change, not just metadata.
+  - [ ] Regenerate `preview.png` on edit-mode pushes too, same file-presence
+        gate — otherwise GitHub's free before/after image diff shows a stale
+        picture pretending nothing changed
+
+### End-to-end tests (Phase 6 isn't done until all of these pass)
+
+- [ ] **Propose → merge → pull, full loop:** a real React Button component
+      (with a `preview.tsx`) proposed via Add New's Scan-originated wizard,
+      confirm `artifacts/<id>/manifest.yaml` + payload + `preview.png` land
+      correctly in the remote, a real PR opens with the image embedded and
+      visible in both the PR body and the Files-changed diff, merge it, then
+      `pull` it into a *different* project and confirm the live sandboxed
+      preview renders (hover state included) in the app.
+- [ ] **CLI-driven propose, no GUI:** the same component proposed via
+      `deliveryos push <id> --new --kind ui-component ...` alone (no app
+      window open) — confirm the headless-render fallback still produces a
+      `preview.png` and the PR still opens correctly.
+- [ ] **Edit + drift detection, full loop:** pull the merged Button into a
+      second project, edit it there (a real visual change), push with a
+      version bump, merge; back in the *first* project, run "Check for
+      updates" and confirm `update_available` (not silently missed) with a
+      refreshed preview once re-pulled.
+- [ ] **Graceful degradation:** a component with an unresolved import (e.g.
+      `lodash`) proposed anyway — confirm it still proposes/pushes/pulls
+      successfully with a text-only card (no live preview), never a hard
+      failure blocking the artifact from existing.
+- [ ] **Scan false-positive handling:** run Scan against a real project with
+      at least one page-level component and one genuinely reusable one,
+      confirm both surface as candidates (no silent exclusion) but only the
+      genuine one gets proposed — Review is the safety net, not the detector.
+- [ ] All existing 109+ engine tests still pass unmodified (sanity check this
+      stayed additive, not a regression on any existing kind's Pull/Push/Scan
+      behavior).
+- [ ] No automated GUI test suite exists for the native Tauri window (same
+      constraint as every earlier phase) — the live-preview *rendering
+      itself* still needs a human eyeballing it; everything above the
+      rendering (manifest correctness, PR contents, version bumps, drift
+      detection) should be covered by sidecar/engine-level automated e2e
+      tests, not a GUI click-through.
