@@ -649,50 +649,128 @@ input, textarea, select {
 /* ---------- UI Components (its own page, live sandboxed-iframe previews)
  * ---------- */
 
-.ui-component-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 16px;
-}
-
-.ui-component-card {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  overflow: hidden;
-  box-shadow: var(--shadow-1);
-  transition: box-shadow .15s ease, transform .15s ease, border-color .15s ease;
+/* A plain vertical list, not a packed grid -- components genuinely
+ * differ in natural size (a Badge vs. a full animated hero), but with
+ * every row full-width there's no bin-packing problem to solve for that
+ * at all. This used to be a Muuri-managed bin-packed masonry grid
+ * (variable width AND height, tightly packed); removed entirely once
+ * every row being the same width made the whole mechanism -- vendoring a
+ * library, `position: absolute`, an item-content-wrapper requirement,
+ * explicit repack calls on every resize -- unnecessary complexity for
+ * what's fundamentally a component catalog, not a Pinterest-style tile
+ * wall. */
+.ui-component-list {
   display: flex;
   flex-direction: column;
 }
 
-.ui-component-card:hover {
-  border-color: var(--border-strong);
-  box-shadow: var(--shadow-2);
-  transform: translateY(-3px);
+.ui-component-row {
+  padding: 24px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.ui-component-row:first-child {
+  padding-top: 0;
+}
+
+.ui-component-row:last-child {
+  border-bottom: none;
+}
+
+.ui-component-row-header {
+  display: block;
+  cursor: pointer;
+  margin-bottom: 16px;
+  max-width: 720px;
+}
+
+.ui-component-row-header .index {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  opacity: .45;
+  margin-right: 8px;
+}
+
+.ui-component-row-header .name {
+  font-family: 'EB Garamond', Georgia, serif;
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+.ui-component-row-header .meta {
+  font-size: 11px;
+  opacity: .55;
+  font-family: 'JetBrains Mono', monospace;
+  margin-left: 10px;
+}
+
+.ui-component-row-header .description {
+  margin: 6px 0 0;
+  font-size: 13px;
+  opacity: .7;
 }
 
 /* The live-preview slot -- an iframe fills this once IntersectionObserver
  * fires and the compiled preview.tsx/preview.html comes back from
- * `preview.compile`. Fixed height (not aspect-ratio) so the grid stays
- * evenly ruled regardless of what a component's own content does. */
+ * `preview.compile`. 160px/100% here are only the LOADING-STATE default;
+ * every compiled preview reports its own real content WIDTH and height
+ * back over postMessage (compile.ts's injectContentHeightReporter -- the
+ * parent can't just read the iframe's DOM directly, since
+ * sandbox="allow-scripts" deliberately omits allow-same-origin), and
+ * app.js sets this frame's width/height inline to match once that
+ * arrives -- see loadUiComponentPreview/loadDetailPreview and
+ * clampPreviewWidth/clampPreviewHeight. A component genuinely narrower
+ * than the column (e.g. a fixed-width themed box around a short string)
+ * gets a frame that hugs its real width instead of a fixed 720px box
+ * with dead space either side of it. max-width stays as the ceiling for
+ * BOTH the loading state and the clamp above -- a wide viewport still
+ * never stretches the demo wider than the header's own column. */
 .ui-component-preview-frame {
   height: 160px;
+  width: 100%;
+  max-width: 720px;
+  /* The header above is left-aligned (it's text); the live preview's
+   * width now genuinely varies per component (see above), so `margin: 0
+   * auto` is what keeps it centered in the row's available width
+   * regardless of whether it happens to hit the max-width cap or is
+   * narrower than that -- not just a one-time offset from the header's
+   * own left alignment. */
+  margin: 0 auto;
   background: var(--surface-inset);
-  border-bottom: 1px solid var(--border);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
   position: relative;
-  /* Only .ui-component-card-body opens Detail (see app.js) -- an explicit
-   * default cursor here stops this area from visually promising a click
-   * that goes nowhere, since the pointer cursor used to live on the whole
-   * card before the click-target fix scoped the listener down to the body. */
+  overflow: hidden;
+  /* Centers the iframe itself when it's SHORTER than this frame (e.g. a
+   * tiny Badge hitting the 80px height floor in clampPreviewHeight) --
+   * the iframe's own #root can't do this centering itself: it has to
+   * shrink-wrap tightly to its real content for the height MEASUREMENT
+   * to be correct (see compile.ts's injectContentHeightReporter and its
+   * "measure document.body, not document.documentElement" comment), so
+   * there's no spare space left inside the iframe's own document to
+   * center anything within. Centering the iframe AS AN ELEMENT from out
+   * here, instead, gets the same visual result without corrupting the
+   * measurement. */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Only .ui-component-row-header opens Detail (see app.js) -- an
+   * explicit default cursor here stops this area from visually promising
+   * a click that goes nowhere. */
   cursor: default;
 }
 
 .ui-component-preview-frame iframe {
   width: 100%;
-  height: 100%;
   border: none;
   display: block;
+  /* `width: 100%` here is only the LOADING-STATE default (before app.js
+   * has a real measurement to act on) -- once a contentHeight message
+   * arrives, app.js sets an explicit inline `width` (and no `height:
+   * 100%` is set here at all, ever), both to the REAL reported content
+   * size, not the frame's own (possibly larger, clamped) size, so
+   * short/narrow content centers via the flex rule above instead of
+   * pinning to the top-left with dead space around it. */
 }
 
 /* Shown until the lazy-loaded iframe's srcdoc actually lands -- avoids a
@@ -708,26 +786,6 @@ input, textarea, select {
   font-family: 'JetBrains Mono', monospace;
 }
 
-.ui-component-card-body {
-  padding: 14px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  cursor: pointer;
-}
-
-.ui-component-card .name {
-  font-family: 'EB Garamond', Georgia, serif;
-  font-size: 18px;
-  line-height: 1.2;
-}
-
-.ui-component-card .meta {
-  font-size: 11px;
-  opacity: .55;
-  font-family: 'JetBrains Mono', monospace;
-}
-
 /* ---------- Detail view: live preview + variant tabs + controls (Phase C) ---------- */
 
 /* Reuses .ui-component-preview-frame's own sizing/background/iframe rules
@@ -736,10 +794,11 @@ input, textarea, select {
  * Detail is where a person actually interacts with a component, not just
  * glances at its default state. */
 .detail-preview-frame {
+  /* border/border-radius already come from the shared
+   * .ui-component-preview-frame rule -- only the size/spacing differ
+   * here. */
   height: 260px;
-  border: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  max-width: none;
   margin-bottom: 12px;
 }
 

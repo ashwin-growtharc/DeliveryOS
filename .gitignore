@@ -3,6 +3,9 @@ dist/
 build/
 sea-config.json
 .deliveryos/
+# Local staging output of scripts/add-ui-component.mjs -- never committed,
+# each run wipes and recreates its own artifact's subfolder.
+.deliveryos-staging/
 *.log
 .env
 *.key

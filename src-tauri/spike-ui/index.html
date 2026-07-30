@@ -194,9 +194,13 @@
              component-type VALUES themselves (Buttons/Navbars/Cards/...),
              not a dimension-picker the way Browse-by-tag's stack/role/
              project tabs work -- there's only one relevant tag dimension
-             here (componentTypes). Each card renders a live sandboxed
-             iframe (sandbox="allow-scripts", never allow-same-origin),
-             lazy-loaded via IntersectionObserver so an off-screen card
+             here (componentTypes). A vertical list, not a packed grid --
+             one full-width row per component (index/name/tag/description,
+             then a live preview), not a Pinterest-style tile wall; there's
+             no bin-packing problem to solve when every row is the same
+             width. Each row renders a live sandboxed iframe
+             (sandbox="allow-scripts", never allow-same-origin),
+             lazy-loaded via IntersectionObserver so an off-screen row
              never eagerly compiles a preview it isn't showing yet. -->
         <section id="view-ui-components" class="view" hidden>
           <div id="ui-components-no-folder" class="hint-banner" hidden>
@@ -207,7 +211,7 @@
             <span id="ui-components-count" class="count"></span>
           </div>
           <div id="ui-components-cat-tabs" class="tab-row" style="margin-bottom: 16px;"></div>
-          <div id="ui-components-grid" class="ui-component-grid"></div>
+          <div id="ui-components-list" class="ui-component-list"></div>
           <p id="ui-components-empty" class="empty-state" hidden>No UI components yet -- Add New or Scan to propose one.</p>
         </section>
 

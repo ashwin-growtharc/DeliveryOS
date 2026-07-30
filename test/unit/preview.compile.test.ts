@@ -161,13 +161,17 @@ describe('compiler-adapter dispatch (Phase B)', () => {
     // Zero-build means no esbuild involvement, no vendored-runtime
     // injection -- the file's own content is untouched. It's no longer
     // byte-for-byte identical to the raw file, though: every adapter's
-    // output gets a CSP <meta> tag injected uniformly (see
-    // injectPreviewCsp), including this one.
+    // output gets a CSP <meta> tag AND the contentHeight reporter script
+    // injected uniformly (see injectPreviewCsp/injectContentHeightReporter),
+    // including this one.
     expect(html).not.toContain('__DeliveryOSReactRuntime');
     expect(html).toContain('Zero-build button');
     expect(html).toContain('Content-Security-Policy');
+    expect(html).toContain('contentHeight');
     // Everything else about the original file survives verbatim.
-    expect(html.replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/, '')).toBe(rawFile);
+    const withoutCsp = html.replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/, '');
+    const withoutHeightReporter = withoutCsp.replace(/<script>\(function \(\) \{[\s\S]*?\}\)\(\);<\/script>/, '');
+    expect(withoutHeightReporter).toBe(rawFile);
   });
 });
 
@@ -271,6 +275,152 @@ describe('injectPreviewCsp (Phase B)', () => {
       expect(html).toContain('Content-Security-Policy');
       expect(html).toContain("default-src 'none'");
     }
+  });
+});
+
+describe('injectContentHeightReporter (dynamic card sizing)', () => {
+  it('every compiled preview (both adapters) reports a real contentHeight over postMessage', async () => {
+    // Adapter-agnostic by design: the parent can't read the iframe's DOM
+    // directly (sandbox="allow-scripts" has no allow-same-origin), so
+    // every compiled preview -- React or zero-build HTML -- has to
+    // self-report its own height for the grid/Detail preview frames to
+    // size to real content instead of a fixed guess.
+    for (const previewEntryPath of [previewPath, htmlPreviewPath]) {
+      const { html } = await compilePreviewHtml(previewEntryPath);
+      const dom = new JSDOM(html, { runScripts: 'dangerously' });
+
+      // jsdom has no actual layout engine, so every element's
+      // scrollWidth/scrollHeight reads 0 regardless of real content
+      // (confirmed empirically, same limitation hit while verifying the
+      // vendored Muuri grid library) -- and reportSize() now (correctly)
+      // refuses to post a (0, 0) measurement at all, a real fix for a
+      // real pre-mount-corruption bug (see injectContentHeightReporter's
+      // own doc comment). Left un-stubbed, jsdom would therefore never
+      // fire a message here no matter how long this test waited, since
+      // it can never produce a non-zero reading -- this stub exists
+      // purely so THIS test can still exercise "does the message fire,
+      // with the right shape" at all; it says nothing about real pixel
+      // values, which still needs a real browser to verify.
+      dom.window.Object.defineProperty(dom.window.HTMLElement.prototype, 'scrollWidth', {
+        configurable: true,
+        get: () => 42,
+      });
+      dom.window.Object.defineProperty(dom.window.HTMLElement.prototype, 'scrollHeight', {
+        configurable: true,
+        get: () => 42,
+      });
+
+      const messages: Array<Record<string, unknown>> = [];
+      dom.window.addEventListener('message', (event) => {
+        messages.push(event.data as Record<string, unknown>);
+      });
+
+      const deadline = Date.now() + 2000;
+      while (Date.now() < deadline && !messages.some((m) => m.type === 'contentHeight')) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      const heightMessage = messages.find((m) => m.type === 'contentHeight');
+      expect(heightMessage).toBeTruthy();
+      expect(typeof heightMessage?.height).toBe('number');
+      expect(typeof heightMessage?.width).toBe('number');
+    }
+  });
+
+  it('the React adapter never reintroduces a "min-height: 100vh" #root rule', async () => {
+    // Regression guard for a real bug: #root { min-height: 100vh } makes
+    // the measured "content height" circular -- 100vh is 100% of the
+    // iframe's OWN current height, so scrollHeight just reflects whatever
+    // height the iframe already has rather than the content's real size,
+    // which is exactly backwards for a height that's supposed to be
+    // DERIVED from measuring the content. Confirmed by hand (a real
+    // screenshot of the running app showed exactly this: a component
+    // clipped with an internal scrollbar despite the resize wiring being
+    // in place) before landing this guard.
+    const { html } = await compilePreviewHtml(previewPath);
+    expect(html).not.toMatch(/#root\s*\{[^}]*100vh/);
+  });
+
+  it('measures document.body, never document.documentElement (a real, confirmed bug)', async () => {
+    // Regression guard: confirmed by hand against the real compiled
+    // badge-showcase artifact that document.documentElement.scrollHeight
+    // reported 735 (the iframe's ambient viewport-ish size) for content
+    // whose real height (document.body.scrollHeight) was only 24 --
+    // `<html>` is the document's root scrolling element, and its
+    // scrollHeight is spec'd to never read smaller than the viewport,
+    // even when real content is far shorter. This broke every SMALL
+    // component (a lone Badge, a couple of Buttons): blank space inside
+    // the card, content pinned to the top instead of filling it. jsdom
+    // can't reproduce the actual wrong number (it has no real layout
+    // engine, both read 0 there), so this only guards the source text --
+    // the real behavior was verified in an actual browser before this
+    // guard was written, not assumed.
+    const { html } = await compilePreviewHtml(previewPath);
+    expect(html).toContain('document.body.scrollHeight');
+    expect(html).not.toContain('document.documentElement.scrollHeight');
+  });
+
+  it('measures width from the #root child, never a plain document.body.scrollWidth (a real, confirmed bug)', async () => {
+    // Regression guard for a distinct bug from the one above: unlike
+    // height, a block element's default WIDTH fills its parent rather
+    // than shrink-wrapping to content, so `document.body.scrollWidth`
+    // always reports the frame's own full width regardless of how
+    // narrow the real rendered content is. Confirmed by hand against a
+    // real compiled preview (a themed, fixed-width text box) whose frame
+    // kept dead space on both sides even after the height fix above --
+    // `document.body` was reporting the frame's full width every time,
+    // not the box's real (narrower) one. Fixed by measuring the actual
+    // React-rendered element (#root's one child), which -- as an
+    // ordinary flex item with no flex-grow -- genuinely shrinks to its
+    // own content width. (Reading its plain scrollWidth directly turned
+    // out to have its OWN bug -- see the max-content regression guard
+    // below -- but the "measure this specific element, not document.body"
+    // part of this fix stayed correct throughout.)
+    const { html } = await compilePreviewHtml(previewPath);
+    expect(html).toContain('widthMeasureTarget()');
+    expect(html).not.toMatch(/width:\s*Math\.ceil\(document\.body\.scrollWidth\)/);
+  });
+
+  it('measures width via max-content, never a plain scrollWidth read (a real, confirmed runaway-shrink bug)', async () => {
+    // Regression guard for a serious bug in the FIRST version of the
+    // width fix above: reading widthMeasureTarget()'s plain scrollWidth
+    // is unstable for anything that can wrap (running text, a flex-wrap
+    // button row) -- its scrollWidth only reflects how much it wraps at
+    // whatever width it CURRENTLY happens to have, and the parent then
+    // applies that reading as its NEXT width. A width even slightly
+    // narrower than the content's real unwrapped width forces one extra
+    // wrap, which makes the widest remaining line -- and therefore the
+    // next reading -- narrower still, which the parent applies as an
+    // even smaller width next. Confirmed by hand against the real
+    // running app: this ran all the way down to one character per line
+    // with a scrollbar, not just a slightly-too-narrow box. `max-content`
+    // asks for this element's width if it never had to wrap at all,
+    // which by definition does not depend on whatever width it currently
+    // has, breaking the feedback loop structurally rather than damping
+    // it.
+    const { html } = await compilePreviewHtml(previewPath);
+    expect(html).toContain('measureIntrinsicWidth');
+    expect(html).toContain("'max-content'");
+  });
+
+  it('never reports a (0, 0) pre-mount measurement (a real, confirmed bug distinct from the wrapping one above)', async () => {
+    // Regression guard: this function's own immediate call and its
+    // 'load' listener can both fire before React's initial commit has
+    // landed (scheduling work asynchronously, not painting synchronously
+    // just because the bundle's <script> finished executing), so
+    // document.body can genuinely still be empty at that point.
+    // Reporting (0, 0) there let the parent apply it as the iframe's own
+    // literal CSS size -- and once an iframe's real rendering surface is
+    // squeezed to zero, layout inside it comes back corrupted even
+    // moments later once React DOES mount and takes a real, correct
+    // measurement. Confirmed by hand with an instrumented standalone
+    // copy of a real compiled preview: message #1 and #2 both reported
+    // (0, 0), the parent applied that as a literal 0x0 iframe, message
+    // #3 correctly reported (587, 97) once React mounted, but message #4
+    // (the very next one) came back as a nonsensical (79, 1015) and
+    // stayed wrong from then on -- not a transient blip, a permanent
+    // corruption traceable directly to the earlier 0x0 resize.
+    const { html } = await compilePreviewHtml(previewPath);
+    expect(html).toMatch(/if\s*\(\s*width\s*===\s*0\s*&&\s*height\s*===\s*0\s*\)\s*\{\s*return;/);
   });
 });
 

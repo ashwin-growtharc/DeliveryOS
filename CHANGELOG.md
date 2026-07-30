@@ -4,6 +4,135 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- Reworked the "UI Components" page's layout twice in the same session,
+  driven by real feedback against the running app:
+  - First made preview cards size to their real content instead of a
+    fixed height, packed via a vendored bin-packing library (Muuri) into
+    a masonry grid (variable width/height, tightly packed). Getting this
+    genuinely correct took several real, hand-verified fixes: Muuri
+    requires the consumer's own CSS to set `position: absolute` on
+    managed items (it only sets `left`/`top`/`transform` itself) --
+    missing this caused a "diagonal staircase with huge gaps" layout,
+    confirmed and fixed via a real-browser repro (jsdom has no actual
+    layout engine, so this class of bug is invisible to it); a CSS
+    `transition: height` was racing Muuri's synchronous re-measurement,
+    always reading the pre-transition height; and
+    `document.documentElement.scrollHeight` -- the original height
+    measurement -- is spec'd to never read smaller than the viewport,
+    silently breaking every small component (a lone Badge, a row of
+    Buttons) by reporting the viewport's size instead of the real
+    (much smaller) content height. Fixed by measuring `document.body`
+    instead, and by centering the iframe as an element from the parent
+    side (`.ui-component-preview-frame`'s own flex-centering) rather than
+    inside the iframe's own document, once the iframe had to shrink-wrap
+    tightly to its real content for the measurement to be correct.
+  - Then replaced the masonry grid with a vertical list entirely (one
+    full-width row per component: index number, name, componentTypes tag,
+    description, then the live preview) after seeing it next to a
+    reference site using this simpler pattern. This is a real
+    simplification, not just a different look -- a single-column list
+    has no bin-packing problem to solve at all, so Muuri, `position:
+    absolute`, the "wide card" heuristic, and the whole vendored-library
+    dependency all became unnecessary and were removed. The height-
+    measurement and centering fixes above are layout-agnostic and needed
+    no changes at all for this pivot.
+  - All verified via a real-browser harness (the real `app.js`/`style.css`
+    with only the sidecar call (`window.DeliveryOS.call`) and Tauri APIs
+    stubbed, driven with real compiled preview data through the actual
+    Chrome browser tool) rather than assumption, since jsdom cannot catch
+    any of these bugs.
+
+- Fixed the list view's preview frame sitting flush against the row's
+  left-aligned text instead of centering in the row's full width (both
+  shared the same `max-width: 720px` with no margin, so the frame
+  inherited the header's implicit left alignment) -- `margin: 0 auto` on
+  `.ui-component-preview-frame` centers it independently once it hits its
+  max-width, confirmed via a real-browser measurement showing an exact
+  symmetric 156px gap on each side. (Investigating this also surfaced a
+  harness-only artifact worth noting: `IntersectionObserver` and a nested
+  iframe's own `ResizeObserver` only run during a browser's "update the
+  rendering" step, which Chrome can skip entirely for a tab that isn't
+  actively being painted -- automation via raw JS execution never forces
+  a paint, so previews silently never loaded until a screenshot capture
+  forced one. A real user's foreground tab is always being painted, so
+  this never surfaces in actual use.)
+
+- Made the preview frame's WIDTH dynamic per component, matching height's
+  existing behavior, after real screenshots showed a fixed-width themed
+  component (a dark, rounded text box) sitting inside a much wider frame
+  with dead space on both sides. Root cause: unlike height (a block
+  element's default height shrink-wraps to its content), a block
+  element's default WIDTH fills its containing block -- `document.body`
+  correctly reports real content HEIGHT, but always reports the frame's
+  own full WIDTH regardless of how narrow the real content is, since body
+  itself stretches to fill the iframe's viewport either way. Fixed by
+  measuring the actual React-rendered element (`#root`'s one child, an
+  ordinary flex item with no `flex-grow`, which genuinely shrinks to its
+  own content width) instead of `document.body` for the width axis only
+  (`compile.ts`'s `injectContentHeightReporter`, still one message, now
+  reporting both `width` and `height`). `app.js` clamps and applies width
+  the same way it already did height (`clampPreviewWidth`, MIN 240/MAX
+  720, mirroring `clampPreviewHeight`), so each row's frame now hugs its
+  real content width -- confirmed via real-browser measurement showing
+  every row's frame still perfectly centered (symmetric left/right gap)
+  but at its own natural width (240px for a lone Badge, 720px for a full
+  animated hero, in between for everything else) instead of always 720px.
+  A separately reported "hover on the Outline button overflows the card"
+  bug, confirmed by the user's own screenshots (the button's border
+  visibly escaping its own rounded-corner shape on hover), could NOT be
+  reproduced under rigorous real-browser testing (dozens of before/after
+  hover screenshots, plus 250+ scrollHeight samples spanning a real hover
+  event showing zero DOM change) -- the compiled preview has no
+  hover-reactive CSS or layout logic that jsdom-style measurement could
+  catch either way, and the visual artifact (a "flag"-shaped border
+  overshooting a rounded corner) looks like a transient GPU
+  compositing/rasterization seam during a fast CSS transition, most
+  likely specific to the real app's WebView2 rendering engine rather than
+  Chromium. Left unfixed pending confirmation from the real running app,
+  since DeliveryOS's preview frame has no reach into a pushed component's
+  own compiled CSS to begin with (by design -- see
+  docs/ui-components-feature-design.md's sandboxing rules).
+
+- Fixed two serious regressions the width work above introduced, both
+  found by testing against the real running app after the fixes above
+  looked correct in an isolated harness:
+  - **Runaway shrink to one character per line.** Reading a component's
+    plain `scrollWidth` is unstable for anything that can wrap (running
+    text, a flex-wrap button row): it only reflects how much the content
+    wraps at whatever width it CURRENTLY has, and the parent then applies
+    that reading as its NEXT width. A width even slightly narrower than
+    the content's true unwrapped size forces one extra wrap, which makes
+    the widest remaining line -- and therefore the next reading --
+    narrower still, compounding every cycle. Confirmed by hand: this ran
+    all the way down to one character per line with a scrollbar. Fixed
+    by measuring via a temporary `width: max-content` (asks the browser
+    for this element's width if it never had to wrap at all, which does
+    not depend on its current width), reverted synchronously before
+    anything can observe or paint the intermediate state.
+  - **Permanent corruption from a 0x0 pre-mount measurement.** The
+    reporter's own immediate call and its `load` listener can both fire
+    before React's initial commit has actually landed, reporting (0, 0)
+    for a still-empty `document.body`. The parent applied that as the
+    iframe's own literal CSS size -- and once an iframe's real rendering
+    surface is squeezed to zero, layout inside it comes back corrupted
+    even moments later once React DOES mount and takes a real, correct
+    measurement (observed by hand: a real 587x97 reading immediately
+    followed by a nonsensical 79x1015 on the very next report, and it
+    stayed wrong from then on, not a transient blip). Fixed by simply
+    never reporting a (0, 0) measurement at all -- the ResizeObserver
+    re-fires the moment React's commit actually lands, same as it does
+    for any later layout change, so nothing is lost by skipping it.
+  - Also added a small (4px) safety margin when applying a reported
+    max-content width back as a real container size, since sub-pixel
+    font-metric rounding between measurement and render could otherwise
+    still wrap content one word early even at its own reported
+    "never wraps" width.
+  - All three fixes verified with an instrumented, isolated parent+iframe
+    repro reproducing the exact message sequence by hand before and
+    after each fix, not just eyeballing the running app -- this class of
+    bug (a feedback loop through postMessage) doesn't show up reliably in
+    a quick visual check, since it can take a few round-trips to diverge.
+
 - Added Storybook-style interactive controls to the "UI Components"
   feature's Detail view (design in `docs/ui-components-feature-design.md`
   §5; full write-up in `PLAN.md`'s Phase C entry): a component's Detail

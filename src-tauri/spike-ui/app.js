@@ -688,29 +688,84 @@
       tabsContainer.appendChild(tab);
     }
 
-    renderUiComponentsGrid(uiComponentEntries);
+    renderUiComponentsList(uiComponentEntries);
   }
 
-  /** The active category's cards, each a live sandboxed-iframe preview.
-   * Lazy-rendered via IntersectionObserver -- a grid of many components
+  /** The active category's rows, each a live sandboxed-iframe preview.
+   * Lazy-rendered via IntersectionObserver -- a list of many components
    * shouldn't eagerly call preview.compile for every single one the
    * moment the page opens, only the ones actually scrolled into view. */
-  // Tracks the grid's current IntersectionObserver so a re-render (e.g.
+  /** Clamps a component-reported content height to a sane range -- a
+   * pushed component's own bug (or just an extreme layout) shouldn't be
+   * able to blow up the surrounding page by reporting an absurd height;
+   * MIN keeps a near-empty component from collapsing to nothing. */
+  function clampPreviewHeight(height) {
+    const MIN = 80;
+    const MAX = 640;
+    return Math.min(Math.max(height, MIN), MAX);
+  }
+
+  /** Same idea as clampPreviewHeight, for width -- a component whose real
+   * content is genuinely narrower than the row's full column (e.g. a
+   * fixed-width themed box, not just "a Button" but a whole styled panel
+   * around some short text) should get a frame that hugs ITS real width,
+   * not a fixed 720px box with dead space camouflaged on both sides by
+   * the frame's own background color. MIN keeps a tiny/near-empty
+   * component (a lone Badge) from shrinking to something narrower than
+   * its own label; MAX matches the row header's own column width
+   * (`.ui-component-row-header`'s max-width in style.css) so a
+   * genuinely-wide component still reads as part of the same column,
+   * not wider than the text above it. */
+  function clampPreviewWidth(width) {
+    const MIN = 240;
+    const MAX = 720;
+    return Math.min(Math.max(width, MIN), MAX);
+  }
+
+  // A few px of headroom added to a reported max-content width before
+  // applying it as a real container size -- see the WIDTH_SAFETY_MARGIN
+  // comment at both call sites for why this is needed at all (sub-pixel
+  // font metrics rounding differently between measurement and render can
+  // otherwise wrap content one word early even at its own reported
+  // "never wraps" width).
+  const WIDTH_SAFETY_MARGIN = 4;
+
+  // Tracks the list's current IntersectionObserver so a re-render (e.g.
   // clicking a different category tab) can disconnect the previous one
   // first -- without this, every re-render's `container.innerHTML = ''`
-  // detaches the old cards from the DOM but leaves the old observer still
+  // detaches the old rows from the DOM but leaves the old observer still
   // holding references to them (and their closures) indefinitely, since
   // nothing ever called .disconnect() on it.
-  let uiComponentsGridObserver = null;
+  let uiComponentsListObserver = null;
 
-  function renderUiComponentsGrid(uiComponentEntries) {
-    const container = $('ui-components-grid');
+  // Tracks every row's own contentHeight message listener so a re-render
+  // can remove them all first -- same reasoning as the IntersectionObserver
+  // above: `container.innerHTML = ''` detaches the old rows/iframes from
+  // the DOM, but a `window`-level listener wouldn't otherwise be cleaned
+  // up on its own.
+  let uiComponentsListMessageHandlers = [];
+
+  /** A single full-width row per component: an index number, name +
+   * componentTypes tag, description, then a live preview underneath --
+   * a plain vertical list, not a packed grid. Components genuinely vary
+   * in height (a lone Badge vs. a full animated hero), but with every row
+   * the same width there's no bin-packing problem to solve for that --
+   * this used to be a Muuri-managed masonry grid; removed entirely once
+   * every row become full-width made it pure unnecessary complexity
+   * (position:absolute, an item-content-wrapper requirement, explicit
+   * repack calls on every resize). */
+  function renderUiComponentsList(uiComponentEntries) {
+    const container = $('ui-components-list');
     const emptyState = $('ui-components-empty');
     container.innerHTML = '';
 
-    if (uiComponentsGridObserver) {
-      uiComponentsGridObserver.disconnect();
+    if (uiComponentsListObserver) {
+      uiComponentsListObserver.disconnect();
     }
+    for (const handler of uiComponentsListMessageHandlers) {
+      window.removeEventListener('message', handler);
+    }
+    uiComponentsListMessageHandlers = [];
 
     const category = state.uiComponentsPageCategory;
     const filtered = category
@@ -720,60 +775,64 @@
     emptyState.hidden = filtered.length !== 0;
     $('ui-components-count').textContent = `${filtered.length} component${filtered.length === 1 ? '' : 's'}`;
 
-    const entryByCard = new Map();
+    const entryByRow = new Map();
     const observer = new IntersectionObserver((observedEntries) => {
       for (const observedEntry of observedEntries) {
         if (!observedEntry.isIntersecting) {
           continue;
         }
-        const card = observedEntry.target;
-        observer.unobserve(card);
-        const entry = entryByCard.get(card);
-        void loadUiComponentPreview(card, entry);
+        const row = observedEntry.target;
+        observer.unobserve(row);
+        const entry = entryByRow.get(row);
+        void loadUiComponentPreview(row, entry);
       }
     });
-    uiComponentsGridObserver = observer;
+    uiComponentsListObserver = observer;
 
-    for (const entry of filtered) {
-      const card = document.createElement('div');
-      card.className = 'ui-component-card';
-      card.innerHTML = `
+    filtered.forEach((entry, index) => {
+      const row = document.createElement('div');
+      row.className = 'ui-component-row';
+      row.innerHTML = `
+        <div class="ui-component-row-header">
+          <span class="index"></span>
+          <span class="name"></span>
+          <span class="meta"></span>
+          <p class="description"></p>
+        </div>
         <div class="ui-component-preview-frame">
           <span class="ui-component-preview-loading">Loading preview&hellip;</span>
         </div>
-        <div class="ui-component-card-body">
-          <div class="name"></div>
-          <div class="meta"></div>
-        </div>
       `;
-      card.querySelector('.name').textContent = entry.manifest.id;
-      card.querySelector('.meta').textContent =
+      row.querySelector('.index').textContent = String(index + 1).padStart(2, '0');
+      row.querySelector('.name').textContent = entry.manifest.id;
+      row.querySelector('.meta').textContent =
         (entry.manifest.tags?.componentTypes ?? []).join(', ') || entry.manifest.kind;
-      // Only the card BODY opens Detail, not the whole card -- the preview
-      // frame above it gets a real, interactive <iframe> once loaded, and
-      // clicks landing inside an iframe (a separate browsing context)
-      // don't bubble to a listener on an ancestor element anyway. Keeping
-      // the live preview fully interactive (hover states etc. actually
-      // working) matters more here than the whole card being one giant
-      // click target.
-      card.querySelector('.ui-component-card-body').addEventListener('click', () => openDetail(entry));
-      container.appendChild(card);
+      row.querySelector('.description').textContent = entry.manifest.description;
+      // Only the header (index/name/tag/description) opens Detail, not the
+      // whole row -- the preview frame below it gets a real, interactive
+      // <iframe> once loaded, and clicks landing inside an iframe (a
+      // separate browsing context) don't bubble to a listener on an
+      // ancestor element anyway. Keeping the live preview fully
+      // interactive (hover states etc. actually working) matters more
+      // here than the whole row being one giant click target.
+      row.querySelector('.ui-component-row-header').addEventListener('click', () => openDetail(entry));
+      container.appendChild(row);
 
-      entryByCard.set(card, entry);
-      observer.observe(card);
-    }
+      entryByRow.set(row, entry);
+      observer.observe(row);
+    });
   }
 
-  /** Fetches the compiled preview for one card and drops it into a
+  /** Fetches the compiled preview for one row and drops it into a
    * sandboxed iframe -- sandbox="allow-scripts" only, deliberately never
    * allow-same-origin (see docs/ui-components-feature-design.md §3: that's
    * what keeps the frame's origin opaque, so a pushed component's own code
    * can never reach window.parent, cookies, or localStorage). A compile
-   * failure degrades to a text placeholder, never breaks the whole grid --
+   * failure degrades to a text placeholder, never breaks the whole list --
    * same "preview fails soft" principle as every other known limitation
    * in this feature. */
-  async function loadUiComponentPreview(card, entry) {
-    const frame = card.querySelector('.ui-component-preview-frame');
+  async function loadUiComponentPreview(row, entry) {
+    const frame = row.querySelector('.ui-component-preview-frame');
     try {
       const result = await call('preview.compile', { remote: entry.remoteName, id: entry.manifest.id });
       const iframe = document.createElement('iframe');
@@ -781,6 +840,63 @@
       iframe.srcdoc = result.html;
       frame.innerHTML = '';
       frame.appendChild(iframe);
+
+      // The frame starts at its CSS default (loading-state) height; once
+      // the compiled preview reports its own real content height (every
+      // compiled preview does this -- see compile.ts's
+      // injectContentHeightReporter, adapter-agnostic), the row grows or
+      // shrinks to fit instead of clipping/leaving dead space. event.source,
+      // not event.origin, is the only sound check here -- a srcdoc iframe's
+      // origin is the opaque literal string "null" for EVERY such iframe on
+      // the page at once, so it can't tell this row's iframe apart from
+      // any other.
+      // A ResizeObserver can fire several times in quick succession while
+      // a component's initial render/layout is still settling (fonts,
+      // nested reflows, etc.) -- coalescing to one resize per animation
+      // frame (using whichever size was reported LAST) avoids a burst of
+      // redundant style writes for the same row in a row.
+      let pendingRawWidth = null;
+      let pendingRawHeight = null;
+      let resizeScheduled = false;
+
+      const handler = (event) => {
+        if (event.source !== iframe.contentWindow) return;
+        const data = event.data;
+        if (!data || typeof data !== 'object' || data.type !== 'contentHeight') return;
+        pendingRawWidth = data.width;
+        pendingRawHeight = data.height;
+        if (resizeScheduled) return;
+        resizeScheduled = true;
+        requestAnimationFrame(() => {
+          resizeScheduled = false;
+          // +WIDTH_SAFETY_MARGIN: the reported width is the content's true
+          // max-content (never-wraps) size, but applying that EXACT pixel
+          // value back as the container's width can still wrap it one
+          // word early -- sub-pixel font metrics rounding differently
+          // between the measurement and the real render (observed by
+          // hand: a real compiled preview measured at 572px still wrapped
+          // when given exactly 572px of room). A few px of headroom costs
+          // nothing visually (the frame is centered either way) and
+          // removes the boundary-exact case entirely.
+          const clampedWidth = clampPreviewWidth(pendingRawWidth + WIDTH_SAFETY_MARGIN);
+          const clampedHeight = clampPreviewHeight(pendingRawHeight);
+          frame.style.width = `${clampedWidth}px`;
+          frame.style.height = `${clampedHeight}px`;
+          // The iframe itself gets the REAL (unclamped, but never bigger
+          // than the frame it sits in) size on both axes, not the
+          // frame's -- when content is smaller than clampPreviewWidth/
+          // clampPreviewHeight's floor (a tiny Badge, a narrow themed
+          // box), this is what lets .ui-component-preview-frame's flex
+          // centering actually have room to center the iframe within
+          // itself on both axes, instead of the iframe filling the whole
+          // frame with dead space rendered as part of its own (mostly
+          // empty) document.
+          iframe.style.width = `${Math.min(pendingRawWidth + WIDTH_SAFETY_MARGIN, clampedWidth)}px`;
+          iframe.style.height = `${Math.min(pendingRawHeight, clampedHeight)}px`;
+        });
+      };
+      uiComponentsListMessageHandlers.push(handler);
+      window.addEventListener('message', handler);
     } catch (err) {
       frame.innerHTML = '';
       const placeholder = document.createElement('span');
@@ -793,7 +909,7 @@
   // Tracks the Detail preview's current window-level message listener so
   // opening a different (or the same) artifact's Detail can remove the
   // previous one first -- same disconnect-before-replace discipline
-  // uiComponentsGridObserver already uses for its IntersectionObserver.
+  // uiComponentsListObserver already uses for its IntersectionObserver.
   let detailPreviewMessageHandler = null;
 
   // A monotonically increasing token identifying the MOST RECENT call to
@@ -900,7 +1016,22 @@
     detailPreviewMessageHandler = (event) => {
       if (event.source !== iframe.contentWindow) return;
       const data = event.data;
-      if (!data || typeof data !== 'object' || data.type !== 'variantChanged') return;
+      if (!data || typeof data !== 'object') return;
+      if (data.type === 'contentHeight') {
+        const clampedHeight = clampPreviewHeight(data.height);
+        frame.style.height = `${clampedHeight}px`;
+        // See the grid's identical comment (loadUiComponentPreview) --
+        // the iframe gets the real, unclamped size so short/narrow
+        // content centers via the frame's flex rule instead of pinning
+        // to the top-left. Detail's own frame keeps `max-width: none`
+        // (see .detail-preview-frame in style.css), so width is left at
+        // its CSS default here -- unlike the list, Detail has no shared
+        // column width to hug, and letting an interactive preview go as
+        // wide as the panel allows is the existing, deliberate behavior.
+        iframe.style.height = `${Math.min(data.height, clampedHeight)}px`;
+        return;
+      }
+      if (data.type !== 'variantChanged') return;
       for (const [variantName, tab] of tabsByVariant) {
         tab.classList.toggle('active', variantName === data.variant);
       }

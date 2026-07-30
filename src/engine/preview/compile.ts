@@ -332,13 +332,26 @@ async function compileReactPreview(previewEntryPath: string): Promise<CompiledPr
   const safeBundledJs = escapeForScriptTag(bundledJs);
   const safeVendoredRuntimeJs = escapeForScriptTag(VENDORED_REACT_RUNTIME_JS);
 
+  // Deliberately NO "min-height: 100vh" on #root below (Phase B's
+  // original rule, removed in Phase C) -- this whole HTML string is
+  // embedded verbatim into the shipped preview, so any explanation lived
+  // here as a CSS comment would ship to every compiled artifact for no
+  // reason; the real explanation belongs here, in a TS comment, instead.
+  // The parent measures document.body.scrollHeight to size
+  // the iframe to this content's REAL height (see
+  // injectContentHeightReporter below) -- 100vh is 100% of the iframe's
+  // OWN current height, a circular reference that anchors the
+  // measurement to whatever height the iframe already happens to have,
+  // not the content's actual natural size. display:flex + centering
+  // still helps a single small element (e.g. one Button variant) sit
+  // centered rather than pinned top-left, without inflating height.
   const html = `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
 <style>
   html, body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-  #root { display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+  #root { display: flex; align-items: center; justify-content: center; }
 </style>
 </head>
 <body>
@@ -391,7 +404,8 @@ export async function compilePreviewHtml(previewEntryPath: string): Promise<Comp
   const compiled = previewEntryPath.endsWith('.html')
     ? compileHtmlPreview(previewEntryPath)
     : await compileReactPreview(previewEntryPath);
-  return { ...compiled, html: injectPreviewCsp(compiled.html) };
+  const html = injectContentHeightReporter(injectPreviewCsp(compiled.html));
+  return { ...compiled, html };
 }
 
 /**
@@ -420,6 +434,178 @@ function injectPreviewCsp(html: string): string {
     return html.slice(0, insertAt) + metaTag + html.slice(insertAt);
   }
   return metaTag + html;
+}
+
+/**
+ * Reports the compiled preview's own real content box back to the parent
+ * via `postMessage` (`{type:'contentHeight', width, height}`) -- the
+ * parent can't just read `iframe.contentDocument.body.scrollHeight`
+ * itself, since `sandbox="allow-scripts"` deliberately omits
+ * `allow-same-origin` (the frame's opaque origin is the whole point of
+ * the sandbox), so cross-origin access to the iframe's DOM throws. This
+ * is the same "measure yourself, report over postMessage" pattern
+ * embeddable-iframe tools (CodeSandbox, CodePen) use for exactly this
+ * reason. (The message `type` stays `'contentHeight'` even though it now
+ * also carries `width` -- it's the same "here is my real size" report
+ * the parent has always listened for, not a new protocol message.)
+ *
+ * Deliberately adapter-agnostic (wired into `compilePreviewHtml`'s
+ * dispatcher, not duplicated inside `compileReactPreview`'s own harness)
+ * -- measuring the content doesn't care whether it came from the React
+ * adapter or the zero-build HTML one; both need their real size known by
+ * the parent so preview cards can size to their actual content instead
+ * of a uniform fixed box.
+ *
+ * Measures `document.body`, NOT `document.documentElement` -- confirmed
+ * by hand (a real, small standalone preview reported 735 for
+ * `documentElement.scrollHeight` vs. an actual content height of 24):
+ * `<html>` is the document's root scrolling element, and its
+ * `scrollHeight`/`scrollWidth` are spec'd to never read smaller than the
+ * viewport, even when the real content is far shorter/narrower. That
+ * floor silently broke every SMALL component (a lone Badge, a couple of
+ * Buttons) -- their frame would inherit whatever the iframe's ambient
+ * viewport-ish size happened to be, not their genuine tiny size, leaving
+ * exactly the "blank space inside the card" bug this was meant to fix in
+ * the first place (first found for height; the same floor applies to
+ * `scrollWidth` for the same reason, which is why a component narrower
+ * than the frame -- e.g. a fixed-width themed box -- left dead space on
+ * both sides once only height was made dynamic). `document.body` has no
+ * such floor on either axis.
+ *
+ * A `ResizeObserver` (not a one-shot measurement) re-reports on every
+ * subsequent layout change too -- necessary for anything animated (e.g.
+ * an orbiting/hover-expanding layout) whose real size isn't known until
+ * well after initial mount.
+ *
+ * Width is measured differently than height, for a real reason: a block
+ * element's default WIDTH fills its containing block (`width: auto`
+ * means "as wide as the parent," not "as wide as my content"), while its
+ * default HEIGHT shrink-wraps to content -- the two axes are not
+ * symmetric in CSS. `document.body` therefore always reports its own
+ * (parent-filling) width regardless of how narrow the actual rendered
+ * content is, which is exactly correct for height but silently wrong for
+ * width: confirmed by hand against a real compiled preview whose visible
+ * content (a themed, fixed-width text box) was genuinely narrower than
+ * the frame, yet `document.body.scrollWidth` still reported the full
+ * frame width, reintroducing the same "dead space either side of the
+ * card" bug this measurement exists to prevent -- just on the
+ * horizontal axis instead of vertical. The React adapter's harness
+ * always mounts into `#root` (see `compileReactPreview`) as its one and
+ * only child, and that child -- an ordinary flex ITEM inside #root's
+ * `display: flex` row, with no `flex-grow` set -- genuinely shrinks to
+ * its own content width rather than stretching, so measuring THAT
+ * element (falling back to `document.body` when `#root` isn't present
+ * or doesn't have exactly one child -- the zero-build HTML adapter has
+ * no such guarantee at all) gives the real width instead of the
+ * viewport-filling one.
+ *
+ * Reading that element's plain `scrollWidth` directly (the first version
+ * of this fix) turned out to be a real, confirmed bug of its own: ANY
+ * content that can wrap (running text, a flex-wrap row of buttons) only
+ * wraps as much as whatever width it's CURRENTLY been given, so its
+ * scrollWidth reflects that current width, not an independent "true"
+ * one. Since the parent then applies whatever width gets reported as
+ * this element's NEXT width, a width even slightly narrower than the
+ * content's real unwrapped width causes one extra wrap -- which makes
+ * the widest remaining line (and therefore the next scrollWidth
+ * reading) narrower still -- which the parent then applies as an even
+ * smaller width next time. That is a genuine, unstable feedback loop,
+ * not just an occasional rounding error: confirmed by hand against a
+ * real compiled preview, where it ran all the way down to one character
+ * per line with a scrollbar, not just a slightly-too-narrow box.
+ *
+ * `measureIntrinsicWidth` breaks that loop structurally rather than
+ * damping it: forcing `width: max-content` asks the browser for this
+ * element's width if it never had to wrap at all, which by definition
+ * does not depend on whatever width it currently happens to have --
+ * measuring it 100 times in a row against the same content always
+ * returns the same number, however many times the parent has resized
+ * the iframe in between. Reverted in the same synchronous call, before
+ * anything else can observe or paint the intermediate state, so this
+ * never visibly disturbs the real layout. (A component whose own
+ * top-level element relies on `width: 100%` to fill its container --
+ * e.g. a full-bleed animated hero with only absolutely-positioned
+ * children, which contribute nothing to a max-content calculation --
+ * still measures sanely: max-content on THAT element resolves from its
+ * own normal-flow children's intrinsic sizes, same as it would for any
+ * other block element.)
+ *
+ * `reportSize` also refuses to post a (0, 0) measurement at all -- a
+ * distinct, confirmed bug from the wrapping one above, and just as
+ * serious: this function's own immediate call, and its `load` listener,
+ * can both fire before React's initial commit has actually landed
+ * (`createRoot().render()` schedules work asynchronously; finishing the
+ * bundle's `<script>` does not mean anything has painted yet), so
+ * `document.body` can genuinely still be empty. Reporting (0, 0) in
+ * that case let the parent apply it as the iframe's own literal CSS
+ * size -- and once an iframe's real rendering surface is squeezed to
+ * zero, layout inside it comes back corrupted even moments later, once
+ * React DOES mount and a real, correct measurement is taken (observed by
+ * hand: a real 587x97 reading immediately followed by a nonsensical
+ * 79x1015 on the very next report, permanently, not a transient blip).
+ * See `reportSize`'s own early-return for the fix and full rationale.
+ */
+function injectContentHeightReporter(html: string): string {
+  const script = `<script>(function () {
+    function widthMeasureTarget() {
+      var root = document.getElementById('root');
+      if (root && root.children.length === 1) {
+        return root.children[0];
+      }
+      return document.body;
+    }
+    function measureIntrinsicWidth(el) {
+      var prevWidth = el.style.width;
+      var prevMaxWidth = el.style.maxWidth;
+      el.style.width = 'max-content';
+      el.style.maxWidth = 'none';
+      var width = el.scrollWidth;
+      el.style.width = prevWidth;
+      el.style.maxWidth = prevMaxWidth;
+      return width;
+    }
+    function reportSize() {
+      var width = Math.ceil(measureIntrinsicWidth(widthMeasureTarget()));
+      var height = Math.ceil(document.body.scrollHeight);
+      // Both this function's own immediate call below AND the 'load'
+      // listener can fire before React's initial commit has actually
+      // landed (createRoot().render() schedules work asynchronously --
+      // it does not paint synchronously just because the bundle's
+      // <script> finished executing), which means #root can still be
+      // genuinely empty at this point. A confirmed real bug: reporting
+      // (0, 0) in that case let the parent apply it as the iframe's own
+      // literal CSS width/height (0px) -- and once an iframe's actual
+      // rendering surface is squeezed to zero, layout inside it comes
+      // back corrupted even moments later once React DOES mount and a
+      // real, correct measurement is taken (observed by hand: a real
+      // measurement of 587x97 immediately followed by a nonsensical
+      // 79x1015 on the very next report, and it stayed wrong from then
+      // on). Skipping the report entirely here -- rather than reporting
+      // 0 and letting the parent's own clamping floor absorb it -- means
+      // the iframe is simply never resized away from its CSS loading-
+      // state default until there is real content to size it to; the
+      // ResizeObserver below re-fires reportSize() the moment React's
+      // commit actually lands, same as it does for any later layout
+      // change.
+      if (width === 0 && height === 0) {
+        return;
+      }
+      window.parent.postMessage({ type: 'contentHeight', width: width, height: height }, '*');
+    }
+    if (typeof ResizeObserver !== 'undefined') {
+      var observer = new ResizeObserver(reportSize);
+      observer.observe(document.body);
+      observer.observe(widthMeasureTarget());
+    }
+    window.addEventListener('load', reportSize);
+    reportSize();
+  })();<\/script>`;
+
+  const bodyCloseIndex = html.lastIndexOf('</body>');
+  if (bodyCloseIndex !== -1) {
+    return html.slice(0, bodyCloseIndex) + script + html.slice(bodyCloseIndex);
+  }
+  return html + script;
 }
 
 /**
