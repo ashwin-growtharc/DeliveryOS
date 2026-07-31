@@ -4,6 +4,36 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- Fixed a real, confirmed bug behind a user report of "different style on
+  every refresh" for the UI Components preview pipeline: the
+  `ResizeObserver` that reports a component's real content size was set
+  up with two `.observe()` calls -- `document.body`, and whatever
+  `widthMeasureTarget()` (the actual rendered element) returned AT THAT
+  MOMENT. Both calls run synchronously at script-setup time, before
+  React's initial commit has landed, so the second call ALSO fell back
+  to `document.body` and was an unwitting duplicate of the first -- the
+  real rendered element was never actually being watched for its own
+  future size changes, only `document.body`'s own (shrink-wrapped) box
+  re-triggered a re-measure. Anything whose width settles without
+  `document.body`'s height also changing (a width-only reflow; text
+  re-rendering at a constant line count) went silently unreported.
+  Confirmed by hand: reloading the same `decrypting-text` preview
+  repeatedly reported different widths (587 vs. 572px) across otherwise-
+  identical loads -- whichever render happened to be live at the single
+  moment `document.body`'s height first changed got measured and frozen,
+  and that moment's exact timing (React's commit scheduling vs. the
+  observer's own notification timing) varies run to run. Fixed by
+  re-observing whichever element `reportSize()` actually measured on
+  every call, upgrading from `document.body` to the real element the
+  instant it exists. Also tightened the pre-mount `(0, 0)` guard to skip
+  on EITHER axis reading zero, not just both together. Verified by
+  reloading the same preview 3 times fresh (not just re-checking one
+  load): 591x97 every time, versus the previous 587/572px inconsistency.
+  Found via a dedicated code-review pass focused specifically on sources
+  of non-determinism, not a guess -- the review traced the exact
+  synchronous-vs-async timing gap rather than re-describing already-fixed
+  bugs.
+
 - Reworked the "UI Components" page's layout twice in the same session,
   driven by real feedback against the running app:
   - First made preview cards size to their real content instead of a

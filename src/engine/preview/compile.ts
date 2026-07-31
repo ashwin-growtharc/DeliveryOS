@@ -475,7 +475,12 @@ function injectPreviewCsp(html: string): string {
  * A `ResizeObserver` (not a one-shot measurement) re-reports on every
  * subsequent layout change too -- necessary for anything animated (e.g.
  * an orbiting/hover-expanding layout) whose real size isn't known until
- * well after initial mount.
+ * well after initial mount. Critically, it has to actually observe the
+ * REAL rendered element for this to work -- see `reportSize`'s own
+ * `observedWidthTarget` handling below for a real, confirmed bug where it
+ * didn't (silently watching `document.body` forever instead, so any
+ * later change that didn't also move body's own shrink-wrapped height
+ * went unreported).
  *
  * Width is measured differently than height, for a real reason: a block
  * element's default WIDTH fills its containing block (`width: auto`
@@ -564,8 +569,49 @@ function injectContentHeightReporter(html: string): string {
       el.style.maxWidth = prevMaxWidth;
       return width;
     }
+    var observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(reportSize) : null;
+    // The element widthMeasureTarget() resolves to at the moment THIS
+    // function last (re)wired the observer -- not the same thing as
+    // "whatever it would resolve to right now." Tracked so reportSize can
+    // tell when the real element has appeared (or changed) and needs to
+    // be subscribed to directly, instead of only ever watching
+    // document.body.
+    var observedWidthTarget = null;
     function reportSize() {
-      var width = Math.ceil(measureIntrinsicWidth(widthMeasureTarget()));
+      var target = widthMeasureTarget();
+      // A confirmed real bug, distinct from the (0,0) one below: this
+      // function's FIRST call (below, and via 'load') runs before
+      // widthMeasureTarget() has anything real to return, so it falls
+      // back to document.body -- and until now, the SECOND .observe()
+      // call (setup time, once, see below) resolved widthMeasureTarget()
+      // at that same too-early moment, meaning it ALSO returned
+      // document.body and just re-subscribed to the same element the
+      // first .observe() call already covered. The real rendered
+      // element was never actually being watched for its OWN future size
+      // changes -- only document.body's box re-triggered a re-measure,
+      // and document.body's own height can easily stay constant across a
+      // real content change (a width-only reflow; text re-rendering at
+      // the same line count) that has nothing to do with height at all.
+      // Confirmed by hand: reloading the same decrypting-text preview
+      // repeatedly reported different widths (587 vs. 572 across two
+      // otherwise-identical loads) -- whichever render happened to be
+      // live at the single moment document.body's height first changed
+      // got measured and then frozen, and that moment's exact timing
+      // (React's commit scheduling vs. the observer's own notification
+      // timing) varies run to run. Re-observing whichever element THIS
+      // call actually measured -- upgrading from document.body to the
+      // real element the moment it exists, and idempotent once they're
+      // the same element already -- means the real element stays
+      // subscribed to its own future changes from then on, not just
+      // riding along on document.body's.
+      if (observer && target !== observedWidthTarget) {
+        if (observedWidthTarget) {
+          observer.unobserve(observedWidthTarget);
+        }
+        observer.observe(target);
+        observedWidthTarget = target;
+      }
+      var width = Math.ceil(measureIntrinsicWidth(target));
       var height = Math.ceil(document.body.scrollHeight);
       // Both this function's own immediate call below AND the 'load'
       // listener can fire before React's initial commit has actually
@@ -586,16 +632,18 @@ function injectContentHeightReporter(html: string): string {
       // state default until there is real content to size it to; the
       // ResizeObserver below re-fires reportSize() the moment React's
       // commit actually lands, same as it does for any later layout
-      // change.
-      if (width === 0 && height === 0) {
+      // change. Either axis reading exactly 0 (not just both at once) is
+      // treated the same way -- a genuinely tiny real component still
+      // clamps to clampPreviewWidth/Height's floor downstream, so there's
+      // no real case where a legitimate measurement needs to be exactly 0
+      // on just one axis.
+      if (width === 0 || height === 0) {
         return;
       }
       window.parent.postMessage({ type: 'contentHeight', width: width, height: height }, '*');
     }
-    if (typeof ResizeObserver !== 'undefined') {
-      var observer = new ResizeObserver(reportSize);
+    if (observer) {
       observer.observe(document.body);
-      observer.observe(widthMeasureTarget());
     }
     window.addEventListener('load', reportSize);
     reportSize();

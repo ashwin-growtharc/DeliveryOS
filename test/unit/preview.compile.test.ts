@@ -418,9 +418,36 @@ describe('injectContentHeightReporter (dynamic card sizing)', () => {
     // #3 correctly reported (587, 97) once React mounted, but message #4
     // (the very next one) came back as a nonsensical (79, 1015) and
     // stayed wrong from then on -- not a transient blip, a permanent
-    // corruption traceable directly to the earlier 0x0 resize.
+    // corruption traceable directly to the earlier 0x0 resize. Either
+    // axis reading exactly 0 (not just both together) is treated the
+    // same way -- see the OR, not AND, below.
     const { html } = await compilePreviewHtml(previewPath);
-    expect(html).toMatch(/if\s*\(\s*width\s*===\s*0\s*&&\s*height\s*===\s*0\s*\)\s*\{\s*return;/);
+    expect(html).toMatch(/if\s*\(\s*width\s*===\s*0\s*\|\|\s*height\s*===\s*0\s*\)\s*\{\s*return;/);
+  });
+
+  it('re-observes the real rendered element for width, not just document.body forever (a real, confirmed bug)', async () => {
+    // Regression guard: the ResizeObserver was set up with TWO .observe()
+    // calls -- document.body, and whatever widthMeasureTarget() returned
+    // AT THAT MOMENT. Both calls run synchronously at script-setup time,
+    // before React's initial commit has landed, so widthMeasureTarget()
+    // falls back to document.body for BOTH of them -- the second call was
+    // an unwitting duplicate of the first, and the real rendered element
+    // was never actually subscribed for its own future size changes.
+    // Only document.body's own (shrink-wrapped) box re-triggered a
+    // re-measure, and body's height can easily stay constant across a
+    // real content change that has nothing to do with height (a
+    // width-only reflow; text re-rendering at the same line count).
+    // Confirmed by hand: reloading the same decrypting-text preview
+    // repeatedly reported different widths (587 vs. 572) across
+    // otherwise-identical loads -- whichever render happened to be live
+    // at the single moment body's height first changed got measured and
+    // then frozen forever, and that moment's exact timing varies run to
+    // run. Fixed by re-observing whichever element reportSize() actually
+    // measured on every call, upgrading from document.body to the real
+    // element the instant it exists.
+    const { html } = await compilePreviewHtml(previewPath);
+    expect(html).toContain('observedWidthTarget');
+    expect(html).toMatch(/if\s*\(\s*observer\s*&&\s*target\s*!==\s*observedWidthTarget\s*\)/);
   });
 });
 
