@@ -9,17 +9,18 @@
     "node": ">=22.12.0"
   },
   "scripts": {
-    "prepare": "node scripts/generate-vendored-react-runtime.mjs",
-    "prebuild": "node scripts/generate-vendored-react-runtime.mjs",
+    "prepare": "node scripts/generate-vendored-react-runtime.mjs && node scripts/generate-vendored-libraries.mjs",
+    "prebuild": "node scripts/generate-vendored-react-runtime.mjs && node scripts/generate-vendored-libraries.mjs",
     "build": "tsc -p tsconfig.json",
     "dev": "tsx src/index.ts",
-    "pretypecheck": "node scripts/generate-vendored-react-runtime.mjs",
+    "pretypecheck": "node scripts/generate-vendored-react-runtime.mjs && node scripts/generate-vendored-libraries.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --max-warnings 0",
-    "pretest": "node scripts/generate-vendored-react-runtime.mjs",
+    "pretest": "node scripts/generate-vendored-react-runtime.mjs && node scripts/generate-vendored-libraries.mjs",
     "test": "vitest run",
     "build:sidecar": "node scripts/build-sidecar.mjs",
-    "generate:vendored-react": "node scripts/generate-vendored-react-runtime.mjs"
+    "generate:vendored-react": "node scripts/generate-vendored-react-runtime.mjs",
+    "generate:vendored-libraries": "node scripts/generate-vendored-libraries.mjs"
   },
   "dependencies": {
     "@octokit/rest": "^22.0.1",
@@ -46,9 +47,13 @@
     "@types/react-dom": "^19.2.3",
     "@typescript-eslint/eslint-plugin": "^8.12.0",
     "@typescript-eslint/parser": "^8.12.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
     "eslint": "^9.14.0",
+    "framer-motion": "^12.43.0",
     "jsdom": "^30.0.1",
     "prettier": "^3.3.3",
+    "tailwind-merge": "^3.6.0",
     "tsx": "^4.19.0",
     "vitest": "^2.1.0"
   }

@@ -4,6 +4,39 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- **Vendored a short allow-list of common UI-kit libraries** --
+  `framer-motion`, `clsx`, `tailwind-merge`, `class-variance-authority` --
+  the same way React itself is already vendored, so a real pasted
+  component that imports one of these (left completely untouched, per
+  `.claude/skills/ui-component-extractor/SKILL.md`) now actually compiles
+  and runs instead of failing with `Could not resolve "..."`. New
+  `scripts/generate-vendored-libraries.mjs` (mirrors
+  `generate-vendored-react-runtime.mjs`'s pattern) bundles each library
+  with react/react-dom/`react/jsx-runtime` marked `external`, so it shares
+  the one already-vendored React instance rather than bringing its own
+  (would silently break hooks/context otherwise). `compileReactPreview`
+  now marks exactly these specifiers `external` too, satisfied at
+  preview-render time by a new global `require()` shim (embedded ahead of
+  the component bundle) that resolves `'react'`/`'react/jsx-runtime'` to
+  the vendored React runtime and any allow-listed name to
+  `window.__DeliveryOSVendoredLibs[name]`. Everything else still hits
+  `createDirectorySandboxPlugin`'s existing rejection exactly as before --
+  confirmed with a regression test importing `zod` (a real dependency of
+  this very repo, so genuinely resolvable, not just missing) and asserting
+  it's still rejected. Found and fixed a real ESM/CJS double-interop bug
+  along the way: the vendored library's own bundle and the CONSUMING
+  component's bundle are two separate esbuild invocations, and without a
+  `__esModule: true` marker on the vendored object, esbuild's `__toESM`
+  helper wrapped it a second time in the consumer, making `clsx.default`
+  the entire namespace object instead of the real function (`(0,
+  c.default) is not a function`) -- confirmed by hand, fixed by marking
+  the vendored object accordingly. Verified end-to-end against the real
+  `ExpandedTabs` component in a real test project (framer-motion) via both
+  a direct compile and a real browser click that re-triggered its layout
+  animation. 3 new unit tests (clsx runs for real, framer-motion mounts
+  for real, an unvendored real package is still rejected); full suite
+  (163 tests) + typecheck + lint all clean.
+
 - Surfaced the real compile/parse error in every "Preview unavailable"
   placeholder (`loadUiComponentPreview`, `loadDetailPreview`,
   `loadAddNewReviewPreview` in `app.js`) instead of discarding it --

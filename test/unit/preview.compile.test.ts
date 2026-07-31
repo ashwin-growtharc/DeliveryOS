@@ -145,6 +145,69 @@ describe('import sandboxing (Phase B)', () => {
   });
 });
 
+describe('vendored UI-kit libraries (framer-motion, clsx, etc.)', () => {
+  const vendoredLibPreviewPath = path.join(
+    __dirname, '..', 'fixtures', 'preview-spike', 'VendoredLib', 'preview.tsx',
+  );
+  const vendoredMotionPreviewPath = path.join(
+    __dirname, '..', 'fixtures', 'preview-spike', 'VendoredMotion', 'preview.tsx',
+  );
+
+  it('compiles a component that imports clsx directly, untouched, and clsx actually runs', async () => {
+    const { html } = await compilePreviewHtml(vendoredLibPreviewPath);
+    const dom = new JSDOM(html, { runScripts: 'dangerously' });
+
+    const deadline = Date.now() + 2000;
+    let tag: Element | null = null;
+    while (Date.now() < deadline) {
+      tag = dom.window.document.querySelector('[data-testid="tag"]');
+      if (tag) break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    // Checked against the real rendered className, not just "did this
+    // compile" -- clsx('tag', active && 'tag--active') only produces this
+    // exact joined string if clsx's own real logic executed, not just if
+    // the import happened to not throw.
+    expect(tag?.className).toBe('tag tag--active');
+  });
+
+  it('compiles a component that imports framer-motion directly, untouched, and it actually mounts', async () => {
+    const { html } = await compilePreviewHtml(vendoredMotionPreviewPath);
+    const dom = new JSDOM(html, { runScripts: 'dangerously' });
+
+    const deadline = Date.now() + 2000;
+    let fader: Element | null = null;
+    while (Date.now() < deadline) {
+      fader = dom.window.document.querySelector('[data-testid="fader"]');
+      if (fader) break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    // Proves framer-motion's real module resolved and rendered a real DOM
+    // node -- this is the exact import shape ("import { motion } from
+    // 'framer-motion'") that failed with "Could not resolve" before the
+    // vendoring support this test guards.
+    expect(fader?.textContent).toBe('Hello');
+  });
+
+  it('still rejects a real npm package import that is NOT on the vendored allow-list', async () => {
+    // A regression guard for the sandbox itself: adding the vendored-
+    // library allow-list must not accidentally widen esbuild's resolution
+    // to arbitrary node_modules packages in general. UnvendoredLib/
+    // Formatted.tsx imports 'zod' -- a real dependency of this very repo,
+    // so esbuild CAN resolve it from node_modules (unlike a genuinely
+    // missing package) -- and it must still be rejected by
+    // createDirectorySandboxPlugin, exactly like any other file outside
+    // the component's own directory. Only the exact names in
+    // VENDORED_LIBRARY_NAMES should ever bypass that check.
+    const unvendoredLibPreviewPath = path.join(
+      __dirname, '..', 'fixtures', 'preview-spike', 'UnvendoredLib', 'preview.tsx',
+    );
+    await expect(compilePreviewHtml(unvendoredLibPreviewPath)).rejects.toThrow(
+      /resolves outside this component's own directory/,
+    );
+  });
+});
+
 describe('compiler-adapter dispatch (Phase B)', () => {
   it('routes a .tsx preview through the React adapter', async () => {
     const { html } = await compilePreviewHtml(previewPath);

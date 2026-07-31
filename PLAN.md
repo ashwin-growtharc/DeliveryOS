@@ -402,7 +402,12 @@ demonstrably true, not just when every task box is checked.
       documents how to ingest a found/pasted component (react-import fix,
       promoting an unexported-but-real component to be the file's actual
       export, hand-written realistic-data `preview.tsx`) so Scan picks it
-      up correctly — see CHANGELOG.md for the full rationale.
+      up correctly. A short allow-list of common UI-kit libraries
+      (`framer-motion`, `clsx`, `tailwind-merge`,
+      `class-variance-authority`) is now vendored the same way React is,
+      via `scripts/generate-vendored-libraries.mjs` -- a component
+      importing one of these needs no workaround at all; anything else
+      still fails with a real, honest unresolved-import error — see CHANGELOG.md for the full rationale.
   - [x] Broad structural detection (`src/**/*.{tsx,jsx}`, filtered by "returns
         JSX with a co-located `Props` type") — **not** a hardcoded folder-name
         glob (design doc §6, the `src/ui/` flat-convention finding)

@@ -31,11 +31,17 @@ scan the result:
    reads `window.__DeliveryOSReactRuntime.React` — there is no real `react`
    package on disk at preview-compile time. A completely normal
    `import React, { useState } from 'react'` fails to bundle with
-   `Could not resolve "react"`. Every other import (Tailwind classes,
-   `framer-motion`, `clsx`, anything else genuinely third-party) is left
-   completely untouched — those are real dependencies, and an unresolved
-   one should surface as a real, honest compile error for Review to see,
-   not something this process tries to paper over.
+   `Could not resolve "react"`. A short, explicit allow-list of common
+   UI-kit dependencies is ALSO vendored the same way (see
+   `VENDORED_LIBRARY_NAMES` in `compile.ts`): **`framer-motion`, `clsx`,
+   `tailwind-merge`, `class-variance-authority`** — a component that
+   imports any of these needs no workaround at all, step 2 below is a
+   no-op for them. Any OTHER third-party import (an icon library, a date
+   picker, anything not on that list) is left completely untouched and
+   will fail with a real, honest `Could not resolve "..."` error for
+   Review to see — don't try to route around it; if it comes up
+   repeatedly, that's a signal to add it to the allow-list instead (see
+   `scripts/generate-vendored-libraries.mjs`'s own `LIBRARIES` array).
 
 2. **Scan's detector requires an EXPORTED component with a non-empty props
    map.** `detectUiComponentCandidates` (`src/engine/scan/detectUiComponents.ts`)
@@ -269,7 +275,10 @@ itself the default export with its real `ExpandedTabsProps`, deleted the
 the `Default` export's example data (plus a second, differently-shaped
 `SettingsSubNav` variant). Re-parsing found the component immediately;
 `deliveryos scan` picked it up with zero warnings on the next run.
-`framer-motion` itself was left untouched — its preview correctly fails
-with `Could not resolve "framer-motion"` (a real, unresolved third-party
-dependency), which is accurate signal for Review, not a bug to work
-around.
+`framer-motion` itself was left completely untouched in the component's
+own source (still a plain `import { AnimatePresence, motion } from
+'framer-motion'`) — it's on the vendored allow-list, so it compiled and
+actually animated with no workaround needed at all, confirmed both by a
+successful `compilePreviewHtml` call and by a real browser click that
+switched the selected tab and re-triggered framer-motion's layout
+animation.

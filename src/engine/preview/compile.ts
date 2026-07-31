@@ -3,7 +3,71 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { previewCachePath } from '../paths';
 import { VENDORED_REACT_RUNTIME_JS } from './vendoredReactRuntime.generated';
+import { VENDORED_LIBRARIES_JS } from './vendoredLibraries.generated';
 import { extractPropsSchemas, PropSchemaEntry } from './docgen';
+
+/**
+ * The allow-listed third-party UI-kit libraries a component's own source
+ * may import directly (left completely untouched, per
+ * .claude/skills/ui-component-extractor/SKILL.md) and still compile --
+ * everything else falls through to `createDirectorySandboxPlugin`'s
+ * existing "resolves outside this component's own directory" rejection,
+ * same as before this list existed. Marking exactly these specifiers
+ * `external` (below) means esbuild never tries to resolve them from a
+ * real node_modules at all (which wouldn't exist in the packaged
+ * sidecar anyway) -- it instead compiles each into a `__require(name)`
+ * call, satisfied at actual preview-render time by
+ * `VENDORED_LIBRARY_REQUIRE_SHIM_JS`'s global `require` function, which
+ * resolves it to whatever `VENDORED_LIBRARIES_JS[name]` assigned into
+ * `window.__DeliveryOSVendoredLibs`. Kept as an explicit list here
+ * (rather than `Object.keys(VENDORED_LIBRARIES_JS)`) so adding a new
+ * library is a deliberate two-place change (here + the generation
+ * script's own `LIBRARIES` array), not something that silently expands
+ * just because the generated file happens to contain more entries.
+ */
+const VENDORED_LIBRARY_NAMES = ['framer-motion', 'clsx', 'tailwind-merge', 'class-variance-authority'];
+
+/**
+ * Defines the global `require` function that satisfies esbuild's
+ * `__require(name)` fallback (its own documented behavior for an
+ * `external`-marked specifier in an IIFE build -- there is no real
+ * module system at runtime to satisfy it any other way). Embedded as its
+ * own inline `<script>`, after `VENDORED_REACT_RUNTIME_JS` (so
+ * `window.__DeliveryOSReactRuntime.React` already exists) but before
+ * every vendored library's own script (each of which calls `require`
+ * for 'react'/'react/jsx-runtime' at its own top-level module-eval time)
+ * and the component bundle itself.
+ *
+ * `'react/jsx-runtime'` needs its own constructed shim, not just a
+ * pass-through to React: confirmed empirically that framer-motion's own
+ * real bundle references it directly (one of its internal helper
+ * components is itself authored in JSX, compiled with the automatic
+ * runtime) even though nothing in DeliveryOS's OWN compiler ever
+ * generates that import -- `jsx`/`jsxs` here are the standard,
+ * well-documented shim shape (a plain `React.createElement` call,
+ * folding an explicit `key` argument back into `props` since
+ * `createElement`'s own signature doesn't take one positionally the way
+ * the automatic runtime's `jsx()` does).
+ */
+const VENDORED_LIBRARY_REQUIRE_SHIM_JS = `(function () {
+  var React = window.__DeliveryOSReactRuntime.React;
+  function jsx(type, props, key) {
+    if (key !== undefined) {
+      props = Object.assign({}, props, { key: key });
+    }
+    return React.createElement(type, props);
+  }
+  var jsxRuntime = { jsx: jsx, jsxs: jsx, Fragment: React.Fragment };
+  window.__DeliveryOSVendoredLibs = window.__DeliveryOSVendoredLibs || {};
+  window.require = function (specifier) {
+    if (specifier === 'react') return React;
+    if (specifier === 'react/jsx-runtime' || specifier === 'react/jsx-dev-runtime') return jsxRuntime;
+    if (Object.prototype.hasOwnProperty.call(window.__DeliveryOSVendoredLibs, specifier)) {
+      return window.__DeliveryOSVendoredLibs[specifier];
+    }
+    throw new Error('Cannot resolve "' + specifier + '" in a DeliveryOS preview');
+  };
+})();`;
 
 export interface CompiledPreview {
   html: string;
@@ -298,6 +362,12 @@ async function compileReactPreview(previewEntryPath: string): Promise<CompiledPr
     jsx: 'transform',
     jsxFactory: 'window.__DeliveryOSReactRuntime.React.createElement',
     jsxFragment: 'window.__DeliveryOSReactRuntime.React.Fragment',
+    // Lets a component's own untouched `import { motion } from
+    // 'framer-motion'` (etc.) compile at all -- see VENDORED_LIBRARY_NAMES
+    // and VENDORED_LIBRARY_REQUIRE_SHIM_JS's own doc comments for the full
+    // mechanism. Anything NOT in this list still hits
+    // createDirectorySandboxPlugin's existing rejection exactly as before.
+    external: VENDORED_LIBRARY_NAMES,
     minify: true,
     // esbuild's minifier renames top-level identifiers, which changes a
     // function's own runtime `.name` -- since the harness above reports
@@ -331,6 +401,16 @@ async function compileReactPreview(previewEntryPath: string): Promise<CompiledPr
   const escapeForScriptTag = (js: string) => js.replace(/<\/script/gi, '<\\/script');
   const safeBundledJs = escapeForScriptTag(bundledJs);
   const safeVendoredRuntimeJs = escapeForScriptTag(VENDORED_REACT_RUNTIME_JS);
+  const safeRequireShimJs = escapeForScriptTag(VENDORED_LIBRARY_REQUIRE_SHIM_JS);
+  // Every vendored library is embedded unconditionally, whether or not
+  // THIS particular component actually imports it -- detecting real
+  // per-component usage would mean re-parsing import specifiers just to
+  // decide which scripts to include, for a modest (tens of KB, all local
+  // to this one srcdoc iframe, never sent over a real network) size
+  // saving. Simple and correct beats a premature optimization here.
+  const safeVendoredLibrariesJs = Object.values(VENDORED_LIBRARIES_JS)
+    .map((js) => escapeForScriptTag(js))
+    .join('\n');
 
   // Deliberately NO "min-height: 100vh" on #root below (Phase B's
   // original rule, removed in Phase C) -- this whole HTML string is
@@ -357,6 +437,8 @@ async function compileReactPreview(previewEntryPath: string): Promise<CompiledPr
 <body>
 <div id="root"></div>
 <script>${safeVendoredRuntimeJs}</script>
+<script>${safeRequireShimJs}</script>
+<script>${safeVendoredLibrariesJs}</script>
 <script>${safeBundledJs}</script>
 </body>
 </html>`;
