@@ -6,6 +6,7 @@ import tailwindcss from 'tailwindcss';
 import { previewCachePath } from '../paths';
 import { VENDORED_REACT_RUNTIME_JS } from './vendoredReactRuntime.generated';
 import { VENDORED_LIBRARIES_JS } from './vendoredLibraries.generated';
+import { VENDORED_TAILWIND_PREFLIGHT_CSS } from './vendoredTailwindPreflight.generated';
 import { extractPropsSchemas, findComponentFiles, PropSchemaEntry } from './docgen';
 
 /**
@@ -44,14 +45,22 @@ import { extractPropsSchemas, findComponentFiles, PropSchemaEntry } from './docg
  * this exact in-memory source text, no matter where it ends up living."
  *
  * `preflight` (Tailwind's own global reset -- `border: 0`, `margin: 0`,
- * removing default `<button>`/`<input>` chrome, etc.) is left ON
- * (Tailwind's default): a real Tailwind-authored component's own classes
- * assume that reset already happened in its host app (e.g. a `<button>`
- * with no explicit `border` utility expects the browser's own default
- * button border to already be gone) -- turning it off would leave native
- * browser chrome showing through underneath the intended utility styling,
- * which is a worse, more confusing result than the "no styling at all"
- * bug this function exists to fix.
+ * removing default `<button>`/`<input>` chrome, etc.) is applied via
+ * `VENDORED_TAILWIND_PREFLIGHT_CSS`, NOT Tailwind's own `preflight` core
+ * plugin (explicitly disabled below): that plugin reads its own
+ * package's `lib/css/preflight.css` off disk with a plain
+ * `fs.readFileSync` at RUNTIME (confirmed by hand: this throws `ENOENT`
+ * inside the packaged Node SEA sidecar, which has no node_modules/
+ * tailwindcss directory anywhere near it -- the exact same class of
+ * packaging problem this project already hit for esbuild's native binary
+ * and React's own runtime). `VENDORED_TAILWIND_PREFLIGHT_CSS` is that
+ * exact same file's content, embedded once at build time by
+ * `scripts/generate-vendored-tailwind-preflight.mjs` -- same fix, same
+ * reason. A real Tailwind-authored component's own classes assume this
+ * reset already happened in its host app (e.g. a `<button>` with no
+ * explicit `border` utility expects the browser's own default button
+ * border to already be gone), so it's still applied, just not via
+ * Tailwind's own runtime-file-reading mechanism.
  *
  * Never throws on a source file it can't read/parse in a way that would
  * fail the whole preview -- same "preview fails soft" principle as
@@ -78,9 +87,10 @@ async function generateTailwindCss(resolveDir: string, previewEntryPath: string)
     const result = await postcss([
       tailwindcss({
         content: sourceTexts.map((raw) => ({ raw, extension: 'tsx' as const })),
+        corePlugins: { preflight: false },
       }),
     ]).process('@tailwind base; @tailwind components; @tailwind utilities;', { from: undefined });
-    return result.css;
+    return VENDORED_TAILWIND_PREFLIGHT_CSS + '\n' + result.css;
   } catch {
     // A real Tailwind/PostCSS internal failure shouldn't take down an
     // otherwise-working preview -- same "styling is best-effort, the

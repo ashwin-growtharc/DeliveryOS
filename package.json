@@ -9,18 +9,19 @@
     "node": ">=22.12.0"
   },
   "scripts": {
-    "prepare": "node scripts/generate-vendored-react-runtime.mjs && node scripts/generate-vendored-libraries.mjs",
-    "prebuild": "node scripts/generate-vendored-react-runtime.mjs && node scripts/generate-vendored-libraries.mjs",
+    "prepare": "node scripts/generate-vendored-react-runtime.mjs && node scripts/generate-vendored-libraries.mjs && node scripts/generate-vendored-tailwind-preflight.mjs",
+    "prebuild": "node scripts/generate-vendored-react-runtime.mjs && node scripts/generate-vendored-libraries.mjs && node scripts/generate-vendored-tailwind-preflight.mjs",
     "build": "tsc -p tsconfig.json",
     "dev": "tsx src/index.ts",
-    "pretypecheck": "node scripts/generate-vendored-react-runtime.mjs && node scripts/generate-vendored-libraries.mjs",
+    "pretypecheck": "node scripts/generate-vendored-react-runtime.mjs && node scripts/generate-vendored-libraries.mjs && node scripts/generate-vendored-tailwind-preflight.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --max-warnings 0",
-    "pretest": "node scripts/generate-vendored-react-runtime.mjs && node scripts/generate-vendored-libraries.mjs",
+    "pretest": "node scripts/generate-vendored-react-runtime.mjs && node scripts/generate-vendored-libraries.mjs && node scripts/generate-vendored-tailwind-preflight.mjs",
     "test": "vitest run",
     "build:sidecar": "node scripts/build-sidecar.mjs",
     "generate:vendored-react": "node scripts/generate-vendored-react-runtime.mjs",
-    "generate:vendored-libraries": "node scripts/generate-vendored-libraries.mjs"
+    "generate:vendored-libraries": "node scripts/generate-vendored-libraries.mjs",
+    "generate:vendored-tailwind-preflight": "node scripts/generate-vendored-tailwind-preflight.mjs"
   },
   "dependencies": {
     "@octokit/rest": "^22.0.1",

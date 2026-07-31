@@ -233,6 +233,31 @@ describe('Tailwind CSS generation', () => {
     const { html } = await compilePreviewHtml(previewPath);
     expect(html).not.toMatch(/\.rounded-full/);
   });
+
+  it('includes a real preflight reset even with tailwindcss\'s own preflight.css asset file entirely absent', async () => {
+    // The actual claim this test exists to prove: preflight CSS is
+    // genuinely vendored (VENDORED_TAILWIND_PREFLIGHT_CSS), not just
+    // coincidentally read off disk because the fixture happens to run
+    // inside this monorepo's own node_modules -- mirrors the exact
+    // isolation-testing discipline the "vendored React runtime" test uses
+    // for react/react-dom. This is a real, previously-confirmed bug: the
+    // packaged Node SEA sidecar has no node_modules/tailwindcss directory
+    // at all, and Tailwind's own `preflight` core plugin reads its
+    // package's lib/css/preflight.css with a plain `fs.readFileSync` at
+    // RUNTIME -- confirmed by hand to throw ENOENT inside the real
+    // packaged sidecar exe before this fix. Hiding the file here
+    // reproduces that exact missing-asset condition without needing a
+    // full SEA build in this test.
+    const preflightPath = path.join(repoRoot, 'node_modules', 'tailwindcss', 'lib', 'css', 'preflight.css');
+    const hiddenPath = `${preflightPath}.hidden-for-test`;
+    fs.renameSync(preflightPath, hiddenPath);
+    try {
+      const { html } = await compilePreviewHtml(tailwindStyledPreviewPath);
+      expect(html).toMatch(/box-sizing:\s*border-box/);
+    } finally {
+      fs.renameSync(hiddenPath, preflightPath);
+    }
+  });
 });
 
 describe('compiler-adapter dispatch (Phase B)', () => {

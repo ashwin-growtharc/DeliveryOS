@@ -412,7 +412,14 @@ demonstrably true, not just when every task box is checked.
       `generateTailwindCss`, Tailwind v3's own JIT engine run server-side
       against a component's actual class usage) -- a Tailwind-authored
       component now renders genuinely styled, not just structurally
-      correct — see CHANGELOG.md for the full rationale.
+      correct. Fixed a packaged-sidecar-only follow-up bug: Tailwind's own
+      `preflight` plugin reads a static CSS file off disk at runtime,
+      which doesn't exist inside the packaged Node SEA -- same class of
+      problem as esbuild's native binary and React's own runtime, same
+      fix (`scripts/generate-vendored-tailwind-preflight.mjs` embeds it as
+      a string constant at build time instead). Verified by spawning the
+      actual packaged sidecar exe directly, not just `dist/` under a
+      normal `node` process — see CHANGELOG.md for the full rationale.
   - [x] Broad structural detection (`src/**/*.{tsx,jsx}`, filtered by "returns
         JSX with a co-located `Props` type") — **not** a hardcoded folder-name
         glob (design doc §6, the `src/ui/` flat-convention finding)

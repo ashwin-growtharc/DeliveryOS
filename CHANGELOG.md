@@ -4,6 +4,34 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- **Fixed a real packaged-sidecar-only bug in the Tailwind CSS generation
+  below**: the user restarted the app after that fix shipped and still saw
+  zero styling. Root cause, confirmed by directly spawning the actual
+  packaged sidecar `.exe` and sending it a real `preview.compileLocal`
+  request (not just testing against `dist/` under a normal `node`
+  process, which has real `node_modules` and had masked this entirely):
+  Tailwind's own `preflight` core plugin reads its package's
+  `lib/css/preflight.css` off disk with a plain `fs.readFileSync` at
+  RUNTIME (`node_modules/tailwindcss/lib/corePlugins.js`) -- the packaged
+  Node SEA has no `node_modules` anywhere near it at all, so this threw
+  `ENOENT`, silently caught by `generateTailwindCss`'s own fail-soft catch
+  and degrading to no styling at all. The exact same class of packaging
+  problem this project already hit twice before (esbuild's native binary,
+  React's own runtime) -- same fix: new
+  `scripts/generate-vendored-tailwind-preflight.mjs` reads that one static
+  file once at build time and embeds it as a plain string constant
+  (`VENDORED_TAILWIND_PREFLIGHT_CSS`); `generateTailwindCss` now disables
+  Tailwind's own `preflight` core plugin entirely and prepends this
+  constant instead. New regression test hides the real
+  `preflight.css` file (mirroring the existing "vendored React runtime"
+  isolation test's exact discipline) and confirms preflight CSS still
+  appears in the output. Re-verified by spawning the actual rebuilt
+  packaged sidecar exe again and confirming both a real `.rounded-full`
+  rule and a real preflight `box-sizing: border-box` rule are present,
+  with no stderr errors -- not just re-running the earlier `dist/`-based
+  check, which would not have caught this. Full suite (166 tests) +
+  typecheck + lint all clean.
+
 - **Real Tailwind CSS generation in the preview pipeline.** Found by hand
   (a screenshot of a real Tailwind-authored component's live preview
   showed correct DOM structure -- icons, layout, labels -- but zero visual
