@@ -79,6 +79,77 @@ export async function teardownTestRemote(dir: string): Promise<void> {
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
+/** id/installTarget of the extra `kind: ui-component` artifact seeded by
+ * createTestRemoteWithUiComponentArtifact() -- exposed so tests don't have
+ * to hardcode magic strings. Its payload has a real `Button.tsx` +
+ * `preview.tsx`, needed to exercise Phase E's preview.png generation (which
+ * is gated purely on a preview entry file existing -- none of
+ * TEST_ARTIFACTS' template/doc/config fixtures have one). */
+export const UI_COMPONENT_ARTIFACT = {
+  id: 'test-button',
+  installTarget: 'test-button',
+} as const;
+
+const UI_COMPONENT_TSX = `export interface ButtonProps {
+  label: string;
+}
+
+export function Button({ label }: ButtonProps) {
+  return <button style={{ padding: '8px 16px' }}>{label}</button>;
+}
+`;
+
+const UI_COMPONENT_PREVIEW_TSX = `import { Button } from './Button';
+
+export const Default = () => <Button label="Click me" />;
+`;
+
+function uiComponentManifestYaml(): string {
+  const lines = [
+    `id: ${UI_COMPONENT_ARTIFACT.id}`,
+    `kind: ui-component`,
+    `description: Test ui-component artifact with a real preview.tsx`,
+    `owner: test-team`,
+    `version: 1.0.0`,
+    `tags:`,
+    `  roles: []`,
+    `  teams: []`,
+    `  stacks: []`,
+    `  componentTypes: [button]`,
+    `source_repo: https://example.invalid/test-remote`,
+    `install_target: ${UI_COMPONENT_ARTIFACT.installTarget}`,
+    `review_required: false`,
+  ];
+  return lines.join('\n') + '\n';
+}
+
+/**
+ * Like createTestRemote(), but seeds one additional `kind: ui-component`
+ * artifact (UI_COMPONENT_ARTIFACT) whose payload is a real Button.tsx +
+ * preview.tsx pair -- the shape Phase E's preview.png generation (push.ts's
+ * `maybeRenderPreviewImage`) actually needs to exercise. Kept separate from
+ * createTestRemote() for the same reason
+ * createTestRemoteWithPayloadPathArtifact() is: every pre-existing test
+ * that assumes "exactly 3 seeded artifacts" keeps working unmodified.
+ */
+export async function createTestRemoteWithUiComponentArtifact(): Promise<string> {
+  const dir = await createTestRemote();
+  const git = simpleGit(dir);
+
+  const payloadDir = path.join(dir, 'artifacts', UI_COMPONENT_ARTIFACT.id, 'payload');
+  fs.mkdirSync(payloadDir, { recursive: true });
+  fs.writeFileSync(path.join(payloadDir, 'Button.tsx'), UI_COMPONENT_TSX, 'utf-8');
+  fs.writeFileSync(path.join(payloadDir, 'preview.tsx'), UI_COMPONENT_PREVIEW_TSX, 'utf-8');
+
+  const manifestDir = path.join(dir, 'artifacts', UI_COMPONENT_ARTIFACT.id);
+  fs.writeFileSync(path.join(manifestDir, 'manifest.yaml'), uiComponentManifestYaml(), 'utf-8');
+
+  await git.add('.');
+  await git.commit('seed ui-component test artifact');
+
+  return dir;
+}
+
 /** id/payload_path/install_target of the extra artifact seeded by
  * createTestRemoteWithPayloadPathArtifact(), exposed so tests don't have to
  * hardcode magic strings. Its payload lives at the fixture repo's root

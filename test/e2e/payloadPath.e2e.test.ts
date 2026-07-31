@@ -160,7 +160,14 @@ describe('payload_path e2e', () => {
       ]);
       const diffFiles = diffOutput.split('\n').map((line) => line.trim()).filter(Boolean);
 
-      expect(diffFiles).toEqual([PAYLOAD_PATH_ARTIFACT.payloadPath]);
+      // Phase E: edit-mode push now always bumps + commits manifest.yaml
+      // alongside the payload diff (previously it never touched
+      // manifest.yaml at all -- see push.ts's own doc comment on
+      // PushOptions.bump) -- so the real payload_path file is no longer
+      // the ONLY changed path, just still the only PAYLOAD path.
+      expect(diffFiles.sort()).toEqual(
+        [`artifacts/${PAYLOAD_PATH_ARTIFACT.id}/manifest.yaml`, PAYLOAD_PATH_ARTIFACT.payloadPath].sort(),
+      );
       expect(
         diffFiles.some((f) => f.startsWith(`artifacts/${PAYLOAD_PATH_ARTIFACT.id}/payload/`)),
       ).toBe(false);

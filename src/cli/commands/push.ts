@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import { pushArtifact, PushOptions } from '../../engine/push/push';
+import { VersionBumpKind } from '../../engine/manifest/version';
 
 /** Splits a comma-separated --roles/--teams/--stacks flag into trimmed,
  * lowercased values -- lowercased so "python" and "Python" pushed on
@@ -30,6 +31,24 @@ export interface PushCommandFlags {
   stacks?: string;
   componentTypes?: string;
   postInstall?: string;
+  bump?: string;
+}
+
+const VALID_BUMP_KINDS: readonly string[] = ['patch', 'minor', 'major'];
+
+/** Validates `--bump`'s raw string value against the real
+ * `VersionBumpKind` union -- Commander has no built-in enum-option
+ * validation, so an invalid value (a typo, e.g. `--bump pathc`) would
+ * otherwise silently fall through to `pushArtifact`'s own `options.bump ??
+ * 'patch'` default as a plain string, defeating the point of asking for a
+ * bigger bump at all. Fails loudly here instead, before any network/git
+ * work starts. */
+function parseBumpKind(value?: string): VersionBumpKind | undefined {
+  if (value === undefined) return undefined;
+  if (!VALID_BUMP_KINDS.includes(value)) {
+    throw new Error(`--bump must be one of ${VALID_BUMP_KINDS.join(', ')} (got "${value}")`);
+  }
+  return value as VersionBumpKind;
 }
 
 /** Maps raw commander flags onto the engine's PushOptions shape. Validation
@@ -69,6 +88,7 @@ export function toPushOptions(flags: PushCommandFlags): PushOptions {
     metadataEdit: hasMetadataEdit
       ? { description: flags.description, roles, teams, stacks, componentTypes }
       : undefined,
+    bump: parseBumpKind(flags.bump),
   };
 }
 
@@ -120,6 +140,12 @@ export function registerPushCommand(program: Command): void {
       '--post-install <cmd>',
       'Shell command to run in install_target after a pull (--new only; e.g. "npm install", '
         + '"pip install -e \\".[dev]\\""). Omit if the project needs no setup step.',
+    )
+    .option(
+      '--bump <patch|minor|major>',
+      'Size of the version bump for a payload edit push (--new/metadata-only edits ignore '
+        + 'this entirely). Defaults to "patch" -- a real payload change always bumps the '
+        + 'version, this only lets you choose a bigger bump than the default.',
     )
     .action(async (id: string, flags: PushCommandFlags) => {
       const options = toPushOptions(flags);

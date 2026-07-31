@@ -4,6 +4,66 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- **Phase 6, Phase E — PR preview image + the version-bump fix — Done.**
+  Closes the last two real gaps in UI Components: a proposed/edited
+  component's PR now embeds a real `preview.png`, and edit-mode push can
+  finally bump a component's version at all (previously: never, at all --
+  `manifest.yaml` was never even part of what edit-mode push touched, so
+  `checkForUpdates`/the preview cache could never detect a real edit,
+  silently, forever).
+  - New `src/engine/preview/renderPreviewImage.ts`: compiles a component's
+    preview via the existing `compilePreviewHtml` (the same HTML the live
+    sandboxed iframe already uses) and screenshots it with a real headless
+    browser (`playwright-core`, `channel: 'msedge'` then `'chrome'` as a
+    fallback -- confirmed by hand this dev machine has no Chrome install at
+    all, while Edge launched immediately, and this project is Windows-only
+    today). Screenshots `#root`'s rendered CHILD, not `#root` itself --
+    `#root` is a width-less flex container that otherwise fills the
+    viewport, confirmed by hand as a real bug during development (a
+    near-viewport-width image with the component tiny and centered inside
+    it) before fixing it to crop to the actual component.
+  - Used for BOTH the GUI and CLI push paths, deliberately deviating from
+    the original brainstormed "GUI reuses the Tauri webview" idea -- no
+    such screenshot capability exists in this Tauri app, and building one
+    would mean new, fragile, Windows-only WebView2-specific Rust code for
+    no real benefit over one consistent path that guarantees the GUI and
+    CLI produce the same image for the same source.
+  - New `src/engine/manifest/version.ts` (`bumpVersion`) + a new
+    `PushOptions.bump` field / `--bump patch|minor|major` CLI flag,
+    defaulting to an automatic `patch` bump on any real payload change (a
+    metadata-only edit never bumps at all -- its payload, and therefore its
+    real behavior, hasn't changed). `push.ts`'s edit-mode branch now writes
+    an updated `manifest.yaml` back to the remote cache and commits it --
+    for the first time ever in this branch.
+  - `preview.png` generation is gated purely on a conventional preview
+    entry file existing (`findPreviewEntryFile`), never a `kind` check,
+    matching how `post_install` already works -- runs on both propose-new
+    and edit-mode pushes, regenerating on every real payload change so
+    GitHub's before/after image diff never shows a stale picture. A render
+    failure (a real compile error, no browser installed) never fails the
+    whole push -- same graceful-degradation principle as an unresolved
+    import in the live preview itself.
+  - PR bodies embed the image via a plain markdown `![preview](https://raw.
+    githubusercontent.com/.../<branch>/...)` tag -- confirmed GitHub
+    sanitizes PR bodies/diffs and strips `<iframe>`/`<script>` entirely, so
+    a static image is the only way to show a preview inline at all, live or
+    not. Edit-mode PR titles/bodies now show `vOLD -> vNEW` when a real
+    version bump happened.
+  - New test fixture `createTestRemoteWithUiComponentArtifact` (a real
+    `kind: ui-component` artifact with a real `Button.tsx` + `preview.tsx`)
+    added alongside the existing template/doc/config fixtures, strictly
+    additive -- every pre-existing test that assumes "exactly 3 seeded
+    artifacts" keeps working unmodified.
+  - Updated one existing e2e test (`payloadPath.e2e.test.ts`) whose exact
+    diff-file-list assertion predated this fix -- edit-mode push now always
+    additionally commits `manifest.yaml`, which is correct, expected new
+    behavior, not a regression.
+  - 12 new/updated tests (`bumpVersion`, `renderPreviewImage` against a real
+    headless browser, `prContent`'s version-arrow/image embedding, 5 new
+    `push.ts` e2e tests, 3 new CLI `--bump` parsing tests) + 1 existing test
+    updated for the new expected behavior. Full suite (181 tests) +
+    typecheck + lint all clean.
+
 - **Fixed a real scrollbar-flash bug in the live preview**, found by hand
   once real styling/animation actually worked: clicking a component that
   changes size at runtime (framer-motion's `ExpandedTabs`) briefly showed

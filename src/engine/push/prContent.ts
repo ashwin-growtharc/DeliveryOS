@@ -11,6 +11,13 @@ export interface EditPrContentParams {
   kind: string;
   owner: string;
   version: string;
+  // The version this edit is bumping FROM -- when present, the title/body
+  // show "vOLD -> vNEW" instead of just the new version, so a reviewer can
+  // see at a glance that a real version bump happened (Phase E), not just
+  // that some files changed. Optional so existing callers/tests that never
+  // bump (there are none left in push.ts itself, but this keeps the
+  // function usable standalone) don't have to pass a redundant value.
+  previousVersion?: string;
   gitUserName: string;
   gitUserEmail: string;
   changedFiles: ChangedFile[];
@@ -20,26 +27,36 @@ export interface EditPrContentParams {
   // PR body names the real file/directory instead of a shadow path that
   // was never actually written to.
   payloadRoot?: string;
+  // Fully-formed raw.githubusercontent.com URL for a freshly rendered
+  // preview.png (Phase E), or undefined when no preview entry file exists
+  // for this artifact (see push.ts's maybeRenderPreviewImage). GitHub
+  // sanitizes PR bodies/diffs and strips <iframe>/<script> entirely -- a
+  // plain markdown image tag is the only way to show a preview inline at
+  // all, live or otherwise.
+  previewImageUrl?: string;
 }
 
 /** Builds the PR title/body for an edit-mode push (a diff against an
  * already-tracked artifact). One bullet per changed file, in the same
  * order `computeChangedFiles` returned them. */
 export function buildEditPrContent(params: EditPrContentParams): PrContent {
-  const { id, kind, owner, version, gitUserName, gitUserEmail, changedFiles, payloadRoot } = params;
+  const { id, kind, owner, version, previousVersion, gitUserName, gitUserEmail, changedFiles, payloadRoot, previewImageUrl } = params;
 
-  const title = `[DeliveryOS] Update ${id} (v${version})`;
+  const versionDisplay = previousVersion && previousVersion !== version ? `v${previousVersion} -> v${version}` : `v${version}`;
+  const title = `[DeliveryOS] Update ${id} (${versionDisplay})`;
 
   const root = payloadRoot ?? 'payload';
   const changedFilesLines = changedFiles
     .map((file) => `- ${file.status}: ${path.posix.join(root, file.relPath)}`)
     .join('\n');
 
+  const previewSection = previewImageUrl ? `\n### Preview\n![preview](${previewImageUrl})\n` : '';
+
   const body = `## DeliveryOS push: update \`${id}\`
 
-**Kind:** ${kind}   **Owner:** ${owner}   **Version:** ${version}
+**Kind:** ${kind}   **Owner:** ${owner}   **Version:** ${versionDisplay}
 **Pushed by:** ${gitUserName} <${gitUserEmail}>
-
+${previewSection}
 ### Changed files
 ${changedFilesLines}
 
@@ -130,6 +147,11 @@ export interface ProposeNewPrContentParams {
   // single-file payload (see push.ts's payload_path override), so the PR
   // body names the real committed path instead of a shadow one.
   payloadRoot?: string;
+  // Fully-formed raw.githubusercontent.com URL for a freshly rendered
+  // preview.png (Phase E), or undefined when no preview entry file exists
+  // for this artifact -- see `buildEditPrContent`'s own doc comment for
+  // why this has to be a static image, never a live embed.
+  previewImageUrl?: string;
 }
 
 /** Builds the PR title/body for a propose-new-mode push (a brand-new
@@ -146,6 +168,7 @@ export function buildProposeNewPrContent(params: ProposeNewPrContentParams): PrC
     gitUserEmail,
     payloadFiles,
     payloadRoot,
+    previewImageUrl,
   } = params;
 
   const title = `[DeliveryOS] Propose new artifact: ${id}`;
@@ -156,13 +179,15 @@ export function buildProposeNewPrContent(params: ProposeNewPrContentParams): PrC
     ...payloadFiles.map((relPath) => `- ${path.posix.join(root, relPath)}`),
   ].join('\n');
 
+  const previewSection = previewImageUrl ? `\n### Preview\n![preview](${previewImageUrl})\n` : '';
+
   const body = `## DeliveryOS push: propose new artifact \`${id}\`
 
 **Kind:** ${kind}   **Owner:** ${owner}   **Version:** ${version}
 **Install target:** ${installTarget}
 **Tags:** roles=[${tags.roles.join(', ')}], teams=[${tags.teams.join(', ')}], stacks=[${tags.stacks.join(', ')}], componentTypes=[${tags.componentTypes.join(', ')}]
 **Pushed by:** ${gitUserName} <${gitUserEmail}>
-
+${previewSection}
 ### New files
 ${newFilesLines}
 

@@ -30,6 +30,53 @@ describe('buildEditPrContent', () => {
     expect(content.body).toContain('added: payload/new.txt');
     expect(content.body).toContain('deleted: payload/old.txt');
   });
+
+  it('shows a version arrow when previousVersion differs from version (Phase E)', () => {
+    const content = buildEditPrContent({
+      id: 'welcome-template',
+      kind: 'template',
+      owner: 'test-team',
+      version: '1.0.1',
+      previousVersion: '1.0.0',
+      gitUserName: 'Ashwin B',
+      gitUserEmail: 'ashwin@example.com',
+      changedFiles: [{ relPath: 'README.md', status: 'modified' }],
+    });
+
+    expect(content.title).toContain('v1.0.0 -> v1.0.1');
+    expect(content.body).toContain('v1.0.0 -> v1.0.1');
+  });
+
+  it('embeds the preview image as a markdown image tag when previewImageUrl is set (Phase E)', () => {
+    const content = buildEditPrContent({
+      id: 'welcome-template',
+      kind: 'ui-component',
+      owner: 'test-team',
+      version: '1.0.1',
+      gitUserName: 'Ashwin B',
+      gitUserEmail: 'ashwin@example.com',
+      changedFiles: [{ relPath: 'Button.tsx', status: 'modified' }],
+      previewImageUrl: 'https://raw.githubusercontent.com/acme/repo/deliveryos/welcome-template/123/artifacts/welcome-template/payload/preview.png',
+    });
+
+    expect(content.body).toContain(
+      '![preview](https://raw.githubusercontent.com/acme/repo/deliveryos/welcome-template/123/artifacts/welcome-template/payload/preview.png)',
+    );
+  });
+
+  it('omits the Preview section entirely when no preview image was generated', () => {
+    const content = buildEditPrContent({
+      id: 'welcome-template',
+      kind: 'template',
+      owner: 'test-team',
+      version: '1.0.1',
+      gitUserName: 'Ashwin B',
+      gitUserEmail: 'ashwin@example.com',
+      changedFiles: [{ relPath: 'README.md', status: 'modified' }],
+    });
+
+    expect(content.body).not.toContain('### Preview');
+  });
 });
 
 describe('buildProposeNewPrContent', () => {
@@ -59,5 +106,24 @@ describe('buildProposeNewPrContent', () => {
     expect(content.body).toContain('artifacts/brand-new-artifact/manifest.yaml');
     expect(content.body).toContain('artifacts/brand-new-artifact/payload/README.md');
     expect(content.body).toContain('artifacts/brand-new-artifact/payload/config.yaml');
+  });
+
+  it('embeds the preview image as a markdown image tag when previewImageUrl is set (Phase E)', () => {
+    const content = buildProposeNewPrContent({
+      id: 'brand-new-artifact',
+      kind: 'ui-component',
+      owner: 'platform-team',
+      version: '1.0.0',
+      installTarget: 'brand-new-artifact',
+      tags: { roles: [], teams: [], stacks: [], componentTypes: ['button'] },
+      gitUserName: 'Ashwin B',
+      gitUserEmail: 'ashwin@example.com',
+      payloadFiles: ['Button.tsx', 'preview.tsx'],
+      previewImageUrl: 'https://raw.githubusercontent.com/acme/repo/deliveryos/brand-new-artifact/123/artifacts/brand-new-artifact/payload/preview.png',
+    });
+
+    expect(content.body).toContain(
+      '![preview](https://raw.githubusercontent.com/acme/repo/deliveryos/brand-new-artifact/123/artifacts/brand-new-artifact/payload/preview.png)',
+    );
   });
 });

@@ -451,32 +451,62 @@ demonstrably true, not just when every task box is checked.
   - [x] Route through the **existing** Scan → Review & Propose → wizard
         pipeline (no parallel UI) — Review's live preview becomes a genuine
         visual check, not just a text read
-- [ ] **Phase E — PR preview image + the version-bump fix**
+- [x] **Phase E — PR preview image + the version-bump fix — Done**
       Goal: every proposed or edited UI component's PR contains a real
       preview image (visible both inline in the PR body and in the
       Files-changed diff), and editing an already-pushed component's payload
       can actually bump its version — so `checkForUpdates` and the preview
       cache both correctly detect the change downstream, for every kind, not
       silently only for propose-new.
-  - [ ] Headless-render the default/first CSF variant to `preview.png`,
+  - [x] Headless-render the default/first CSF variant to `preview.png`,
         committed alongside the payload — gated on file-presence
         (`preview.*` exists), not a `kind` check, matching how `post_install`
-        already works
-  - [ ] GUI path reuses the Tauri webview already rendering Review's live
-        preview; CLI path needs a real headless render (Playwright,
-        `channel: 'chrome'` — not bundling its own Chromium)
-  - [ ] PR body embeds the image via `raw.githubusercontent.com/.../<branch>/...`
-  - [ ] **Real gap, must be fixed here, not deferred:** give edit-mode push a
-        way to bump `version` at all — today there is none (manifest.yaml
-        isn't even part of what's copied to `install_target`, so there's no
-        local copy to edit). Without this, `checkForUpdates` can never detect
-        a UI-component edit, and the preview cache (keyed on `id + version`)
-        never invalidates either. A `--bump patch|minor|major` flag / a
-        Detail-Edit-form field, defaulting to an automatic patch bump on any
-        payload-content change, not just metadata.
-  - [ ] Regenerate `preview.png` on edit-mode pushes too, same file-presence
+        already works. New `renderPreviewImage` (`src/engine/preview/`)
+        compiles via the existing `compilePreviewHtml` (the same HTML the
+        live sandboxed iframe uses), loads it in a real headless browser via
+        `playwright-core`, and screenshots `#root`'s rendered CHILD (not
+        `#root` itself, which as a width-less flex container would
+        otherwise fill the full viewport — confirmed by hand). Never fails
+        the whole push (graceful degradation, same principle as an
+        unresolved import in the live preview itself).
+  - [x] **Deviated from the brainstormed plan, deliberately:** used a single
+        Playwright-based render for BOTH the GUI and CLI paths, not "GUI
+        reuses the Tauri webview" — no such capture mechanism exists in this
+        Tauri app, and building one would mean new, fragile, Windows-only
+        WebView2-specific Rust code for no real benefit over one consistent
+        path. Also `channel: 'msedge'` (not `'chrome'`): confirmed by hand
+        that this dev machine has no Chrome install at all, while Edge
+        (Chromium-based, ships with Windows) launched immediately —
+        `'chrome'` stays as a fallback for a machine that has it.
+  - [x] PR body embeds the image via `raw.githubusercontent.com/.../<branch>/...`
+        (a plain markdown image tag — confirmed GitHub sanitizes PR
+        bodies/diffs and strips `<iframe>`/`<script>` entirely, so a static
+        image is the only way to show a preview inline at all, live or not)
+  - [x] **Real gap, fixed:** edit-mode push now bumps `version` — new
+        `bumpVersion` (`src/engine/manifest/version.ts`) + a new
+        `PushOptions.bump` field (`--bump patch|minor|major` CLI flag,
+        defaulting to an automatic `'patch'` bump on any real payload
+        change, never requiring it to be asked for). `manifest.yaml` is now
+        written back to the remote cache and committed in this branch for
+        the first time ever (previously never touched at all). No new GUI
+        control was added for choosing minor/major — the default automatic
+        patch bump covers the actual requirement with zero required UI
+        changes; a future "let a person pick a bigger bump from Detail" is
+        a nice-to-have, not required for this fix.
+  - [x] Regenerate `preview.png` on edit-mode pushes too, same file-presence
         gate — otherwise GitHub's free before/after image diff shows a stale
         picture pretending nothing changed
+      Verified via 12 new/updated tests (bumpVersion, renderPreviewImage
+      against a real headless browser, prContent's version-arrow/image
+      embedding, and 5 push.ts e2e tests covering default patch bump,
+      explicit `--bump minor`, and preview.png generation/regeneration for
+      both propose-new and edit-mode — all against the real git-backed
+      fixture remote this suite already uses, fake Octokit only). Full
+      suite (181 tests) + typecheck + lint all clean. Not yet done: the
+      broader Phase 6 end-to-end tests below (a real GitHub merge + pull
+      round trip) — Phase E's own implementation is complete and tested at
+      the same level as every other phase in this codebase (real git, fake
+      GitHub API), but nothing here has gone through an actual PR merge yet.
 
 ### End-to-end tests (Phase 6 isn't done until all of these pass)
 

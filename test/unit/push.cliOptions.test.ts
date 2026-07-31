@@ -101,4 +101,18 @@ describe('toPushOptions', () => {
     const options = toPushOptions({ remote: 'arcos-poc' });
     expect(options.metadataEdit).toBeUndefined();
   });
+
+  it('parses a valid --bump value onto PushOptions.bump (Phase E)', () => {
+    expect(toPushOptions({ bump: 'minor' }).bump).toBe('minor');
+    expect(toPushOptions({ bump: 'major' }).bump).toBe('major');
+    expect(toPushOptions({ bump: 'patch' }).bump).toBe('patch');
+  });
+
+  it('leaves bump undefined when --bump was never passed, letting pushArtifact apply its own default', () => {
+    expect(toPushOptions({}).bump).toBeUndefined();
+  });
+
+  it('rejects an invalid --bump value loudly instead of silently passing it through', () => {
+    expect(() => toPushOptions({ bump: 'pathc' })).toThrow(/--bump must be one of/);
+  });
 });

@@ -7,6 +7,9 @@ import { cachePath } from '../remote/remoteCache';
 import { resolveArtifact, ProgressCallback } from '../pull/pull';
 import { buildCatalog } from '../catalog/catalog';
 import { ManifestSchema, Manifest } from '../manifest/schema';
+import { bumpVersion, VersionBumpKind } from '../manifest/version';
+import { renderPreviewImage } from '../preview/renderPreviewImage';
+import { findPreviewEntryFile } from '../preview/resolveArtifactPreview';
 import { pristinePath } from '../paths';
 import { computeChangedFiles, listPayloadFiles } from './diff';
 import { buildBranchName } from './branchName';
@@ -68,6 +71,16 @@ export interface PushOptions {
   // manifest.yaml without touching its payload at all. See Detail's Edit
   // button in the app.
   metadataEdit?: MetadataEditOptions;
+  // Payload edit-mode push ONLY (the `else` branch below) -- a metadata-
+  // only edit never bumps version at all (its payload, and therefore its
+  // real behavior, hasn't changed). Defaults to `'patch'` when omitted:
+  // Phase E's fix for a real gap (edit-mode push never touched
+  // `manifest.yaml` at all, so `checkForUpdates`/the preview cache could
+  // never detect a real edit) is that a version bump just HAPPENS on any
+  // real payload change, not something a person has to remember to ask
+  // for -- this field only lets someone choose a bigger bump than the
+  // default, never opt out of bumping entirely.
+  bump?: VersionBumpKind;
 }
 
 export interface PushResult {
@@ -83,6 +96,50 @@ function copyFileInto(srcRoot: string, destRoot: string, relPath: string): void 
   const dest = path.join(destRoot, relPath);
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   fs.copyFileSync(src, dest);
+}
+
+/**
+ * Renders a fresh `preview.png` into `payloadDir` (a real, headless
+ * screenshot of the compiled preview -- see `renderPreviewImage`'s own doc
+ * comment) if it has a conventional preview entry file, and returns its
+ * git-relative commit path -- or `undefined` if no preview entry file
+ * exists at all. Gated purely on file-presence, never a `kind` check
+ * (PLAN.md's Phase E note: "matching how `post_install` already works"),
+ * so any future non-`ui-component` kind that adopts the same `preview.*`
+ * convention gets this for free.
+ *
+ * A render failure (a real compile error in the component, no headless
+ * browser installed on this machine, etc.) does NOT fail the whole push --
+ * same "graceful degradation" principle PLAN.md's own Phase 6 end-to-end
+ * test list already establishes for an unresolved import in the live
+ * preview itself: an artifact whose preview can't be rendered should still
+ * propose/push successfully, just without an image, not be blocked from
+ * existing at all.
+ */
+async function maybeRenderPreviewImage(
+  payloadDir: string,
+  gitRoot: string,
+  onProgress?: ProgressCallback,
+): Promise<string | undefined> {
+  let previewEntryPath: string;
+  try {
+    previewEntryPath = findPreviewEntryFile(payloadDir);
+  } catch {
+    return undefined;
+  }
+
+  onProgress?.('render-preview', 'Rendering preview.png...');
+  try {
+    const png = await renderPreviewImage(previewEntryPath);
+    fs.writeFileSync(path.join(payloadDir, 'preview.png'), png);
+    return path.posix.join(gitRoot, 'preview.png');
+  } catch (err) {
+    onProgress?.(
+      'render-preview',
+      `Could not render preview.png (continuing without one): ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return undefined;
+  }
 }
 
 /**
@@ -247,6 +304,10 @@ export async function pushArtifact(
     onProgress?.('stage', `Staging payload files for "${id}"...`);
     const artifactDir = path.join(cacheDir, 'artifacts', id);
     fs.mkdirSync(artifactDir, { recursive: true });
+    // Single-file payloads (e.g. a lone `.md` skill) have no sibling
+    // directory a preview.tsx could possibly live in -- preview.png
+    // generation only ever applies to the directory-payload branch below.
+    let previewImageGitPath: string | undefined;
     if (payloadIsFile) {
       const fileDestDir = path.join(cacheDir, 'files', id);
       fs.mkdirSync(fileDestDir, { recursive: true });
@@ -262,6 +323,7 @@ export async function pushArtifact(
       for (const relPath of payloadFiles) {
         copyFileInto(options.payloadPath, payloadDestDir, relPath);
       }
+      previewImageGitPath = await maybeRenderPreviewImage(payloadDestDir, `artifacts/${id}/payload`, onProgress);
     }
     fs.writeFileSync(path.join(artifactDir, 'manifest.yaml'), stringifyYaml(manifest), 'utf-8');
 
@@ -269,6 +331,7 @@ export async function pushArtifact(
     filesToCommit = [
       `artifacts/${id}/manifest.yaml`,
       ...payloadFiles.map((relPath) => path.posix.join(payloadGitRoot, relPath)),
+      ...(previewImageGitPath ? [previewImageGitPath] : []),
     ];
     commitMessage = `DeliveryOS push: propose new artifact ${id}`;
 
@@ -283,6 +346,9 @@ export async function pushArtifact(
       gitUserEmail: identity.email,
       payloadFiles,
       payloadRoot: payloadPathOverride ? `files/${id}` : undefined,
+      previewImageUrl: previewImageGitPath
+        ? `https://raw.githubusercontent.com/${ghOwner}/${ghRepo}/${branchName}/${previewImageGitPath}`
+        : undefined,
     });
     prTitle = content.title;
     prBody = content.body;
@@ -380,20 +446,48 @@ export async function pushArtifact(
       }
     }
 
-    filesToCommit = changedFiles.map((change) =>
-      path.posix.join(payloadDestGitRoot, change.relPath),
-    );
+    // Real payload content changed (guaranteed by the NoLocalChangesError
+    // check above) -- bump the manifest's version and write it back, the
+    // actual Phase E fix: edit-mode push never touched manifest.yaml at
+    // all before this, so `checkForUpdates`/the preview cache (both keyed
+    // on version) could never detect a real edit, silently forever. See
+    // PushOptions.bump's own doc comment for why this defaults to 'patch'
+    // rather than requiring an explicit choice.
+    const previousVersion = manifest.version;
+    const newVersion = bumpVersion(previousVersion, options.bump ?? 'patch');
+    const updatedManifest = { ...manifest, version: newVersion };
+    const validatedManifest = ManifestSchema.safeParse(updatedManifest);
+    if (!validatedManifest.success) {
+      const issues = validatedManifest.error.issues
+        .map((issue) => `${issue.path.join('.') || '<root>'}: ${issue.message}`)
+        .join('; ');
+      throw new ManifestValidationError(`Version bump for "${id}" produced an invalid manifest: ${issues}`);
+    }
+    const manifestPath = path.join(cacheDir, 'artifacts', id, 'manifest.yaml');
+    fs.writeFileSync(manifestPath, stringifyYaml(validatedManifest.data), 'utf-8');
+
+    const previewImageGitPath = await maybeRenderPreviewImage(payloadDestDir, payloadDestGitRoot, onProgress);
+
+    filesToCommit = [
+      `artifacts/${id}/manifest.yaml`,
+      ...changedFiles.map((change) => path.posix.join(payloadDestGitRoot, change.relPath)),
+      ...(previewImageGitPath ? [previewImageGitPath] : []),
+    ];
     commitMessage = `DeliveryOS push: update ${id}`;
 
     const content = buildEditPrContent({
       id,
       kind: manifest.kind,
       owner: manifest.owner,
-      version: manifest.version,
+      version: newVersion,
+      previousVersion,
       gitUserName: identity.name,
       gitUserEmail: identity.email,
       changedFiles,
       payloadRoot: manifest.payload_path,
+      previewImageUrl: previewImageGitPath
+        ? `https://raw.githubusercontent.com/${ghOwner}/${ghRepo}/${branchName}/${previewImageGitPath}`
+        : undefined,
     });
     prTitle = content.title;
     prBody = content.body;
