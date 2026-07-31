@@ -525,15 +525,17 @@ function injectPreviewCsp(html: string): string {
  * does not depend on whatever width it currently happens to have --
  * measuring it 100 times in a row against the same content always
  * returns the same number, however many times the parent has resized
- * the iframe in between. Reverted in the same synchronous call, before
- * anything else can observe or paint the intermediate state, so this
- * never visibly disturbs the real layout. (A component whose own
- * top-level element relies on `width: 100%` to fill its container --
- * e.g. a full-bleed animated hero with only absolutely-positioned
- * children, which contribute nothing to a max-content calculation --
- * still measures sanely: max-content on THAT element resolves from its
- * own normal-flow children's intrinsic sizes, same as it would for any
- * other block element.)
+ * the iframe in between. Measured against a detached CLONE of the real
+ * element (see `measurementSandbox` below), not the real element itself
+ * -- see that variable's own doc comment for why mutating the real
+ * element directly (this function's first version) was its own separate,
+ * real, confirmed bug. (A component whose own top-level element relies
+ * on `width: 100%` to fill its container -- e.g. a full-bleed animated
+ * hero with only absolutely-positioned children, which contribute
+ * nothing to a max-content calculation -- still measures sanely:
+ * max-content on THAT element resolves from its own normal-flow
+ * children's intrinsic sizes, same as it would for any other block
+ * element.)
  *
  * `reportSize` also refuses to post a (0, 0) measurement at all -- a
  * distinct, confirmed bug from the wrapping one above, and just as
@@ -559,14 +561,42 @@ function injectContentHeightReporter(html: string): string {
       }
       return document.body;
     }
+    // A dedicated, permanent, never-observed measurement sandbox, attached
+    // to <html> rather than <body> -- deliberately NOT a descendant of
+    // anything the ResizeObserver below watches (document.body, or
+    // widthMeasureTarget()'s real element). measureIntrinsicWidth clones
+    // the real element INTO this container to measure it, rather than
+    // mutating the real element's own style directly (the previous
+    // version of this function) -- mutating an element the observer is
+    // actively watching, even synchronously reverted before returning,
+    // is a real, confirmed source of corruption: the real running app
+    // (WebView2, not the Chromium build used to develop/verify this fix)
+    // showed the exact old wrapping-collapse symptom (one character per
+    // line) return AFTER this file's own ResizeObserver re-subscription
+    // fix -- i.e. wiring the observer to watch the real element directly
+    // (correct, and necessary for the "different every refresh" fix) is
+    // exactly what put that same element back in the observer's own
+    // measurement path, and WebView2 evidently does not handle
+    // self-mutation-during-callback as gracefully as the Chromium build
+    // this was checked against. A detached clone removes the entire
+    // hazard category regardless of any given engine's specific
+    // ResizeObserver loop-detection heuristics -- nothing the observer
+    // watches is ever touched by measurement.
+    var measurementSandbox = document.createElement('div');
+    measurementSandbox.style.position = 'fixed';
+    measurementSandbox.style.top = '0';
+    measurementSandbox.style.left = '0';
+    measurementSandbox.style.visibility = 'hidden';
+    measurementSandbox.style.pointerEvents = 'none';
+    document.documentElement.appendChild(measurementSandbox);
+
     function measureIntrinsicWidth(el) {
-      var prevWidth = el.style.width;
-      var prevMaxWidth = el.style.maxWidth;
-      el.style.width = 'max-content';
-      el.style.maxWidth = 'none';
-      var width = el.scrollWidth;
-      el.style.width = prevWidth;
-      el.style.maxWidth = prevMaxWidth;
+      var clone = el.cloneNode(true);
+      clone.style.width = 'max-content';
+      clone.style.maxWidth = 'none';
+      measurementSandbox.appendChild(clone);
+      var width = clone.scrollWidth;
+      measurementSandbox.removeChild(clone);
       return width;
     }
     var observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(reportSize) : null;

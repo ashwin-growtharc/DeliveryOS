@@ -449,6 +449,32 @@ describe('injectContentHeightReporter (dynamic card sizing)', () => {
     expect(html).toContain('observedWidthTarget');
     expect(html).toMatch(/if\s*\(\s*observer\s*&&\s*target\s*!==\s*observedWidthTarget\s*\)/);
   });
+
+  it('measures width against a detached clone, never by mutating the real (observed) element (a real, confirmed bug)', async () => {
+    // Regression guard for a bug the fix above directly caused: once the
+    // ResizeObserver was correctly upgraded to watch the REAL rendered
+    // element (not just document.body), measureIntrinsicWidth's old
+    // technique -- temporarily setting THAT SAME element's own
+    // style.width to 'max-content', reading scrollWidth, then reverting
+    // it -- meant the observer's own callback was now mutating the exact
+    // element the observer itself was watching. Synchronously reverting
+    // before the callback returns is spec-legal and worked fine in the
+    // Chromium build used to develop/verify this fix, but the real
+    // running app (WebView2, a different engine/version) does not handle
+    // this as gracefully: the old one-character-per-line collapse bug
+    // came BACK, confirmed by hand in the real app, immediately after
+    // landing the ResizeObserver re-subscription fix -- not a stale
+    // build; the served preview's own cached output was confirmed (by
+    // hand) to already contain that fix's code. Measuring against a
+    // cloned element in a dedicated, never-observed sandbox removes the
+    // whole self-mutation-during-callback hazard category regardless of
+    // any given engine's specific ResizeObserver loop-detection
+    // heuristics -- nothing the observer watches is ever touched.
+    const { html } = await compilePreviewHtml(previewPath);
+    expect(html).toContain('measurementSandbox');
+    expect(html).toContain('cloneNode');
+    expect(html).not.toMatch(/el\.style\.width\s*=\s*'max-content'/);
+  });
 });
 
 describe('getOrCompilePreview caching (Phase B)', () => {

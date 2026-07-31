@@ -4,6 +4,28 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- Fixed the previous fix: re-subscribing the ResizeObserver to the real
+  rendered element (see the entry just below) put that element back in
+  the observer's own measurement path -- `measureIntrinsicWidth` was
+  temporarily setting THAT SAME element's `style.width` to `max-content`
+  to measure it, then reverting. Synchronously reverting before the
+  callback returns is spec-legal and worked fine in the Chromium build
+  used to develop/verify the previous fix, but the real running app
+  (WebView2, a different engine/version) does not handle self-mutation-
+  during-callback as gracefully: the old one-character-per-line collapse
+  came back, confirmed in the real app immediately after that fix landed
+  -- and confirmed NOT to be a stale build/cache this time (the actual
+  served preview's cached output was checked by hand and already
+  contained the previous fix's code). Fixed by measuring against a
+  detached clone of the element instead, in a dedicated sandbox container
+  attached to `<html>` that the ResizeObserver never watches -- nothing
+  the observer watches is ever touched by measurement, regardless of any
+  given engine's specific loop-detection heuristics. Chrome could not
+  reproduce this bug either before or after the fix (confirmed multiple
+  times this session), so verification here is necessarily code-review +
+  reasoning about the mechanism, not a Chrome repro -- this one needs
+  confirmation against the real WebView2 app specifically.
+
 - Fixed a real, confirmed bug behind a user report of "different style on
   every refresh" for the UI Components preview pipeline: the
   `ResizeObserver` that reports a component's real content size was set
