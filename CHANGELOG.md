@@ -4,6 +4,35 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- Fixed two real gaps in Phase D's auto-scaffolded `preview.tsx` found by
+  hand while testing Scan against a real project: a required prop with no
+  default and no better inference always fell back to a placeholder
+  assuming string/boolean/number, which was wrong two ways. (1) A required
+  string-LITERAL-UNION prop (`variant: 'primary' | 'secondary'`) got an
+  empty string -- genuinely invalid for that type, not one of its own
+  allowed literals. Fixed by reusing `parseEnumValues` (newly exported
+  from `docgen.ts`) to pick the union's own first member instead. (2) A
+  plain required string prop with no default (e.g. `label: string`) also
+  got an empty string, which renders as invisible/blank content in the
+  live preview -- exactly what made a scanned `Button` component's Review
+  preview look "dead": a real button was rendering with no visible label
+  at all, easy to mistake for a broken preview rather than an unfinished
+  placeholder. Fixed by using the prop's own name, capitalized, instead
+  (`label` -> `"Label"`). Also fixed a related bug this surfaced: a
+  required FUNCTION-typed prop (`onActivate: () => void`) fell into the
+  same string-placeholder branch, which is worse than blank -- a
+  component that actually calls the prop would throw "onActivate is not a
+  function" the moment someone interacts with the Review preview, not
+  just render statically. Fixed with a real, callable no-op (`() => {}`)
+  instead -- still never fabricating actual behavior (an optional
+  callback prop like a real `onClick` stays intentionally un-wired, left
+  for Review to fill in by hand, per this scaffold's existing "starting
+  point, not a finished demo" discipline). 2 new unit tests; full suite
+  (160 tests) + typecheck + lint all clean. Verified by hand: regenerated
+  the auto-scaffolded preview for a real `Button` component in a real
+  test project, confirmed it now renders with a visible "Label" instead
+  of blank.
+
 - **Phase D — Scan integration, completed.** Wired `detectUiComponentCandidates`
   (below) into `scanForNewArtifacts` (`scan.ts` now calls it alongside the
   four existing markdown-backed kinds and merges results into one array --

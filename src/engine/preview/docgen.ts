@@ -140,8 +140,16 @@ function toPropSchemaEntry(prop: PropItem): PropSchemaEntry {
  * else (booleans, numbers, `string | number`, arbitrary object types)
  * yields `undefined` so the controls panel falls back to a plain
  * text/boolean input instead of misreading a non-enum union as one.
+ *
+ * Exported (not just used internally by `toPropSchemaEntry` above) so
+ * `detectUiComponents.ts`'s auto-scaffolded `preview.tsx` can pick a real
+ * member of a required string-literal-union prop as its placeholder value,
+ * instead of the empty string `placeholderForType` would otherwise fall
+ * back to -- an empty string is a genuinely invalid value for a union
+ * type (not even one of the type's own allowed literals), which a plain
+ * "any required prop with no default gets ''" rule would silently produce.
  */
-function parseEnumValues(typeName: string): string[] | undefined {
+export function parseEnumValues(typeName: string): string[] | undefined {
   const parts = typeName.split('|').map((part) => part.trim());
   const isStringLiteralUnion = parts.length > 1 && parts.every((part) => /^"[^"]*"$/.test(part));
   if (!isStringLiteralUnion) {

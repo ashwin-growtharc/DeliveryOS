@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { ComponentDoc, PropItem } from 'react-docgen-typescript';
-import { parseComponentFile } from '../preview/docgen';
+import { parseComponentFile, parseEnumValues } from '../preview/docgen';
 import { scanStagingDir } from '../paths';
 import { ScanCandidate } from './types';
 
@@ -399,10 +399,16 @@ function findEscapingImportWarnings(filePath: string, source: string, allowedRoo
  * style convention (see `test/fixtures/preview-spike/Button/preview.tsx`):
  * a plain import of the component plus one `Default` export rendering it.
  * Only REQUIRED props get a value -- optional props are simply omitted,
- * relying on the component's own defaults -- and each required prop's
- * value comes from its docgen `defaultValue` if one happens to be present,
- * else a type-based placeholder (`''` for string, `false` for boolean,
- * `0` for number and anything else). Deliberately not cleverer than that:
+ * relying on the component's own defaults (a real callback prop like
+ * `onClick` is never auto-wired to a fake handler, even when required in
+ * principle it would need one -- inventing behavior a person didn't write
+ * is a different, riskier kind of guess than a placeholder value). Each
+ * required prop's value comes from its docgen `defaultValue` if one
+ * happens to be present, a real member of its own string-literal union if
+ * it has one (`parseEnumValues`), else a type-based placeholder (the
+ * prop's own name, capitalized, for a plain string -- never an empty
+ * string, which renders as invisible content; `false` for boolean, `0`
+ * for number). Deliberately not cleverer than that:
  * this is a starting point for Review to edit, the same "AI guessed,
  * review before proposing" spirit as every other guessed field in scan.
  */
@@ -451,7 +457,31 @@ function literalForProp(prop: PropItem): string {
   if (prop.defaultValue?.value !== undefined) {
     return serializeDefaultValue(String(prop.defaultValue.value), prop.type.name);
   }
-  return placeholderForType(prop.type.name);
+  // A required string-literal-union prop (`variant: 'primary' | 'secondary'`)
+  // with no default falls through to placeholderForType's plain-string
+  // branch unless checked first -- and an empty string is a genuinely
+  // INVALID value for a union type (not one of its own allowed literals),
+  // not just an uninformative one. Picking the union's own first member
+  // instead is always valid input, not just a nicer-looking placeholder.
+  const enumValues = parseEnumValues(prop.type.name);
+  if (enumValues && enumValues.length > 0) {
+    return JSON.stringify(enumValues[0]);
+  }
+  // A function-typed required prop (`onActivate: () => void`) needs a
+  // real, callable placeholder -- the plain-string branch in
+  // placeholderForType would otherwise hand it a STRING (the capitalized
+  // prop name), which is worse than the old empty-string bug this whole
+  // function exists to fix: a component that actually CALLS the prop
+  // (`onClick={onActivate}`, then a real click) would throw "onActivate is
+  // not a function" the moment someone interacts with the Review preview,
+  // not just render blank. A no-op arrow function is syntactically valid
+  // and safe to call, without fabricating any real BEHAVIOR (a materially
+  // different, riskier kind of guess this codebase deliberately avoids --
+  // see buildInferredPropsSource's own doc comment).
+  if (prop.type.name.includes('=>')) {
+    return '() => {}';
+  }
+  return placeholderForType(prop.type.name, prop.name);
 }
 
 /** `react-docgen-typescript` (with `savePropValueAsString`) stores a
@@ -468,12 +498,25 @@ function serializeDefaultValue(rawValue: string, typeName: string): string {
   return JSON.stringify(rawValue);
 }
 
-function placeholderForType(typeName: string): string {
+/**
+ * Type-based placeholder for a required prop with no default and no enum
+ * to pick from -- `propName` (the actual prop's own name, e.g. `label`)
+ * becomes the string placeholder itself (capitalized: `label` -> `'Label'`)
+ * rather than an empty string. An empty string technically satisfies a
+ * `string` prop's type, but renders as genuinely blank/invisible content in
+ * the live preview -- exactly the kind of "looks broken, not just
+ * unfinished" first impression a Review-step live preview exists to avoid
+ * (a person can't tell "this is a real bug" from "this is an unfilled
+ * placeholder" when a component renders literally empty). Still just a
+ * best-effort starting point for Review to edit, same as every other
+ * guessed value here -- not an attempt to guess the "real" intended text.
+ */
+function placeholderForType(typeName: string, propName: string): string {
   if (typeName === 'boolean') {
     return 'false';
   }
   if (typeName === 'number') {
     return '0';
   }
-  return "''";
+  return JSON.stringify(propName.charAt(0).toUpperCase() + propName.slice(1));
 }

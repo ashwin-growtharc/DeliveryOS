@@ -70,8 +70,10 @@ describe('detectUiComponentCandidates', () => {
     const previewSource = fs.readFileSync(previewPath, 'utf-8');
     expect(previewSource).toContain("import { Button } from './Button';");
     // `label` is required (no default in the destructuring) and has no
-    // docgen defaultValue -- falls back to the string placeholder.
-    expect(previewSource).toContain("label: ''");
+    // docgen defaultValue -- falls back to the string placeholder, the
+    // prop's own name capitalized ("Label"), not an empty string (which
+    // would render as invisible content in the live preview).
+    expect(previewSource).toContain('label: "Label"');
     // `variant` is optional -- omitted from the stub entirely.
     expect(previewSource).not.toContain('variant:');
     expect(previewSource).toContain('export const Default = () => <Button {...inferredProps} />;');
@@ -257,6 +259,51 @@ describe('detectUiComponentCandidates', () => {
       const button = candidates.find((c) => c.id === 'ui-button')!;
       expect(button.warnings).toBeDefined();
       expect(button.warnings!.some((w) => w.includes('./theme'))).toBe(true);
+    });
+  });
+
+  describe('scaffolded preview.tsx placeholder quality', () => {
+    it('picks a real member of a required string-literal-union prop, never an empty string', () => {
+      // An empty string is genuinely INVALID for a union type (not one of
+      // its own allowed literals) -- confirmed by hand against a real
+      // scaffolded preview.tsx for a component whose only required prop
+      // was a 'primary' | 'secondary' union: this exact bug produced
+      // `variant: ''`, rendering the component in neither valid state.
+      const cwd = project();
+      writeFile(
+        cwd,
+        'src/ui/Tag/Tag.tsx',
+        "export interface TagProps {\n  tone: 'info' | 'danger';\n}\n\nexport function Tag({ tone }: TagProps) {\n  return <span data-tone={tone}>tag</span>;\n}\n",
+      );
+
+      detectUiComponentCandidates(cwd, alwaysNew);
+
+      const previewSource = fs.readFileSync(path.join(cwd, 'src', 'ui', 'Tag', 'preview.tsx'), 'utf-8');
+      expect(previewSource).toContain('tone: "info"');
+    });
+
+    it('gives a required callback prop a real, callable no-op placeholder, never a string', () => {
+      // Confirmed by hand: without this, a required function-typed prop
+      // fell into the plain-string placeholder branch (the capitalized
+      // prop name) -- syntactically valid but WRONG for a function type.
+      // A component that actually calls the prop (`onClick={onActivate}`,
+      // then a real click in the Review preview) would throw "onActivate
+      // is not a function" the moment someone interacts with it, not just
+      // render blank. `() => {}` is a real, callable, harmless no-op --
+      // safe to call, without fabricating any actual BEHAVIOR (a
+      // materially riskier kind of guess this codebase deliberately
+      // avoids, per buildInferredPropsSource's own doc comment).
+      const cwd = project();
+      writeFile(
+        cwd,
+        'src/ui/Clicker/Clicker.tsx',
+        'export interface ClickerProps {\n  onActivate: () => void;\n}\n\nexport function Clicker({ onActivate }: ClickerProps) {\n  return <button onClick={onActivate}>Go</button>;\n}\n',
+      );
+
+      detectUiComponentCandidates(cwd, alwaysNew);
+
+      const previewSource = fs.readFileSync(path.join(cwd, 'src', 'ui', 'Clicker', 'preview.tsx'), 'utf-8');
+      expect(previewSource).toContain('onActivate: () => {}');
     });
   });
 });
