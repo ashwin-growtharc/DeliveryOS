@@ -901,7 +901,7 @@
       frame.innerHTML = '';
       const placeholder = document.createElement('span');
       placeholder.className = 'ui-component-preview-loading';
-      placeholder.textContent = 'Preview unavailable';
+      placeholder.textContent = `Preview unavailable -- ${err instanceof Error ? err.message : String(err)}`;
       frame.appendChild(placeholder);
     }
   }
@@ -973,7 +973,7 @@
       frame.innerHTML = '';
       const placeholder = document.createElement('span');
       placeholder.className = 'ui-component-preview-loading';
-      placeholder.textContent = 'Preview unavailable';
+      placeholder.textContent = `Preview unavailable -- ${err instanceof Error ? err.message : String(err)}`;
       frame.appendChild(placeholder);
       return;
     }
@@ -2257,7 +2257,7 @@
       frame.innerHTML = '';
       const placeholder = document.createElement('span');
       placeholder.className = 'ui-component-preview-loading';
-      placeholder.textContent = 'Preview unavailable';
+      placeholder.textContent = `Preview unavailable -- ${err instanceof Error ? err.message : String(err)}`;
       frame.appendChild(placeholder);
       return;
     }

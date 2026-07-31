@@ -393,7 +393,16 @@ demonstrably true, not just when every task box is checked.
       tests (`test/unit/detectUiComponents.test.ts`) + 1 new e2e test
       proving the `scanForNewArtifacts` wiring itself (not just the detector
       module alone) + 2 new `compileLocalPreview` unit tests; full suite
-      (158 tests) + typecheck + lint all clean.
+      (160 tests) + typecheck + lint all clean. Follow-up fixes from
+      hand-testing against a real project: the auto-scaffold's
+      required-prop placeholders (empty string / invalid enum value / a
+      string where a callback was needed), and every "Preview unavailable"
+      placeholder now shows the real underlying error instead of
+      swallowing it. New skill, `.claude/skills/ui-component-extractor/SKILL.md`,
+      documents how to ingest a found/pasted component (react-import fix,
+      promoting an unexported-but-real component to be the file's actual
+      export, hand-written realistic-data `preview.tsx`) so Scan picks it
+      up correctly — see CHANGELOG.md for the full rationale.
   - [x] Broad structural detection (`src/**/*.{tsx,jsx}`, filtered by "returns
         JSX with a co-located `Props` type") — **not** a hardcoded folder-name
         glob (design doc §6, the `src/ui/` flat-convention finding)

@@ -4,6 +4,39 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- Surfaced the real compile/parse error in every "Preview unavailable"
+  placeholder (`loadUiComponentPreview`, `loadDetailPreview`,
+  `loadAddNewReviewPreview` in `app.js`) instead of discarding it --
+  found while hand-testing Scan against a real project, where a
+  component with a genuinely unresolved import (a plain `import React
+  from 'react'` against DeliveryOS's vendored-React pipeline, which has
+  no real `react` package on disk at compile time) just showed a bare
+  "Preview unavailable" with no way to tell why. Now shows
+  `Preview unavailable -- <message>`, reusing the same
+  `err instanceof Error ? err.message : String(err)` pattern already
+  used for toasts elsewhere in this file. Added text-wrapping/padding to
+  `.ui-component-preview-loading` so a real error message doesn't clip
+  inside the (possibly narrow) preview frame.
+
+- Added a new skill, `.claude/skills/ui-component-extractor/SKILL.md`,
+  documenting the process for ingesting an arbitrary pasted/found React
+  UI component (from v0, 21st.dev, shadcn, Aceternity, etc.) into a
+  DeliveryOS project so it both compiles and is correctly picked up by
+  `deliveryos scan`: promote the real props-bearing component to be the
+  file's own export when the pasted source is a zero-prop demo wrapper
+  around an unexported internal component (a real, confirmed Scan false
+  negative -- `react-docgen-typescript` never documents unexported
+  symbols, no parser option overrides this), apply the established
+  mechanical react-import fix, leave every other (genuinely third-party)
+  import untouched, and hand-write `preview.tsx` with realistic example
+  data instead of relying on the auto-scaffold's bare type-based
+  placeholders. Includes a full worked Dropdown example and a verified
+  real-world case (`ExpandedTabs`, restructured out of a `Tabs2` demo
+  wrapper in a real test project -- confirmed via a direct
+  `react-docgen-typescript` probe that the original file produced zero
+  component docs, and that `deliveryos scan` found it with zero warnings
+  immediately after the restructure).
+
 - Fixed two real gaps in Phase D's auto-scaffolded `preview.tsx` found by
   hand while testing Scan against a real project: a required prop with no
   default and no better inference always fell back to a placeholder
