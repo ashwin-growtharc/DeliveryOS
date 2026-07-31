@@ -407,7 +407,12 @@ demonstrably true, not just when every task box is checked.
       `class-variance-authority`) is now vendored the same way React is,
       via `scripts/generate-vendored-libraries.mjs` -- a component
       importing one of these needs no workaround at all; anything else
-      still fails with a real, honest unresolved-import error — see CHANGELOG.md for the full rationale.
+      still fails with a real, honest unresolved-import error. Real
+      Tailwind CSS is now also generated at compile time (`compile.ts`'s
+      `generateTailwindCss`, Tailwind v3's own JIT engine run server-side
+      against a component's actual class usage) -- a Tailwind-authored
+      component now renders genuinely styled, not just structurally
+      correct — see CHANGELOG.md for the full rationale.
   - [x] Broad structural detection (`src/**/*.{tsx,jsx}`, filtered by "returns
         JSX with a co-located `Props` type") — **not** a hardcoded folder-name
         glob (design doc §6, the `src/ui/` flat-convention finding)

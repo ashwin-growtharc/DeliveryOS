@@ -105,8 +105,16 @@ export function extractPropsSchemas(
  * that same assumption or it would silently find zero siblings and
  * degrade to an empty (but not erroring) schema for a perfectly valid
  * authoring layout.
+ *
+ * Exported (not just used internally by `extractPropsSchemas`) so
+ * `compile.ts`'s Tailwind CSS generation can reuse the exact same
+ * "every .tsx/.jsx file in this payload directory" discovery -- it needs
+ * every sibling's raw source text to scan for class names, not just the
+ * ones docgen itself cares about. Pass `''` for `excludeBasename` there
+ * (a name no real file ever has) to include every file with none
+ * excluded, rather than adding a second, subtly-different traversal.
  */
-function findComponentFiles(dir: string, excludeBasename: string): string[] {
+export function findComponentFiles(dir: string, excludeBasename: string): string[] {
   const found: string[] = [];
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     if (entry.name === 'node_modules' || entry.name.startsWith('.')) {

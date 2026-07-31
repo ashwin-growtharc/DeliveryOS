@@ -208,6 +208,33 @@ describe('vendored UI-kit libraries (framer-motion, clsx, etc.)', () => {
   });
 });
 
+describe('Tailwind CSS generation', () => {
+  const tailwindStyledPreviewPath = path.join(
+    __dirname, '..', 'fixtures', 'preview-spike', 'TailwindStyled', 'preview.tsx',
+  );
+
+  it('generates real CSS rules for a Tailwind-authored component, not just inert class names', async () => {
+    const { html } = await compilePreviewHtml(tailwindStyledPreviewPath);
+
+    // Chip.tsx uses rounded-full/bg-indigo-600/px-3/py-1/text-white -- this
+    // checks the actual generated declarations exist, not just that the
+    // class name string appears (which it always would, straight from the
+    // component's own source getting bundled in regardless of any CSS
+    // generation at all).
+    expect(html).toMatch(/\.rounded-full\s*\{[^}]*border-radius:\s*9999px/);
+    expect(html).toMatch(/\.bg-indigo-600\s*\{[^}]*background-color:\s*rgb\(79 70 229/);
+  });
+
+  it('a component using no Tailwind classes at all still compiles with no extra Tailwind CSS bloat', async () => {
+    // Button.tsx (the Phase A fixture) uses inline `style={{...}}`, never a
+    // className -- Tailwind's own scanner should find nothing to generate
+    // beyond its always-present base custom-property declarations, not
+    // silently fail or throw.
+    const { html } = await compilePreviewHtml(previewPath);
+    expect(html).not.toMatch(/\.rounded-full/);
+  });
+});
+
 describe('compiler-adapter dispatch (Phase B)', () => {
   it('routes a .tsx preview through the React adapter', async () => {
     const { html } = await compilePreviewHtml(previewPath);

@@ -4,6 +4,34 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- **Real Tailwind CSS generation in the preview pipeline.** Found by hand
+  (a screenshot of a real Tailwind-authored component's live preview
+  showed correct DOM structure -- icons, layout, labels -- but zero visual
+  styling: no rounding, background, spacing, blur, shadow). An independent
+  agent investigation confirmed the root cause: `compileReactPreview`
+  never had a CSS build step at all -- no `tailwindcss`/`postcss`
+  dependency, no `tailwind.config`/`postcss.config` anywhere in the repo,
+  esbuild only ever bundled JS/TSX. New `generateTailwindCss` in
+  `compile.ts` runs Tailwind v3's own JIT engine (via `postcss` +
+  `tailwindcss`'s `content: [{ raw, extension }]` API -- scans in-memory
+  source text directly, no real file globs needed) against every sibling
+  `.tsx`/`.jsx` file in a component's payload directory (reusing
+  `findComponentFiles`, newly exported from `docgen.ts`), and injects the
+  resulting CSS as a `<style>` tag. Unlike the vendored JS libraries
+  above, this runs entirely server-side in the sidecar process itself (no
+  browser-side vendoring needed) and required no separate generation
+  script: `build-sidecar.mjs`'s existing esbuild bundle already inlines
+  every real dependency of `sidecar.ts`'s import graph. Preflight
+  (Tailwind's own reset) is left on, matching what a real Tailwind-hosted
+  component already assumes. Fails soft to no extra CSS (never breaks an
+  otherwise-working preview) if a sibling file can't be read or Tailwind
+  itself throws. Verified against the real `ExpandedTabs` component in a
+  real test project via both a direct compile (confirmed generated CSS
+  rules like `.rounded-full { border-radius: 9999px }` are present) and a
+  real browser screenshot/click showing the fully-styled, correctly
+  animated result. 2 new unit tests; full suite (165 tests) + typecheck +
+  lint all clean.
+
 - **Vendored a short allow-list of common UI-kit libraries** --
   `framer-motion`, `clsx`, `tailwind-merge`, `class-variance-authority` --
   the same way React itself is already vendored, so a real pasted

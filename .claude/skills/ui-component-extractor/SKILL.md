@@ -102,6 +102,13 @@ imports, `framer-motion`, `clsx`, icon libraries, etc. If one of those
 can't resolve in DeliveryOS's sandboxed compile, that's real, useful
 signal for Review — don't try to strip or shim it away here.
 
+Tailwind utility classes need no workaround at all: `compileReactPreview`
+(`compile.ts`) generates real CSS at compile time from the component's own
+class usage (via Tailwind's own JIT engine, run server-side against the
+component's raw source — see `generateTailwindCss`), so a component
+styled entirely with Tailwind classes renders fully styled, not just
+structurally correct.
+
 ### 3. Place the file
 
 `src/ui/<ComponentName>/<ComponentName>.tsx` — a dedicated folder per

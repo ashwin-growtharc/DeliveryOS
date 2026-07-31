@@ -1,10 +1,93 @@
 import * as esbuild from 'esbuild';
 import * as fs from 'fs';
 import * as path from 'path';
+import postcss from 'postcss';
+import tailwindcss from 'tailwindcss';
 import { previewCachePath } from '../paths';
 import { VENDORED_REACT_RUNTIME_JS } from './vendoredReactRuntime.generated';
 import { VENDORED_LIBRARIES_JS } from './vendoredLibraries.generated';
-import { extractPropsSchemas, PropSchemaEntry } from './docgen';
+import { extractPropsSchemas, findComponentFiles, PropSchemaEntry } from './docgen';
+
+/**
+ * Real Tailwind CSS, generated at compile time from whatever utility
+ * class names a component's own source actually uses -- found while
+ * hand-testing Scan against a real project: a Tailwind-authored
+ * component (left completely untouched, per
+ * .claude/skills/ui-component-extractor/SKILL.md) rendered with correct
+ * DOM structure but ZERO visual styling, since nothing in this pipeline
+ * had ever generated CSS for those classes at all (confirmed: no
+ * tailwind.config/postcss.config existed anywhere in this repo before
+ * this function).
+ *
+ * Runs entirely server-side, in the sidecar process itself -- unlike
+ * `VENDORED_LIBRARIES_JS` (a browser-side concern, since those libraries'
+ * OWN code has to run inside the compiled preview's iframe),
+ * `tailwindcss`/`postcss` never execute in the browser at all; they just
+ * produce a plain CSS string here, which gets embedded as a `<style>`
+ * tag like any other static content. This is also why no separate
+ * "vendoring" generation script is needed the way React/framer-motion
+ * needed one: `build-sidecar.mjs`'s own esbuild bundle already inlines
+ * every real dependency of `sidecar.ts`'s import graph (nothing is
+ * marked `external` there except esbuild itself, for its own unrelated
+ * reason) -- `tailwindcss`/`postcss` are genuinely Node-side code, so
+ * that same bundle step packages them in automatically.
+ *
+ * Uses Tailwind's own documented `content: [{ raw, extension }]` shape
+ * (v3's JIT scanner) rather than a real file-glob `content` pattern --
+ * this function already has every sibling file's text in hand (via
+ * `findComponentFiles`, the same "every .tsx/.jsx file in this payload
+ * directory" discovery `extractPropsSchemas` already uses) and there is
+ * no on-disk config to point a glob at anyway for a component that was
+ * never authored with Tailwind's own build tooling in mind. Deliberately
+ * pinned to Tailwind v3 (not v4): v4's default content-detection scans
+ * real files on disk (via `@source`), which doesn't fit "generate CSS for
+ * this exact in-memory source text, no matter where it ends up living."
+ *
+ * `preflight` (Tailwind's own global reset -- `border: 0`, `margin: 0`,
+ * removing default `<button>`/`<input>` chrome, etc.) is left ON
+ * (Tailwind's default): a real Tailwind-authored component's own classes
+ * assume that reset already happened in its host app (e.g. a `<button>`
+ * with no explicit `border` utility expects the browser's own default
+ * button border to already be gone) -- turning it off would leave native
+ * browser chrome showing through underneath the intended utility styling,
+ * which is a worse, more confusing result than the "no styling at all"
+ * bug this function exists to fix.
+ *
+ * Never throws on a source file it can't read/parse in a way that would
+ * fail the whole preview -- same "preview fails soft" principle as
+ * `extractPropsSchemas`'s own degrade-to-`{}` on a bad sibling file,
+ * applied here to "degrade to no extra CSS," never "degrade to no
+ * preview at all."
+ */
+async function generateTailwindCss(resolveDir: string, previewEntryPath: string): Promise<string> {
+  const files = [previewEntryPath, ...findComponentFiles(resolveDir, '')];
+  const sourceTexts: string[] = [];
+  for (const file of files) {
+    try {
+      sourceTexts.push(fs.readFileSync(file, 'utf-8'));
+    } catch {
+      // Same "one bad sibling file shouldn't erase everyone else's
+      // styling" reasoning as extractPropsSchemas's own per-file catch.
+    }
+  }
+  if (sourceTexts.length === 0) {
+    return '';
+  }
+
+  try {
+    const result = await postcss([
+      tailwindcss({
+        content: sourceTexts.map((raw) => ({ raw, extension: 'tsx' as const })),
+      }),
+    ]).process('@tailwind base; @tailwind components; @tailwind utilities;', { from: undefined });
+    return result.css;
+  } catch {
+    // A real Tailwind/PostCSS internal failure shouldn't take down an
+    // otherwise-working preview -- same "styling is best-effort, the
+    // component itself is not" principle as the per-file read above.
+    return '';
+  }
+}
 
 /**
  * The allow-listed third-party UI-kit libraries a component's own source
@@ -412,6 +495,15 @@ async function compileReactPreview(previewEntryPath: string): Promise<CompiledPr
     .map((js) => escapeForScriptTag(js))
     .join('\n');
 
+  // Real Tailwind CSS, generated from this component's own actual class
+  // usage -- see generateTailwindCss's own doc comment for the full
+  // rationale. Escaped the same way (and for the same reason) as the
+  // inlined JS above -- cheap defensive consistency, not because
+  // Tailwind's own generated output would ever plausibly contain this
+  // sequence.
+  const tailwindCss = await generateTailwindCss(resolveDir, previewEntryPath);
+  const safeTailwindCss = tailwindCss.replace(/<\/style/gi, '<\\/style');
+
   // Deliberately NO "min-height: 100vh" on #root below (Phase B's
   // original rule, removed in Phase C) -- this whole HTML string is
   // embedded verbatim into the shipped preview, so any explanation lived
@@ -433,6 +525,7 @@ async function compileReactPreview(previewEntryPath: string): Promise<CompiledPr
   html, body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
   #root { display: flex; align-items: center; justify-content: center; }
 </style>
+<style>${safeTailwindCss}</style>
 </head>
 <body>
 <div id="root"></div>
