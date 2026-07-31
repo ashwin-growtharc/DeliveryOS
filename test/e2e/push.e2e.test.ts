@@ -43,11 +43,11 @@ type FakeOctokit = GithubClient & {
   };
 };
 
-function makeFakeOctokit(): FakeOctokit {
+function makeFakeOctokit(isPrivate = false): FakeOctokit {
   return {
     rest: {
       repos: {
-        get: vi.fn().mockResolvedValue({ data: { default_branch: FAKE_DEFAULT_BRANCH } }),
+        get: vi.fn().mockResolvedValue({ data: { default_branch: FAKE_DEFAULT_BRANCH, private: isPrivate } }),
       },
       pulls: {
         create: vi.fn().mockResolvedValue({
@@ -316,6 +316,63 @@ describe('push e2e', () => {
       );
     },
     // See the previous test's own comment on this same generous timeout.
+    60_000,
+  );
+
+  it(
+    'propose-new mode against a PRIVATE repo: still generates+commits preview.png, but never embeds a raw.githubusercontent.com link (Phase E)',
+    async () => {
+      // Regression guard for a real bug found by hand: raw.githubusercontent.com
+      // does not serve private-repo content to an unauthenticated request (a
+      // real push against a real private remote produced a PR body with a
+      // broken image link -- confirmed via a direct curl returning 404). The
+      // fix has to know the repo is private BEFORE building the PR body, not
+      // just at PR-open time.
+      const remoteName = 'test-remote-new-preview-png-private';
+      await registerAndClone(remoteName, fixtureRemoteDir);
+
+      const payloadDir = fs.mkdtempSync(path.join(scratchRoot, 'new-ui-component-payload-private-'));
+      fs.writeFileSync(
+        path.join(payloadDir, 'Badge.tsx'),
+        `export interface BadgeProps {\n  label: string;\n}\n\nexport function Badge({ label }: BadgeProps) {\n  return <span>{label}</span>;\n}\n`,
+        'utf-8',
+      );
+      fs.writeFileSync(
+        path.join(payloadDir, 'preview.tsx'),
+        `import { Badge } from './Badge';\n\nexport const Default = () => <Badge label="New" />;\n`,
+        'utf-8',
+      );
+
+      const octokit = makeFakeOctokit(true); // isPrivate: true
+      const newId = 'test-badge-new-private';
+      const result = await pushArtifact(
+        newId,
+        {
+          remote: remoteName,
+          isNew: true,
+          payloadPath: payloadDir,
+          kind: 'ui-component',
+          owner: 'test-team',
+          description: 'A brand-new badge component (private repo)',
+        },
+        newScratchCwd('new-preview-png-private'),
+        octokit,
+      );
+
+      // preview.png is still generated and committed -- privacy only
+      // affects whether it can be EMBEDDED inline, not whether it exists.
+      const fixtureGit = simpleGit(fixtureRemoteDir);
+      const lsTree = await fixtureGit.raw([
+        'ls-tree', '-r', '--name-only', result.branch, `artifacts/${newId}/payload`,
+      ]);
+      expect(lsTree).toContain('preview.png');
+
+      const call = octokit.rest.pulls.create.mock.calls[0][0];
+      expect(call.body).toContain('### Preview');
+      expect(call.body).not.toContain('raw.githubusercontent.com');
+      expect(call.body).toContain(`artifacts/${newId}/payload/preview.png`);
+      expect(call.body).toContain('Files changed');
+    },
     60_000,
   );
 

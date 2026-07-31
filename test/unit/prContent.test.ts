@@ -77,6 +77,32 @@ describe('buildEditPrContent', () => {
 
     expect(content.body).not.toContain('### Preview');
   });
+
+  it('falls back to a Files-changed pointer, never a broken link, when a preview exists but is not embeddable (private repo)', () => {
+    // Regression guard for a real bug: raw.githubusercontent.com does not
+    // serve private-repo content to an unauthenticated request, and
+    // GitHub's PR-body renderer separately strips `data:` URI images
+    // entirely -- both confirmed by hand. previewImageGitPath (always set
+    // when a preview was generated) without previewImageUrl (only set when
+    // embeddable) must produce a real, working fallback, never a dead
+    // `![]()` tag.
+    const content = buildEditPrContent({
+      id: 'welcome-template',
+      kind: 'ui-component',
+      owner: 'test-team',
+      version: '1.0.1',
+      gitUserName: 'Ashwin B',
+      gitUserEmail: 'ashwin@example.com',
+      changedFiles: [{ relPath: 'Button.tsx', status: 'modified' }],
+      previewImageGitPath: 'artifacts/welcome-template/payload/preview.png',
+    });
+
+    expect(content.body).toContain('### Preview');
+    expect(content.body).not.toContain('![preview]');
+    expect(content.body).not.toContain('raw.githubusercontent.com');
+    expect(content.body).toContain('artifacts/welcome-template/payload/preview.png');
+    expect(content.body).toContain('Files changed');
+  });
 });
 
 describe('buildProposeNewPrContent', () => {

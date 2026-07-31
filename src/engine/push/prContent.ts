@@ -6,7 +6,50 @@ export interface PrContent {
   body: string;
 }
 
-export interface EditPrContentParams {
+/** Params shared by both PR-content builders for describing a freshly
+ * rendered preview.png (Phase E) -- see `buildPreviewSection`'s own doc
+ * comment for why there are two separate fields here, not just one. */
+export interface PreviewImageParams {
+  // Fully-formed raw.githubusercontent.com URL, set ONLY when the remote
+  // repo is confirmed public -- raw.githubusercontent.com does not serve
+  // private-repo content to an unauthenticated request (confirmed by
+  // hand: a real push against a real private remote produced a PR body
+  // with a broken image link, a 404 on that exact URL, and GitHub's own
+  // PR-body markdown sanitizer separately strips `data:` URI images
+  // entirely -- confirmed by hand via a real test comment whose rendered
+  // HTML came back with an empty `<img>` src -- so there is no way to
+  // embed an image inline in a PR body for a private repo at all today).
+  previewImageUrl?: string;
+  // Git-relative path to the generated preview.png, set whenever one was
+  // actually generated -- regardless of whether it can be embedded inline.
+  // Lets the private-repo case still tell the reviewer a preview exists
+  // and where to find it (the Files changed tab, which renders it
+  // natively via GitHub's own authenticated page -- no external fetch
+  // involved, so it works regardless of repo visibility), rather than
+  // silently saying nothing at all.
+  previewImageGitPath?: string;
+}
+
+/** Builds the `### Preview` section for a PR body: a real inline image
+ * when embeddable (public repo), a pointer to the Files changed tab when
+ * one was generated but can't be embedded (private repo -- see
+ * `PreviewImageParams.previewImageUrl`'s own doc comment for why), or
+ * nothing at all when no preview entry file existed for this artifact. */
+function buildPreviewSection(params: PreviewImageParams): string {
+  if (params.previewImageUrl) {
+    return `\n### Preview\n![preview](${params.previewImageUrl})\n`;
+  }
+  if (params.previewImageGitPath) {
+    return (
+      `\n### Preview\nGenerated at \`${params.previewImageGitPath}\` -- view it in the Files changed ` +
+      `tab (can't be embedded inline here for a private repo; GitHub does not serve private-repo raw ` +
+      `content to an unauthenticated request, and strips \`data:\` URI images from PR bodies entirely).\n`
+    );
+  }
+  return '';
+}
+
+export interface EditPrContentParams extends PreviewImageParams {
   id: string;
   kind: string;
   owner: string;
@@ -27,20 +70,13 @@ export interface EditPrContentParams {
   // PR body names the real file/directory instead of a shadow path that
   // was never actually written to.
   payloadRoot?: string;
-  // Fully-formed raw.githubusercontent.com URL for a freshly rendered
-  // preview.png (Phase E), or undefined when no preview entry file exists
-  // for this artifact (see push.ts's maybeRenderPreviewImage). GitHub
-  // sanitizes PR bodies/diffs and strips <iframe>/<script> entirely -- a
-  // plain markdown image tag is the only way to show a preview inline at
-  // all, live or otherwise.
-  previewImageUrl?: string;
 }
 
 /** Builds the PR title/body for an edit-mode push (a diff against an
  * already-tracked artifact). One bullet per changed file, in the same
  * order `computeChangedFiles` returned them. */
 export function buildEditPrContent(params: EditPrContentParams): PrContent {
-  const { id, kind, owner, version, previousVersion, gitUserName, gitUserEmail, changedFiles, payloadRoot, previewImageUrl } = params;
+  const { id, kind, owner, version, previousVersion, gitUserName, gitUserEmail, changedFiles, payloadRoot } = params;
 
   const versionDisplay = previousVersion && previousVersion !== version ? `v${previousVersion} -> v${version}` : `v${version}`;
   const title = `[DeliveryOS] Update ${id} (${versionDisplay})`;
@@ -50,7 +86,7 @@ export function buildEditPrContent(params: EditPrContentParams): PrContent {
     .map((file) => `- ${file.status}: ${path.posix.join(root, file.relPath)}`)
     .join('\n');
 
-  const previewSection = previewImageUrl ? `\n### Preview\n![preview](${previewImageUrl})\n` : '';
+  const previewSection = buildPreviewSection(params);
 
   const body = `## DeliveryOS push: update \`${id}\`
 
@@ -132,7 +168,7 @@ Opened automatically by \`deliveryos push\`. Review under this repo's normal rul
   return { title, body };
 }
 
-export interface ProposeNewPrContentParams {
+export interface ProposeNewPrContentParams extends PreviewImageParams {
   id: string;
   kind: string;
   owner: string;
@@ -147,11 +183,6 @@ export interface ProposeNewPrContentParams {
   // single-file payload (see push.ts's payload_path override), so the PR
   // body names the real committed path instead of a shadow one.
   payloadRoot?: string;
-  // Fully-formed raw.githubusercontent.com URL for a freshly rendered
-  // preview.png (Phase E), or undefined when no preview entry file exists
-  // for this artifact -- see `buildEditPrContent`'s own doc comment for
-  // why this has to be a static image, never a live embed.
-  previewImageUrl?: string;
 }
 
 /** Builds the PR title/body for a propose-new-mode push (a brand-new
@@ -168,7 +199,6 @@ export function buildProposeNewPrContent(params: ProposeNewPrContentParams): PrC
     gitUserEmail,
     payloadFiles,
     payloadRoot,
-    previewImageUrl,
   } = params;
 
   const title = `[DeliveryOS] Propose new artifact: ${id}`;
@@ -179,7 +209,7 @@ export function buildProposeNewPrContent(params: ProposeNewPrContentParams): PrC
     ...payloadFiles.map((relPath) => `- ${path.posix.join(root, relPath)}`),
   ].join('\n');
 
-  const previewSection = previewImageUrl ? `\n### Preview\n![preview](${previewImageUrl})\n` : '';
+  const previewSection = buildPreviewSection(params);
 
   const body = `## DeliveryOS push: propose new artifact \`${id}\`
 

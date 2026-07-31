@@ -496,13 +496,41 @@ demonstrably true, not just when every task box is checked.
   - [x] Regenerate `preview.png` on edit-mode pushes too, same file-presence
         gate — otherwise GitHub's free before/after image diff shows a stale
         picture pretending nothing changed
-      Verified via 12 new/updated tests (bumpVersion, renderPreviewImage
+  - [x] **Real bug found and fixed against an actual live push:** the very
+        first real PR opened against `ai-helpers` (a real, private repo)
+        had a broken image link — `raw.githubusercontent.com` does not
+        serve private-repo content to an unauthenticated request at all
+        (confirmed: a direct `curl` against the exact URL 404s, even
+        though the artifact genuinely exists on that branch), and GitHub's
+        own PR-body markdown renderer separately strips `data:` URI images
+        entirely (confirmed by posting a real test comment and reading its
+        rendered HTML back — the `<img>` tag came back with an empty
+        `src`). Fixed by detecting repo visibility (`fetchRepoInfo`, one
+        `repos.get` call, reused for `defaultBranch` too — no extra
+        round-trip) BEFORE building the PR body, not just at PR-open time:
+        a public repo still gets the inline image; a private one gets a
+        text pointer to the Files-changed tab instead (which renders the
+        image natively via GitHub's own authenticated page — no external
+        fetch involved, works regardless of visibility). Real, subtle
+        constraint surfaced while fixing this: `repos.get` had to move to
+        AFTER each branch's own local-only validation (`NoLocalChangesError`,
+        `IdCollisionError`), not before it — those checks must keep failing
+        with zero GitHub API calls, exactly as they did before Phase E (two
+        existing tests enforce this and caught the regression immediately
+        when the fetch was first placed too early).
+      Verified via 14 new/updated tests (bumpVersion, renderPreviewImage
       against a real headless browser, prContent's version-arrow/image
-      embedding, and 5 push.ts e2e tests covering default patch bump,
-      explicit `--bump minor`, and preview.png generation/regeneration for
-      both propose-new and edit-mode — all against the real git-backed
-      fixture remote this suite already uses, fake Octokit only). Full
-      suite (181 tests) + typecheck + lint all clean. Not yet done: the
+      embedding + the private-repo fallback, and push.ts e2e tests covering
+      default patch bump, explicit `--bump minor`, preview.png
+      generation/regeneration for both propose-new and edit-mode, and the
+      private-repo fallback — all against the real git-backed fixture
+      remote this suite already uses, fake Octokit only). Full suite (186
+      tests) + typecheck + lint all clean. Also verified against the real
+      `ai-helpers` remote: pushed `expandedtabs` for real
+      ([PR #44](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/44)),
+      found the broken-image bug this way, fixed the already-open PR by
+      hand (added the missing `preview.png` + corrected body text) so it
+      isn't left broken while the underlying fix landed. Not yet done: the
       broader Phase 6 end-to-end tests below (a real GitHub merge + pull
       round trip) — Phase E's own implementation is complete and tested at
       the same level as every other phase in this codebase (real git, fake

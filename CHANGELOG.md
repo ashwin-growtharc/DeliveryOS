@@ -4,6 +4,33 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- **Fixed a real broken-image bug in Phase E's PR preview, found by pushing
+  a real component to a real (private) remote.** The very first live PR
+  ([ai-helpers#44](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/44))
+  had a dead image link -- `raw.githubusercontent.com` does not serve
+  private-repo content to an unauthenticated request at all (confirmed: a
+  direct `curl` against the exact committed URL 404s). Also tried a
+  `data:` URI base64 fallback and confirmed, by posting a real test PR
+  comment and reading its rendered HTML back via the GitHub API, that
+  GitHub's PR-body markdown renderer strips `data:` URIs from `<img>` tags
+  entirely (the tag came back with an empty `src`) -- so there is no way
+  to embed an image inline in a PR body for a private repo at all today.
+  New `fetchRepoInfo` (`github.ts`, replacing `getDefaultBranch`) fetches
+  the repo's visibility alongside its default branch in the same one
+  `repos.get` call, so `pushArtifact` can decide BEFORE building the PR
+  body whether to embed the image (public repo) or point at the
+  Files-changed tab instead (private repo -- GitHub renders a committed
+  image there natively, authenticated, no external fetch involved,
+  regardless of visibility). Had to move this fetch to AFTER each branch's
+  own local-only validation, not before: two existing tests assert
+  `NoLocalChangesError`/`IdCollisionError` fail with zero GitHub API calls,
+  and caught this as a real regression the moment the fetch was first
+  placed too early in the function. Fixed the already-open PR #44 by hand
+  (added the missing `preview.png`, corrected the body text) so it wasn't
+  left broken while the underlying fix landed. 2 new tests (a private-repo
+  e2e push, a `buildPreviewSection` fallback unit test) + updated fake
+  Octokit test helper. Full suite (186 tests) + typecheck + lint all clean.
+
 - **Phase 6, Phase E — PR preview image + the version-bump fix — Done.**
   Closes the last two real gaps in UI Components: a proposed/edited
   component's PR now embeds a real `preview.png`, and edit-mode push can

@@ -28,7 +28,7 @@ import {
 } from '../git/git';
 import {
   parseGithubUrl,
-  getDefaultBranch,
+  fetchRepoInfo,
   openPullRequest,
   createOctokit,
   GithubClient,
@@ -199,6 +199,17 @@ export async function pushArtifact(
   }
 
   const { owner: ghOwner, repo: ghRepo } = parseGithubUrl(remoteEntry.url);
+  // Constructing the client is local/free (no network call happens until
+  // one of its methods is actually invoked) -- safe to do unconditionally
+  // here. The actual `repos.get` call (`fetchRepoInfo`, needed for Phase
+  // E's preview-image privacy check) is deliberately NOT made yet: each
+  // branch below has its own local-only validation (NoLocalChangesError,
+  // IdCollisionError) that must keep failing with ZERO GitHub API calls,
+  // exactly as it did before Phase E -- so `fetchRepoInfo` is called once
+  // inside each branch, only after that branch's own local-only checks
+  // have already passed, and its `defaultBranch` is reused directly at
+  // PR-open time below instead of fetching it a second time.
+  const client = octokit ?? (await createOctokit(getGithubToken()));
 
   // Refresh the local cache to the remote's current tip before branching,
   // diffing, or collision-checking against it.
@@ -212,6 +223,7 @@ export async function pushArtifact(
   let commitMessage: string;
   let filesToCommit: string[];
   let prTitle: string;
+  let defaultBranch: string;
   let prBody: string;
 
   if (options.isNew) {
@@ -233,6 +245,12 @@ export async function pushArtifact(
         `Artifact id "${id}" already exists in remote "${remoteName}" (owner: ${collision.manifest.owner}, version: ${collision.manifest.version}). Choose a different id, or drop --new to push an edit to the existing artifact.`,
       );
     }
+
+    // Only fetched now, after the collision check -- see this function's
+    // own comment above `client`'s construction for why.
+    const repoInfo = await fetchRepoInfo(client, ghOwner, ghRepo);
+    defaultBranch = repoInfo.defaultBranch;
+    const isPrivateRepo = repoInfo.isPrivate;
 
     if (!fs.existsSync(options.payloadPath)) {
       throw new ManifestValidationError(`--path "${options.payloadPath}" does not exist`);
@@ -346,9 +364,11 @@ export async function pushArtifact(
       gitUserEmail: identity.email,
       payloadFiles,
       payloadRoot: payloadPathOverride ? `files/${id}` : undefined,
-      previewImageUrl: previewImageGitPath
-        ? `https://raw.githubusercontent.com/${ghOwner}/${ghRepo}/${branchName}/${previewImageGitPath}`
-        : undefined,
+      previewImageGitPath,
+      previewImageUrl:
+        previewImageGitPath && !isPrivateRepo
+          ? `https://raw.githubusercontent.com/${ghOwner}/${ghRepo}/${branchName}/${previewImageGitPath}`
+          : undefined,
     });
     prTitle = content.title;
     prBody = content.body;
@@ -381,6 +401,11 @@ export async function pushArtifact(
         `No metadata changes for "${id}" -- description/roles/teams/stacks/componentTypes are all identical to what's currently on the remote.`,
       );
     }
+
+    // Only fetched now, after the no-op check -- see this function's own
+    // comment above `client`'s construction for why. Metadata edits never
+    // touch the preview image, so only `defaultBranch` is needed here.
+    defaultBranch = (await fetchRepoInfo(client, ghOwner, ghRepo)).defaultBranch;
 
     const updatedManifest = {
       ...current,
@@ -427,6 +452,12 @@ export async function pushArtifact(
         `No local changes detected for "${id}" -- its files are byte-for-byte identical to the pristine snapshot taken at pull time. Nothing to push.`,
       );
     }
+
+    // Only fetched now, after the no-local-changes check -- see this
+    // function's own comment above `client`'s construction for why.
+    const repoInfo = await fetchRepoInfo(client, ghOwner, ghRepo);
+    defaultBranch = repoInfo.defaultBranch;
+    const isPrivateRepo = repoInfo.isPrivate;
 
     // If the manifest this was pulled from set `payload_path`, the real
     // file/directory lives there in the remote's repo, not under
@@ -485,9 +516,11 @@ export async function pushArtifact(
       gitUserEmail: identity.email,
       changedFiles,
       payloadRoot: manifest.payload_path,
-      previewImageUrl: previewImageGitPath
-        ? `https://raw.githubusercontent.com/${ghOwner}/${ghRepo}/${branchName}/${previewImageGitPath}`
-        : undefined,
+      previewImageGitPath,
+      previewImageUrl:
+        previewImageGitPath && !isPrivateRepo
+          ? `https://raw.githubusercontent.com/${ghOwner}/${ghRepo}/${branchName}/${previewImageGitPath}`
+          : undefined,
     });
     prTitle = content.title;
     prBody = content.body;
@@ -501,13 +534,11 @@ export async function pushArtifact(
   await pushBranch(cacheDir, branchName);
 
   onProgress?.('pr-open', 'Opening pull request...');
-  const client = octokit ?? (await createOctokit(getGithubToken()));
-  const base = await getDefaultBranch(client, ghOwner, ghRepo);
   const opened = await openPullRequest(client, {
     owner: ghOwner,
     repo: ghRepo,
     head: branchName,
-    base,
+    base: defaultBranch,
     title: prTitle,
     body: prBody,
   });
