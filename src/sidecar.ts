@@ -48,7 +48,7 @@ import { cloneRemote, cachePath } from './engine/remote/remoteCache';
 import * as fs from 'fs';
 import { RemoteRegistryError } from './engine/errors';
 import { Manifest } from './engine/manifest/schema';
-import { compileArtifactPreview } from './engine/preview/resolveArtifactPreview';
+import { compileArtifactPreview, compileLocalPreview } from './engine/preview/resolveArtifactPreview';
 
 interface SidecarRequest {
   id: string;
@@ -255,6 +255,17 @@ const commands: Record<string, CommandHandler> = {
     const remote = requireString(args, 'remote');
     const id = requireString(args, 'id');
     return compileArtifactPreview(remote, id);
+  },
+
+  // Phase 6, Phase D: a Scan-discovered ui-component candidate has no
+  // remote/id/version yet (it's never been pushed) -- this compiles its
+  // live preview directly from wherever it currently sits on disk
+  // (`payloadPath`, a real project folder or a synthetic staged
+  // directory; see `detectUiComponentCandidates`), so Add New's Review
+  // step can show it before the user decides to propose it at all.
+  'preview.compileLocal': (args) => {
+    const payloadPath = requireString(args, 'payloadPath');
+    return compileLocalPreview(payloadPath);
   },
 };
 

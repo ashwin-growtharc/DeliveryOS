@@ -2,7 +2,11 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { compileArtifactPreview, findPreviewEntryFile } from '../../src/engine/preview/resolveArtifactPreview';
+import {
+  compileArtifactPreview,
+  compileLocalPreview,
+  findPreviewEntryFile,
+} from '../../src/engine/preview/resolveArtifactPreview';
 import { remotesRegistryPath, remoteCachePath } from '../../src/engine/paths';
 
 let deliveryOsHome: string;
@@ -95,5 +99,49 @@ describe('compileArtifactPreview', () => {
     const { html } = await compileArtifactPreview('test-remote', 'my-button');
     expect(html).toContain('<!DOCTYPE html>');
     expect(html).toContain('Click me');
+  });
+});
+
+describe('compileLocalPreview (Phase D)', () => {
+  it('compiles a preview straight from a local payload directory, with no remote/id/version at all', async () => {
+    // Deliberately reuses writeUiComponentArtifact's payload dir directly,
+    // not through a registered remote -- a Scan-discovered candidate has
+    // never been pushed, so there is no remote cache entry to read from at
+    // all, only a real folder sitting somewhere in the project (or a
+    // synthetic staged one). No writeRegistry() call here on purpose.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'deliveryos-local-preview-'));
+    try {
+      const payloadDir = writeUiComponentArtifact(dir, 'unpushed-button');
+      const { html } = await compileLocalPreview(payloadDir);
+      expect(html).toContain('<!DOCTYPE html>');
+      expect(html).toContain('Click me');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('recompiles fresh on every call rather than caching -- unlike compileArtifactPreview, there is no (remote, id, version) to key a cache on yet', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'deliveryos-local-preview-nocache-'));
+    try {
+      const payloadDir = writeUiComponentArtifact(dir, 'unpushed-button');
+      const first = await compileLocalPreview(payloadDir);
+
+      // Change the component's own source after the first compile -- if
+      // this were wrongly routed through the cached getOrCompilePreview
+      // path, the second call would silently return the FIRST compile's
+      // stale output instead of reflecting this edit.
+      fs.writeFileSync(
+        path.join(payloadDir, 'Button.tsx'),
+        `export function Button() { return <button>Edited label</button>; }\n`,
+        'utf-8',
+      );
+      const second = await compileLocalPreview(payloadDir);
+
+      expect(first.html).toContain('Click me');
+      expect(second.html).toContain('Edited label');
+      expect(second.html).not.toContain('Click me');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

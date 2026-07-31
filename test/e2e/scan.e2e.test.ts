@@ -201,4 +201,43 @@ describe('scan e2e', () => {
     const candidates = await scanForNewArtifacts(cwd, remoteName);
     expect(candidates).toEqual([]);
   });
+
+  it(
+    'finds a genuinely reusable React component under src/, alongside the existing agent/skill/command/rule kinds (Phase D)',
+    async () => {
+      // Real, end-to-end confirmation that detectUiComponentCandidates
+      // (unit-tested on its own in test/unit/detectUiComponents.test.ts)
+      // is actually wired into scanForNewArtifacts, not just implemented
+      // in isolation -- this is the integration point that test file
+      // deliberately doesn't cover.
+      const remoteName = 'scan-test-remote-ui-component';
+      await registerAndClone(remoteName);
+      const cwd = newScratchCwd('ui-component');
+
+      const componentDir = path.join(cwd, 'src', 'ui', 'Alert');
+      fs.mkdirSync(componentDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(componentDir, 'Alert.tsx'),
+        'export interface AlertProps { message: string; }\n' +
+          'export function Alert({ message }: AlertProps) { return <div>{message}</div>; }\n',
+        'utf-8',
+      );
+      // A plain page-level file with no Props type at all -- must NOT
+      // show up as a candidate; confirms this test isn't accidentally
+      // passing because ANY .tsx file under src/ gets picked up.
+      const pagesDir = path.join(cwd, 'src', 'pages');
+      fs.mkdirSync(pagesDir, { recursive: true });
+      fs.writeFileSync(path.join(pagesDir, 'Home.tsx'), 'export function Home() { return <div>Home</div>; }\n', 'utf-8');
+
+      const candidates = await scanForNewArtifacts(cwd, remoteName);
+      const alertCandidate = candidates.find((c) => c.id === 'alert');
+
+      expect(alertCandidate).toBeTruthy();
+      expect(alertCandidate?.kind).toBe('ui-component');
+      expect(alertCandidate?.payloadPath).toBe(componentDir);
+      expect(fs.existsSync(path.join(componentDir, 'preview.tsx'))).toBe(true);
+      expect(candidates.some((c) => c.id === 'home')).toBe(false);
+    },
+    30_000,
+  );
 });

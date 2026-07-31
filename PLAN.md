@@ -357,23 +357,62 @@ demonstrably true, not just when every task box is checked.
       `event.source` (confirmed empirically, not assumed). This needs a
       real two-window browser check by the user in the running app before
       being treated as fully proven.
-- [ ] **Phase D — Scan integration**
+- [x] **Phase D — Scan integration — Done**
       Goal: running Scan against a real project with a mix of page-level and
       genuinely reusable components surfaces the reusable ones as proposal
       candidates (each with a working `preview.tsx`, auto-scaffolded if one
       doesn't already exist), routed through the existing Review & Propose
       wizard — with zero behavior change to Scan's existing agent/skill/
       command/rule detection.
-  - [ ] Broad structural detection (`src/**/*.{tsx,jsx}`, filtered by "returns
+      Detection landed as a standalone module,
+      `detectUiComponentCandidates` (`src/engine/scan/detectUiComponents.ts`),
+      then wired into `scanForNewArtifacts` (`scan.ts` now calls it alongside
+      the four existing markdown-backed kinds, merging results into one
+      candidates array — no other line in that function's existing four
+      kinds touched), the CLI (`src/cli/commands/scan.ts` now prints any
+      `candidate.warnings` per candidate, not kind-gated — free for any
+      future candidate kind that grows warnings too), and the app UI
+      (`src-tauri/spike-ui/`: Add New's Review step gets a real live preview
+      for `kind: ui-component` candidates via a new `preview.compileLocal`
+      sidecar command — `compileLocalPreview` in
+      `resolveArtifactPreview.ts`, calling `compilePreviewHtml` directly with
+      no remote/id/version/cache, since a Scan candidate has never been
+      pushed — plus a warnings banner surfacing any import-escape/dedupe
+      findings before Propose). `ScanCandidate` moved out of `scan.ts` into
+      `src/engine/scan/types.ts` (its `kind` union now includes
+      `'ui-component'`, plus an optional `warnings?: string[]`) to avoid a
+      circular import; `scan.ts` re-exports it unchanged. Also added
+      `scanStagingDir(cwd)` to `paths.ts` (cwd-scoped, like `pristineDir`).
+      Verified against a real fixture project covering every documented
+      case at once (a dedicated-folder component, a flat two-components-
+      sharing-one-folder pair forcing the staging path, a same-batch id
+      collision, an import escaping its folder, and a page-level component
+      correctly excluded) via the real built CLI (`node dist/index.js scan`),
+      confirming both auto-scaffolded `preview.tsx` stubs actually compile
+      through the real pipeline — not just unit-tested in isolation. 12 unit
+      tests (`test/unit/detectUiComponents.test.ts`) + 1 new e2e test
+      proving the `scanForNewArtifacts` wiring itself (not just the detector
+      module alone) + 2 new `compileLocalPreview` unit tests; full suite
+      (158 tests) + typecheck + lint all clean.
+  - [x] Broad structural detection (`src/**/*.{tsx,jsx}`, filtered by "returns
         JSX with a co-located `Props` type") — **not** a hardcoded folder-name
         glob (design doc §6, the `src/ui/` flat-convention finding)
-  - [ ] Same-batch id dedupe by folder path (`forms-button` vs.
+  - [x] Same-batch id dedupe by folder path (`forms-button` vs.
         `marketing-button`) — distinct from the existing remote-catalog
-        `IdCollisionError`
-  - [ ] Static check for relative imports escaping the payload root, surfaced
+        `IdCollisionError`. Id = immediate containing folder name + file
+        basename (slugified), collapsed to just the folder name when it
+        already matches the basename (`Card/Card.tsx` → `card`, not
+        `card-card`); a genuine same-batch collision (two different files
+        deriving the same id) keeps the first (by sorted absolute path) and
+        appends `-2`, `-3`, ... to the rest, each with a `warnings` entry
+        naming what it collided with.
+  - [x] Static check for relative imports escaping the payload root, surfaced
         in Review *before* proposing, not as an opaque compile failure
-  - [ ] Auto-scaffolded `preview.tsx` stub when one doesn't exist yet
-  - [ ] Route through the **existing** Scan → Review & Propose → wizard
+  - [x] Auto-scaffolded `preview.tsx` stub when one doesn't exist yet
+        (dedicated-folder components get it written in place; flat-
+        convention components get a staged copy + preview in
+        `scanStagingDir`, original file untouched)
+  - [x] Route through the **existing** Scan → Review & Propose → wizard
         pipeline (no parallel UI) — Review's live preview becomes a genuine
         visual check, not just a text read
 - [ ] **Phase E — PR preview image + the version-bump fix**

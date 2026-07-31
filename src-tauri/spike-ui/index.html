@@ -491,9 +491,30 @@
             </div>
 
             <div class="wizard-step" data-step="review" hidden>
+              <!-- Scan-time-only findings (import-escape flags, same-batch
+                   id-collision notices -- see scan/types.ts's
+                   ScanCandidate.warnings), populated by renderAddNewReview
+                   in app.js. Its own container, not nested inside
+                   .wizard-review below -- that box's bordered/
+                   overflow:hidden styling is sized for review-rows
+                   specifically. -->
+              <div id="addnew-review-warnings"></div>
               <div class="field">
                 <label>Review</label>
                 <div id="addnew-review" class="wizard-review"></div>
+              </div>
+              <!-- Only shown for kind: ui-component (see
+                   loadAddNewReviewPreview in app.js) -- a real live
+                   preview turns Review into a genuine visual check for a
+                   Scan-discovered component candidate, instead of just
+                   re-reading text fields (Phase 6, Phase D). Reuses
+                   .ui-component-preview-frame's own sizing/centering CSS
+                   as-is, same as Detail's own live preview does. -->
+              <div id="addnew-review-preview-section" class="field" hidden>
+                <label>Live preview</label>
+                <div id="addnew-review-preview-frame" class="ui-component-preview-frame">
+                  <span class="ui-component-preview-loading">Loading preview&hellip;</span>
+                </div>
               </div>
             </div>
 

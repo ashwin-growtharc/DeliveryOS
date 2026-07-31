@@ -2170,6 +2170,12 @@
   }
 
   let pendingPayloadPath = null;
+  // Scan-time-only warnings (import-escape flags, same-batch id-collision
+  // notices -- see scan/types.ts's ScanCandidate.warnings) for whichever
+  // candidate openAddNewFromScanCandidate last populated the form from.
+  // Always empty for a plain "+ Add New" entry -- there's no scan
+  // candidate to have warned about anything.
+  let pendingCandidateWarnings = [];
 
   /** Clears every Add New field back to blank -- shared by the plain "+ Add
    * new" entry point (a fresh proposal) and a successful submit (ready for
@@ -2185,6 +2191,112 @@
     $('f-kind-custom').value = '';
     pendingPayloadPath = null;
     $('payload-path-display').textContent = 'No file or folder selected';
+    pendingCandidateWarnings = [];
+    clearAddNewReviewPreviewListener();
+  }
+
+  // ---------- add new: Review step live preview (Phase 6, Phase D) ----------
+  //
+  // Only meaningful for kind: ui-component -- every other kind's Review
+  // step stays exactly the text-only rows renderAddNewReview already
+  // builds. Deliberately simpler than Detail's own live preview
+  // (loadDetailPreview): no variant tabs, no generated props-controls
+  // panel -- Review is a quick "does this actually render" sanity check
+  // before proposing, not a place to interactively explore a component,
+  // so there's no reason to pay for docgen/variant-switching machinery
+  // here at all.
+
+  // Same disconnect-before-replace discipline as
+  // detailPreviewMessageHandler/uiComponentsListMessageHandlers --
+  // Review can be (re)visited many times in one Add New session (Back,
+  // edit a field, Review again), and each visit's compile is async, so a
+  // stale listener from an earlier visit must never outlive it.
+  let addNewReviewPreviewMessageHandler = null;
+  // Guards the same real race loadDetailPreview's own requestId guards:
+  // this function `await`s a sidecar call, and a second call (rapid
+  // Back-then-Review-again) can start before the first one resolves.
+  let addNewReviewPreviewRequestId = 0;
+
+  function clearAddNewReviewPreviewListener() {
+    if (addNewReviewPreviewMessageHandler) {
+      window.removeEventListener('message', addNewReviewPreviewMessageHandler);
+      addNewReviewPreviewMessageHandler = null;
+    }
+  }
+
+  /** Shows a real live preview on the Review step for a ui-component
+   * candidate, compiled straight from wherever pendingPayloadPath
+   * currently points (a real project folder, or Scan's synthetic staged
+   * directory for a flat-convention component) -- see
+   * `preview.compileLocal` (sidecar.ts) and `compileLocalPreview`
+   * (resolveArtifactPreview.ts), which compile directly with no
+   * remote/id/version and no cache, since this candidate has never been
+   * pushed. Hides the whole preview section for every other kind, or
+   * when no payload has been chosen yet. */
+  async function loadAddNewReviewPreview() {
+    const requestId = ++addNewReviewPreviewRequestId;
+    const section = $('addnew-review-preview-section');
+    const frame = $('addnew-review-preview-frame');
+
+    clearAddNewReviewPreviewListener();
+
+    if (resolveKindFieldValue() !== 'ui-component' || !pendingPayloadPath) {
+      section.hidden = true;
+      return;
+    }
+    section.hidden = false;
+    frame.innerHTML = '<span class="ui-component-preview-loading">Loading preview&hellip;</span>';
+    frame.style.width = '';
+    frame.style.height = '';
+
+    let result;
+    try {
+      result = await call('preview.compileLocal', { payloadPath: pendingPayloadPath });
+    } catch (err) {
+      if (requestId !== addNewReviewPreviewRequestId) return; // superseded while awaiting
+      frame.innerHTML = '';
+      const placeholder = document.createElement('span');
+      placeholder.className = 'ui-component-preview-loading';
+      placeholder.textContent = 'Preview unavailable';
+      frame.appendChild(placeholder);
+      return;
+    }
+    if (requestId !== addNewReviewPreviewRequestId) return; // superseded while awaiting
+
+    const iframe = document.createElement('iframe');
+    iframe.sandbox = 'allow-scripts';
+    iframe.srcdoc = result.html;
+    frame.innerHTML = '';
+    frame.appendChild(iframe);
+
+    // Same rAF-coalesced, dynamic width+height sizing as
+    // loadUiComponentPreview -- see that function's own comments
+    // (clampPreviewWidth/clampPreviewHeight, WIDTH_SAFETY_MARGIN) for the
+    // full history of why this isn't simpler.
+    let pendingRawWidth = null;
+    let pendingRawHeight = null;
+    let resizeScheduled = false;
+
+    const handler = (event) => {
+      if (event.source !== iframe.contentWindow) return;
+      const data = event.data;
+      if (!data || typeof data !== 'object' || data.type !== 'contentHeight') return;
+      pendingRawWidth = data.width;
+      pendingRawHeight = data.height;
+      if (resizeScheduled) return;
+      resizeScheduled = true;
+      requestAnimationFrame(() => {
+        resizeScheduled = false;
+        const clampedWidth = clampPreviewWidth(pendingRawWidth + WIDTH_SAFETY_MARGIN);
+        const clampedHeight = clampPreviewHeight(pendingRawHeight);
+        frame.style.width = `${clampedWidth}px`;
+        frame.style.height = `${clampedHeight}px`;
+        iframe.style.width = `${Math.min(pendingRawWidth + WIDTH_SAFETY_MARGIN, clampedWidth)}px`;
+        iframe.style.height = `${Math.min(pendingRawHeight, clampedHeight)}px`;
+      });
+    };
+    addNewReviewPreviewMessageHandler = handler;
+    window.addEventListener('message', handler);
   }
 
   // ---------- add new: field helpers ----------
@@ -2288,6 +2400,7 @@
 
     if (currentStep === 'review') {
       renderAddNewReview();
+      void loadAddNewReviewPreview();
     }
   }
 
@@ -2377,6 +2490,23 @@
   function renderAddNewReview() {
     const container = $('addnew-review');
     container.innerHTML = '';
+
+    // Scan-time-only findings (import-escape flags, same-batch id-
+    // collision notices -- see scan/types.ts's ScanCandidate.warnings) --
+    // non-fatal, but worth a real glance before proposing. Rendered into
+    // their own container, a sibling of #addnew-review, not appended
+    // inside it -- .wizard-review's own bordered/overflow:hidden box is
+    // sized and styled for review-rows specifically, and a differently-
+    // styled hint-banner inside that same box would clip/look inconsistent.
+    // Only ever non-empty for a Scan-originated ui-component candidate.
+    const warningsContainer = $('addnew-review-warnings');
+    warningsContainer.innerHTML = '';
+    for (const warning of pendingCandidateWarnings) {
+      const banner = document.createElement('div');
+      banner.className = 'hint-banner';
+      banner.textContent = warning;
+      warningsContainer.appendChild(banner);
+    }
 
     const rows = [
       ['id', 'Artifact ID', $('f-id').value.trim()],
@@ -2595,8 +2725,17 @@
           </div>
         `;
         row.querySelector('.name').textContent = candidate.id;
+        const baseSummary = candidate.description || '(no description found -- add one on the next screen)';
+        // Only ui-component candidates carry warnings today (an
+        // import-escape flag, a same-batch id-collision disambiguation --
+        // see scan/types.ts's own doc comment) -- surfaced right in the
+        // row so it's visible before clicking through, not just buried in
+        // Review's text rows.
+        const warningCount = candidate.warnings?.length ?? 0;
         row.querySelector('.summary-text').textContent =
-          candidate.description || '(no description found -- add one on the next screen)';
+          warningCount > 0
+            ? `${baseSummary} (${warningCount} warning${warningCount === 1 ? '' : 's'} -- see Review)`
+            : baseSummary;
 
         const btn = document.createElement('button');
         btn.className = 'btn btn-sm';
@@ -2669,6 +2808,7 @@
 
     pendingPayloadPath = candidate.payloadPath;
     $('payload-path-display').textContent = candidate.payloadPath;
+    pendingCandidateWarnings = candidate.warnings ?? [];
     // Jump straight to Review -- everything a scan candidate can prefill is
     // already filled in (roles/stacks/teams are deliberately left blank for
     // manual review, same as before), so forcing a click through 9 empty-

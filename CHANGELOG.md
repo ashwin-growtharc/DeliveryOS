@@ -4,6 +4,67 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- **Phase D — Scan integration, completed.** Wired `detectUiComponentCandidates`
+  (below) into `scanForNewArtifacts` (`scan.ts` now calls it alongside the
+  four existing markdown-backed kinds and merges results into one array --
+  nothing else in those four kinds' own logic touched), the CLI
+  (`src/cli/commands/scan.ts` now prints any `candidate.warnings`, not
+  kind-gated), and the app UI: Add New's Review step shows a real live
+  preview for a `kind: ui-component` Scan candidate, via a new
+  `preview.compileLocal` sidecar command (`compileLocalPreview` in
+  `resolveArtifactPreview.ts`, calling `compilePreviewHtml` directly --
+  no remote/id/version/cache, since the candidate has never been pushed
+  and there's nothing to key a cache on yet), plus a warnings banner
+  surfacing any import-escape/dedupe findings above the review rows.
+  Verified against a real fixture project via the actual built CLI
+  (`node dist/index.js scan`), covering every documented case in one
+  project at once: a dedicated-folder component, two components sharing
+  one folder (forcing the flat/staged path for both), a same-batch id
+  collision, an import escaping its folder, and a page-level component
+  correctly excluded -- then confirmed both an in-place-scaffolded and a
+  staged-and-scaffolded `preview.tsx` actually compile through the real
+  pipeline, not just unit-tested in isolation. Added 1 new e2e test
+  proving the `scanForNewArtifacts` wiring itself (the detector module was
+  already unit-tested on its own) and 2 new `compileLocalPreview` unit
+  tests (including one confirming it recompiles fresh on every call rather
+  than silently serving stale cached output, unlike `compileArtifactPreview`).
+  Full suite (158 tests) + typecheck + lint all clean.
+
+- **Phase D groundwork -- structural UI-component detection for Scan.** New
+  `detectUiComponentCandidates` (`src/engine/scan/detectUiComponents.ts`)
+  walks `src/**/*.{tsx,jsx}` (excluding `node_modules`, dotfiles/dot-dirs,
+  `pages/`/`app/`/`routes/`, and `*.test`/`*.spec` files) and calls
+  `parseComponentFile` (newly extracted from `docgen.ts`'s
+  `extractPropsSchemas`) on each survivor -- a file only becomes a
+  candidate if that parse succeeds and finds a component with a non-empty
+  props map, a pure structural/deterministic heuristic with no AI call.
+  Candidate ids key off each file's immediate containing folder (`forms-
+  button`, not `ui-forms-button`; collapsed to just the folder name when
+  it already matches the basename, e.g. `Card/Card.tsx` -> `card`); a
+  genuine same-batch id collision between two different files keeps the
+  first (by sorted absolute path) and numbers the rest (`-2`, `-3`, ...)
+  with a `warnings` entry explaining why -- distinct from the existing
+  `IdCollisionError`, which only ever checks against a remote catalog, not
+  sibling candidates in the same scan. A component already living in its
+  own dedicated folder (the sole detected component in a non-`src`-root
+  directory) is proposed in place, auto-scaffolding a `preview.tsx` next to
+  it if one doesn't exist; a component with no dedicated folder (flat
+  siblings sharing one directory, or sitting directly in `src/`) instead
+  gets a copy of itself plus a generated preview staged into a new
+  `scanStagingDir(cwd)` (`paths.ts`) -- the original file is never touched.
+  Every detected file's own relative imports are statically checked for
+  escaping its eventual payload directory and surfaced as `warnings`,
+  ahead of (and distinct from) `compile.ts`'s existing runtime
+  `createDirectorySandboxPlugin`, which enforces the same boundary but
+  fails hard and opaquely at compile time. `ScanCandidate` moved out of
+  `scan.ts` into a new `src/engine/scan/types.ts` (its `kind` union now
+  includes `'ui-component'`, plus an optional `warnings?: string[]`) to
+  avoid a circular import; `scan.ts` re-exports it unchanged and is
+  otherwise untouched -- wiring this detector into `scanForNewArtifacts`,
+  the CLI, and the app UI is a deliberately separate follow-up. 12 new
+  unit tests (`test/unit/detectUiComponents.test.ts`), all against real
+  files on disk; full suite (157 tests) + typecheck + lint all clean.
+
 - Fixed the previous fix: re-subscribing the ResizeObserver to the real
   rendered element (see the entry just below) put that element back in
   the observer's own measurement path -- `measureIntrinsicWidth` was

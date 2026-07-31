@@ -98,3 +98,22 @@ export function previewCachePath(remoteName: string, id: string, version: string
   assertSafePathSegment(version, 'version');
   return path.join(previewCacheRoot(), remoteName, id, version, 'compiled.json');
 }
+
+/** Project-local (cwd-scoped) staging directory for one `scan` run's
+ * synthetically-assembled UI-component payloads -- see
+ * `detectUiComponents.ts`'s "flat convention" case, where a component file
+ * has no dedicated folder of its own (e.g. `src/ui/button.tsx` sitting
+ * flat among many unrelated siblings) and a COPY of it plus a generated
+ * `preview.tsx` need somewhere real on disk to live as a payload. Deliberately
+ * cwd-scoped like `pristineDir`, NOT global under `deliveryOsHome()` like
+ * `previewCacheRoot` -- a staged payload is a disposable, per-project,
+ * per-scan-run artifact (copied from a file that only exists in THIS
+ * project), not something reusable across different projects the way a
+ * compiled preview cache entry is. Nothing deletes this directory between
+ * scans; a subdirectory is simply overwritten the next time scan stages
+ * that same candidate id again, the same "invalidated by being
+ * overwritten, nothing explicitly cleaned up" philosophy `previewCachePath`
+ * already relies on for its own cache entries. */
+export function scanStagingDir(cwd: string): string {
+  return path.join(projectDeliveryOsDir(cwd), 'scan-staging');
+}

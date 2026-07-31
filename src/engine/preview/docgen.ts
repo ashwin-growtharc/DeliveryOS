@@ -13,6 +13,25 @@ export interface PropSchemaEntry {
 
 const COMPONENT_FILE_PATTERN = /\.(tsx|jsx)$/;
 
+const parser = withDefaultConfig({ savePropValueAsString: true });
+
+/**
+ * Parses a single `.tsx`/`.jsx` file via the real TypeScript compiler
+ * (`react-docgen-typescript`), returning every component doc found in it
+ * -- shared by `extractPropsSchemas` below (which turns each doc into a
+ * props-controls schema) and Phase D's structural UI-component detector
+ * (`src/engine/scan/detectUiComponents.ts`), which only needs the
+ * boolean "did this find a component at all" signal. Deliberately does
+ * NOT catch parse errors itself -- the two callers already have
+ * different "fail soft" handling for a throw (`extractPropsSchemas`
+ * continues on to other sibling files; the detector treats a throw as
+ * "not a component candidate"), so swallowing the error here would
+ * erase that distinction instead of leaving each caller to decide.
+ */
+export function parseComponentFile(file: string): ComponentDoc[] {
+  return parser.parse(file);
+}
+
 /**
  * Derives a props-controls schema for every component sibling to a
  * preview.tsx file, via `react-docgen-typescript` against the real
@@ -46,7 +65,6 @@ export function extractPropsSchemas(
     return {};
   }
 
-  const parser = withDefaultConfig({ savePropValueAsString: true });
   const schemas: Record<string, PropSchemaEntry[]> = {};
 
   // Parses each file separately, not one `parser.parse(siblingFiles)`
@@ -56,7 +74,7 @@ export function extractPropsSchemas(
   // this same directory to nothing too, not just the broken one.
   for (const file of siblingFiles) {
     try {
-      const docs: ComponentDoc[] = parser.parse(file);
+      const docs: ComponentDoc[] = parseComponentFile(file);
       for (const doc of docs) {
         // First-wins, not last-wins, on a displayName collision (two
         // sibling files exporting a same-named component) -- an

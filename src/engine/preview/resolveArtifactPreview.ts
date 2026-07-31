@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { resolveArtifact } from '../pull/pull';
 import { cachePath } from '../remote/remoteCache';
-import { getOrCompilePreview, CompiledPreview } from './compile';
+import { getOrCompilePreview, compilePreviewHtml, CompiledPreview } from './compile';
 
 /** Conventional preview entry filenames, checked in this priority order
  * inside an artifact's own payload folder (React/TS before the zero-build
@@ -50,4 +50,27 @@ export async function compileArtifactPreview(remoteName: string, id: string): Pr
 
   const previewEntryPath = findPreviewEntryFile(payloadDir);
   return getOrCompilePreview(remoteName, id, manifest.version, previewEntryPath);
+}
+
+/**
+ * Compiles the live preview for a UI-component candidate that has NOT been
+ * pushed yet -- a Scan-discovered candidate sitting in a local
+ * `payloadPath` (a real project folder, or a synthetic staged directory
+ * for a flat-convention component; see `detectUiComponentCandidates`),
+ * shown in Add New's Review step before the user has decided to propose
+ * it at all.
+ *
+ * Deliberately calls `compilePreviewHtml` directly, NOT `getOrCompilePreview`
+ * (the function `compileArtifactPreview` above uses): that cache is keyed
+ * on `(remoteName, id, version)`, none of which exist yet for something
+ * that's never been pushed -- there is no remote entry, no manifest, and
+ * therefore no version to key a cache on, or to invalidate later once one
+ * finally exists. Recompiling on every call is the right tradeoff here:
+ * this is a one-off, on-demand preview for a single Review step, not a
+ * catalog entry someone might view repeatedly across many sessions the
+ * way `compileArtifactPreview`'s result is.
+ */
+export async function compileLocalPreview(payloadDir: string): Promise<CompiledPreview> {
+  const previewEntryPath = findPreviewEntryFile(payloadDir);
+  return compilePreviewHtml(previewEntryPath);
 }
