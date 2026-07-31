@@ -4,6 +4,37 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- **Fixed a real scrollbar-flash bug in the live preview**, found by hand
+  once real styling/animation actually worked: clicking a component that
+  changes size at runtime (framer-motion's `ExpandedTabs`) briefly showed
+  a native scrollbar inside the preview during the transition. Root cause
+  -- resizing is inherently asynchronous (the iframe measures its own
+  content, posts it to the parent, and the parent applies a new box size
+  on its own next frame), so any component whose size changes at runtime
+  always has a brief window where its real content exceeds whatever box
+  the parent has applied so far; the iframe's own `html`/`body` (a
+  genuinely separate root scrolling element, independent of the parent
+  page) had no `overflow: hidden` rule, so that moment showed a real
+  native scrollbar. Researched how other iframe-resize tools/the CSS
+  Working Group treat this class of problem before fixing it -- confirmed
+  `overflow: hidden` on the iframe's own root doesn't affect the
+  `scrollWidth`/`scrollHeight` measurements `injectContentHeightReporter`
+  already depends on (they report real content size regardless of whether
+  a scrollbar is shown), so this is a pure display fix with no
+  measurement-accuracy tradeoff. Also confirmed and documented a SEPARATE,
+  non-fixable platform limitation while researching this: a hover-
+  triggered element that needs to visually extend beyond a component's
+  own box (a tooltip, a dropdown) can never actually paint outside the
+  iframe's allocated box in the parent page -- Chrome (since v108) and
+  Firefox both force `overflow: clip` on `iframe`/`embed`/`object`
+  specifically to stop embedded content from escaping its box, a
+  deliberate isolation boundary, not something either side's CSS can work
+  around. Verified by hand: embedded the real compiled `ExpandedTabs`
+  preview in a deliberately undersized real iframe and clicked through
+  its tab-switch animation -- content clips cleanly at the box edge with
+  no scrollbar, even mid-transition. 1 new unit test; full suite (167
+  tests) + typecheck + lint all clean.
+
 - **Fixed a real packaged-sidecar-only bug in the Tailwind CSS generation
   below**: the user restarted the app after that fix shipped and still saw
   zero styling. Root cause, confirmed by directly spawning the actual

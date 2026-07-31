@@ -455,6 +455,19 @@ describe('injectContentHeightReporter (dynamic card sizing)', () => {
     expect(html).not.toMatch(/#root\s*\{[^}]*100vh/);
   });
 
+  it('sets overflow: hidden on the iframe\'s own html/body, so a mid-resize moment never flashes a native scrollbar', async () => {
+    // Real, confirmed bug: resizing is asynchronous (measure -> postMessage
+    // -> parent applies a new box on its own next frame), so any component
+    // whose size changes at runtime (an animation, a hover state) always
+    // has a brief window where its real content is bigger than whatever
+    // box the parent has applied so far. Without this rule, that moment
+    // shows a real native scrollbar on the iframe's own document -- see
+    // injectContentHeightReporter's own doc comment for the full research
+    // behind this fix.
+    const { html } = await compilePreviewHtml(previewPath);
+    expect(html).toMatch(/html,\s*body\s*\{[^}]*overflow:\s*hidden/);
+  });
+
   it('measures document.body, never document.documentElement (a real, confirmed bug)', async () => {
     // Regression guard: confirmed by hand against the real compiled
     // badge-showcase artifact that document.documentElement.scrollHeight

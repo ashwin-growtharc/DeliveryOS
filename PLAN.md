@@ -419,7 +419,17 @@ demonstrably true, not just when every task box is checked.
       fix (`scripts/generate-vendored-tailwind-preflight.mjs` embeds it as
       a string constant at build time instead). Verified by spawning the
       actual packaged sidecar exe directly, not just `dist/` under a
-      normal `node` process — see CHANGELOG.md for the full rationale.
+      normal `node` process. Fixed a real split-second scrollbar flash on
+      every resize (a component whose size changes at runtime always has
+      a brief window where content exceeds the parent-applied box, since
+      resizing is measure-then-postMessage-then-apply, not synchronous) --
+      the iframe's own `html`/`body` now get `overflow: hidden`, which
+      doesn't affect the existing scrollWidth/scrollHeight measurements.
+      Also documented a separate, non-fixable platform limitation found
+      via the same research: hover-triggered content (tooltips, dropdowns)
+      can never visually escape the iframe's own box in the parent page --
+      Chrome/Firefox both force `overflow: clip` on iframes for isolation,
+      not something either side's CSS can work around — see CHANGELOG.md for the full rationale.
   - [x] Broad structural detection (`src/**/*.{tsx,jsx}`, filtered by "returns
         JSX with a co-located `Props` type") — **not** a hardcoded folder-name
         glob (design doc §6, the `src/ui/` flat-convention finding)

@@ -532,7 +532,21 @@ async function compileReactPreview(previewEntryPath: string): Promise<CompiledPr
 <head>
 <meta charset="utf-8">
 <style>
-  html, body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  /* overflow: hidden here is deliberate, not a default -- see
+     injectContentHeightReporter's own doc comment for the full research
+     behind this. The parent applies the iframe's box size ASYNCHRONOUSLY
+     (postMessage -> rAF-coalesced resize), so there is always a brief
+     window -- mid-animation, or a hover state that grows the content --
+     where the real content genuinely exceeds whatever box the parent has
+     applied SO FAR. Without this rule, html/body (the iframe's own root
+     scrolling element) shows a real native scrollbar the instant that
+     happens, which then disappears again once the parent catches up --
+     exactly the flashing scroller this rule exists to prevent. This does
+     NOT affect measurement accuracy: document.body.scrollWidth/scrollHeight
+     (read by injectContentHeightReporter below) report the content's real,
+     full size regardless of whether overflow is hidden or visible -- only
+     whether a scrollbar/clip is shown changes, never what gets measured. */
+  html, body { margin: 0; padding: 0; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
   #root { display: flex; align-items: center; justify-content: center; }
 </style>
 <style>${safeTailwindCss}</style>
@@ -736,6 +750,44 @@ function injectPreviewCsp(html: string): string {
  * hand: a real 587x97 reading immediately followed by a nonsensical
  * 79x1015 on the very next report, permanently, not a transient blip).
  * See `reportSize`'s own early-return for the fix and full rationale.
+ *
+ * **Why the iframe's own html/body get `overflow: hidden`** (see the
+ * hardcoded reset `<style>` in `compileReactPreview`, not this function):
+ * resizing is inherently asynchronous -- a size change happens inside the
+ * iframe first, gets measured and posted here, then the PARENT applies a
+ * new box size on its own next animation frame. Any component whose size
+ * changes at runtime (a framer-motion transition, a hover state) will
+ * therefore always have at least one brief moment where its real content
+ * is larger than whatever box the parent has applied so far. Without
+ * `overflow: hidden`, that moment shows a real native scrollbar on the
+ * iframe's own document (a genuinely separate browsing context, with its
+ * own root scrolling element, independent of anything the parent page
+ * does) -- confirmed by hand as the exact cause of a real "scrollbar
+ * flashes every time something changes size" report. `overflow: hidden`
+ * doesn't change what gets measured here (`scrollWidth`/`scrollHeight`
+ * report the content's real, full size regardless of whether it's being
+ * clipped or scrolled -- only whether a scrollbar/clip is VISIBLE
+ * changes), so this is a pure display fix with no measurement impact.
+ *
+ * **A separate, non-fixable limitation** (found via web research into
+ * how iframe-resize libraries and the CSS Working Group treat this): a
+ * hover-triggered element that needs to visually extend beyond a
+ * component's normal box (a tooltip, a dropdown menu) can never actually
+ * paint outside this iframe's own allocated box in the parent page, no
+ * matter what CSS is applied on either side of the boundary. Since
+ * Chrome 108, the user-agent stylesheet forces `overflow: clip` on
+ * `iframe`/`embed`/`object` elements specifically to stop embedded
+ * content from visually escaping its box and occluding the embedding
+ * page -- see
+ * https://developer.chrome.com/blog/overflow-replaced-elements and the
+ * CSSWG discussion at https://github.com/w3ctag/design-reviews/issues/750
+ * (Firefox has long clipped iframes the same way, for the same
+ * isolation reason). There is no CSS trick or resize-timing fix on
+ * either side of this boundary that changes that -- it's a deliberate
+ * browser security/isolation boundary, not a bug. The only real
+ * mitigation (used by comparable tools like Storybook's own preview
+ * iframe) is generous, non-tightly-fit sizing for anything with known
+ * hover/expansion behavior, not trying to let the expansion escape.
  */
 function injectContentHeightReporter(html: string): string {
   const script = `<script>(function () {
