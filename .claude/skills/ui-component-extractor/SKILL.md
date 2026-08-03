@@ -34,14 +34,15 @@ scan the result:
    `Could not resolve "react"`. A short, explicit allow-list of common
    UI-kit dependencies is ALSO vendored the same way (see
    `VENDORED_LIBRARY_NAMES` in `compile.ts`): **`framer-motion`, `clsx`,
-   `tailwind-merge`, `class-variance-authority`** — a component that
-   imports any of these needs no workaround at all, step 2 below is a
-   no-op for them. Any OTHER third-party import (an icon library, a date
-   picker, anything not on that list) is left completely untouched and
-   will fail with a real, honest `Could not resolve "..."` error for
-   Review to see — don't try to route around it; if it comes up
-   repeatedly, that's a signal to add it to the allow-list instead (see
-   `scripts/generate-vendored-libraries.mjs`'s own `LIBRARIES` array).
+   `tailwind-merge`, `class-variance-authority`, `lucide-react`** — a
+   component that imports any of these needs no workaround at all, step 2
+   below is a no-op for them. Any OTHER third-party import (a date
+   picker, a charting library, anything not on that list) is left
+   completely untouched and will fail with a real, honest
+   `Could not resolve "..."` error for Review to see — don't try to route
+   around it; if it comes up repeatedly, that's a signal to add it to the
+   allow-list instead (see `scripts/generate-vendored-libraries.mjs`'s
+   own `LIBRARIES` array).
 
 2. **Scan's detector requires an EXPORTED component with a non-empty props
    map.** `detectUiComponentCandidates` (`src/engine/scan/detectUiComponents.ts`)
@@ -96,6 +97,23 @@ import type React from 'react';
 `useRef`, `useMemo`, `useCallback`, whatever's present. Drop the
 `import type React from 'react'` line if the file never references the
 `React` namespace in a type position.)
+
+**If the component is typed as `const X: React.FC<XProps> = (...) => {}`,
+convert it to a plain typed function declaration:**
+`function X(props: XProps) { ... }`. This is not a style preference —
+`React.FC<Props>` as a value-level type annotation requires TypeScript to
+actually RESOLVE the real `React.FC` generic via a genuine `'react'`
+module to unwrap it, which silently fails (Scan's docgen returns zero
+props — not an error, just nothing) in every real ingested payload
+directory, since none of them ship their own `node_modules/react`. A
+plain typed function only needs the local `XProps` interface, never
+`React.FC` itself, so it's unaffected. Confirmed empirically (a 4-way
+test: function-decl vs. `const`-with-`React.FC`, each with/without the
+type-only `react` import — only the `React.FC` form ever came back with
+zero docs) and via a real regression: `magic-container`, pushed and
+scanning fine, rendered with no interactive props in Detail until
+converted from `const MagicContainer: React.FC<MagicContainerProps> = ({...}) => {...}`
+to `function MagicContainer({...}: MagicContainerProps) { ... }`.
 
 Leave every other import completely alone: Tailwind class strings, CSS
 imports, `framer-motion`, `clsx`, icon libraries, etc. If one of those
