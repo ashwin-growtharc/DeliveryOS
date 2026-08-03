@@ -208,7 +208,10 @@
           </div>
           <div class="page-head">
             <h2 class="section-title">UI Components</h2>
-            <span id="ui-components-count" class="count"></span>
+            <div class="page-head-actions">
+              <span id="ui-components-count" class="count"></span>
+              <button id="ui-components-pull-all-btn" class="btn btn-sm" hidden></button>
+            </div>
           </div>
           <div id="ui-components-cat-tabs" class="tab-row" style="margin-bottom: 16px;"></div>
           <div id="ui-components-list" class="ui-component-list"></div>
@@ -351,6 +354,7 @@
 
             <div id="detail-push-status" class="push-status" hidden>
               <p id="detail-push-status-text" class="push-status-text"></p>
+              <button id="detail-view-pr-btn" class="btn btn-ghost btn-sm">View PR</button>
               <button id="detail-check-push-status-btn" class="btn btn-ghost btn-sm">Check push status</button>
             </div>
           </div>
@@ -369,7 +373,7 @@
              filled in and Review's per-field "Edit" jumps back to fix
              just one thing. -->
         <section id="view-addnew" class="view" hidden>
-          <button class="btn back-btn" data-view="browse">&larr; Back to Browse</button>
+          <button id="addnew-top-back-btn" class="btn back-btn">&larr; Back to Browse</button>
           <form id="addnew-form" class="card form-grid">
             <h2 class="section-title">Propose a new artifact</h2>
 

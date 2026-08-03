@@ -4,6 +4,50 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- **Fixed real navigation-flow UX complaints, found by actually using the
+  app.** Detail's "← Back to Browse" was hardcoded regardless of entry
+  point (Browse, a Tag Folder, or the UI Components list all landed on the
+  same generic Browse grid on Back, discarding the actual context), and a
+  successful propose from Scan's "Review & propose" always dumped back to
+  Browse too, losing the rest of that scan batch's still-unreviewed
+  candidates and forcing a full real re-scan to keep going.
+  - New `state.detailReturnView`, captured from `state.view` right before
+    `openDetail` switches to Detail -- its Back button now branches on it:
+    `openTagFolder(category, value)` to reopen the exact Tag Folder (Tag
+    Folder's own back button already did this correctly; Detail's didn't),
+    or `showView(...)` for `'browse'`/`'ui-components'`. The button's own
+    label updates to match ("← Back to Browse" / "← Back to Tag Folder" /
+    "← Back to UI Components").
+  - New `returnToScan(proposedId?)`: returns Add New (both its own top
+    "← Back" link and the post-submit success path) to Scan when
+    `addNewWizardMode` is true, restoring the last real `scan.run` result
+    (cached in `state.lastScanCandidates`) minus whichever candidate was
+    just proposed, if any -- via `showViewRaw`, not `showView('scan')` ->
+    `openScanView()`, which wipes the results list (correct for a fresh
+    sidebar visit, wrong for "come back mid-review"). Flat/direct Add New
+    entry is unaffected -- still returns to Browse, confirmed by hand.
+  - Every place a PR URL used to be inert text is now a real "View PR"
+    button, opened via the opener plugin's `openUrl` (`showToast`'s own
+    doc comment explains why a plain `<a href target="_blank">` doesn't
+    reliably work inside a Tauri webview) -- Add New's success toast,
+    Detail's per-artifact push-success toast, and Detail's persistent
+    pending-PR block (previously showed the raw URL as plain text).
+    `opener:allow-open-url` added to `capabilities/default.json`, scoped
+    to `https://github.com/*` (least-privilege, matching how
+    `allow-open-path` is already scoped rather than wildcard-everything).
+  - New "Pull all" button on the UI Components view, for parity with
+    Browse and Tag Folder (both already had one) -- the one real gap a UX
+    pass through the app found there.
+  - Verified in a real browser against a mocked `DeliveryOS.call`/
+    `window.__TAURI__` harness (`app.js` has no framework/build step and
+    no automated GUI test suite exists for the native Tauri window):
+    Browse/Tag-Folder/UI-Components -> Detail -> Back, each landing back
+    exactly where it started; Scan -> Review & propose -> success ->
+    lands on Scan (not Browse) with the just-proposed candidate gone and
+    the other one still there; every new "View PR" button firing `openUrl`
+    with the exact right PR URL; flat/direct Add New entry confirmed
+    still returns to Browse, not Scan.
+
 - **Fixed a real broken-image bug in Phase E's PR preview, found by pushing
   a real component to a real (private) remote.** The very first live PR
   ([ai-helpers#44](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/44))

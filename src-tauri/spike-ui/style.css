@@ -522,6 +522,12 @@ input, textarea, select {
   opacity: .5;
 }
 
+.page-head-actions {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
 /* ---------- kind swatch (icon + warm accent tint) ----------
  * A small, distinct abstract mark per kind (agent/skill/command/rule/
  * template/doc, see kindIcon() in app.js), used on Browse's cards, Detail,
@@ -1696,8 +1702,31 @@ input, textarea, select {
 .toast.success .dot { background: var(--mint-500); }
 .toast.error .dot { background: var(--danger-500); }
 
+.toast-body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+}
+
 .toast .msg {
   word-break: break-word;
+}
+
+.toast-link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent-600);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.toast-link:hover {
+  opacity: .8;
 }
 
 @keyframes toast-in {

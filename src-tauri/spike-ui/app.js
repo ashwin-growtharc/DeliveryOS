@@ -6,7 +6,7 @@
 (function () {
   const call = window.DeliveryOS.call;
   const { open: openDialog } = window.__TAURI__.dialog;
-  const { revealItemInDir } = window.__TAURI__.opener;
+  const { revealItemInDir, openUrl } = window.__TAURI__.opener;
   const { listen } = window.__TAURI__.event;
   const { check } = window.__TAURI__.updater;
   const { relaunch } = window.__TAURI__.process;
@@ -154,7 +154,22 @@
     // Browse's own search box -- reset every time a new folder is opened.
     tagFolderSearch: '',
     selectedKey: null, // `${id}::${remoteName}` of the entry shown in Detail
+    // Which view Detail was opened FROM ('browse' | 'tag-folder' |
+    // 'ui-components') -- captured once, right before switching to Detail
+    // (see openDetail), so its own Back button can return to that exact
+    // place instead of always Browse. A real, confirmed UX complaint: this
+    // used to be hardcoded, so opening Detail from a Tag Folder or the UI
+    // Components list and clicking Back always dumped to the plain Browse
+    // grid, discarding the actual entry context -- exactly the same class
+    // of bug Tag Folder's OWN back button already avoids (it correctly
+    // returns to 'tags', not 'browse').
+    detailReturnView: null,
     remotes: [],
+    // Last real scan.run result, cached so returnToScan can restore the
+    // rest of a batch (minus whichever candidate was just proposed, if
+    // any) after Add New's wizard finishes, without a second real
+    // network scan just to keep reviewing the others.
+    lastScanCandidates: [],
   };
 
   // Unlisten function for the current `sidecar-progress` event subscription,
@@ -213,20 +228,39 @@
 
   // ---------- toasts ----------
 
-  function showToast(kind, message) {
+  /** `linkUrl`, if given, adds a real clickable action to the toast --
+   * opened via the opener plugin's `openUrl` (`window.__TAURI__.opener`),
+   * NOT a plain `<a href target="_blank">`: inside a Tauri webview, a
+   * bare anchor tag has no reliable way to hand off to the system's
+   * default browser, which is why every other place this app opens
+   * something external (`revealItemInDir` for "Open folder") already goes
+   * through this same plugin rather than raw DOM navigation. A toast
+   * carrying a link stays up longer (12s vs. the plain 5s) -- long enough
+   * to actually read and click, not just glimpse before it vanishes. */
+  function showToast(kind, message, linkUrl, linkLabel) {
     const stack = $('toast-stack');
     const toast = document.createElement('div');
     toast.className = `toast ${kind}`;
-    toast.innerHTML = `<span class="dot"></span><span class="msg"></span>`;
+    toast.innerHTML = `<span class="dot"></span><span class="toast-body"><span class="msg"></span></span>`;
     toast.querySelector('.msg').textContent = message;
+    if (linkUrl) {
+      const link = document.createElement('button');
+      link.type = 'button';
+      link.className = 'toast-link';
+      link.textContent = linkLabel ?? 'View PR →';
+      link.addEventListener('click', () => {
+        void openUrl(linkUrl);
+      });
+      toast.querySelector('.toast-body').appendChild(link);
+    }
     stack.appendChild(toast);
     setTimeout(() => {
       toast.remove();
-    }, 5000);
+    }, linkUrl ? 12000 : 5000);
   }
 
-  function toastSuccess(message) {
-    showToast('success', message);
+  function toastSuccess(message, linkUrl, linkLabel) {
+    showToast('success', message, linkUrl, linkLabel);
   }
 
   function toastError(err) {
@@ -338,6 +372,7 @@
       populateKindPicker();
       addNewWizardMode = false;
       resetWizard();
+      $('addnew-top-back-btn').textContent = '← Back to Browse';
     }
   }
 
@@ -689,6 +724,34 @@
     }
 
     renderUiComponentsList(uiComponentEntries);
+    renderUiComponentsPullAllButton();
+  }
+
+  /** UI Components' own bulk action -- the one real gap this page had
+   * relative to Browse and Tag Folder (both already had a "Pull all"),
+   * confirmed by a UX pass through the app. Recomputes the same
+   * kind+remote+category filtering `renderUiComponentsPage`/
+   * `renderUiComponentsList` already do inline, rather than sharing their
+   * exact code path, so this stays a pure addition with zero risk to the
+   * already-working list rendering. */
+  function visibleUiComponentEntries() {
+    const byKindAndRemote = applyRemoteFilter(
+      state.catalog.filter((entry) => entry.manifest.kind === 'ui-component'),
+    );
+    const category = state.uiComponentsPageCategory;
+    return category
+      ? byKindAndRemote.filter((entry) => (entry.manifest.tags?.componentTypes ?? []).includes(category))
+      : byKindAndRemote;
+  }
+
+  function renderUiComponentsPullAllButton() {
+    renderPullAllButton($('ui-components-pull-all-btn'), visibleUiComponentEntries());
+  }
+
+  async function handleUiComponentsPullAll() {
+    const btn = $('ui-components-pull-all-btn');
+    const pullable = visibleUiComponentEntries().filter(isBulkPullable);
+    await bulkPull(pullable, btn, () => renderUiComponentsPage());
   }
 
   /** The active category's rows, each a live sandboxed-iframe preview.
@@ -1462,7 +1525,7 @@
             cwd: state.projectDir,
             options: {},
           });
-          toastSuccess(`Pushed ${entry.manifest.id}: opened PR #${result.number} (${result.url})`);
+          toastSuccess(`Pushed ${entry.manifest.id}: opened PR #${result.number}`, result.url);
         }
         endProgress(true);
         await loadCatalog();
@@ -1720,8 +1783,27 @@
     }
   }
 
+  /** Detail's Back button label per possible `state.detailReturnView` --
+   * kept next to openDetail (the only place that sets detailReturnView)
+   * so the two stay in sync by construction. */
+  const DETAIL_RETURN_LABELS = {
+    browse: '← Back to Browse',
+    'tag-folder': '← Back to Tag Folder',
+    'ui-components': '← Back to UI Components',
+  };
+
   function openDetail(entry) {
     state.selectedKey = entryKey(entry);
+    // Captured BEFORE switching to Detail, while state.view still reflects
+    // wherever the user actually is right now -- guarded against
+    // overwriting with 'detail' itself in case this is ever called while
+    // already on Detail (nothing in this app does that today, but a stale
+    // 'detail' here would make the Back button loop back to itself).
+    if (state.view !== 'detail') {
+      state.detailReturnView = state.view;
+    }
+    $('back-to-browse-btn').textContent =
+      DETAIL_RETURN_LABELS[state.detailReturnView] ?? DETAIL_RETURN_LABELS.browse;
     resetProgressPanel();
     renderDetail(entry);
     showViewRaw('detail');
@@ -1889,15 +1971,21 @@
     // ever learn whether that push was merged, rejected, or is still open.
     const pushStatusBlock = $('detail-push-status');
     const pushStatusText = $('detail-push-status-text');
+    const viewPrBtn = $('detail-view-pr-btn');
     const checkPushBtn = $('detail-check-push-status-btn');
     if (entry.pendingPr) {
       pushStatusBlock.hidden = false;
+      // The raw URL used to be inlined into this text itself (inert,
+      // impossible to click) -- now a real button, via the opener plugin
+      // (see showToast's own doc comment for why a plain <a> won't work
+      // inside a Tauri webview).
       pushStatusText.textContent =
-        `Pushed — PR #${entry.pendingPr.number} (${entry.pendingPr.url}) `
-        + `is still open, as far as DeliveryOS knows.`;
+        `Pushed — PR #${entry.pendingPr.number} is still open, as far as DeliveryOS knows.`;
+      viewPrBtn.onclick = () => void openUrl(entry.pendingPr.url);
       checkPushBtn.onclick = () => void handleCheckPushStatus(entry);
     } else {
       pushStatusBlock.hidden = true;
+      viewPrBtn.onclick = null;
       checkPushBtn.onclick = null;
     }
   }
@@ -2642,9 +2730,19 @@
             postInstall,
           },
         });
-        toastSuccess(`Proposed ${id}: opened PR #${result.number} (${result.url})`);
+        toastSuccess(`Proposed ${id}: opened PR #${result.number}`, result.url);
         resetAddNewForm();
-        showView('browse');
+        // Return to wherever this proposal actually came from -- Scan
+        // (when reviewing a discovered candidate) or Browse (direct entry)
+        // -- never unconditionally Browse. A real, confirmed UX complaint:
+        // proposing from Scan used to always dump back to Browse, losing
+        // the rest of that scan's still-unreviewed candidates and forcing
+        // a full re-scan (a real network re-fetch) just to keep going.
+        if (addNewWizardMode) {
+          returnToScan(id);
+        } else {
+          showView('browse');
+        }
       } catch (err) {
         toastError(err);
       }
@@ -2770,12 +2868,40 @@
       try {
         const candidates = await call('scan.run', { cwd: state.projectDir, remote });
         endProgress(true);
+        // Cached so returnToScan can restore this batch later (minus
+        // whichever one was just proposed, if any) without a second real
+        // network scan -- see that function's own doc comment.
+        state.lastScanCandidates = candidates;
         renderScanResults(candidates);
       } catch (err) {
         endProgress(false);
         toastError(err);
       }
     });
+  }
+
+  /** Returns to the Scan view from anywhere inside a wizard-mode Add New
+   * session (`addNewWizardMode` true -- entered via Scan's own "Review &
+   * propose" button), restoring the rest of that scan batch -- whether
+   * leaving via the top "Back" link (`proposedId` omitted, nothing to
+   * remove) or after a successful propose (`proposedId` set, removed from
+   * the restored list) -- rather than either (a) unconditionally dumping
+   * back to Browse (the real, confirmed UX complaint this whole flow
+   * exists to fix: it lost the rest of a scan's still-unreviewed
+   * candidates, forcing a full real re-scan just to keep going), or (b)
+   * going to Scan via the normal `showView('scan')` -> `openScanView()`
+   * path, which would itself wipe the results list back to empty (it's
+   * built for a fresh sidebar visit, not a "come back mid-review" one).
+   * Uses `showViewRaw`, not `showView`, specifically to skip that wipe --
+   * `scan-remote-select`'s own value/options are untouched either way, so
+   * nothing needs restoring there. */
+  function returnToScan(proposedId) {
+    showViewRaw('scan');
+    resetProgressPanel();
+    if (proposedId) {
+      state.lastScanCandidates = state.lastScanCandidates.filter((c) => c.id !== proposedId);
+    }
+    renderScanResults(state.lastScanCandidates);
   }
 
   /** Navigates to Add New with id/kind/description/payload pre-filled from
@@ -2798,6 +2924,7 @@
     // goToWizardStep('review') finally runs.
     addNewWizardMode = true;
     resetWizard();
+    $('addnew-top-back-btn').textContent = '← Back to Scan';
     await loadRemotesForAddNewSelect();
 
     $('f-id').value = candidate.id;
@@ -2984,7 +3111,32 @@
     $('scan-run-btn').addEventListener('click', () => void handleRunScan());
     $('browse-pull-all-btn').addEventListener('click', () => void handleBrowsePullAll());
     $('tag-folder-pull-all-btn').addEventListener('click', () => void handleTagFolderPullAll());
-    $('back-to-browse-btn').addEventListener('click', () => showView('browse'));
+    $('ui-components-pull-all-btn').addEventListener('click', () => void handleUiComponentsPullAll());
+    $('back-to-browse-btn').addEventListener('click', () => {
+      // Tag Folder needs its own dedicated re-open (category + value), not
+      // just a generic showView -- 'tags' alone would land on the
+      // Browse-by-tag PICKER, not the specific folder Detail was opened
+      // from. Every other destination ('browse', 'ui-components') already
+      // has its own showView-registered per-view load, so a plain
+      // showView(...) is correct for those.
+      if (state.detailReturnView === 'tag-folder') {
+        openTagFolder(state.activeTagCategory, state.activeTagValue);
+      } else {
+        showView(state.detailReturnView ?? 'browse');
+      }
+    });
+    // Individually wired (not the generic `[data-view]` loop above) since
+    // its destination depends on how Add New was entered -- Scan's own
+    // "Review & propose" (wizard mode) needs returnToScan's restore-the-
+    // batch behavior, not a plain showView('scan') that would wipe the
+    // results back to empty (see returnToScan's own doc comment).
+    $('addnew-top-back-btn').addEventListener('click', () => {
+      if (addNewWizardMode) {
+        returnToScan();
+      } else {
+        showView('browse');
+      }
+    });
 
     $('search-input').addEventListener('input', (ev) => {
       state.search = ev.target.value;
