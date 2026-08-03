@@ -83,7 +83,8 @@ function assertSafePathSegment(segment: string, label: string): void {
 }
 
 /** Path to a specific compiled preview's cached entry, keyed by (remote,
- * id, version) so a version bump naturally invalidates the cache (a stale
+ * id, version, compilerVersion) so either an artifact version bump OR a
+ * change to the compiler ITSELF naturally invalidates the cache (a stale
  * entry is simply never looked up again, not explicitly deleted) --
  * never pushed or pulled, purely a local derived artifact. Filename is
  * `compiled.json`, not `index.html` (Phase B's original shape) -- Phase C
@@ -91,12 +92,28 @@ function assertSafePathSegment(segment: string, label: string): void {
  * propsSchemas), not just a raw HTML string; old Phase-B-era cache
  * entries simply become unreachable under this new filename, same
  * "invalidated by the key changing, nothing explicitly deleted"
- * philosophy as a version bump. */
-export function previewCachePath(remoteName: string, id: string, version: string): string {
+ * philosophy as a version bump.
+ *
+ * `compilerVersion` (see `PREVIEW_COMPILER_VERSION` in compile.ts) exists
+ * because of a real, confirmed bug: an already-pushed artifact whose OWN
+ * version never changes can sit cached indefinitely, silently invisible
+ * to every subsequent fix to the compiler's own output (Tailwind CSS
+ * generation, vendored libraries, the iframe scrollbar fix, and whatever
+ * width/height measurement race fixes came before those) -- confirmed by
+ * hand against a real, months-old cached entry for a real pushed
+ * component (`decrypting-text`) still missing every one of those fixes,
+ * still running whatever measurement logic existed when it was first
+ * compiled, including races since fixed. Bumping `PREVIEW_COMPILER_VERSION`
+ * whenever compile.ts's output-affecting logic changes makes every
+ * previously-cached preview across every remote/artifact/version stop
+ * being looked up in one move, with no manual cache-clearing step for
+ * anyone to remember. */
+export function previewCachePath(remoteName: string, id: string, version: string, compilerVersion: string): string {
   assertSafePathSegment(remoteName, 'remote name');
   assertSafePathSegment(id, 'artifact id');
   assertSafePathSegment(version, 'version');
-  return path.join(previewCacheRoot(), remoteName, id, version, 'compiled.json');
+  assertSafePathSegment(compilerVersion, 'compiler version');
+  return path.join(previewCacheRoot(), remoteName, id, version, `compiler-v${compilerVersion}`, 'compiled.json');
 }
 
 /** Project-local (cwd-scoped) staging directory for one `scan` run's

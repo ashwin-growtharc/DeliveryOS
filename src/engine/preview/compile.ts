@@ -10,6 +10,22 @@ import { VENDORED_TAILWIND_PREFLIGHT_CSS } from './vendoredTailwindPreflight.gen
 import { extractPropsSchemas, findComponentFiles, PropSchemaEntry } from './docgen';
 
 /**
+ * Bump this string whenever a change anywhere in this file changes what
+ * `compilePreviewHtml` actually PRODUCES for the same input source (a new
+ * CSS/JS injection, a fixed measurement race, a new vendored library,
+ * anything that changes the compiled HTML's behavior or content) --
+ * `getOrCompilePreview`'s cache is keyed on this alongside
+ * `(remoteName, id, version)` (see `previewCachePath`'s own doc comment
+ * for the real, confirmed bug this exists to prevent: an already-pushed
+ * artifact whose OWN version never changes stayed cached indefinitely,
+ * invisible to every subsequent fix made here). No particular numbering
+ * scheme required -- any distinct value invalidates every previously
+ * cached preview across every remote/artifact/version in one move; a
+ * short incrementing string is just the simplest thing that works.
+ */
+const PREVIEW_COMPILER_VERSION = '1';
+
+/**
  * Real Tailwind CSS, generated at compile time from whatever utility
  * class names a component's own source actually uses -- found while
  * hand-testing Scan against a real project: a Tailwind-authored
@@ -945,7 +961,7 @@ export async function getOrCompilePreview(
   version: string,
   previewEntryPath: string,
 ): Promise<CompiledPreview> {
-  const cachePath = previewCachePath(remoteName, id, version);
+  const cachePath = previewCachePath(remoteName, id, version, PREVIEW_COMPILER_VERSION);
   if (fs.existsSync(cachePath)) {
     return JSON.parse(fs.readFileSync(cachePath, 'utf-8')) as CompiledPreview;
   }

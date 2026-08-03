@@ -84,6 +84,24 @@ async function main() {
     // `require('esbuild')` in the packaged bundle, since the packaged
     // sidecar ships with no node_modules at all -- bundling it IS the
     // point; ESBUILD_BINARY_PATH is what makes that legal.
+    //
+    // `chromium-bidi/*` IS marked external, for the opposite reason:
+    // playwright-core (pulled in via renderPreviewImage.ts, Phase E) has a
+    // real `require("chromium-bidi/...")` inside a lazily-invoked
+    // initializer (`init_bidiOverCdp`, only reached if something launches
+    // a browser over the newer WebDriver BiDi protocol -- Firefox/WebKit,
+    // or Chromium with BiDi explicitly requested). This project only ever
+    // calls `chromium.launch({channel: 'msedge'|'chrome'})`, both plain
+    // CDP, so that initializer is never actually reached at runtime --
+    // confirmed by esbuild's own bundling failure (`chromium-bidi` isn't
+    // installed at all; it's optional and this project never needed it).
+    // Leaving it external (rather than trying to install a real
+    // chromium-bidi just to satisfy the bundler) means the unresolved
+    // `require` stays as literal, never-executed dead code in the output,
+    // exactly like the `esbuild` case above but for the opposite reason
+    // (this one's fine to be unresolvable specifically BECAUSE it's never
+    // reached, not despite it).
+    external: ['chromium-bidi', 'chromium-bidi/*'],
     outfile: bundlePath,
   });
 

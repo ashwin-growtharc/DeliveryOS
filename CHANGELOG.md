@@ -4,6 +4,71 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- **Fixed a real, currently-live rendering bug** ("this thing good
+  sometimes, not good sometimes" -- a real component's live preview
+  intermittently collapsed to one character per line with a scrollbar) --
+  and, investigating it, **found and fixed a much more serious regression:
+  the packaged Tauri app's sidecar has been crashing on startup, for
+  every command, since Phase E.**
+  - Root cause of the original report: `getOrCompilePreview`'s cache was
+    keyed only on `(remoteName, id, version)` -- an already-pushed
+    artifact whose own version never changes stays cached indefinitely,
+    invisible to every subsequent fix to the compiler itself. Confirmed
+    by hand: a real, months-old cached preview for `decrypting-text` (a
+    real pushed test artifact) was missing Tailwind CSS generation,
+    vendored libraries, and the iframe scrollbar fix -- three separate
+    fixes landed earlier this same session -- still running whatever
+    measurement logic existed when it was first compiled, including
+    timing-dependent races since fixed (explaining "sometimes good,
+    sometimes bad": the same stale, racy bundle, not a new bug each time).
+    Fixed with a new `PREVIEW_COMPILER_VERSION` constant (`compile.ts`),
+    folded into `previewCachePath` alongside the artifact version --
+    bumping it whenever compile.ts's output-affecting logic changes now
+    invalidates every previously-cached preview across every remote/
+    artifact/version in one move, with no manual cache-clearing step.
+  - Investigating led to rebuilding the packaged sidecar for the first
+    time since Phase E added `playwright-core` -- and it didn't just fail
+    to build, it revealed the packaged EXE crashes on startup for every
+    single command, not just push: `playwright-core`'s own bundle does a
+    dynamic `require(path.join(__dirname, '..', 'package.json'))` at
+    import time (to read its own version), and Node's SEA `require` shim
+    can only resolve genuine built-ins or whatever esbuild statically
+    bundled in -- confirmed by hand, including that marking the whole
+    package `external` doesn't help either: a real, on-disk
+    `node_modules/playwright-core` sitting right next to the packaged exe
+    still isn't resolvable, since Node SEA has NO external module
+    resolution at all, for anything, regardless of what's physically on
+    disk. Fixed by making the `playwright-core` import in
+    `renderPreviewImage.ts` fully lazy (a dynamic `import()` inside the
+    one function that needs it, not a static top-level import) -- the
+    sidecar now starts fine for every command, and the one place that
+    still needs `playwright-core` (an actual push generating a
+    `preview.png`) fails INTO the exact same graceful-degradation path a
+    Playwright-unrelated render failure already used
+    (`maybeRenderPreviewImage`'s own try/catch, push.ts) rather than
+    crashing. This is a genuine, permanent platform limit, not a
+    temporary one: the packaged desktop app can never generate
+    `preview.png` at all (Node SEA cannot run `playwright-core` in any
+    form); only the CLI (a real, unpackaged `node` process with real
+    `node_modules`) can. Also fixed a second, unrelated packaged-sidecar
+    build failure surfaced by the same rebuild: `playwright-core`'s own
+    bundle references the optional, never-installed `chromium-bidi`
+    package inside a lazily-invoked initializer this project never
+    reaches (no BiDi-protocol browser launches, only plain CDP via
+    `channel: 'msedge'`/`'chrome'`) -- marked `external` in
+    `build-sidecar.mjs`'s esbuild config, same "never resolved, never
+    reached" reasoning as the `chromium-bidi` case's own doc comment.
+  - New regression tests: a stale-cache-from-an-older-compiler-version
+    test (`preview.compile.test.ts`), and a real e2e test proving a
+    render failure (a genuine compile error, not Playwright-specific)
+    never blocks the push itself, just omits the image (`push.e2e.test.ts`)
+    -- the actual safety net now protecting against the newly-discovered
+    packaged-sidecar failure mode. Verified by hand against the real,
+    rebuilt packaged sidecar exe: an unrelated command (`remote.list`) now
+    succeeds where it previously crashed the whole process, and
+    `decrypting-text`'s preview now recompiles fresh with every current
+    fix present. Full suite (188 tests) + typecheck + lint all clean.
+
 - **Fixed real navigation-flow UX complaints, found by actually using the
   app.** Detail's "← Back to Browse" was hardcoded regardless of entry
   point (Browse, a Tag Folder, or the UI Components list all landed on the

@@ -320,6 +320,77 @@ describe('push e2e', () => {
   );
 
   it(
+    'propose-new mode: a preview render failure never blocks the push itself, just omits the image (Phase E)',
+    async () => {
+      // Regression guard for a real, serious bug found by hand: adding
+      // playwright-core (needed for renderPreviewImage) as a real
+      // dependency of push.ts turned out to crash the ENTIRE packaged
+      // Node SEA sidecar on startup (playwright-core's own bundle does a
+      // dynamic require of its own package.json at import time, which
+      // Node's SEA require shim can't resolve at all -- confirmed
+      // empirically, including that marking it external doesn't help
+      // either, since SEA has zero external module resolution). Fixed by
+      // making the import lazy (see renderPreviewImage.ts's own doc
+      // comment) -- meaning the packaged app can still fail to render a
+      // preview at the exact moment a push needs one. This test proves
+      // maybeRenderPreviewImage's own catch (push.ts) genuinely absorbs
+      // ANY render failure, not just the ones this repo's dev machine
+      // happens to be able to reproduce -- a component whose preview.tsx
+      // has a real compile error (a syntax error, here) never reaches
+      // Playwright at all, but exercises the exact same catch path a
+      // Playwright-specific failure would.
+      const remoteName = 'test-remote-new-preview-failure';
+      await registerAndClone(remoteName, fixtureRemoteDir);
+
+      const payloadDir = fs.mkdtempSync(path.join(scratchRoot, 'new-ui-component-broken-preview-'));
+      fs.writeFileSync(
+        path.join(payloadDir, 'Broken.tsx'),
+        `export interface BrokenProps {\n  label: string;\n}\n\nexport function Broken({ label }: BrokenProps) {\n  return <span>{label}</span>;\n}\n`,
+        'utf-8',
+      );
+      // A genuine syntax error -- compilePreviewHtml itself throws before
+      // ever reaching Playwright, exercising maybeRenderPreviewImage's
+      // catch the same way a Playwright-specific failure would.
+      fs.writeFileSync(
+        path.join(payloadDir, 'preview.tsx'),
+        `import { Broken } from './Broken';\n\nexport const Default = () => <Broken label="New" (((( ;\n`,
+        'utf-8',
+      );
+
+      const octokit = makeFakeOctokit();
+      const newId = 'test-broken-preview';
+      const result = await pushArtifact(
+        newId,
+        {
+          remote: remoteName,
+          isNew: true,
+          payloadPath: payloadDir,
+          kind: 'ui-component',
+          owner: 'test-team',
+          description: 'A component whose preview fails to compile',
+        },
+        newScratchCwd('new-preview-failure'),
+        octokit,
+      );
+
+      // The push itself still succeeded -- a real PR opened.
+      expect(result.number).toBeGreaterThan(0);
+
+      const fixtureGit = simpleGit(fixtureRemoteDir);
+      const lsTree = await fixtureGit.raw([
+        'ls-tree', '-r', '--name-only', result.branch, `artifacts/${newId}/payload`,
+      ]);
+      expect(lsTree).toContain('Broken.tsx');
+      expect(lsTree).toContain('preview.tsx');
+      expect(lsTree).not.toContain('preview.png');
+
+      const call = octokit.rest.pulls.create.mock.calls[0][0];
+      expect(call.body).not.toContain('### Preview');
+    },
+    60_000,
+  );
+
+  it(
     'propose-new mode against a PRIVATE repo: still generates+commits preview.png, but never embeds a raw.githubusercontent.com link (Phase E)',
     async () => {
       // Regression guard for a real bug found by hand: raw.githubusercontent.com

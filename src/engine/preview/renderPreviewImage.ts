@@ -1,5 +1,4 @@
 import type { Browser } from 'playwright-core';
-import { chromium } from 'playwright-core';
 import { compilePreviewHtml } from './compile';
 
 /**
@@ -23,7 +22,41 @@ import { compilePreviewHtml } from './compile';
  */
 const HEADLESS_BROWSER_CHANNELS = ['msedge', 'chrome'] as const;
 
+/**
+ * `playwright-core` is imported dynamically here, NOT with a static
+ * top-level `import`, for a real, confirmed reason: `sidecar.ts`
+ * (imported by every sidecar command, not just push) pulls in `push.ts`,
+ * which pulls in this file -- a static import would mean merely
+ * STARTING the sidecar drags in `playwright-core`'s own module-init code,
+ * which crashes immediately and unconditionally inside the packaged Node
+ * SEA (`ERR_UNKNOWN_BUILTIN_MODULE`: playwright-core's own bundle does a
+ * dynamic `require(path.join(__dirname, '..', 'package.json'))` at import
+ * time to read its own version, and Node's SEA `require` shim can only
+ * resolve genuine Node built-ins or whatever esbuild statically bundled
+ * in -- confirmed empirically, including that marking the whole package
+ * `external` doesn't help either: a real, on-disk `node_modules/
+ * playwright-core` sitting right next to the packaged exe still isn't
+ * resolvable, since Node SEA has NO external module resolution at all,
+ * for anything, regardless of what's physically on disk). Before this
+ * fix, EVERY sidecar command crashed the whole process on startup in the
+ * packaged app, not just push -- this was found and fixed as a real
+ * regression, not a hypothetical one.
+ *
+ * Deferring the import to here means the sidecar itself starts fine for
+ * every command; only an actual push of a component WITH a preview file
+ * ever reaches this line at all, and if this dynamic import itself throws
+ * (in the packaged app, where it does), that failure is caught by
+ * `maybeRenderPreviewImage`'s own existing try/catch (push.ts) --
+ * pushArtifact still succeeds, just without a preview.png, the identical
+ * graceful-degradation path as any other render failure (a real compile
+ * error, no browser installed). This is a genuine, permanent platform
+ * limitation, not a temporary one: the packaged desktop app can never
+ * generate `preview.png` (Node SEA cannot run `playwright-core` in any
+ * form), while the CLI (a real, unpackaged `node` process with real
+ * `node_modules`) always can.
+ */
 async function launchAvailableBrowser(): Promise<Browser> {
+  const { chromium } = await import('playwright-core');
   let lastError: unknown;
   for (const channel of HEADLESS_BROWSER_CHANNELS) {
     try {

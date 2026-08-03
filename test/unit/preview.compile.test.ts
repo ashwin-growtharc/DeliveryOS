@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { JSDOM } from 'jsdom';
 import { compilePreviewHtml, getOrCompilePreview, listVariantNames } from '../../src/engine/preview/compile';
+import { previewCachePath } from '../../src/engine/paths';
 
 const fixtureDir = path.join(__dirname, '..', 'fixtures', 'preview-spike', 'Button');
 const previewPath = path.join(fixtureDir, 'preview.tsx');
@@ -661,5 +662,31 @@ describe('getOrCompilePreview caching (Phase B)', () => {
     // than incorrectly returning the 1.0.0 entry.
     const result = await getOrCompilePreview('test-remote', 'button', '2.0.0', previewPath);
     expect(result.html.length).toBeGreaterThan(0);
+  });
+
+  it('a stale cache entry from an OLDER compiler version is never served, even with the same (remote, id, version)', async () => {
+    // Regression guard for a real, confirmed bug: an already-pushed
+    // artifact's cache used to be keyed on (remote, id, version) alone --
+    // an artifact whose OWN version never changes stayed cached
+    // indefinitely, invisible to every subsequent fix to compile.ts
+    // itself (confirmed by hand against a real months-old cached preview
+    // still missing Tailwind CSS generation, vendored libraries, and the
+    // iframe scrollbar fix, all added long after that cache entry was
+    // first written). Simulates a legacy cache entry from a hypothetical
+    // older PREVIEW_COMPILER_VERSION by writing directly to where
+    // previewCachePath says one would live, then confirms the CURRENT
+    // getOrCompilePreview (which always asks for the CURRENT compiler
+    // version) never serves it -- a real compile happens instead.
+    const legacyCachePath = previewCachePath('test-remote', 'stale-version-check', '1.0.0', '0-fake-legacy');
+    fs.mkdirSync(path.dirname(legacyCachePath), { recursive: true });
+    fs.writeFileSync(
+      legacyCachePath,
+      JSON.stringify({ html: '<html><!-- stale legacy cache entry, pre-dates every current fix --></html>', variantNames: [], propsSchemas: {} }),
+      'utf-8',
+    );
+
+    const result = await getOrCompilePreview('test-remote', 'stale-version-check', '1.0.0', previewPath);
+    expect(result.html).not.toContain('stale legacy cache entry');
+    expect(result.html).toContain('__DeliveryOSReactRuntime');
   });
 });
