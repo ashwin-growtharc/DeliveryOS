@@ -49,7 +49,19 @@ const outFile = path.join(repoRoot, 'src', 'engine', 'preview', 'vendoredLibrari
 // (kept as a separate, explicit const there rather than imported from
 // here, since this script's output is a generated data file, not a
 // module compile.ts should take on a real import dependency on).
-const LIBRARIES = ['framer-motion', 'clsx', 'tailwind-merge', 'class-variance-authority'];
+// `lucide-react` is the one real size outlier here (~716 KB minified,
+// bundling all of its icon components -- vs. ~185 KB for framer-motion,
+// the next largest) -- found while ingesting a real pasted component that
+// used exactly one icon out of it. Bundled whole anyway, matching this
+// list's existing "embed unconditionally, whether or not THIS component
+// uses it" simplicity (see compile.ts's own doc comment on that
+// tradeoff): a real per-component tree-shaken bundle (only the icons an
+// individual component actually imports) would need a SEPARATE esbuild
+// pass at PREVIEW-COMPILE time, not a one-time build-time generation step
+// like every other entry here -- a real, larger architecture change,
+// worth doing if this list's total size ever becomes a genuine problem,
+// not attempted here.
+const LIBRARIES = ['framer-motion', 'clsx', 'tailwind-merge', 'class-variance-authority', 'lucide-react'];
 
 async function bundleLibrary(name) {
   // `Object.assign({ __esModule: true }, Lib)` -- not just `= Lib` --

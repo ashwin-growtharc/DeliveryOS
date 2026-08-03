@@ -98,11 +98,16 @@ describe('compilePreviewHtml (Phase A spike)', () => {
   it('produces a reasonably-sized minified bundle', async () => {
     const { html } = await compilePreviewHtml(previewPath);
 
-    // Minified React + ReactDOM's client runtime inlined should land well
-    // under the unminified ~1.1MB the first spike pass produced -- a rough
+    // Every compiled preview embeds ALL vendored libraries unconditionally
+    // (see VENDORED_LIBRARY_NAMES's own doc comment), regardless of which
+    // one this particular component actually imports -- so lucide-react's
+    // real ~716 KB (bundling every icon, the one size outlier in that
+    // list -- see generate-vendored-libraries.mjs) lands in THIS bundle
+    // too, even though Button.tsx never imports it. Ceiling raised to
+    // match that real, expected cost, not loosened arbitrarily -- a rough
     // sanity ceiling, not a tight budget; Phase A's real size/latency check
     // happens against the packaged sidecar, not this unit test.
-    expect(html.length).toBeLessThan(500_000);
+    expect(html.length).toBeLessThan(1_300_000);
   });
 });
 
@@ -188,6 +193,33 @@ describe('vendored UI-kit libraries (framer-motion, clsx, etc.)', () => {
     // 'framer-motion'") that failed with "Could not resolve" before the
     // vendoring support this test guards.
     expect(fader?.textContent).toBe('Hello');
+  });
+
+  it('compiles a component that imports an icon from lucide-react directly, untouched, and renders a real SVG', async () => {
+    // lucide-react is the one real size outlier in this allow-list (~716
+    // KB minified, since every icon component gets bundled regardless of
+    // which one a given component actually imports -- see
+    // generate-vendored-libraries.mjs's own doc comment on that
+    // tradeoff), added after a real pasted component (a command-palette
+    // style search modal) needed exactly one icon out of it and failed
+    // with "Could not resolve lucide-react" before this.
+    const vendoredIconPreviewPath = path.join(
+      __dirname, '..', 'fixtures', 'preview-spike', 'VendoredIcon', 'preview.tsx',
+    );
+    const { html } = await compilePreviewHtml(vendoredIconPreviewPath);
+    const dom = new JSDOM(html, { runScripts: 'dangerously' });
+
+    const deadline = Date.now() + 2000;
+    let icon: Element | null = null;
+    while (Date.now() < deadline) {
+      icon = dom.window.document.querySelector('[data-testid="search-icon"]');
+      if (icon) break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    // A real lucide-react icon renders as an actual <svg>, not just some
+    // placeholder element -- proves the real module resolved and its
+    // component actually rendered, not just that the import didn't throw.
+    expect(icon?.tagName.toLowerCase()).toBe('svg');
   });
 
   it('still rejects a real npm package import that is NOT on the vendored allow-list', async () => {

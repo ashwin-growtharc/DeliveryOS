@@ -4,6 +4,42 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- **Fixed a real docgen bug** (`magic-container`'s pushed preview showing
+  no interactive props / "showing someother thing") and **vendored
+  `lucide-react`** after a real pasted component (a command-palette style
+  search UI) failed to compile with "Could not resolve lucide-react".
+  - Root cause of the docgen bug: `React.FC<Props>` as a value-level type
+    annotation requires TypeScript to actually resolve the real `React.FC`
+    generic via a real `'react'` module to unwrap it -- which fails
+    silently (zero docs returned, not an error) in every real-world
+    component payload directory, since none of them ship their own
+    `node_modules/react`. A plain typed function declaration
+    (`function X(props: Props) {}`) only needs the local `Props`
+    interface, never `React.FC` itself, so it's unaffected. Confirmed via
+    a 4-way empirical test (function-decl vs. `const X: React.FC<Props>`,
+    with/without a `react` type import) and by re-probing
+    `react-docgen-typescript` directly (`[]` before the fix, a real
+    `className` prop schema after). Fixed by converting `magic-container`
+    to a plain typed function and pushing the fix to its already-open PR's
+    branch. `.claude/skills/ui-component-extractor/SKILL.md` should be
+    updated with this as a documented conversion step for future pasted
+    `React.FC<Props>` components.
+  - `lucide-react` added to the same vendored-library allow-list as
+    `framer-motion`/`clsx`/`tailwind-merge`/`class-variance-authority`
+    (`VENDORED_LIBRARY_NAMES` in `compile.ts`, `LIBRARIES` in
+    `scripts/generate-vendored-libraries.mjs`) -- it's the one real size
+    outlier in that list (~716 KB minified, bundling every icon
+    component regardless of which one an individual component actually
+    imports, vs. ~185 KB for framer-motion, the next largest). Embedded
+    unconditionally anyway, matching the rest of the list's existing
+    "embed it whether or not this particular preview uses it" simplicity,
+    since it's a local one-time build cost, not a per-request network
+    cost -- a real per-component tree-shaken bundle would need a separate
+    architecture, not attempted here. Bumped the "reasonably-sized
+    bundle" unit test's sanity ceiling to reflect the real, expected new
+    size (every compiled preview bundle grows by lucide-react's ~716 KB,
+    not just ones that import it).
+
 - **Fixed a real, currently-live rendering bug** ("this thing good
   sometimes, not good sometimes" -- a real component's live preview
   intermittently collapsed to one character per line with a scrollbar) --

@@ -134,7 +134,7 @@ async function generateTailwindCss(resolveDir: string, previewEntryPath: string)
  * script's own `LIBRARIES` array), not something that silently expands
  * just because the generated file happens to contain more entries.
  */
-const VENDORED_LIBRARY_NAMES = ['framer-motion', 'clsx', 'tailwind-merge', 'class-variance-authority'];
+const VENDORED_LIBRARY_NAMES = ['framer-motion', 'clsx', 'tailwind-merge', 'class-variance-authority', 'lucide-react'];
 
 /**
  * Defines the global `require` function that satisfies esbuild's
