@@ -20,6 +20,18 @@
 // then inlines that string directly into the packaged output, so nothing
 // needs to be resolved from a filesystem at runtime at all.
 //
+// Vendors the real 'react-dom' entry (not just 'react-dom/client's
+// createRoot) too -- added once the @radix-ui/react-* vendored libraries
+// (see generate-vendored-libraries.mjs) surfaced a real gap: several
+// Radix primitives call `ReactDOM.createPortal`/`flushSync` from plain
+// 'react-dom' internally (Dialog/Popover/Select/Tooltip all portal their
+// content), which the require shim (compile.ts's
+// VENDORED_LIBRARY_REQUIRE_SHIM_JS) previously had no way to resolve at
+// all -- confirmed by hand: every Radix primitive that portals threw
+// "Cannot resolve react-dom" before this. Both entry points come from
+// the same 'react-dom' package/version bundled together in this one
+// esbuild call, so there's no dual-instance risk.
+//
 // Run this whenever React/ReactDOM's pinned version changes (package.json).
 // Must run before `tsc` -- wired as an npm "pregenerate" step; see
 // package.json's "build" script.
@@ -35,8 +47,9 @@ const outFile = path.join(repoRoot, 'src', 'engine', 'preview', 'vendoredReactRu
 
 const shim = `
   import React from 'react';
+  import ReactDOM from 'react-dom';
   import { createRoot } from 'react-dom/client';
-  window.__DeliveryOSReactRuntime = { React, createRoot };
+  window.__DeliveryOSReactRuntime = { React, ReactDOM, createRoot };
 `;
 
 async function main() {

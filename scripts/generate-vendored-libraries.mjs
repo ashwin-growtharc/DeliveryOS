@@ -61,7 +61,46 @@ const outFile = path.join(repoRoot, 'src', 'engine', 'preview', 'vendoredLibrari
 // like every other entry here -- a real, larger architecture change,
 // worth doing if this list's total size ever becomes a genuine problem,
 // not attempted here.
-const LIBRARIES = ['framer-motion', 'clsx', 'tailwind-merge', 'class-variance-authority', 'lucide-react'];
+//
+// The `@radix-ui/react-*` entries are a starter set of the primitives
+// shadcn/ui-derived pasted components reach for most often (Dialog,
+// Dropdown Menu, Popover, Select, Tooltip, Tabs, Checkbox, Switch,
+// Label, Accordion, Avatar, Radio Group, Separator, Alert Dialog, Toast,
+// plus Slot -- which underlies almost every shadcn component's `asChild`
+// prop). Each is its own separate npm package (Radix doesn't ship one
+// combined bundle), so each gets its own entry/IIFE here, each bundled
+// under its own real package name -- a component importing any one of
+// them needs no workaround, exactly like the rest of this list. Unlike
+// lucide-react, these are individually small (Radix's own modular
+// design), so adding this whole set is a modest, not a size-outlier,
+// addition. Any Radix primitive NOT on this list (Menubar, Navigation
+// Menu, Scroll Area, Slider, Toggle, Toggle Group, Context Menu, Hover
+// Card, Progress, ...) is left unvendored on purpose -- add it here if a
+// real ingested component needs it repeatedly, matching this list's
+// established "start small, extend reactively" pattern.
+const LIBRARIES = [
+  'framer-motion',
+  'clsx',
+  'tailwind-merge',
+  'class-variance-authority',
+  'lucide-react',
+  '@radix-ui/react-slot',
+  '@radix-ui/react-dialog',
+  '@radix-ui/react-dropdown-menu',
+  '@radix-ui/react-popover',
+  '@radix-ui/react-select',
+  '@radix-ui/react-tooltip',
+  '@radix-ui/react-tabs',
+  '@radix-ui/react-checkbox',
+  '@radix-ui/react-switch',
+  '@radix-ui/react-label',
+  '@radix-ui/react-accordion',
+  '@radix-ui/react-avatar',
+  '@radix-ui/react-radio-group',
+  '@radix-ui/react-separator',
+  '@radix-ui/react-alert-dialog',
+  '@radix-ui/react-toast',
+];
 
 async function bundleLibrary(name) {
   // `Object.assign({ __esModule: true }, Lib)` -- not just `= Lib` --

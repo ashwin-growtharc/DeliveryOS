@@ -101,13 +101,14 @@ describe('compilePreviewHtml (Phase A spike)', () => {
     // Every compiled preview embeds ALL vendored libraries unconditionally
     // (see VENDORED_LIBRARY_NAMES's own doc comment), regardless of which
     // one this particular component actually imports -- so lucide-react's
-    // real ~716 KB (bundling every icon, the one size outlier in that
-    // list -- see generate-vendored-libraries.mjs) lands in THIS bundle
-    // too, even though Button.tsx never imports it. Ceiling raised to
-    // match that real, expected cost, not loosened arbitrarily -- a rough
-    // sanity ceiling, not a tight budget; Phase A's real size/latency check
-    // happens against the packaged sidecar, not this unit test.
-    expect(html.length).toBeLessThan(1_300_000);
+    // ~716 KB plus the full starter set of @radix-ui/react-* primitives
+    // (~560 KB combined -- see generate-vendored-libraries.mjs) both land
+    // in THIS bundle too, even though Button.tsx imports neither. Ceiling
+    // raised to match that real, expected cost, not loosened arbitrarily
+    // -- a rough sanity ceiling, not a tight budget; Phase A's real
+    // size/latency check happens against the packaged sidecar, not this
+    // unit test.
+    expect(html.length).toBeLessThan(1_900_000);
   });
 });
 
@@ -220,6 +221,34 @@ describe('vendored UI-kit libraries (framer-motion, clsx, etc.)', () => {
     // placeholder element -- proves the real module resolved and its
     // component actually rendered, not just that the import didn't throw.
     expect(icon?.tagName.toLowerCase()).toBe('svg');
+  });
+
+  it('compiles a component that imports a Radix UI primitive (@radix-ui/react-switch) directly, untouched, and it actually renders with real state', async () => {
+    // The @radix-ui/react-* entries are a starter set of the primitives
+    // shadcn/ui-derived pasted components reach for most often (Dialog,
+    // Dropdown Menu, Select, Tooltip, Tabs, Checkbox, Switch, ...) -- see
+    // generate-vendored-libraries.mjs's own doc comment. Switch is a
+    // simple, single-package one to regression-test: no Provider/portal
+    // wrapper required, and its rendered `data-state` attribute proves
+    // the real Radix state machine ran, not just that the import didn't
+    // throw.
+    const radixSwitchPreviewPath = path.join(
+      __dirname, '..', 'fixtures', 'preview-spike', 'VendoredRadix', 'preview.tsx',
+    );
+    const { html } = await compilePreviewHtml(radixSwitchPreviewPath);
+    const dom = new JSDOM(html, { runScripts: 'dangerously' });
+
+    const deadline = Date.now() + 2000;
+    let root: Element | null = null;
+    while (Date.now() < deadline) {
+      root = dom.window.document.querySelector('[data-testid="switch-root"]');
+      if (root) break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(root?.getAttribute('role')).toBe('switch');
+    // defaultChecked was passed -- a real Radix Switch reflects this as
+    // data-state="checked", not just an inert checked attribute.
+    expect(root?.getAttribute('data-state')).toBe('checked');
   });
 
   it('still rejects a real npm package import that is NOT on the vendored allow-list', async () => {

@@ -34,11 +34,15 @@ scan the result:
    `Could not resolve "react"`. A short, explicit allow-list of common
    UI-kit dependencies is ALSO vendored the same way (see
    `VENDORED_LIBRARY_NAMES` in `compile.ts`): **`framer-motion`, `clsx`,
-   `tailwind-merge`, `class-variance-authority`, `lucide-react`** — a
-   component that imports any of these needs no workaround at all, step 2
-   below is a no-op for them. Any OTHER third-party import (a date
-   picker, a charting library, anything not on that list) is left
-   completely untouched and will fail with a real, honest
+   `tailwind-merge`, `class-variance-authority`, `lucide-react`, and a
+   starter set of `@radix-ui/react-*` primitives (`slot`, `dialog`,
+   `dropdown-menu`, `popover`, `select`, `tooltip`, `tabs`, `checkbox`,
+   `switch`, `label`, `accordion`, `avatar`, `radio-group`, `separator`,
+   `alert-dialog`, `toast`)** — a component that imports any of these
+   needs no workaround at all, step 2 below is a no-op for them. Any
+   OTHER third-party import (a date picker, a charting library, a Radix
+   primitive not in this list, anything not on it) is left completely
+   untouched and will fail with a real, honest
    `Could not resolve "..."` error for Review to see — don't try to route
    around it; if it comes up repeatedly, that's a signal to add it to the
    allow-list instead (see `scripts/generate-vendored-libraries.mjs`'s

@@ -39,6 +39,32 @@ design rationale.
     bundle" unit test's sanity ceiling to reflect the real, expected new
     size (every compiled preview bundle grows by lucide-react's ~716 KB,
     not just ones that import it).
+  - **Also added a starter set of 16 `@radix-ui/react-*` primitives**
+    (Dialog, Dropdown Menu, Popover, Select, Tooltip, Tabs, Checkbox,
+    Switch, Label, Accordion, Avatar, Radio Group, Separator, Alert
+    Dialog, Toast, and Slot -- the ones shadcn/ui-derived pasted
+    components reach for most often), to the same allow-list, at the
+    user's explicit request ("add lucide react and other
+    important/common ones too"). Each is individually small (Radix's own
+    modular per-primitive package design), ~560 KB combined -- a modest
+    addition next to lucide-react's own size, not another outlier.
+    **Doing this surfaced a real, previously-latent gap**: several Radix
+    primitives (Dialog, Popover, Select, Tooltip -- anything that portals
+    its content) call `ReactDOM.createPortal`/`flushSync` from plain
+    `'react-dom'`, which the compiler had never vendored (only
+    `react-dom/client`'s `createRoot`) and the require shim
+    (`VENDORED_LIBRARY_REQUIRE_SHIM_JS`) had no case for at all --
+    confirmed by hand, every portal-based Radix primitive threw "Cannot
+    resolve react-dom" before this. Fixed by vendoring the real
+    `'react-dom'` entry alongside `react-dom/client` in the same runtime
+    bundle (`generate-vendored-react-runtime.mjs`) and adding it to the
+    require shim, at effectively zero extra size (both entry points come
+    from the same already-bundled package). New regression tests: a
+    `@radix-ui/react-switch` fixture (asserts a real `data-state="checked"`
+    from `defaultChecked`, proving the actual Radix state machine ran),
+    plus a manual portal-based Dialog probe verified by hand. Bumped the
+    bundle-size sanity ceiling again to account for the Radix set's real
+    combined weight.
 
 - **Fixed a real, currently-live rendering bug** ("this thing good
   sometimes, not good sometimes" -- a real component's live preview

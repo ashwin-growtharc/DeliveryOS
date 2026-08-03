@@ -134,7 +134,29 @@ async function generateTailwindCss(resolveDir: string, previewEntryPath: string)
  * script's own `LIBRARIES` array), not something that silently expands
  * just because the generated file happens to contain more entries.
  */
-const VENDORED_LIBRARY_NAMES = ['framer-motion', 'clsx', 'tailwind-merge', 'class-variance-authority', 'lucide-react'];
+const VENDORED_LIBRARY_NAMES = [
+  'framer-motion',
+  'clsx',
+  'tailwind-merge',
+  'class-variance-authority',
+  'lucide-react',
+  '@radix-ui/react-slot',
+  '@radix-ui/react-dialog',
+  '@radix-ui/react-dropdown-menu',
+  '@radix-ui/react-popover',
+  '@radix-ui/react-select',
+  '@radix-ui/react-tooltip',
+  '@radix-ui/react-tabs',
+  '@radix-ui/react-checkbox',
+  '@radix-ui/react-switch',
+  '@radix-ui/react-label',
+  '@radix-ui/react-accordion',
+  '@radix-ui/react-avatar',
+  '@radix-ui/react-radio-group',
+  '@radix-ui/react-separator',
+  '@radix-ui/react-alert-dialog',
+  '@radix-ui/react-toast',
+];
 
 /**
  * Defines the global `require` function that satisfies esbuild's
@@ -170,6 +192,7 @@ const VENDORED_LIBRARY_REQUIRE_SHIM_JS = `(function () {
   window.__DeliveryOSVendoredLibs = window.__DeliveryOSVendoredLibs || {};
   window.require = function (specifier) {
     if (specifier === 'react') return React;
+    if (specifier === 'react-dom') return window.__DeliveryOSReactRuntime.ReactDOM;
     if (specifier === 'react/jsx-runtime' || specifier === 'react/jsx-dev-runtime') return jsxRuntime;
     if (Object.prototype.hasOwnProperty.call(window.__DeliveryOSVendoredLibs, specifier)) {
       return window.__DeliveryOSVendoredLibs[specifier];
