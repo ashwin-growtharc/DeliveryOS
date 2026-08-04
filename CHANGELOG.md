@@ -18,6 +18,21 @@ design rationale.
   pre-existing unrelated failure) + typecheck + lint clean. On branch
   `phase7-schema-install-params`.
 
+- **Phase 7's real target actually pushed**: the Auth.js v5 + Prisma
+  Credentials module (`auth.config.ts`, `password.ts`, a copy-pasteable
+  Prisma schema snippet, and a README documenting the manual wiring steps
+  until a wiring agent exists) proposed via the existing, unmodified
+  `deliveryos push --new` CLI — zero new engine code needed. Opened as
+  [PR #50](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/50)
+  against `ai-helpers`. The three `install_params` were hand-added to the
+  manifest in a follow-up commit (`push --new` has no CLI flag for this
+  field yet) and verified against the real `ManifestSchema` before
+  committing. Deliberately scoped the payload to a self-contained folder,
+  not a project-root-wide copy: `pullArtifact` has no file-merge concept,
+  so scattering files across an existing project (overwriting a real
+  `prisma/schema.prisma` wholesale, for instance) would be actively
+  destructive. Not yet merged — left for review.
+
 - **Two Tier-0 hardening fixes, both merged** (see PLAN.md's "Tier 0
   hardening" section). `fix-lockfile-race` fixes a real, present-tense
   concurrency bug: `upsertEntry` was an unlocked read-modify-write, so the

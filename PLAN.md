@@ -886,9 +886,34 @@ up again.
       required-config checklist collecting the project's own values (never
       the artifact's own defaults), and a signed/provenance badge — no live
       preview attempted.
-- [ ] Propose-new flow: manual/CLI-driven only at first, no Scan — "is this
-      generic enough to share" is a judgment call Scan can't safely make yet
-      for backend code the way it can for a React component.
+- [x] **Propose-new flow: manual/CLI-driven only at first, no Scan** — "is
+      this generic enough to share" is a judgment call Scan can't safely
+      make yet for backend code the way it can for a React component.
+      Done, for real: the actual Auth.js v5 + Prisma module (`auth.config.ts`,
+      `password.ts`, a copy-pasteable Prisma schema snippet, and a README
+      documenting the manual wiring steps until item 6's agent exists)
+      pushed via the existing, unmodified `deliveryos push --new` CLI path
+      — zero new engine code needed, confirming the "cheap once 2 lands"
+      sequencing call. Opened as
+      [PR #50](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/50)
+      against `ai-helpers`, `kind: backend-plugin`,
+      `install_target: src/lib/auth`. The three `install_params`
+      (`AUTH_SECRET`, `AUTH_URL`, `DATABASE_URL`) were hand-added to the
+      pushed manifest in a follow-up commit on the same branch — `push
+      --new` has no CLI flag for this field yet (a real, small gap to
+      close later, not blocking this artifact from existing). Verified
+      the hand-edited manifest against the real `ManifestSchema` before
+      committing. **Deliberately scoped the payload to a self-contained
+      folder, never a project-root-wide copy**: `pullArtifact` does one
+      recursive copy into `install_target` with no file-merge concept at
+      all, so a payload that tried to scatter files across a consuming
+      project's existing structure (e.g. overwriting a real
+      `prisma/schema.prisma` wholesale) would be actively destructive —
+      the README documents the remaining root-level wiring
+      (`auth.ts`/`middleware.ts`/the API route/the schema merge) as
+      manual steps instead, honestly reflecting that item 6's wiring
+      agent doesn't exist yet. Not yet merged — left for review, same as
+      every other real PR this session.
 - [ ] Wiring agent, scoped to the three-tier model already designed
       (auto-applies / proposes-and-confirms / never-touches) — at minimum
       tier 1 and tier 2 working for the one real target artifact.
