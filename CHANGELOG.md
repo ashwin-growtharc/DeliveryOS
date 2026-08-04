@@ -4,6 +4,20 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- **Two Tier-0 hardening fixes, ready on separate branches** (see PLAN.md's
+  new "Tier 0 hardening" section) — not yet merged into this branch.
+  `fix-lockfile-race` fixes a real, present-tense concurrency bug:
+  `upsertEntry` was an unlocked read-modify-write, so the app's own
+  20-minute auto-sync tick and a concurrent manual pull/push could race,
+  with the second writer silently clobbering the first's already-applied
+  update. Fixed with `proper-lockfile` (pure-JS, no native bindings).
+  `close-github-poll-loop` closes a real, named gap: PR status polling
+  (`sync.resolvePendingPushes`) already existed and was well-tested, but
+  was wired to only a manual per-entry button — never the same 20-minute
+  tick that already polls version drift. Wired it in, and caught a real
+  ordering bug along the way (a same-tick merge could silently wipe that
+  tick's own drift annotations).
+
 - **Closed out Phase 6's end-to-end test checklist for real** (see
   PLAN.md) — every scenario now walked against the actual `ai-helpers`
   remote, not fixtures. Along the way, **found and fixed a real bug**:
