@@ -912,8 +912,11 @@ up again.
       the README documents the remaining root-level wiring
       (`auth.ts`/`middleware.ts`/the API route/the schema merge) as
       manual steps instead, honestly reflecting that item 6's wiring
-      agent doesn't exist yet. Not yet merged — left for review, same as
-      every other real PR this session.
+      agent doesn't exist yet. **Merged** (2026-08-04) and pulled for real
+      into `DOS Demo`: all four payload files landed at `src/lib/auth/`,
+      the lockfile entry recorded correctly — the propose→merge→pull leg
+      of `kind: backend-plugin` is now proven the same way `ui-component`
+      was proven in Phase 6, not just pushed and left unverified.
 - [ ] Wiring agent, scoped to the three-tier model already designed
       (auto-applies / proposes-and-confirms / never-touches) — at minimum
       tier 1 and tier 2 working for the one real target artifact.
