@@ -566,13 +566,25 @@ demonstrably true, not just when every task box is checked.
       visible in both the PR body and the Files-changed diff, merge it, then
       `pull` it into a *different* project and confirm the live sandboxed
       preview renders (hover state included) in the app.
-      **Partially exercised for real**: `search` (#45) and `magic-container`
-      (#46) are both genuinely proposed, pushed, and merged into
-      `ai-helpers` — the propose→merge leg is proven, repeatedly, against a
-      real private GitHub repo, not a fixture. The remaining leg — pulling
-      one of these into a *different* project and confirming the live
-      preview renders there in the running app — hasn't been deliberately
-      walked yet; do that before checking this off.
+      **Propose→merge→pull now proven for real, up to the native-app
+      glance**: `search` (#45) and `magic-container` (#46) were genuinely
+      proposed, pushed, and merged into `ai-helpers`; both were then
+      `deliveryos pull`ed for real into `DOS Demo` (a genuinely different
+      local project, registered against a different original remote —
+      `arcos-poc` — with no prior history of either component), landing
+      correctly (`src/ui/MagicContainer/`, `src/ui/Search/`, both lockfile
+      entries added). Compiled both pulled copies through the real
+      `compilePreviewHtml` pipeline and rendered the result in a real DOM
+      (jsdom): `magic-container` renders its actual gradient-border markup
+      AND now returns a real docgen props schema (`className`) — confirming
+      the `React.FC<Props>` fix survived the full push→merge→pull round
+      trip, not just the original authoring project; `search` renders a
+      real `<svg>` (its `lucide-react` icon) plus its real recent-searches
+      content. **Only remaining gap**: an actual human glance at the native
+      Tauri window with its project folder pointed at `DOS Demo`, to
+      confirm hover state and visual polish — everything below that bar is
+      now proven the same way every other phase in this codebase is
+      (real git, real compile, real render), not simulated.
 - [ ] **CLI-driven propose, no GUI:** the same component proposed via
       `deliveryos push <id> --new --kind ui-component ...` alone (no app
       window open) — confirm the headless-render fallback still produces a

@@ -4,6 +4,19 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- **Corrected a long-stale PLAN.md status** ("Phase 6 — Not started,
+  brainstormed only" — long false, sub-phases A–E have been implemented and
+  shipped for a while) and, while at it, **ran a real end-to-end pull
+  verification**: pulled the already-merged `search` and `magic-container`
+  artifacts into `DOS Demo`, a genuinely different local project with no
+  prior history of either component, confirming files land correctly and
+  both compile + render through the real preview pipeline there (not just
+  in the project that originally authored them) — `magic-container`'s
+  docgen fix and the `lucide-react` vendoring both proven to survive a real
+  push→merge→pull round trip, closing most of Phase 6's own
+  "propose→merge→pull, full loop" end-to-end test (only a human glance at
+  the native app remains).
+
 - **Fixed a real docgen bug** (`magic-container`'s pushed preview showing
   no interactive props / "showing someother thing") and **vendored
   `lucide-react`** after a real pasted component (a command-palette style
