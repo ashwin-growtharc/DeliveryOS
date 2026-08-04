@@ -672,6 +672,70 @@ demonstrably true, not just when every task box is checked.
       above need a deliberate human pass rather than another automated test
       — left unchecked as an acknowledged constraint, not a task to close.
 
+## Tier 0 hardening — **In progress, ahead of Phase 7**
+
+Not a numbered phase — a cross-cutting priority list from
+[docs/product-roadmap-vision.md](docs/product-roadmap-vision.md)'s own
+"Priority reset" section, which argues (convincingly enough to track here)
+that these outrank any new artifact kind, Phase 7 included: every real push
+so far has been the builder testing the loop, not another engineer solving
+their own work with it, so proving that — and fixing what's already real
+and broken — is higher value than a new kind built on an unproven
+foundation. Tracked here so it doesn't just live in a brainstorm doc.
+
+- [ ] Fix the lockfile race — `upsertEntry` (`src/engine/lockfile/lockfile.ts`)
+      is an unlocked read-modify-write. See
+      [scalable-architecture-research.md §3.7](docs/scalable-architecture-research.md).
+      Being fixed on a separate branch (`fix-lockfile-race`), independent of
+      this one.
+- [x] **Close the GitHub-polling loop** — today's loop was Browse → Pull →
+      edit → Push → **go check GitHub by hand** → merge → Pull again;
+      `sync.resolvePendingPushes` (PR open/merged/closed status) already
+      existed at the engine level and was already well-tested
+      (`test/e2e/sync.resolvePendingPushes.test.ts`), but was wired to only
+      a manual, per-entry "Check push status" button in Detail — never the
+      app's own 20-minute background auto-sync tick, exactly the gap
+      product-roadmap-vision.md's own "closing the GitHub loop" section
+      names: *"Same mechanism could poll PR status the same way it polls
+      version drift — no new architecture, same reentrancy-guarded tick,
+      just a second thing it checks."* Done, on branch
+      `close-github-poll-loop` — extracted `resolvePendingPushesCore()`
+      (mirroring `checkForArtifactUpdatesCore`'s own established "core
+      work only, no button busy/toast" split) out of the existing button
+      handler with no logic change, then wired it into `onAutoSyncTick`
+      too. `resolvePendingPushes` returns `[]` immediately (no network
+      call) when nothing's pending, so this costs nothing on a tick for a
+      project with no open pushes. Only toasts on a real change (something
+      merged, or got closed without merging) — a pending push that's
+      simply still open stays silent, matching the version-drift half's
+      own "don't nag" principle. **Caught and fixed a real ordering bug
+      while wiring this in**: `resolvePendingPushesCore()` can trigger a
+      full `loadCatalog()` reload on a real merge, which would silently
+      wipe the `availableVersion` annotations `checkForArtifactUpdatesCore`
+      had just patched onto `state.catalog` moments earlier in the SAME
+      tick (a same-tick merge would make that tick's own drift toast a lie
+      the instant it fired, invisible again until the next tick 20 minutes
+      later) — fixed by running the reload-capable call first and the
+      in-place-patch-only call second, so whichever ran last is always the
+      one left standing. Pure frontend change (`app.js` only, no engine
+      code touched) — syntax-checked and linted clean; no automated GUI
+      test suite exists for the native Tauri window (an already-documented
+      constraint), so this needs a real glance at the running app to
+      confirm the toast fires correctly, same as every other app.js-only
+      change this project has shipped.
+- [ ] Prove adoption — get one real engineer outside the build team to
+      pull/push something they'd have built anyway. Not something engine
+      work can do on its own; revisit once there's an actual candidate
+      person/task.
+- [ ] Ship the security/provenance model
+      ([scalable-architecture-research.md §3.3](docs/scalable-architecture-research.md))
+      — a real liability the moment anything beyond a UI button is shared
+      further, not hypothetical. Also a hard prerequisite for Phase 7 per
+      that phase's own checklist below, not just a Tier 0 nice-to-have.
+- [ ] Track real usage as a number, not a feeling (ARCHITECTURE.md §9 risk
+      #6) — pulls/pushes/reuse counted from day one, the only way "prove
+      adoption" above becomes evidence instead of anecdote.
+
 ## Phase 7 — Backend plug-and-play artifacts — **Not started, brainstormed only**
 
 Goal: a backend building block (starting with one real auth/login module)

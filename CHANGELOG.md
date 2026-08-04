@@ -4,6 +4,21 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- **Closed the manual GitHub round-trip in the background auto-sync tick**:
+  `sync.resolvePendingPushes` (PR open/merged/closed polling) already
+  existed and was already well-tested at the engine level, but was wired
+  to only a manual per-entry "Check push status" button — never the app's
+  own 20-minute background tick, so a merged/rejected push still needed a
+  person to notice and click a button. Extracted the button's existing
+  logic into a shared `resolvePendingPushesCore()` (no logic change) and
+  wired it into the same tick that already polls version drift — costs
+  nothing on a tick with no pending pushes, only toasts on a real change
+  (merged / closed-without-merging), silent otherwise. Caught and fixed a
+  real ordering bug while wiring it in: a same-tick merge's catalog reload
+  could silently wipe that same tick's own just-reported drift
+  annotations — fixed by reordering the two checks. Pure frontend change,
+  on branch `close-github-poll-loop`.
+
 - **Closed out Phase 6's end-to-end test checklist for real** (see
   PLAN.md) — every scenario now walked against the actual `ai-helpers`
   remote, not fixtures. Along the way, **found and fixed a real bug**:
