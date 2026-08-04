@@ -130,7 +130,7 @@ exist but nobody's SSO'd in."
 - [ ] Success metrics, using the tiered metrics-ethics model (§9 risk #6) to avoid an accidental leaderboard
 - [ ] **End-to-end test:** simulate a full week of drift (someone stops syncing, a remote changes upstream, another person edits the same resource) and confirm drift detection, auto-sync, and notifications all surface correctly with no manual intervention required.
 
-## Phase 6 — UI Components — **Not started, brainstormed only**
+## Phase 6 — UI Components — **Sub-phases A–E done; end-to-end verification pending**
 
 Goal: a UI-component artifact can be proposed (via Scan or CLI), reviewed
 with a real live interactive preview, merged as a normal GitHub PR (with an
@@ -142,6 +142,21 @@ flagging future updates. Full design in
 into the same A–E sub-phases the design doc itself lays out; **F (preview
 for large/multi-file `template` artifacts) is explicitly out of scope for
 this phase** — kept as a forward pointer only, see the design doc §13.
+
+**Status, corrected** — this header used to read "Not started, brainstormed
+only" long after that stopped being true; every sub-phase below (A–E) is
+implemented, tested, and shipped. What's actually still open is just the
+"End-to-end tests" checklist at the end of this section — real multi-repo,
+multi-project round trips, as opposed to the real-git/fake-GitHub-API level
+every sub-phase's own tests already run at. Some of that ground has been
+covered for real since Phase E landed (four real PRs opened against the
+`ai-helpers` remote — `expandedtabs` (#44, open),
+`search` (#45, merged), `magic-container` (#46, merged),
+a `search` preview.png follow-up (#47, open) — plus a real
+docgen-bug fix pushed directly to #46's branch), but the specific
+end-to-end scenarios below (a genuinely different project pulling a merged
+component and rendering it live, a full edit+drift-detection round trip)
+haven't been deliberately walked yet. See each checklist item's own note.
 
 Each sub-phase below states its own **Goal** (the observable outcome that
 proves it's actually done) before its task checklist, same discipline every
@@ -551,32 +566,68 @@ demonstrably true, not just when every task box is checked.
       visible in both the PR body and the Files-changed diff, merge it, then
       `pull` it into a *different* project and confirm the live sandboxed
       preview renders (hover state included) in the app.
+      **Partially exercised for real**: `search` (#45) and `magic-container`
+      (#46) are both genuinely proposed, pushed, and merged into
+      `ai-helpers` — the propose→merge leg is proven, repeatedly, against a
+      real private GitHub repo, not a fixture. The remaining leg — pulling
+      one of these into a *different* project and confirming the live
+      preview renders there in the running app — hasn't been deliberately
+      walked yet; do that before checking this off.
 - [ ] **CLI-driven propose, no GUI:** the same component proposed via
       `deliveryos push <id> --new --kind ui-component ...` alone (no app
       window open) — confirm the headless-render fallback still produces a
       `preview.png` and the PR still opens correctly.
+      **Likely already satisfied in practice, not yet formally confirmed**:
+      every real push this session (`expandedtabs`, `search`,
+      `magic-container`, and the `search` preview.png follow-up) went
+      through the CLI/sidecar directly, with no app window involved, and
+      each produced a working `preview.png` via the headless-render path.
+      Worth one deliberate pass confirming this explicitly rather than
+      relying on incidental evidence.
 - [ ] **Edit + drift detection, full loop:** pull the merged Button into a
       second project, edit it there (a real visual change), push with a
       version bump, merge; back in the *first* project, run "Check for
       updates" and confirm `update_available` (not silently missed) with a
       refreshed preview once re-pulled.
+      Not yet exercised for real — `magic-container`'s docgen fix (a real
+      edit + version-unchanged commit pushed straight to its merged PR's
+      branch) came close but never went through a second pull + "Check for
+      updates" in a first project. Still open.
 - [ ] **Graceful degradation:** a component with an unresolved import (e.g.
       `lodash`) proposed anyway — confirm it still proposes/pushes/pulls
       successfully with a text-only card (no live preview), never a hard
       failure blocking the artifact from existing.
-- [ ] **Scan false-positive handling:** run Scan against a real project with
+      **Push-side is automated and passing** (`push.e2e.test.ts`: "a preview
+      render failure never blocks the push itself, just omits the image";
+      `preview.compile.test.ts`'s `UnvendoredLib` fixture, a real `zod`
+      import, confirms a clean compile-time rejection rather than a crash).
+      The pull-side "text-only card in a real Detail view" half hasn't been
+      separately confirmed against an artifact with a genuinely unresolved
+      import — still open.
+- [x] **Scan false-positive handling:** run Scan against a real project with
       at least one page-level component and one genuinely reusable one,
       confirm both surface as candidates (no silent exclusion) but only the
       genuine one gets proposed — Review is the safety net, not the detector.
-- [ ] All existing 109+ engine tests still pass unmodified (sanity check this
+      Done, as part of Phase D's own verification: "Verified against a real
+      fixture project covering every documented case at once (... and a
+      page-level component correctly excluded) via the real built CLI" (see
+      Phase D above) — this scenario was walked for real, not left as a
+      unit-test-only claim.
+- [x] All existing 109+ engine tests still pass unmodified (sanity check this
       stayed additive, not a regression on any existing kind's Pull/Push/Scan
       behavior).
+      Continuously true — 190 tests pass as of the most recent change
+      (lucide-react + Radix UI vendoring), zero regressions on any
+      pre-Phase-6 kind's Pull/Push/Scan behavior at any point this phase.
 - [ ] No automated GUI test suite exists for the native Tauri window (same
       constraint as every earlier phase) — the live-preview *rendering
       itself* still needs a human eyeballing it; everything above the
       rendering (manifest correctness, PR contents, version bumps, drift
       detection) should be covered by sidecar/engine-level automated e2e
       tests, not a GUI click-through.
+      Still true, and still the reason the two "not yet exercised" items
+      above need a deliberate human pass rather than another automated test
+      — left unchecked as an acknowledged constraint, not a task to close.
 
 ## Phase 7 — Backend plug-and-play artifacts — **Not started, brainstormed only**
 
