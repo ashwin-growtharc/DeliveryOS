@@ -4,6 +4,35 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- **Phase 7 (backend-plugin artifacts) started for real**: picked a
+  concrete target (Auth.js/NextAuth v5 + Prisma, Credentials provider, in
+  a Next.js App Router project) over Passport.js/Express, a Supabase-auth
+  wrapper, and a Python logger, and built the first real piece —
+  `src/engine/manifest/schema.ts` gained `install_params` (a new
+  `InstallParamSchema[]`, schema-level-impossible to mark `secret` and
+  also declare a `default`), plus `content_digest` and an optional
+  `signature` object for the not-yet-built provenance model. Fully
+  additive: every pre-existing manifest still parses unchanged, verified
+  against the real catalog through the actual packaged sidecar exe, not
+  just `dist/` under `node`. 8 new unit tests; full suite (200 tests, one
+  pre-existing unrelated failure) + typecheck + lint clean. On branch
+  `phase7-schema-install-params`.
+
+- **Phase 7's real target actually pushed**: the Auth.js v5 + Prisma
+  Credentials module (`auth.config.ts`, `password.ts`, a copy-pasteable
+  Prisma schema snippet, and a README documenting the manual wiring steps
+  until a wiring agent exists) proposed via the existing, unmodified
+  `deliveryos push --new` CLI — zero new engine code needed. Opened as
+  [PR #50](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/50)
+  against `ai-helpers`. The three `install_params` were hand-added to the
+  manifest in a follow-up commit (`push --new` has no CLI flag for this
+  field yet) and verified against the real `ManifestSchema` before
+  committing. Deliberately scoped the payload to a self-contained folder,
+  not a project-root-wide copy: `pullArtifact` has no file-merge concept,
+  so scattering files across an existing project (overwriting a real
+  `prisma/schema.prisma` wholesale, for instance) would be actively
+  destructive. Not yet merged — left for review.
+
 - **Two Tier-0 hardening fixes, both merged** (see PLAN.md's "Tier 0
   hardening" section). `fix-lockfile-race` fixes a real, present-tense
   concurrency bug: `upsertEntry` was an unlocked read-modify-write, so the

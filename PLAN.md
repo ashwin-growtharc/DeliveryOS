@@ -767,7 +767,7 @@ foundation. Tracked here so it doesn't just live in a brainstorm doc.
       server at all — everything is local-file-based. Not started pending
       that scoping call.
 
-## Phase 7 — Backend plug-and-play artifacts — **Target picked and scoped; not yet built**
+## Phase 7 — Backend plug-and-play artifacts — **In progress (schema extension done)**
 
 Goal: a backend building block (starting with one real auth/login module)
 can be proposed, reviewed via a rendered README + required-config checklist
@@ -818,30 +818,44 @@ up again.
       different project" target — **one needs to be created**, the same
       way `DOS Demo`/`DELETER` were stood up as separate real pull targets
       for Phase 6.
-- [ ] Extend the manifest schema with install-time *parameters* (e.g. a
+- [x] **Extend the manifest schema with install-time *parameters*** (e.g. a
       declared list of required env vars/config keys), not just the existing
       fixed-string `post_install` command — the real schema gap already
       identified; a real auth module can't be meaningfully pulled without it.
-      **Scoped, additive, matching the schema's existing "every new field
-      defaults so old manifests keep parsing unchanged" discipline**: a new
-      `install_params: InstallParamSchema[]` array (`key`, `description`,
-      `secret`, `required`, `default` — `.refine()`'d so a `secret` field
-      can never also declare a `default`, since the Detail/Pull UX must
-      collect the PROJECT's own value, never the artifact's own), plus
-      `content_digest` (sha256, §3.6) and an optional `signature` object
-      for the item below. For this real target, concretely: `AUTH_SECRET`
-      (secret, required, no default), `AUTH_URL` (not secret, required,
-      defaults to `http://localhost:3000`), `DATABASE_URL` (secret,
-      required, no default). The rendered-README half of the next
-      checklist item needs no new field at all — gate it on file-presence
-      (`payload/README.md` exists?), the same precedent `preview.png`
-      already set in `push.ts`. **Real nuance to build in from the start**:
-      `pull.ts`'s pristine-snapshot step runs after `post_install`
-      specifically so generated files aren't mistaken for local edits —
-      collected secret values must never land inside `installTarget` where
-      that snapshot would capture them; whatever collects install-time
-      values needs an explicit exclusion for this as part of the same
-      change, not a follow-up fix.
+      Done — additive, matching the schema's existing "every new field
+      defaults so old manifests keep parsing unchanged" discipline. New
+      `InstallParamSchema` (`key`, `description`, `secret`, `required`,
+      `default`, `.refine()`'d so a `secret` field can never also declare
+      a `default` — a schema-level impossibility, not just a convention
+      someone could forget, since the Detail/Pull UX must collect the
+      PROJECT's own value, never the artifact's own) and a new
+      `install_params: InstallParamSchema[]` array on `ManifestSchema`
+      (`src/engine/manifest/schema.ts`), defaulting to `[]`. Also added
+      `content_digest` (sha256-regex-validated, §3.6) and an optional
+      `signature` object (`algorithm: 'cosign'` literal,
+      `certificate_identity`, `oidc_issuer`) — both inert until the
+      security/provenance item below actually builds the signing/verify
+      pipeline, but additive now while it costs nothing, matching §3.1's
+      own "add fields now, while it's free" principle. 8 new unit tests
+      in `manifest.schema.test.ts` (backward-compat default, the real
+      Auth.js target's own three params parsing correctly, the
+      secret+default rejection, content_digest/signature validation both
+      ways). Verified against the real, already-existing catalog through
+      the actual packaged sidecar exe (not just `dist/` under `node`): a
+      real pre-existing manifest (`accessibility-auditor`, no new fields
+      at all) parses unchanged and now carries `install_params: []` by
+      default. Full suite (200 tests, one pre-existing unrelated failure)
+      + typecheck + lint all clean. **Real nuance flagged for the item
+      that actually collects these values (Detail/Pull UX, below), not
+      yet built**: `pull.ts`'s pristine-snapshot step runs after
+      `post_install` specifically so generated files aren't mistaken for
+      local edits — collected secret values must never land inside
+      `installTarget` where that snapshot would capture them; whatever
+      collects install-time values needs an explicit exclusion for this
+      as part of that same change, not a follow-up fix. The
+      rendered-README half of the next checklist item needs no new field
+      at all — gate it on file-presence (`payload/README.md` exists?),
+      the same precedent `preview.png` already set in `push.ts`.
 - [ ] Ship the security/provenance model (cosign signing + SLSA-style
       attestation at merge time, verified at Pull) — treated as a hard
       prerequisite for this phase, not later polish, per the roadmap doc's
@@ -872,9 +886,34 @@ up again.
       required-config checklist collecting the project's own values (never
       the artifact's own defaults), and a signed/provenance badge — no live
       preview attempted.
-- [ ] Propose-new flow: manual/CLI-driven only at first, no Scan — "is this
-      generic enough to share" is a judgment call Scan can't safely make yet
-      for backend code the way it can for a React component.
+- [x] **Propose-new flow: manual/CLI-driven only at first, no Scan** — "is
+      this generic enough to share" is a judgment call Scan can't safely
+      make yet for backend code the way it can for a React component.
+      Done, for real: the actual Auth.js v5 + Prisma module (`auth.config.ts`,
+      `password.ts`, a copy-pasteable Prisma schema snippet, and a README
+      documenting the manual wiring steps until item 6's agent exists)
+      pushed via the existing, unmodified `deliveryos push --new` CLI path
+      — zero new engine code needed, confirming the "cheap once 2 lands"
+      sequencing call. Opened as
+      [PR #50](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/50)
+      against `ai-helpers`, `kind: backend-plugin`,
+      `install_target: src/lib/auth`. The three `install_params`
+      (`AUTH_SECRET`, `AUTH_URL`, `DATABASE_URL`) were hand-added to the
+      pushed manifest in a follow-up commit on the same branch — `push
+      --new` has no CLI flag for this field yet (a real, small gap to
+      close later, not blocking this artifact from existing). Verified
+      the hand-edited manifest against the real `ManifestSchema` before
+      committing. **Deliberately scoped the payload to a self-contained
+      folder, never a project-root-wide copy**: `pullArtifact` does one
+      recursive copy into `install_target` with no file-merge concept at
+      all, so a payload that tried to scatter files across a consuming
+      project's existing structure (e.g. overwriting a real
+      `prisma/schema.prisma` wholesale) would be actively destructive —
+      the README documents the remaining root-level wiring
+      (`auth.ts`/`middleware.ts`/the API route/the schema merge) as
+      manual steps instead, honestly reflecting that item 6's wiring
+      agent doesn't exist yet. Not yet merged — left for review, same as
+      every other real PR this session.
 - [ ] Wiring agent, scoped to the three-tier model already designed
       (auto-applies / proposes-and-confirms / never-touches) — at minimum
       tier 1 and tier 2 working for the one real target artifact.
