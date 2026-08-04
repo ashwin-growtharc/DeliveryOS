@@ -767,7 +767,7 @@ foundation. Tracked here so it doesn't just live in a brainstorm doc.
       server at all — everything is local-file-based. Not started pending
       that scoping call.
 
-## Phase 7 — Backend plug-and-play artifacts — **In progress (schema extension done)**
+## Phase 7 — Backend plug-and-play artifacts — **In progress (Tier 1 + Tier 2 wiring agent done)**
 
 Goal: a backend building block (starting with one real auth/login module)
 can be proposed, reviewed via a rendered README + required-config checklist
@@ -961,17 +961,84 @@ up again.
       the lockfile entry recorded correctly — the propose→merge→pull leg
       of `kind: backend-plugin` is now proven the same way `ui-component`
       was proven in Phase 6, not just pushed and left unverified.
-- [ ] Wiring agent, scoped to the three-tier model already designed
-      (auto-applies / proposes-and-confirms / never-touches) — at minimum
-      tier 1 and tier 2 working for the one real target artifact.
-      **Maps cleanly onto this target, a reason to like the pick, not
-      just a coincidence**: Tier 1/auto-applies = adding
-      `AUTH_SECRET=`/`AUTH_URL=`/`DATABASE_URL=` placeholder lines to
-      `.env.example`, mechanical and identical every time. Tier
-      2/proposes-and-confirms = wrapping the app's root layout in
-      `<SessionProvider>`, or merging into an existing `middleware.ts`
-      route-matcher. Tier 3/never-touches = the real secret values
-      themselves.
+- [x] **Wiring agent, scoped to the three-tier model already designed**
+      (auto-applies / proposes-and-confirms / never-touches) — tier 1 and
+      tier 2 now working for the one real target artifact, tier 3
+      unchanged (real secret values are never touched by this or any
+      other mechanism). Done, on branch `phase7-detail-pull-ux`.
+      **Deterministic and manifest-declared, not a genuine LLM-reasoning
+      agent** — confirmed with the user before building, since "wiring
+      agent" could otherwise plausibly mean either.
+      **Tier 1 (auto-applies), no new manifest field**: `.env.example`
+      placeholder generation is 100% derivable from the already-shipped
+      `install_params` (`param.secret ? '' : (param.default ?? '')`), so
+      no author-facing field was added at all — redeclaring the same keys
+      a second time would only create a drift risk for no benefit (a real
+      issue a Plan-agent design review caught in an earlier draft).
+      `installParams.ts`'s existing upsert logic was extracted into a
+      shared, file-path-parameterized `upsertEnvFile(filePath, values)`;
+      `applyInstallParams` (`.env.local`, real values) and the new
+      `applyEnvExamplePlaceholders` (`.env.example`, placeholders) both
+      reuse it rather than duplicating the parse/update/append/preserve
+      logic. Wired into `pullArtifact` as part of the existing
+      install-params pull stage.
+      **Tier 2 (proposes-and-confirms), new `wiring_actions` manifest
+      field**: `WiringActionSchema` (`type: 'suggest_snippet'`,
+      `description`, `targetFile` — project-ROOT-relative, resolved
+      against `cwd`, never `install_target`-relative — `whenAbsent`
+      requiring a snippet, `whenPresent` optional so a declared action can
+      honestly say "review before replacing" instead of forcing a snippet
+      to serve both "create from scratch" and "don't blindly overwrite" —
+      a real conflation an earlier draft had, caught before it shipped).
+      New `resolveWiringActions(wiringActions, cwd)`
+      (`src/engine/pull/wiring.ts`) — purely read-only detection, resolves
+      each action's target file against `cwd`, returns the applicable
+      variant or a synthesized "review before touching it" fallback;
+      **never writes or mutates anything**. Deliberately excludes the
+      Prisma schema merge — that's Tier 3 ("DB schema/migrations") per
+      this project's own three-tier table, not Tier 2, and needs no new
+      mechanism since the payload's `.prisma` reference file is already
+      surfaced passively via the prior item's `artifact.readPayloadFile` +
+      rendered README.
+      **Sidecar**: new `artifact.resolveWiringActions` command. **CLI**:
+      unchanged — `pull --set` already covers Tier 1's inputs.
+      **Frontend**: Detail's `detail-backend-plugin-section` gained a
+      "Wiring" subsection (gated on `wiring_actions` being non-empty, in
+      addition to the existing `install_params` gate, never a `kind`
+      check) — one card per resolved action showing the target file, an
+      exists/not-found status badge, description, instructions, and the
+      snippet when one applies. Deliberately no "apply" button anywhere in
+      this subsection — Tier 2 is inherently "go do this in your own
+      editor," matching the tier's own definition. Verified in a real
+      browser against a mocked `DeliveryOS.call`/`__TAURI__` harness (same
+      proven pattern used for the prior item): confirmed two cards render
+      for the mocked `nextauth-credentials` entry, `auth.ts` showing
+      "NOT FOUND" with its real snippet and `middleware.ts` showing
+      "EXISTS" (warning-colored) with merge-guidance instructions and no
+      snippet — matching the design exactly.
+      **Real content**: the actual, already-merged `nextauth-credentials`
+      manifest on `ai-helpers` was updated with its real 4 `wiring_actions`
+      (`auth.ts`, `middleware.ts`, the API route, `app/layout.tsx`) on a
+      new branch, verified against the rebuilt `ManifestSchema`, and
+      opened as
+      [PR #51](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/51)
+      — open, awaiting review/merge, not yet merged. Also verified
+      `artifact.resolveWiringActions` against this real (locally
+      checked-out, not-yet-merged) manifest content through the actual
+      rebuilt packaged sidecar exe: all 4 actions resolved correctly with
+      real snippet/instructions text, `targetFileExists: false` for all
+      four against a fresh fake project dir.
+      **Tests**: 6 new schema tests (`manifest.schema.test.ts`), 7 new
+      `applyEnvExamplePlaceholders` tests plus upsert-idempotency/CRLF
+      coverage (`installParams.test.ts`, 27 tests total in that file), a
+      new `wiring.test.ts` (7 tests for `resolveWiringActions`, including
+      an explicit regression guard that it resolves against `cwd` and not
+      an `install_target`-shaped subdirectory), plus new e2e coverage in
+      both `pull.e2e.test.ts` (12 tests total) and `sidecar.e2e.test.ts`
+      (19 tests: 18 pass + the same 1 pre-existing unrelated
+      GitHub-auth-boundary failure confirmed unrelated to this work on the
+      base commit). Full suite: 246 passed, 1 failed (same pre-existing,
+      unrelated failure) + typecheck + lint all clean.
 - [ ] **Sequencing, once implementation actually starts**: pick-target →
       schema extension → propose-new (manual, cheap, existing generic
       `push --new` path) is strictly sequential — nothing downstream has

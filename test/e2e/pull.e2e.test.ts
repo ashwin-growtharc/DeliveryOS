@@ -259,6 +259,21 @@ describe('pull e2e', () => {
       expect(fs.existsSync(path.join(installTargetDir, '.env.local'))).toBe(false);
     });
 
+    it('also generates .env.example placeholders (Tier 1 of the wiring agent, item 6) -- derived from install_params, never containing the real secret values just configured', () => {
+      const exampleContent = fs.readFileSync(path.join(paramsCwd, '.env.example'), 'utf-8');
+      // Secret params always get a blank placeholder, regardless of the
+      // real value --set just configured in .env.local moments ago.
+      expect(exampleContent).toContain('AUTH_SECRET=\n');
+      expect(exampleContent).toContain('DATABASE_URL=\n');
+      expect(exampleContent).not.toContain('real-secret-value');
+      expect(exampleContent).not.toContain('postgres://real-db');
+      // The non-secret param's own default IS used as the placeholder.
+      expect(exampleContent).toContain('AUTH_URL=http://localhost:3000');
+
+      const installTargetDir = path.join(paramsCwd, INSTALL_PARAMS_ARTIFACT.installTarget);
+      expect(fs.existsSync(path.join(installTargetDir, '.env.example'))).toBe(false);
+    });
+
     it('pulling with a required param genuinely unfilled (no --set, no default) still succeeds, and reports it as missing rather than failing the whole pull', () => {
       const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'deliveryos-e2e-install-params-missing-'));
       try {

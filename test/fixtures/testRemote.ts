@@ -222,7 +222,11 @@ export async function createTestRemoteWithPayloadPathArtifact(): Promise<string>
  * secret+required param with no default (must come from --set or the app's
  * checklist, or it's reported missing), one non-secret+required param WITH
  * a default (satisfied even with no input at all), and one more
- * secret+required param with no default. */
+ * secret+required param with no default. Also declares two `wiring_actions`
+ * (Phase 7 item 6) mirroring the real target's two representative shapes:
+ * one with no `whenPresent` at all ("this already exists, review before
+ * touching it"), one WITH a `whenPresent` (merge-guidance instructions,
+ * still no snippet -- the real `middleware.ts` case). */
 export const INSTALL_PARAMS_ARTIFACT = {
   id: 'test-backend-plugin',
   installTarget: 'test-backend-plugin',
@@ -256,6 +260,21 @@ function installParamsManifestYaml(): string {
     `    description: Postgres connection string`,
     `    secret: true`,
     `    required: true`,
+    `wiring_actions:`,
+    `  - type: suggest_snippet`,
+    `    description: Wire up the root auth entry point`,
+    `    targetFile: auth.ts`,
+    `    whenAbsent:`,
+    `      instructions: Create auth.ts at your project root.`,
+    `      snippet: "export const { handlers, auth } = NextAuth(authConfig);"`,
+    `  - type: suggest_snippet`,
+    `    description: Wire up the auth middleware`,
+    `    targetFile: middleware.ts`,
+    `    whenAbsent:`,
+    `      instructions: Create middleware.ts at your project root.`,
+    `      snippet: "export { auth as middleware } from './auth';"`,
+    `    whenPresent:`,
+    `      instructions: Merge the auth re-export into your existing middleware.ts.`,
   ];
   return lines.join('\n') + '\n';
 }

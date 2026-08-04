@@ -7,7 +7,12 @@ import { upsertEntry } from '../lockfile/lockfile';
 import { pristinePath } from '../paths';
 import { ArtifactResolutionError, PostInstallError } from '../errors';
 import { Manifest } from '../manifest/schema';
-import { resolveInstallParamValues, applyInstallParams, readExistingEnvValues } from './installParams';
+import {
+  resolveInstallParamValues,
+  applyInstallParams,
+  readExistingEnvValues,
+  applyEnvExamplePlaceholders,
+} from './installParams';
 
 export interface PullResult {
   manifest: Manifest;
@@ -160,6 +165,11 @@ export async function pullArtifact(
     readExistingEnvValues(cwd),
   );
   applyInstallParams(cwd, values);
+  // Tier 1 of the wiring agent (Phase 7 item 6) -- derived straight from
+  // install_params, no separate declared action. Same no-op guarantee as
+  // applyInstallParams for the overwhelming majority of artifacts that
+  // declare no install_params at all.
+  applyEnvExamplePlaceholders(cwd, manifest.install_params);
 
   onProgress?.('lockfile', 'Updating lockfile...');
   await upsertEntry(cwd, {

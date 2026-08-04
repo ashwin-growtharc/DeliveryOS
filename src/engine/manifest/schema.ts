@@ -32,6 +32,60 @@ export const InstallParamSchema = z
 
 export type InstallParam = z.infer<typeof InstallParamSchema>;
 
+/**
+ * One Tier-2 ("proposes, waits for confirmation") wiring step a
+ * `backend-plugin` artifact declares -- a concrete, tailored suggestion for
+ * editing a file at the INSTALLING project's own root (e.g. `auth.ts`,
+ * `middleware.ts`), never something DeliveryOS auto-splices into a real
+ * project's real source. `type` is kept explicit (even though
+ * `suggest_snippet` is the only variant today) so a second variant can be
+ * added later without breaking existing manifests -- the same additive
+ * posture as every other field in this schema.
+ *
+ * Deliberately does NOT cover Tier 1 (see `install_params` -- `.env.example`
+ * placeholders are derived from it directly, with no separate declared
+ * action, since redeclaring the same keys a second time here would just be
+ * a real drift risk for no benefit) or Tier 3 (a Prisma schema merge is
+ * "DB schema/migrations" -- explicitly a NEVER-touch per the project's own
+ * three-tier model, not a lesser form of Tier 2; it needs no mechanism here
+ * at all, since the payload's own `.prisma` reference file and rendered
+ * README already surface it passively).
+ *
+ * `whenAbsent`/`whenPresent` are split, not one `snippet` field, because a
+ * single string can't honestly serve both "this file doesn't exist yet,
+ * here's the full content to create" and "this file already exists, don't
+ * blindly overwrite it." `whenPresent` is optional: omitting it means "this
+ * already existing is itself the signal -- review before touching it,"
+ * with no snippet offered at all (e.g. `auth.ts`/the API route, which this
+ * artifact expects to own outright).
+ */
+const WiringSnippetVariant = z.object({
+  instructions: z.string().min(1),
+  // Absent when there's nothing safe to paste verbatim (a "this already
+  // exists, go look at it yourself" case) -- required for `whenAbsent`
+  // itself (a fresh file has nothing to conflict with, so there's always
+  // something concrete to hand over), optional for `whenPresent`.
+  snippet: z.string().optional(),
+});
+
+export const WiringActionSchema = z.object({
+  type: z.literal('suggest_snippet'),
+  description: z.string().min(1),
+  // Resolved against the INSTALLING project's root (`cwd`), same as
+  // `.env.local`/`.env.example` -- never `install_target`/payload-relative.
+  // This is the one place a future implementer could easily copy the
+  // wrong precedent from the rest of pull.ts (everything else there is
+  // installTarget-relative); has its own dedicated test for this reason.
+  targetFile: z.string().min(1),
+  // `snippet` required here, unlike whenPresent below: a fresh file has
+  // nothing to conflict with, so there's always something concrete to
+  // hand over.
+  whenAbsent: WiringSnippetVariant.required({ snippet: true }),
+  whenPresent: WiringSnippetVariant.optional(),
+});
+
+export type WiringAction = z.infer<typeof WiringActionSchema>;
+
 export const ManifestSchema = z.object({
   id: z.string().min(1),
   // Deliberately a plain string, not a closed enum: `kind` is an
@@ -95,6 +149,10 @@ export const ManifestSchema = z.object({
       oidc_issuer: z.string().min(1),
     })
     .optional(),
+  // Tier-2 wiring steps (see WiringActionSchema's own doc comment) --
+  // additive/defaulted like install_params, absent for every kind that
+  // doesn't need one.
+  wiring_actions: z.array(WiringActionSchema).default([]),
 });
 
 export type Manifest = z.infer<typeof ManifestSchema>;

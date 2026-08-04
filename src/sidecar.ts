@@ -35,6 +35,7 @@ import { computeChangedFiles } from './engine/push/diff';
 import { pristinePath } from './engine/paths';
 import { pullArtifact, resolveArtifact, ProgressCallback } from './engine/pull/pull';
 import { resolveInstallParamValues, applyInstallParams, readExistingEnvValues } from './engine/pull/installParams';
+import { resolveWiringActions } from './engine/pull/wiring';
 import { pushArtifact, PushOptions } from './engine/push/push';
 import { checkForUpdates, resolvePendingPushes } from './engine/sync/sync';
 import { scanForNewArtifacts } from './engine/scan/scan';
@@ -270,6 +271,20 @@ const commands: Record<string, CommandHandler> = {
     const relativePath = requireString(args, 'path');
     const content = readArtifactPayloadFile(remote, id, relativePath);
     return { content };
+  },
+
+  // Tier 2 of the wiring agent (Phase 7 item 6): resolves every
+  // wiring_action a manifest declares against the REAL project at `cwd` --
+  // purely read-only detection (does the target file already exist?),
+  // never a file mutation. Lets Detail's Wiring subsection show a
+  // concrete, tailored suggestion instead of the README's own generic
+  // copy-paste instructions.
+  'artifact.resolveWiringActions': (args) => {
+    const id = requireString(args, 'id');
+    const cwd = requireString(args, 'cwd');
+    const remote = optionalString(args, 'remote');
+    const entry = resolveArtifact(id, remote);
+    return resolveWiringActions(entry.manifest.wiring_actions, cwd);
   },
 
   'artifact.push': async (args, { onProgress }) => {

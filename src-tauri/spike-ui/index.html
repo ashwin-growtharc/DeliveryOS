@@ -310,6 +310,14 @@
                 <div id="detail-install-params-fields"></div>
                 <button type="submit" class="btn btn-primary btn-sm">Apply configuration</button>
               </form>
+
+              <!-- Tier 2 of the wiring agent (Phase 7 item 6): a concrete,
+                   tailored suggestion per declared wiring_action -- never an
+                   auto-applied edit. See renderWiringSection in app.js. -->
+              <div id="detail-wiring-section" hidden>
+                <div class="wiring-section-label">Wiring</div>
+                <div id="detail-wiring-actions"></div>
+              </div>
             </div>
 
             <div class="meta-grid">

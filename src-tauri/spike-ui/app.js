@@ -1001,6 +1001,10 @@
   // one's content.
   let installParamsRequestId = 0;
 
+  // Same request-token-guard discipline, for renderWiringSection's own
+  // async artifact.resolveWiringActions call.
+  let wiringRequestId = 0;
+
   /** Clears any live Detail-preview iframe/listener -- called both at the
    * top of loadDetailPreview (about to replace it with a new one) and
    * from renderDetail when switching to a NON-ui-component artifact
@@ -1226,6 +1230,84 @@
       }
     } catch (err) {
       toastError(err);
+    }
+  }
+
+  /** Tier 2 of the wiring agent (Phase 7 item 6): resolves this artifact's
+   * declared `wiring_actions` against the real project at `state.projectDir`
+   * and renders one card per action -- description, which real file it
+   * targets, whether that file already exists, and the applicable
+   * instructions/snippet. Deliberately no "apply" button anywhere here:
+   * Tier 2 is inherently "go do this in your own editor," matching the
+   * tier's own definition ("shown as a diff; applied only on explicit
+   * confirmation" means a PERSON applies it, not that DeliveryOS silently
+   * generates and commits one). Hidden entirely when the manifest declares
+   * no wiring_actions at all -- the overwhelming majority of artifacts. */
+  async function renderWiringSection(entry) {
+    const requestId = ++wiringRequestId;
+    const section = $('detail-wiring-section');
+    const container = $('detail-wiring-actions');
+
+    if (!entry.manifest.wiring_actions || entry.manifest.wiring_actions.length === 0) {
+      section.hidden = true;
+      return;
+    }
+
+    let resolved;
+    try {
+      resolved = await call('artifact.resolveWiringActions', {
+        id: entry.manifest.id,
+        remote: entry.remoteName,
+        cwd: state.projectDir,
+      });
+    } catch (err) {
+      if (requestId !== wiringRequestId) return; // superseded while awaiting
+      section.hidden = false;
+      container.innerHTML = '';
+      const errorEl = document.createElement('div');
+      errorEl.className = 'wiring-action-card';
+      errorEl.textContent = `Could not resolve wiring actions -- ${err instanceof Error ? err.message : String(err)}`;
+      container.appendChild(errorEl);
+      return;
+    }
+    if (requestId !== wiringRequestId) return; // superseded while awaiting
+
+    section.hidden = false;
+    container.innerHTML = '';
+    for (const action of resolved) {
+      const card = document.createElement('div');
+      card.className = 'wiring-action-card';
+
+      const header = document.createElement('div');
+      header.className = 'wiring-action-header';
+      const fileEl = document.createElement('code');
+      fileEl.textContent = action.targetFile;
+      const statusEl = document.createElement('span');
+      statusEl.className = `wiring-action-status ${action.targetFileExists ? 'exists' : 'absent'}`;
+      statusEl.textContent = action.targetFileExists ? 'exists' : 'not found';
+      header.appendChild(fileEl);
+      header.appendChild(statusEl);
+
+      const descEl = document.createElement('div');
+      descEl.className = 'wiring-action-description';
+      descEl.textContent = action.description;
+
+      const instructionsEl = document.createElement('div');
+      instructionsEl.className = 'wiring-action-instructions';
+      instructionsEl.textContent = action.instructions;
+
+      card.appendChild(header);
+      card.appendChild(descEl);
+      card.appendChild(instructionsEl);
+
+      if (action.snippet) {
+        const snippetEl = document.createElement('pre');
+        snippetEl.className = 'wiring-action-snippet';
+        snippetEl.textContent = action.snippet;
+        card.appendChild(snippetEl);
+      }
+
+      container.appendChild(card);
     }
   }
 
@@ -2004,14 +2086,22 @@
     }
 
     // Phase 7 (kind: backend-plugin, or any future kind that declares
-    // install_params): shown purely on whether the manifest HAS any --
-    // never a kind check, matching this codebase's own established
-    // "file/field presence, not kind" convention (preview.png's own
-    // gating in push.ts is the precedent this follows).
+    // install_params/wiring_actions): shown purely on whether the manifest
+    // HAS any of either -- never a kind check, matching this codebase's
+    // own established "file/field presence, not kind" convention
+    // (preview.png's own gating in push.ts is the precedent this
+    // follows). Gated on EITHER, not just install_params: a hypothetical
+    // future artifact with wiring_actions but no install_params should
+    // still show the outer section (renderInstallParamsSection/
+    // renderWiringSection each independently no-op on their own empty
+    // list, via the same convention).
     const backendPluginSection = $('detail-backend-plugin-section');
-    if (manifest.install_params && manifest.install_params.length > 0) {
+    const hasInstallParams = manifest.install_params && manifest.install_params.length > 0;
+    const hasWiringActions = manifest.wiring_actions && manifest.wiring_actions.length > 0;
+    if (hasInstallParams || hasWiringActions) {
       backendPluginSection.hidden = false;
       void renderInstallParamsSection(entry);
+      void renderWiringSection(entry);
     } else {
       backendPluginSection.hidden = true;
     }

@@ -4,6 +4,39 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- **Phase 7's wiring agent (Tier 1 + Tier 2), deterministic and
+  manifest-declared, not an LLM-reasoning agent** (confirmed with the user
+  before building). Tier 1 needed no new manifest field at all:
+  `.env.example` placeholders are fully derivable from the already-shipped
+  `install_params`, so `installParams.ts`'s upsert logic was extracted
+  into a shared `upsertEnvFile(filePath, values)` reused by both
+  `applyInstallParams` (`.env.local`) and the new
+  `applyEnvExamplePlaceholders` (`.env.example`). Tier 2 gained a new
+  `wiring_actions` manifest field (`WiringActionSchema`:
+  `type: 'suggest_snippet'`, `targetFile` resolved against `cwd` --
+  never `install_target` -- `whenAbsent` requiring a snippet,
+  `whenPresent` optional so a declared action can honestly say "review
+  before replacing" instead of forcing one snippet to serve both cases)
+  and a new, purely read-only `resolveWiringActions(wiringActions, cwd)`
+  (`src/engine/pull/wiring.ts`) that never writes or mutates anything.
+  Deliberately excludes the Prisma schema merge -- that's Tier 3 per this
+  project's own three-tier table, already surfaced passively via the
+  prior item's `artifact.readPayloadFile` + rendered README. New sidecar
+  command `artifact.resolveWiringActions`. Detail gained a "Wiring"
+  subsection (one card per resolved action: target file, exists/not-found
+  badge, description, instructions, snippet if applicable) -- no "apply"
+  button, since Tier 2 is inherently "go do this in your own editor."
+  The real, already-merged `nextauth-credentials` manifest on
+  `ai-helpers` was updated with its real 4 `wiring_actions`, opened as
+  [PR #51](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/51)
+  -- open, awaiting review, not yet merged. Verified in a real browser
+  against a mocked harness, and `artifact.resolveWiringActions` verified
+  against the real (locally checked-out) manifest content through the
+  actual rebuilt packaged sidecar exe. 20 new tests across schema, unit,
+  and e2e coverage; full suite (247 tests, one pre-existing unrelated
+  failure) + typecheck + lint clean. On branch `phase7-detail-pull-ux`,
+  not yet pushed.
+
 - **Phase 7's Detail/Pull UX for non-visual artifacts**: a new
   `src/engine/pull/installParams.ts` resolves and applies an artifact's
   declared `install_params` (provided value > already-configured

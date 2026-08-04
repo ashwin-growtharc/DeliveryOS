@@ -96,6 +96,50 @@ export function readExistingEnvValues(cwd: string): Record<string, string> {
 }
 
 /**
+ * Writes `values` into `filePath`, a plain `.env`-shaped file -- the shared
+ * core both `applyInstallParams` (`.env.local`, real secret values) and
+ * `applyEnvExamplePlaceholders` (`.env.example`, blank/default placeholders)
+ * upsert through, extracted here rather than duplicated so both inherit the
+ * exact same idempotency/preservation guarantees for free instead of
+ * re-earning them separately.
+ *
+ * A no-op when `values` is empty -- neither caller creates a file at all for
+ * an artifact that declares no `install_params`.
+ *
+ * Existing content is preserved -- only the given keys are inserted/updated;
+ * every other line (including comments and blank lines) survives untouched,
+ * in place. Values are written literally, with no shell-style quoting beyond
+ * what's already valid `.env` syntax (a caller supplying a value containing
+ * a newline or `=` is a real edge case, not attempted here). Always exactly
+ * one trailing newline on write, regardless of whether the original file had
+ * one, didn't exist yet, or ended mid-line.
+ */
+export function upsertEnvFile(filePath: string, values: Record<string, string>): void {
+  const keys = Object.keys(values);
+  if (keys.length === 0) {
+    return;
+  }
+
+  const existing = fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf-8') : '';
+  const lines = existing.length > 0 ? parseEnvLines(existing) : [];
+
+  const remaining = new Set(keys);
+  const updatedLines = lines.map(({ key, line }) => {
+    if (key && remaining.has(key)) {
+      remaining.delete(key);
+      return `${key}=${values[key]}`;
+    }
+    return line;
+  });
+
+  for (const key of remaining) {
+    updatedLines.push(`${key}=${values[key]}`);
+  }
+
+  fs.writeFileSync(filePath, `${updatedLines.join('\n')}\n`, 'utf-8');
+}
+
+/**
  * Writes resolved install-time values into `<cwd>/.env.local` -- a
  * project-ROOT file, deliberately never anything under an artifact's own
  * `install_target`. This is the real reason it lives in its own module
@@ -112,39 +156,35 @@ export function readExistingEnvValues(cwd: string): Record<string, string> {
  * still complete the pull and configure the rest later (via the app's own
  * required-config checklist, or a follow-up `--set`), rather than losing an
  * otherwise-successful pull over one missing value.
- *
- * Existing `.env.local` content (real values a project already has) is
- * preserved -- only the given keys are inserted/updated; every other line
- * (including comments and blank lines) survives untouched, in place.
- * Values are written literally, with no shell-style quoting beyond what's
- * already valid `.env` syntax (a caller supplying a value containing a
- * newline or `=` is a real edge case, not attempted here).
  */
 export function applyInstallParams(cwd: string, values: Record<string, string>): void {
-  const keys = Object.keys(values);
-  if (keys.length === 0) {
-    return;
+  upsertEnvFile(path.join(cwd, '.env.local'), values);
+}
+
+/**
+ * Tier 1 of Phase 7's wiring agent (see `WiringActionSchema`'s own doc
+ * comment for Tiers 2/3): generates `.env.example` placeholder lines
+ * directly from a manifest's `install_params`, with NO separate declared
+ * action and no new schema field -- the same three keys redeclared a
+ * second time in a `wiring_actions`-shaped entry would just be a real drift
+ * risk (the two lists could disagree) for no benefit, since the mapping
+ * from an install_param to its placeholder is always the same deterministic
+ * rule: `secret` params get a blank placeholder (never their own default,
+ * which doesn't exist for a secret param anyway per the schema's own
+ * `.refine()`); non-secret params get their declared `default` if any, else
+ * blank too.
+ *
+ * Also project-ROOT, never `install_target` -- same reasoning as
+ * `applyInstallParams`, though `.env.example` never holds a real secret
+ * value (only placeholders), so the pristine-snapshot risk that motivated
+ * that choice doesn't apply here as urgently; kept in the same place anyway
+ * for consistency, since both files describe the SAME install_params from
+ * the SAME project root.
+ */
+export function applyEnvExamplePlaceholders(cwd: string, installParams: InstallParam[]): void {
+  const placeholders: Record<string, string> = {};
+  for (const param of installParams) {
+    placeholders[param.key] = param.secret ? '' : (param.default ?? '');
   }
-
-  const envPath = path.join(cwd, '.env.local');
-  const existing = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf-8') : '';
-  const lines = existing.length > 0 ? parseEnvLines(existing) : [];
-
-  const remaining = new Set(keys);
-  const updatedLines = lines.map(({ key, line }) => {
-    if (key && remaining.has(key)) {
-      remaining.delete(key);
-      return `${key}=${values[key]}`;
-    }
-    return line;
-  });
-
-  for (const key of remaining) {
-    updatedLines.push(`${key}=${values[key]}`);
-  }
-
-  // Always exactly one trailing newline -- the standard, unsurprising
-  // shape for a .env file, regardless of whether the original file had
-  // one, didn't exist yet, or ended mid-line.
-  fs.writeFileSync(envPath, `${updatedLines.join('\n')}\n`, 'utf-8');
+  upsertEnvFile(path.join(cwd, '.env.example'), placeholders);
 }

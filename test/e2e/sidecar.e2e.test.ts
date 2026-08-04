@@ -928,4 +928,70 @@ describe('sidecar e2e', () => {
     },
     30_000,
   );
+
+  it(
+    'artifact.resolveWiringActions resolves against the real project at cwd, absent vs. present, with no file ever written',
+    async () => {
+      const wiringRemoteDir = await createTestRemoteWithInstallParamsArtifact();
+      const cwd = newScratchCwd('resolve-wiring-actions');
+      const session = new SidecarSession(cwd, deliveryOsHome);
+      try {
+        const remoteName = 'sidecar-remote-wiring';
+        const addResp = await session.request('remote.add', { url: wiringRemoteDir, name: remoteName });
+        expect(addResp.ok).toBe(true);
+
+        // Neither auth.ts nor middleware.ts exists yet in this fresh
+        // project -- both actions should resolve to their whenAbsent
+        // variant.
+        const beforeResp = await session.request('artifact.resolveWiringActions', {
+          id: INSTALL_PARAMS_ARTIFACT.id,
+          remote: remoteName,
+          cwd,
+        });
+        expect(beforeResp.ok).toBe(true);
+        const before = beforeResp.result as Array<{
+          targetFile: string; targetFileExists: boolean; snippet?: string; instructions: string;
+        }>;
+        expect(before).toHaveLength(2);
+        const authAction = before.find((a) => a.targetFile === 'auth.ts')!;
+        expect(authAction.targetFileExists).toBe(false);
+        expect(authAction.snippet).toContain('NextAuth');
+        const middlewareAction = before.find((a) => a.targetFile === 'middleware.ts')!;
+        expect(middlewareAction.targetFileExists).toBe(false);
+        expect(middlewareAction.snippet).toContain('auth as middleware');
+
+        // Now seed a real middleware.ts in the project -- re-resolving
+        // must flip that ONE action to its whenPresent variant (merge
+        // guidance, no snippet) while auth.ts's own resolution is
+        // unaffected.
+        fs.writeFileSync(path.join(cwd, 'middleware.ts'), 'export default function middleware() {}', 'utf-8');
+
+        const afterResp = await session.request('artifact.resolveWiringActions', {
+          id: INSTALL_PARAMS_ARTIFACT.id,
+          remote: remoteName,
+          cwd,
+        });
+        expect(afterResp.ok).toBe(true);
+        const after = afterResp.result as Array<{
+          targetFile: string; targetFileExists: boolean; snippet?: string; instructions: string;
+        }>;
+        const authAfter = after.find((a) => a.targetFile === 'auth.ts')!;
+        expect(authAfter.targetFileExists).toBe(false);
+        const middlewareAfter = after.find((a) => a.targetFile === 'middleware.ts')!;
+        expect(middlewareAfter.targetFileExists).toBe(true);
+        expect(middlewareAfter.snippet).toBeUndefined();
+        expect(middlewareAfter.instructions).toContain('Merge');
+
+        // Purely read-only -- resolving never creates/modifies auth.ts,
+        // and the middleware.ts we seeded by hand is untouched.
+        expect(fs.existsSync(path.join(cwd, 'auth.ts'))).toBe(false);
+        expect(fs.readFileSync(path.join(cwd, 'middleware.ts'), 'utf-8'))
+          .toBe('export default function middleware() {}');
+      } finally {
+        await session.close();
+        await teardownTestRemote(wiringRemoteDir);
+      }
+    },
+    30_000,
+  );
 });

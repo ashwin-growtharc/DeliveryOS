@@ -6,6 +6,7 @@ import {
   resolveInstallParamValues,
   applyInstallParams,
   readExistingEnvValues,
+  applyEnvExamplePlaceholders,
 } from '../../src/engine/pull/installParams';
 import { InstallParam } from '../../src/engine/manifest/schema';
 
@@ -191,5 +192,112 @@ describe('applyInstallParams', () => {
 
     expect(fs.existsSync(path.join(cwd, '.env.local'))).toBe(true);
     expect(fs.readdirSync(installTargetLikeDir)).toEqual([]);
+  });
+
+  it('re-running with identical input produces byte-identical output -- real idempotency, not just "doesn\'t throw"', () => {
+    applyInstallParams(cwd, { AUTH_SECRET: 'value-one', AUTH_URL: 'http://localhost:3000' });
+    const firstContent = fs.readFileSync(path.join(cwd, '.env.local'), 'utf-8');
+
+    applyInstallParams(cwd, { AUTH_SECRET: 'value-one', AUTH_URL: 'http://localhost:3000' });
+    const secondContent = fs.readFileSync(path.join(cwd, '.env.local'), 'utf-8');
+
+    expect(secondContent).toBe(firstContent);
+  });
+
+  it('CRLF-terminated existing content still parses and upserts correctly', () => {
+    fs.writeFileSync(path.join(cwd, '.env.local'), 'EXISTING=keep\r\nAUTH_SECRET=old\r\n', 'utf-8');
+
+    applyInstallParams(cwd, { AUTH_SECRET: 'new' });
+
+    const content = fs.readFileSync(path.join(cwd, '.env.local'), 'utf-8');
+    expect(content).toContain('EXISTING=keep');
+    expect(content).toContain('AUTH_SECRET=new');
+    expect(content).not.toContain('AUTH_SECRET=old');
+  });
+});
+
+describe('applyEnvExamplePlaceholders (Tier 1 of the wiring agent, Phase 7 item 6)', () => {
+  let cwd: string;
+
+  beforeEach(() => {
+    cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'deliveryos-env-example-test-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  });
+
+  it('a secret param always gets a blank placeholder, regardless of anything else', () => {
+    applyEnvExamplePlaceholders(cwd, [
+      { key: 'AUTH_SECRET', description: 'Session secret', secret: true, required: true },
+    ]);
+    const content = fs.readFileSync(path.join(cwd, '.env.example'), 'utf-8');
+    expect(content).toBe('AUTH_SECRET=\n');
+  });
+
+  it('a non-secret param with a declared default uses that default as the placeholder', () => {
+    applyEnvExamplePlaceholders(cwd, [
+      { key: 'AUTH_URL', description: 'App URL', secret: false, required: true, default: 'http://localhost:3000' },
+    ]);
+    const content = fs.readFileSync(path.join(cwd, '.env.example'), 'utf-8');
+    expect(content).toBe('AUTH_URL=http://localhost:3000\n');
+  });
+
+  it('a non-secret param with no default gets a blank placeholder', () => {
+    applyEnvExamplePlaceholders(cwd, [
+      { key: 'SOME_FLAG', description: 'no default', secret: false, required: false },
+    ]);
+    const content = fs.readFileSync(path.join(cwd, '.env.example'), 'utf-8');
+    expect(content).toBe('SOME_FLAG=\n');
+  });
+
+  it('an empty install_params array is a no-op -- no .env.example created for the overwhelming majority of artifacts', () => {
+    applyEnvExamplePlaceholders(cwd, []);
+    expect(fs.existsSync(path.join(cwd, '.env.example'))).toBe(false);
+  });
+
+  it('matches the real nextauth-credentials target\'s exact three placeholders', () => {
+    applyEnvExamplePlaceholders(cwd, [
+      { key: 'AUTH_SECRET', description: 'Session secret', secret: true, required: true },
+      { key: 'AUTH_URL', description: 'App URL', secret: false, required: true, default: 'http://localhost:3000' },
+      { key: 'DATABASE_URL', description: 'DB connection string', secret: true, required: true },
+    ]);
+    const content = fs.readFileSync(path.join(cwd, '.env.example'), 'utf-8');
+    expect(content).toBe('AUTH_SECRET=\nAUTH_URL=http://localhost:3000\nDATABASE_URL=\n');
+  });
+
+  it('two sequential calls with different key-sets (simulating two different backend-plugin artifacts) each leave the other\'s lines alone', () => {
+    applyEnvExamplePlaceholders(cwd, [
+      { key: 'AUTH_SECRET', description: 'from artifact A', secret: true, required: true },
+    ]);
+    applyEnvExamplePlaceholders(cwd, [
+      { key: 'OTHER_ARTIFACT_KEY', description: 'from artifact B', secret: false, required: true, default: 'default-value' },
+    ]);
+
+    const content = fs.readFileSync(path.join(cwd, '.env.example'), 'utf-8');
+    expect(content).toBe('AUTH_SECRET=\nOTHER_ARTIFACT_KEY=default-value\n');
+  });
+
+  it('re-running with the same install_params is byte-identical the second time', () => {
+    const params = [
+      { key: 'AUTH_SECRET', description: 'Session secret', secret: true, required: true },
+      { key: 'AUTH_URL', description: 'App URL', secret: false, required: true, default: 'http://localhost:3000' },
+    ];
+    applyEnvExamplePlaceholders(cwd, params);
+    const first = fs.readFileSync(path.join(cwd, '.env.example'), 'utf-8');
+    applyEnvExamplePlaceholders(cwd, params);
+    const second = fs.readFileSync(path.join(cwd, '.env.example'), 'utf-8');
+    expect(second).toBe(first);
+  });
+
+  it('never writes .env.local, and applyInstallParams never writes .env.example -- the two files are independent', () => {
+    applyEnvExamplePlaceholders(cwd, [
+      { key: 'AUTH_SECRET', description: 'Session secret', secret: true, required: true },
+    ]);
+    expect(fs.existsSync(path.join(cwd, '.env.local'))).toBe(false);
+
+    applyInstallParams(cwd, { DATABASE_URL: 'postgres://real' });
+    const exampleContent = fs.readFileSync(path.join(cwd, '.env.example'), 'utf-8');
+    expect(exampleContent).not.toContain('DATABASE_URL');
   });
 });
