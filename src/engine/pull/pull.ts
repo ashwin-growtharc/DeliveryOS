@@ -7,12 +7,21 @@ import { upsertEntry } from '../lockfile/lockfile';
 import { pristinePath } from '../paths';
 import { ArtifactResolutionError, PostInstallError } from '../errors';
 import { Manifest } from '../manifest/schema';
+import { resolveInstallParamValues, applyInstallParams, readExistingEnvValues } from './installParams';
 
 export interface PullResult {
   manifest: Manifest;
   remoteName: string;
   installTarget: string;
   postInstallOutput?: string;
+  /** Which of this artifact's declared `install_params` still have no
+   * value -- neither provided by the caller nor covered by the param's
+   * own `default`. Never a hard failure (see `applyInstallParams`'s own
+   * doc comment): a pull with missing required params still succeeds,
+   * so a person can configure the rest later rather than lose an
+   * otherwise-successful pull over one missing value. Always `[]` for
+   * an artifact with no `install_params` at all. */
+  missingRequiredParams: string[];
 }
 
 /**
@@ -69,14 +78,17 @@ export function resolveArtifact(
 /**
  * Pulls the artifact identified by `id` (optionally scoped to `remoteName`)
  * into `cwd`: copies its payload into install_target, runs post_install if
- * present, then upserts the cwd-scoped lockfile. The lockfile is only
- * updated once both the copy and post_install succeed.
+ * present, applies any declared install_params (`providedValues`, e.g. a
+ * CLI's `--set KEY=VALUE` flags or the app's own required-config
+ * checklist), then upserts the cwd-scoped lockfile. The lockfile is only
+ * updated once the copy and post_install both succeed.
  */
 export async function pullArtifact(
   id: string,
   remoteName: string | undefined,
   cwd: string,
   onProgress?: ProgressCallback,
+  providedValues: Record<string, string> = {},
 ): Promise<PullResult> {
   onProgress?.('resolve', `Resolving artifact "${id}"...`);
   const entry = resolveArtifact(id, remoteName);
@@ -135,6 +147,20 @@ export async function pullArtifact(
   }
   fs.cpSync(installTarget, pristineTarget, { recursive: true });
 
+  // Deliberately after the pristine snapshot above, and writes to `cwd`
+  // itself (`.env.local`), never into `installTarget` -- see
+  // `applyInstallParams`'s own doc comment for why that separation is the
+  // real point, not just a convenient ordering. A no-op (writes nothing)
+  // for the overwhelming majority of artifacts, which declare no
+  // install_params at all.
+  onProgress?.('install-params', 'Applying install-time configuration...');
+  const { values, missingRequired } = resolveInstallParamValues(
+    manifest.install_params,
+    providedValues,
+    readExistingEnvValues(cwd),
+  );
+  applyInstallParams(cwd, values);
+
   onProgress?.('lockfile', 'Updating lockfile...');
   await upsertEntry(cwd, {
     id: manifest.id,
@@ -142,5 +168,11 @@ export async function pullArtifact(
     remote: resolvedRemoteName,
   });
 
-  return { manifest, remoteName: resolvedRemoteName, installTarget, postInstallOutput };
+  return {
+    manifest,
+    remoteName: resolvedRemoteName,
+    installTarget,
+    postInstallOutput,
+    missingRequiredParams: missingRequired,
+  };
 }

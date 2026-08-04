@@ -1231,6 +1231,67 @@ input, textarea, select {
   margin: 0 0 10px;
 }
 
+/* ---------- backend-plugin Detail section (Phase 7) ----------
+ * Non-visual counterpart to the ui-component live-preview section above --
+ * a provenance badge, a plain rendered README, and a required-config
+ * checklist. Reuses .field's existing label/input styling verbatim rather
+ * than inventing a second input language. */
+
+.provenance-badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .2px;
+  padding: 4px 10px;
+  border-radius: var(--radius-md);
+  margin: 14px 0;
+}
+
+.provenance-badge.signed {
+  background: var(--success-100);
+  color: var(--success-600);
+}
+
+.provenance-badge.unsigned {
+  background: var(--warning-100);
+  color: var(--warning-600);
+}
+
+.detail-readme {
+  white-space: pre-wrap;
+  font-family: var(--font-mono, monospace);
+  font-size: 12.5px;
+  line-height: 1.6;
+  background: var(--surface-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  margin-bottom: 14px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.install-params-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.install-param-help {
+  font-size: 11px;
+  opacity: .6;
+  margin-bottom: 5px;
+}
+
+.install-params-form input[type="text"],
+.install-params-form input[type="password"] {
+  width: 100%;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  padding: 8px 12px;
+  background: var(--card);
+}
+
 /* ---------- progress panel (live Pull/Push stage feed) ----------
  * Deliberately not a numeric `<progress>` percentage bar: there is no
  * honest way to know "80% done" for an arbitrary post_install shell command

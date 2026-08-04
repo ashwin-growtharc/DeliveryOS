@@ -33,7 +33,8 @@ import { buildCatalog, refreshCatalog, CatalogEntry } from './engine/catalog/cat
 import { readLockfile } from './engine/lockfile/lockfile';
 import { computeChangedFiles } from './engine/push/diff';
 import { pristinePath } from './engine/paths';
-import { pullArtifact, ProgressCallback } from './engine/pull/pull';
+import { pullArtifact, resolveArtifact, ProgressCallback } from './engine/pull/pull';
+import { resolveInstallParamValues, applyInstallParams, readExistingEnvValues } from './engine/pull/installParams';
 import { pushArtifact, PushOptions } from './engine/push/push';
 import { checkForUpdates, resolvePendingPushes } from './engine/sync/sync';
 import { scanForNewArtifacts } from './engine/scan/scan';
@@ -49,6 +50,7 @@ import * as fs from 'fs';
 import { RemoteRegistryError } from './engine/errors';
 import { Manifest } from './engine/manifest/schema';
 import { compileArtifactPreview, compileLocalPreview } from './engine/preview/resolveArtifactPreview';
+import { readArtifactPayloadFile } from './engine/payload/readPayloadFile';
 
 interface SidecarRequest {
   id: string;
@@ -108,6 +110,24 @@ function requireString(args: Record<string, unknown>, key: string): string {
 function optionalString(args: Record<string, unknown>, key: string): string | undefined {
   const value = args[key];
   return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+/** Extracts a plain string->string map (e.g. install-param values the app's
+ * required-config checklist collected) -- absent or malformed entirely
+ * defaults to `{}` rather than throwing, since providing no values at all
+ * is the overwhelmingly common case (most artifacts declare none). */
+function optionalStringRecord(args: Record<string, unknown>, key: string): Record<string, string> {
+  const value = args[key];
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return {};
+  }
+  const result: Record<string, string> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof v === 'string') {
+      result[k] = v;
+    }
+  }
+  return result;
 }
 
 /**
@@ -214,7 +234,42 @@ const commands: Record<string, CommandHandler> = {
     const id = requireString(args, 'id');
     const cwd = requireString(args, 'cwd');
     const remote = optionalString(args, 'remote');
-    return pullArtifact(id, remote, cwd, onProgress);
+    const values = optionalStringRecord(args, 'values');
+    return pullArtifact(id, remote, cwd, onProgress, values);
+  },
+
+  // Configures an already-pulled artifact's install_params without a full
+  // re-pull -- e.g. the user filled in the required-config checklist
+  // AFTER pulling, or is going back to fix one value later. Resolves the
+  // SAME manifest/params pullArtifact itself would (via resolveArtifact),
+  // so the "provided value wins over the param's own default" rule stays
+  // identical in both places, not two subtly different implementations.
+  'artifact.applyInstallParams': (args) => {
+    const id = requireString(args, 'id');
+    const cwd = requireString(args, 'cwd');
+    const remote = optionalString(args, 'remote');
+    const values = optionalStringRecord(args, 'values');
+    const entry = resolveArtifact(id, remote);
+    const resolved = resolveInstallParamValues(
+      entry.manifest.install_params,
+      values,
+      readExistingEnvValues(cwd),
+    );
+    applyInstallParams(cwd, resolved.values);
+    return { missingRequiredParams: resolved.missingRequired };
+  },
+
+  // Reads one file (e.g. README.md) directly out of an artifact's payload
+  // in its remote's local cache -- lets Detail render real setup
+  // documentation for a non-visual artifact (backend-plugin) before
+  // anyone decides to pull it, the same "browse before you commit"
+  // principle preview.compile already established for ui-component.
+  'artifact.readPayloadFile': (args) => {
+    const remote = requireString(args, 'remote');
+    const id = requireString(args, 'id');
+    const relativePath = requireString(args, 'path');
+    const content = readArtifactPayloadFile(remote, id, relativePath);
+    return { content };
   },
 
   'artifact.push': async (args, { onProgress }) => {

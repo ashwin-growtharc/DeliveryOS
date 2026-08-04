@@ -215,3 +215,77 @@ export async function createTestRemoteWithPayloadPathArtifact(): Promise<string>
 
   return dir;
 }
+
+/** id/installTarget/params of the extra `kind: backend-plugin` artifact
+ * seeded by createTestRemoteWithInstallParamsArtifact() -- mirrors the real
+ * `nextauth-credentials` artifact's shape (Phase 7) at test scale: one
+ * secret+required param with no default (must come from --set or the app's
+ * checklist, or it's reported missing), one non-secret+required param WITH
+ * a default (satisfied even with no input at all), and one more
+ * secret+required param with no default. */
+export const INSTALL_PARAMS_ARTIFACT = {
+  id: 'test-backend-plugin',
+  installTarget: 'test-backend-plugin',
+} as const;
+
+function installParamsManifestYaml(): string {
+  const lines = [
+    `id: ${INSTALL_PARAMS_ARTIFACT.id}`,
+    `kind: backend-plugin`,
+    `description: Test backend-plugin artifact with real install_params`,
+    `owner: test-team`,
+    `version: 1.0.0`,
+    `tags:`,
+    `  roles: []`,
+    `  teams: []`,
+    `  stacks: []`,
+    `source_repo: https://example.invalid/test-remote`,
+    `install_target: ${INSTALL_PARAMS_ARTIFACT.installTarget}`,
+    `review_required: false`,
+    `install_params:`,
+    `  - key: AUTH_SECRET`,
+    `    description: Session-signing secret`,
+    `    secret: true`,
+    `    required: true`,
+    `  - key: AUTH_URL`,
+    `    description: Canonical app URL`,
+    `    secret: false`,
+    `    required: true`,
+    `    default: http://localhost:3000`,
+    `  - key: DATABASE_URL`,
+    `    description: Postgres connection string`,
+    `    secret: true`,
+    `    required: true`,
+  ];
+  return lines.join('\n') + '\n';
+}
+
+/**
+ * Like createTestRemote(), but seeds one additional `kind: backend-plugin`
+ * artifact (INSTALL_PARAMS_ARTIFACT) declaring real install_params -- the
+ * shape Phase 7's item 2/4 work (manifest schema + Pull-time collection)
+ * actually needs to exercise. Kept separate from createTestRemote() for the
+ * same reason every other `createTestRemoteWith*` variant is: every
+ * pre-existing test that assumes "exactly 3 seeded artifacts" keeps working
+ * unmodified.
+ */
+export async function createTestRemoteWithInstallParamsArtifact(): Promise<string> {
+  const dir = await createTestRemote();
+  const git = simpleGit(dir);
+
+  const payloadDir = path.join(dir, 'artifacts', INSTALL_PARAMS_ARTIFACT.id, 'payload');
+  fs.mkdirSync(payloadDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(payloadDir, 'README.md'),
+    `# ${INSTALL_PARAMS_ARTIFACT.id}\n\nTest backend-plugin payload.\n`,
+    'utf-8',
+  );
+
+  const manifestDir = path.join(dir, 'artifacts', INSTALL_PARAMS_ARTIFACT.id);
+  fs.writeFileSync(path.join(manifestDir, 'manifest.yaml'), installParamsManifestYaml(), 'utf-8');
+
+  await git.add('.');
+  await git.commit('seed install_params test artifact');
+
+  return dir;
+}

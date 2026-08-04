@@ -5,7 +5,13 @@ import * as path from 'path';
 import { spawn, ChildProcess } from 'child_process';
 import * as readline from 'readline';
 import simpleGit from 'simple-git';
-import { createTestRemote, teardownTestRemote, TEST_ARTIFACTS } from '../fixtures/testRemote';
+import {
+  createTestRemote,
+  createTestRemoteWithInstallParamsArtifact,
+  teardownTestRemote,
+  TEST_ARTIFACTS,
+  INSTALL_PARAMS_ARTIFACT,
+} from '../fixtures/testRemote';
 import { addRemoteEntry } from '../../src/engine/remote/remoteRegistry';
 import { cloneRemote, cachePath } from '../../src/engine/remote/remoteCache';
 
@@ -577,7 +583,8 @@ describe('sidecar e2e', () => {
 
   it(
     'artifact.pull emits progress stages in order (resolve, copy, post_install, snapshot, '
-      + 'lockfile) before the final response, and the final response shape is untouched',
+      + 'install-params, lockfile) before the final response, and the final response shape '
+      + 'is untouched',
     async () => {
       const cwd = newScratchCwd('pull-progress');
       const session = new SidecarSession(cwd, deliveryOsHome);
@@ -606,6 +613,7 @@ describe('sidecar e2e', () => {
           'copy',
           'post_install',
           'snapshot',
+          'install-params',
           'lockfile',
         ]);
         for (const line of progressLines) {
@@ -648,7 +656,7 @@ describe('sidecar e2e', () => {
         expect(pullResp.ok).toBe(true);
 
         const stages = session.takeProgressLines().map((p) => p.stage);
-        expect(stages).toEqual(['resolve', 'copy', 'snapshot', 'lockfile']);
+        expect(stages).toEqual(['resolve', 'copy', 'snapshot', 'install-params', 'lockfile']);
       } finally {
         await session.close();
       }
@@ -812,6 +820,108 @@ describe('sidecar e2e', () => {
 
         const progressLines = session.takeProgressLines();
         expect(progressLines.some((line) => line.stage === 'fetch')).toBe(true);
+      } finally {
+        await session.close();
+      }
+    },
+    30_000,
+  );
+
+  it(
+    'artifact.pull applies values passed as "values", and artifact.applyInstallParams configures the rest afterward without a re-pull',
+    async () => {
+      const installParamsRemoteDir = await createTestRemoteWithInstallParamsArtifact();
+      const cwd = newScratchCwd('install-params');
+      const session = new SidecarSession(cwd, deliveryOsHome);
+      try {
+        const addResp = await session.request('remote.add', {
+          url: installParamsRemoteDir,
+          name: 'sidecar-remote-install-params',
+        });
+        expect(addResp.ok).toBe(true);
+
+        // AUTH_URL is deliberately omitted here -- its manifest-declared
+        // default should apply on its own, exercising the same
+        // provided-value-wins-over-default rule both artifact.pull and
+        // artifact.applyInstallParams share via resolveInstallParamValues.
+        const pullResp = await session.request('artifact.pull', {
+          id: INSTALL_PARAMS_ARTIFACT.id,
+          remote: 'sidecar-remote-install-params',
+          cwd,
+          values: { AUTH_SECRET: 'from-pull' },
+        });
+        expect(pullResp.ok).toBe(true);
+        expect((pullResp.result as { missingRequiredParams: string[] }).missingRequiredParams)
+          .toEqual(['DATABASE_URL']);
+
+        let envContent = fs.readFileSync(path.join(cwd, '.env.local'), 'utf-8');
+        expect(envContent).toContain('AUTH_SECRET=from-pull');
+        expect(envContent).toContain('AUTH_URL=http://localhost:3000');
+        expect(envContent).not.toContain('DATABASE_URL');
+
+        // Now configure the still-missing value WITHOUT a re-pull -- the
+        // real point of this command existing at all (going back later to
+        // fix one value, from Detail, after already having pulled).
+        const applyResp = await session.request('artifact.applyInstallParams', {
+          id: INSTALL_PARAMS_ARTIFACT.id,
+          remote: 'sidecar-remote-install-params',
+          cwd,
+          values: { DATABASE_URL: 'postgres://from-apply' },
+        });
+        expect(applyResp.ok).toBe(true);
+        expect((applyResp.result as { missingRequiredParams: string[] }).missingRequiredParams)
+          .toEqual([]);
+
+        envContent = fs.readFileSync(path.join(cwd, '.env.local'), 'utf-8');
+        expect(envContent).toContain('DATABASE_URL=postgres://from-apply');
+        // The earlier values must survive untouched -- applyInstallParams
+        // only ever updates the keys it was actually given.
+        expect(envContent).toContain('AUTH_SECRET=from-pull');
+      } finally {
+        await session.close();
+        await teardownTestRemote(installParamsRemoteDir);
+      }
+    },
+    30_000,
+  );
+
+  it(
+    'artifact.readPayloadFile reads a real file out of an artifact\'s payload, and returns undefined (not an error) for one that doesn\'t exist',
+    async () => {
+      const cwd = newScratchCwd('read-payload-file');
+      const session = new SidecarSession(cwd, deliveryOsHome);
+      try {
+        const remoteName = 'sidecar-remote-read-payload';
+        const addResp = await session.request('remote.add', { url: fixtureRemoteDir, name: remoteName });
+        expect(addResp.ok).toBe(true);
+
+        const artifact = TEST_ARTIFACTS[0];
+        const readResp = await session.request('artifact.readPayloadFile', {
+          remote: remoteName,
+          id: artifact.id,
+          path: 'README.md',
+        });
+        expect(readResp.ok).toBe(true);
+        expect((readResp.result as { content?: string }).content).toContain(`# ${artifact.id}`);
+
+        const missingResp = await session.request('artifact.readPayloadFile', {
+          remote: remoteName,
+          id: artifact.id,
+          path: 'no-such-file.md',
+        });
+        expect(missingResp.ok).toBe(true);
+        expect((missingResp.result as { content?: string }).content).toBeUndefined();
+
+        // Real security boundary, not just a nicety -- a path-traversal
+        // attempt must be refused outright, the same discipline compile.ts's
+        // own import sandboxing already established for preview.tsx.
+        const escapeResp = await session.request('artifact.readPayloadFile', {
+          remote: remoteName,
+          id: artifact.id,
+          path: '../../../../package.json',
+        });
+        expect(escapeResp.ok).toBe(false);
+        expect(escapeResp.error?.message).toContain('outside');
       } finally {
         await session.close();
       }

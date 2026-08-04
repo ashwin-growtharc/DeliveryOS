@@ -4,6 +4,29 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- **Phase 7's Detail/Pull UX for non-visual artifacts**: a new
+  `src/engine/pull/installParams.ts` resolves and applies an artifact's
+  declared `install_params` (provided value > already-configured
+  `.env.local` value > the manifest's own `default`), writing to
+  `<cwd>/.env.local` -- a project-ROOT file, deliberately never anything
+  under `install_target`, since the pristine-snapshot step would otherwise
+  capture a secret value baked into a "pristine reference copy". CLI:
+  `deliveryos pull <id> --set KEY=VALUE` (repeatable). Sidecar: two new
+  commands, `artifact.applyInstallParams` (configure later without a
+  re-pull) and `artifact.readPayloadFile` (reads a real file, e.g.
+  README.md, out of an artifact's payload, sandboxed against
+  path-traversal). Caught a real bug while wiring this up: configuring one
+  missing value later made every OTHER already-satisfied param look
+  missing again, since the resolver only ever saw what was provided THAT
+  call -- fixed by folding in whatever's already in `.env.local` first.
+  Detail gained a new section (gated on `install_params` being non-empty,
+  never a `kind` check): a provenance badge, the rendered README, and a
+  required-config checklist. Verified in a real browser against a mocked
+  harness, and the real packaged sidecar exe reading the real, merged
+  `nextauth-credentials` artifact's README from `ai-helpers`. 29 new
+  tests; full suite (222 tests, one pre-existing unrelated failure) +
+  typecheck + lint clean. On branch `phase7-detail-pull-ux`.
+
 - **Phase 7 (backend-plugin artifacts) started for real**: picked a
   concrete target (Auth.js/NextAuth v5 + Prisma, Credentials provider, in
   a Next.js App Router project) over Passport.js/Express, a Supabase-auth

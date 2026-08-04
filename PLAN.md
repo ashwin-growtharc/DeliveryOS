@@ -882,10 +882,54 @@ up again.
       signing onto `agent-asset`/`ui-component` (gated on `manifest.
       signature` being present, so it's free for other kinds later
       without forcing adoption now), any key-management scheme.
-- [ ] Detail/Pull UX for non-visual artifacts: rendered README, a
+- [x] **Detail/Pull UX for non-visual artifacts**: rendered README, a
       required-config checklist collecting the project's own values (never
       the artifact's own defaults), and a signed/provenance badge — no live
-      preview attempted.
+      preview attempted. Done, on branch `phase7-detail-pull-ux`.
+      **Engine side** (the real substance of this item): a new
+      `src/engine/pull/installParams.ts` — `resolveInstallParamValues`
+      (provided value > already-configured `.env.local` value > the
+      param's own `default`, in that precedence) and `applyInstallParams`
+      (writes to `<cwd>/.env.local`, a project-ROOT file, deliberately
+      never anything under `install_target` — the real reason this isn't
+      inline in `pull.ts`: the pristine-snapshot step would otherwise
+      capture a secret value baked into a "pristine reference copy").
+      `pullArtifact` gained a `providedValues` param and a new
+      `missingRequiredParams` result field — never a hard failure, so an
+      otherwise-successful pull isn't lost over one missing value. CLI:
+      `deliveryos pull <id> --set KEY=VALUE` (repeatable). Sidecar: two
+      new commands, `artifact.applyInstallParams` (configure later
+      without a re-pull — correctly folds in already-configured
+      `.env.local` values so finishing configuration incrementally never
+      makes an already-satisfied param look missing again — a real bug
+      caught by a sidecar e2e test exercising exactly that
+      pull-then-configure-the-rest sequence) and `artifact.readPayloadFile`
+      (reads a real file, e.g. README.md, out of an artifact's payload,
+      sandboxed against path-traversal the same way `compile.ts`'s import
+      resolution already is). **Frontend**: Detail gained a
+      `detail-backend-plugin-section` (gated on `install_params` being
+      non-empty, never a `kind` check) showing a provenance badge
+      (honestly "Unverified" until item 3's signing pipeline exists), the
+      rendered README (plain preformatted text — no markdown renderer is
+      vendored anywhere in this app, and adding one is a bigger scope
+      increase than this item calls for), and the required-config form
+      (blank fields are omitted on submit, never sent as empty-string
+      overwrites, so re-opening Detail without retyping an
+      already-configured secret can't blank it out). Verified in a real
+      browser against a mocked `DeliveryOS.call`/`__TAURI__` harness (same
+      proven pattern used earlier this session): the section renders
+      correctly for the real `nextauth-credentials` manifest (secret
+      fields as `type="password"`, `AUTH_URL`'s real default pre-filled),
+      submitting calls `artifact.applyInstallParams` with exactly the
+      typed values, and the "still missing required value(s)" error path
+      fires correctly when required fields are left blank. 29 new engine
+      tests (17 unit + 3 CLI e2e + 2 sidecar e2e, across
+      `installParams.test.ts`, `pull.e2e.test.ts`, `sidecar.e2e.test.ts`)
+      plus the real-browser check above for the untested frontend half.
+      Full suite (222 tests, one pre-existing unrelated failure) +
+      typecheck + lint all clean. Also verified the real packaged sidecar
+      exe (not just `dist/` under `node`) reads the real, already-merged
+      `nextauth-credentials` artifact's README correctly from `ai-helpers`.
 - [x] **Propose-new flow: manual/CLI-driven only at first, no Scan** — "is
       this generic enough to share" is a judgment call Scan can't safely
       make yet for backend code the way it can for a React component.
