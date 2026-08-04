@@ -688,8 +688,7 @@ foundation. Tracked here so it doesn't just live in a brainstorm doc.
       background auto-sync tick and any concurrent manual pull/push on the
       same machine, independent of any org rollout. See
       [scalable-architecture-research.md §3.7](docs/scalable-architecture-research.md)
-      ("a today-sized bug, not a someday one"). Done on branch
-      `fix-lockfile-race` (not yet merged into this branch) — wrapped the
+      ("a today-sized bug, not a someday one"). Done — wrapped the
       read-modify-write in `proper-lockfile` (a small, pure-JS, `mkdir`-based
       advisory lock — no native bindings, confirmed by reading its source,
       so this can't repeat the `playwright-core` SEA-packaging surprise
@@ -723,9 +722,8 @@ foundation. Tracked here so it doesn't just live in a brainstorm doc.
       product-roadmap-vision.md's own "closing the GitHub loop" section
       names: *"Same mechanism could poll PR status the same way it polls
       version drift — no new architecture, same reentrancy-guarded tick,
-      just a second thing it checks."* Done on branch
-      `close-github-poll-loop` (not yet merged into this branch) —
-      extracted `resolvePendingPushesCore()` (mirroring
+      just a second thing it checks."* Done — extracted
+      `resolvePendingPushesCore()` (mirroring
       `checkForArtifactUpdatesCore`'s own established "core work only, no
       button busy/toast" split) out of the existing button handler with no
       logic change, then wired it into `onAutoSyncTick` too.
@@ -739,7 +737,9 @@ foundation. Tracked here so it doesn't just live in a brainstorm doc.
       full `loadCatalog()` reload on a real merge, which would silently
       wipe the `availableVersion` annotations `checkForArtifactUpdatesCore`
       had just patched onto `state.catalog` moments earlier in the SAME
-      tick — fixed by running the reload-capable call first and the
+      tick (a same-tick merge would make that tick's own drift toast a lie
+      the instant it fired, invisible again until the next tick 20 minutes
+      later) — fixed by running the reload-capable call first and the
       in-place-patch-only call second, so whichever ran last is always the
       one left standing. Pure frontend change (`app.js` only, no engine
       code touched) — syntax-checked, linted, and traced by hand; no

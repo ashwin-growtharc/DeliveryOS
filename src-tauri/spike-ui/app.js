@@ -1607,42 +1607,57 @@
     });
   }
 
+  /** Core work: asks the engine to check every pending-push PR's real
+   * GitHub state (open / merged / closed-without-merging) and resync
+   * anything that got merged, then merges the result back into
+   * state.catalog -- shared by both the manual "Check push status" button
+   * (handleCheckPushStatus, below) and the background auto-sync timer
+   * (onAutoSyncTick), same "core work only, no button busy/toast" split
+   * checkForArtifactUpdatesCore already established for version-drift
+   * checks. Returns the raw `results` array so callers decide what, if
+   * anything, to tell the user. Rethrows on failure so each caller applies
+   * its own error handling. */
+  async function resolvePendingPushesCore() {
+    const results = await call('sync.resolvePendingPushes', { cwd: state.projectDir });
+
+    // A merge resyncs the pristine snapshot server-side, which changes
+    // what localStatus should be (edited_locally -> pulled) -- that can
+    // only be recomputed by re-running catalog.list (it's derived from
+    // files on disk, not something to fake client-side), so do a full,
+    // cheap (local-only, no network) catalog refresh whenever anything
+    // merged. A closed-without-merge result only needs pendingPr cleared,
+    // which is safe to patch in client-side.
+    const anyMerged = results.some((r) => r.merged);
+    if (anyMerged) {
+      await loadCatalog();
+    } else {
+      for (const result of results) {
+        const match = state.catalog.find(
+          (e) => e.manifest.id === result.id && e.remoteName === result.remote,
+        );
+        if (match && result.state === 'closed') {
+          match.pendingPr = undefined;
+        }
+      }
+      renderCards();
+    }
+
+    return results;
+  }
+
   /** "Check push status" button handler (Detail view, shown only when the
-   * selected entry has a pendingPr): asks the engine to check every
-   * pending-push PR's real GitHub state and resync anything that got
-   * merged, then merges the result back into state.catalog and reports
+   * selected entry has a pendingPr): runs resolvePendingPushesCore() (which
+   * checks every pending push project-wide, not just this one) and reports
    * what happened for THIS entry specifically via toast. Uses the same
-   * progress-panel plumbing as a normal pull/push, since this can be a
-   * real network call. */
+   * progress-panel plumbing as a normal pull/push, since this can be a real
+   * network call. */
   async function handleCheckPushStatus(entry) {
     const btn = $('detail-check-push-status-btn');
     await withBusy(btn, 'Checking...', async () => {
       await beginProgress();
       try {
-        const results = await call('sync.resolvePendingPushes', { cwd: state.projectDir });
+        const results = await resolvePendingPushesCore();
         endProgress(true);
-
-        // A merge resyncs the pristine snapshot server-side, which changes
-        // what localStatus should be (edited_locally -> pulled) -- that can
-        // only be recomputed by re-running catalog.list (it's derived from
-        // files on disk, not something to fake client-side), so do a full,
-        // cheap (local-only, no network) catalog refresh whenever anything
-        // merged. A closed-without-merge result only needs pendingPr
-        // cleared, which is safe to patch in client-side.
-        const anyMerged = results.some((r) => r.merged);
-        if (anyMerged) {
-          await loadCatalog();
-        } else {
-          for (const result of results) {
-            const match = state.catalog.find(
-              (e) => e.manifest.id === result.id && e.remoteName === result.remote,
-            );
-            if (match && result.state === 'closed') {
-              match.pendingPr = undefined;
-            }
-          }
-          renderCards();
-        }
 
         const mine = results.find(
           (r) => r.id === entry.manifest.id && r.remote === entry.remoteName,
@@ -3073,12 +3088,54 @@
    * and only surfaces a toast when the tick actually turned up new updates
    * (comparing the count of entries with an `availableVersion` before vs.
    * after), so a routine no-op tick every 20 minutes stays invisible rather
-   * than nagging the user. */
+   * than nagging the user.
+   *
+   * Also polls every pending push's real PR status the same way
+   * (resolvePendingPushesCore) -- closing a real, named gap: today's loop
+   * was Browse -> Pull -> edit -> Push -> go check GitHub by hand -> merge
+   * -> Pull again, with that GitHub round-trip being the one manual step
+   * version-drift checking never needed. `resolvePendingPushes` returns
+   * `[]` immediately (no network call at all) when nothing's pending, so
+   * this costs nothing on every tick for a project with no open pushes --
+   * no new architecture, just a second thing the same reentrancy-guarded
+   * tick checks, exactly as docs/product-roadmap-vision.md's own "closing
+   * the GitHub loop" section describes. Only toasts on a real change
+   * (something merged or got closed without merging) -- a pending push
+   * that's simply still open stays silent, same "don't nag" principle as
+   * the version-drift half above. */
   async function onAutoSyncTick() {
     if (autoSyncInFlight) return; // reentrancy guard: skip this tick if a check is already running
     if (!state.projectDir) return; // nothing to check without a project folder
     autoSyncInFlight = true;
     try {
+      // Order matters here: resolvePendingPushesCore() runs FIRST because it
+      // can trigger a full loadCatalog() reload (on a real merge) that
+      // replaces state.catalog wholesale -- catalog.list's own entries carry
+      // no availableVersion at all, that's a purely client-side annotation
+      // checkForArtifactUpdatesCore patches on afterward. Running the
+      // reload-capable call first, then the in-place-patch-only call second,
+      // means whichever one runs last is always the one left standing --
+      // reversing this order would let a same-tick merge silently wipe that
+      // tick's own just-reported drift annotations from state.catalog until
+      // the next tick, 20 minutes later, quietly re-populated them.
+      const pushResults = await resolvePendingPushesCore();
+      const merged = pushResults.filter((r) => r.merged);
+      const closed = pushResults.filter((r) => !r.merged && r.state === 'closed');
+      if (merged.length > 0) {
+        toastSuccess(
+          merged.length === 1
+            ? `PR #${merged[0].prNumber} for "${merged[0].id}" was merged.`
+            : `${merged.length} pending PRs were merged.`,
+        );
+      }
+      if (closed.length > 0) {
+        toastError(new Error(
+          closed.length === 1
+            ? `PR #${closed[0].prNumber} for "${closed[0].id}" was closed without merging.`
+            : `${closed.length} pending PRs were closed without merging.`,
+        ));
+      }
+
       const before = state.catalog.filter((e) => e.availableVersion).length;
       await checkForArtifactUpdatesCore();
       const after = state.catalog.filter((e) => e.availableVersion).length;
