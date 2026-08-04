@@ -577,3 +577,54 @@ demonstrably true, not just when every task box is checked.
       rendering (manifest correctness, PR contents, version bumps, drift
       detection) should be covered by sidecar/engine-level automated e2e
       tests, not a GUI click-through.
+
+## Phase 7 — Backend plug-and-play artifacts — **Not started, brainstormed only**
+
+Goal: a backend building block (starting with one real auth/login module)
+can be proposed, reviewed via a rendered README + required-config checklist
+(no live preview), pulled into a different project with its install-time
+configuration actually collected, signed and provenance-verified end to end,
+and wired in up to the bounds of the wiring agent's own scope tiers — proving
+`kind: backend-plugin` the same way `kind: ui-component` was proven in
+Phase 6, on one real target instead of a hypothetical.
+
+Full background in
+[docs/product-roadmap-vision.md](docs/product-roadmap-vision.md) (Wave 1)
+and [docs/scalable-architecture-research.md](docs/scalable-architecture-research.md)
+(§3.1 entity model, §3.3 security/provenance) — this phase turns that
+brainstorm into scoped tasks, same discipline every earlier phase here uses.
+
+**Note on sequencing, not a blocker:** product-roadmap-vision.md's own
+"priority reset" puts adoption proof, the lockfile fix, closing the
+GitHub-polling loop, and usage tracking (Tier 0) ahead of this in real
+priority. Recorded here as a phase because it's now been asked for
+directly — worth remembering Tier 0 still outranks it if sequencing comes
+up again.
+
+- [ ] Pick one real, concrete auth/login implementation to model this on —
+      every kind proven so far (`agent-asset`, `ui-component`) started from a
+      real target, not a hypothetical; this one hasn't yet.
+- [ ] Extend the manifest schema with install-time *parameters* (e.g. a
+      declared list of required env vars/config keys), not just the existing
+      fixed-string `post_install` command — the real schema gap already
+      identified; a real auth module can't be meaningfully pulled without it.
+- [ ] Ship the security/provenance model (cosign signing + SLSA-style
+      attestation at merge time, verified at Pull) — treated as a hard
+      prerequisite for this phase, not later polish, per the roadmap doc's
+      own reasoning about credential-handling artifacts.
+- [ ] Detail/Pull UX for non-visual artifacts: rendered README, a
+      required-config checklist collecting the project's own values (never
+      the artifact's own defaults), and a signed/provenance badge — no live
+      preview attempted.
+- [ ] Propose-new flow: manual/CLI-driven only at first, no Scan — "is this
+      generic enough to share" is a judgment call Scan can't safely make yet
+      for backend code the way it can for a React component.
+- [ ] Wiring agent, scoped to the three-tier model already designed
+      (auto-applies / proposes-and-confirms / never-touches) — at minimum
+      tier 1 and tier 2 working for the one real target artifact.
+- [ ] **End-to-end test:** propose the real auth module, merge it, pull it
+      into a *different* project, confirm install-time config is actually
+      collected and applied, confirm the signature/provenance verifies
+      before any files are written, and confirm the wiring agent's tier
+      boundaries hold (auto-applies what's mechanical, asks before touching
+      the app root, never touches the real secret values).

@@ -15,7 +15,8 @@ components, grouped by a `componentTypes` tag) is also done, including
 Storybook-style variant tabs and a generated props-controls panel on a
 component's Detail view — see
 [docs/ui-components-feature-design.md](docs/ui-components-feature-design.md)
-and `PLAN.md`'s Phase A/B/C entries. See
+and `PLAN.md`'s Phase A/B/C entries. Phase 7 (`kind: backend-plugin` —
+auth/login-style artifacts) is now scoped in `PLAN.md` but not started. See
 [CHANGELOG.md](CHANGELOG.md) for what's shipped, [PLAN.md](PLAN.md) for
 what's left, and the [docs index](#docs-index) below for everything else.
 
@@ -164,3 +165,5 @@ The frontend (`src-tauri/spike-ui/*.js`) has no automated test coverage
 | [docs/phase-3-spike-results.md](docs/phase-3-spike-results.md) | Sidecar-packaging feasibility spike: size/latency numbers |
 | [docs/phase-3-ui-scope.md](docs/phase-3-ui-scope.md) | What the desktop app UI does and deliberately doesn't do yet, and why |
 | [docs/release-process.md](docs/release-process.md) | Manual runbook for cutting a signed release with working auto-update (no CI exists yet) |
+| [docs/product-roadmap-vision.md](docs/product-roadmap-vision.md) | Long-term roadmap brainstorm: backend/data-engineering artifact kinds, org/team/access maturity, voice AI, a VSCode-based IDE surface |
+| [docs/scalable-architecture-research.md](docs/scalable-architecture-research.md) | Target architecture research: catalog indexing, provenance/signing, policy-as-code, org/team modeling — grounded in Backstage, Sigstore/SLSA, OCI/Helm, and multi-tenant RBAC prior art |
