@@ -767,7 +767,7 @@ foundation. Tracked here so it doesn't just live in a brainstorm doc.
       server at all — everything is local-file-based. Not started pending
       that scoping call.
 
-## Phase 7 — Backend plug-and-play artifacts — **Not started, brainstormed only**
+## Phase 7 — Backend plug-and-play artifacts — **Target picked and scoped; not yet built**
 
 Goal: a backend building block (starting with one real auth/login module)
 can be proposed, reviewed via a rendered README + required-config checklist
@@ -790,17 +790,84 @@ priority. Recorded here as a phase because it's now been asked for
 directly — worth remembering Tier 0 still outranks it if sequencing comes
 up again.
 
-- [ ] Pick one real, concrete auth/login implementation to model this on —
-      every kind proven so far (`agent-asset`, `ui-component`) started from a
-      real target, not a hypothetical; this one hasn't yet.
+- [x] **Pick one real, concrete auth/login implementation to model this
+      on** — every kind proven so far (`agent-asset`, `ui-component`)
+      started from a real target, not a hypothetical; this one hadn't yet.
+      **Decision: Auth.js (NextAuth v5) + Prisma adapter, Credentials
+      (email/password) provider, in a Next.js App Router project.**
+      Weighed against Passport.js/Express (real, but every proven kind so
+      far already lands in the Next.js/React stack GrowthArc actually
+      builds client work in — no reason to stand up a second stack just
+      to host this artifact), a Supabase-auth wrapper (real, but most of
+      the interesting logic lives inside a hosted service, not in the
+      payload DeliveryOS actually distributes — under-exercises "is this
+      genuinely reusable, generic logic"), and a Python logger (raised as
+      an alternative mid-scoping — a legitimate real backend-plugin
+      candidate, but this phase's own goal is explicitly "starting with
+      one real auth/login module," and the very next checklist item's
+      justification for a HARD security/provenance prerequisite rests
+      specifically on "credential-handling surface, materially different
+      blast radius than a Button" — a logger doesn't carry that risk
+      profile, so picking it first would walk back reasoning already
+      committed here, not fulfill it. Fine as a *second* backend-plugin
+      example later). Credentials (password), not OAuth-only, because
+      OAuth needs no user table at all — it would fail to exercise the
+      "which ORM/user table" half of the schema gap below. Confirmed with
+      the user: Next.js + Prisma is a real GrowthArc stack; no second real
+      Next.js project exists yet for the end-to-end test's "pull into a
+      different project" target — **one needs to be created**, the same
+      way `DOS Demo`/`DELETER` were stood up as separate real pull targets
+      for Phase 6.
 - [ ] Extend the manifest schema with install-time *parameters* (e.g. a
       declared list of required env vars/config keys), not just the existing
       fixed-string `post_install` command — the real schema gap already
       identified; a real auth module can't be meaningfully pulled without it.
+      **Scoped, additive, matching the schema's existing "every new field
+      defaults so old manifests keep parsing unchanged" discipline**: a new
+      `install_params: InstallParamSchema[]` array (`key`, `description`,
+      `secret`, `required`, `default` — `.refine()`'d so a `secret` field
+      can never also declare a `default`, since the Detail/Pull UX must
+      collect the PROJECT's own value, never the artifact's own), plus
+      `content_digest` (sha256, §3.6) and an optional `signature` object
+      for the item below. For this real target, concretely: `AUTH_SECRET`
+      (secret, required, no default), `AUTH_URL` (not secret, required,
+      defaults to `http://localhost:3000`), `DATABASE_URL` (secret,
+      required, no default). The rendered-README half of the next
+      checklist item needs no new field at all — gate it on file-presence
+      (`payload/README.md` exists?), the same precedent `preview.png`
+      already set in `push.ts`. **Real nuance to build in from the start**:
+      `pull.ts`'s pristine-snapshot step runs after `post_install`
+      specifically so generated files aren't mistaken for local edits —
+      collected secret values must never land inside `installTarget` where
+      that snapshot would capture them; whatever collects install-time
+      values needs an explicit exclusion for this as part of the same
+      change, not a follow-up fix.
 - [ ] Ship the security/provenance model (cosign signing + SLSA-style
       attestation at merge time, verified at Pull) — treated as a hard
       prerequisite for this phase, not later polish, per the roadmap doc's
-      own reasoning about credential-handling artifacts.
+      own reasoning about credential-handling artifacts. **Gate, stated
+      plainly: this touches `growtharc-ai-helpers`'s own CI/CD — nothing
+      here gets built without the user's explicit go-ahead first**, per
+      Tier 0's standing rule. Smallest real first slice, once given: (1)
+      a GitHub Actions workflow on `growtharc-ai-helpers`, triggered on
+      merge, computing a sha256 digest over the merged payload, recording
+      it as `content_digest`, and running `cosign sign-blob` against it
+      using the workflow's own GitHub Actions OIDC identity (keyless — no
+      key material for anyone to own), signature+cert committed alongside
+      the manifest plus a plain `provenance.json` (build repo, commit SHA,
+      workflow run URL, timestamp) as the SLSA-style attestation — real
+      and useful without chasing full SLSA predicate-schema conformance
+      on day one; (2) a new verification step in `pullArtifact`, running
+      BEFORE `fs.cpSync` (this phase's own end-to-end test wording:
+      "verifies before any files are written"), recomputing the fetched
+      payload's digest and `cosign verify-blob`-ing it against the
+      recorded identity, refusing the pull via a new
+      `SignatureVerificationError` (matching `src/engine/errors.ts`'s
+      existing one-class-per-concern pattern) on any mismatch or absence.
+      Deliberately deferred: full SLSA Level 3 conformance, retrofitting
+      signing onto `agent-asset`/`ui-component` (gated on `manifest.
+      signature` being present, so it's free for other kinds later
+      without forcing adoption now), any key-management scheme.
 - [ ] Detail/Pull UX for non-visual artifacts: rendered README, a
       required-config checklist collecting the project's own values (never
       the artifact's own defaults), and a signed/provenance badge — no live
@@ -811,6 +878,25 @@ up again.
 - [ ] Wiring agent, scoped to the three-tier model already designed
       (auto-applies / proposes-and-confirms / never-touches) — at minimum
       tier 1 and tier 2 working for the one real target artifact.
+      **Maps cleanly onto this target, a reason to like the pick, not
+      just a coincidence**: Tier 1/auto-applies = adding
+      `AUTH_SECRET=`/`AUTH_URL=`/`DATABASE_URL=` placeholder lines to
+      `.env.example`, mechanical and identical every time. Tier
+      2/proposes-and-confirms = wrapping the app's root layout in
+      `<SessionProvider>`, or merging into an existing `middleware.ts`
+      route-matcher. Tier 3/never-touches = the real secret values
+      themselves.
+- [ ] **Sequencing, once implementation actually starts**: pick-target →
+      schema extension → propose-new (manual, cheap, existing generic
+      `push --new` path) is strictly sequential — nothing downstream has
+      a real artifact to sign/render/wire until then. Security/provenance,
+      Detail/Pull UX, and the wiring agent are genuinely independent of
+      each other once the real module exists in `ai-helpers`, and can
+      proceed in parallel (Detail/Pull UX can render an "unverified" badge
+      state while provenance is still pending — it doesn't need to block
+      on that). The end-to-end test is last by construction — it exercises
+      all of the above together against a real merge and the newly-created
+      second real Next.js project.
 - [ ] **End-to-end test:** propose the real auth module, merge it, pull it
       into a *different* project, confirm install-time config is actually
       collected and applied, confirm the signature/provenance verifies
