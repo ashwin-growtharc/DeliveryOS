@@ -181,14 +181,14 @@ export async function resolvePendingPushes(
           fs.rmSync(pristineTarget, { recursive: true, force: true });
         }
         fs.cpSync(installTarget, pristineTarget, { recursive: true });
-        upsertEntry(cwd, {
+        await upsertEntry(cwd, {
           id: entry.id,
           version: match.manifest.version,
           remote: entry.remote,
         });
       }
     } else if (status.state === 'closed') {
-      upsertEntry(cwd, { ...entry, pendingPr: undefined });
+      await upsertEntry(cwd, { ...entry, pendingPr: undefined });
     }
   }
 

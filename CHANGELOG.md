@@ -4,19 +4,22 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
-- **Two Tier-0 hardening fixes, ready on separate branches** (see PLAN.md's
-  new "Tier 0 hardening" section) — not yet merged into this branch.
-  `fix-lockfile-race` fixes a real, present-tense concurrency bug:
-  `upsertEntry` was an unlocked read-modify-write, so the app's own
-  20-minute auto-sync tick and a concurrent manual pull/push could race,
-  with the second writer silently clobbering the first's already-applied
-  update. Fixed with `proper-lockfile` (pure-JS, no native bindings).
-  `close-github-poll-loop` closes a real, named gap: PR status polling
-  (`sync.resolvePendingPushes`) already existed and was well-tested, but
-  was wired to only a manual per-entry button — never the same 20-minute
-  tick that already polls version drift. Wired it in, and caught a real
-  ordering bug along the way (a same-tick merge could silently wipe that
-  tick's own drift annotations).
+- **Two Tier-0 hardening fixes, both merged** (see PLAN.md's "Tier 0
+  hardening" section). `fix-lockfile-race` fixes a real, present-tense
+  concurrency bug: `upsertEntry` was an unlocked read-modify-write, so the
+  app's own 20-minute auto-sync tick and a concurrent manual pull/push
+  could race, with the second writer silently clobbering the first's
+  already-applied update. Fixed with `proper-lockfile` (pure-JS, no native
+  bindings). Two regression tests prove it, both verified by hand to
+  actually fail without the fix (a same-id-only version of the second test
+  was tried first and quietly turned out to prove nothing — caught by
+  running it against the unlocked code too). `close-github-poll-loop`
+  closes a real, named gap: PR status polling (`sync.resolvePendingPushes`)
+  already existed and was well-tested, but was wired to only a manual
+  per-entry button — never the same 20-minute tick that already polls
+  version drift. Wired it in, and caught a real ordering bug along the way
+  (a same-tick merge could silently wipe that tick's own drift
+  annotations).
 
 - **Closed out Phase 6's end-to-end test checklist for real** (see
   PLAN.md) — every scenario now walked against the actual `ai-helpers`

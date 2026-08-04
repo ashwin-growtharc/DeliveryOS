@@ -551,7 +551,7 @@ export async function pushArtifact(
   // was ever followed up on. Propose-new has no pre-existing lockfile entry
   // to attach this to -- out of scope here, tracked only for edit-mode.
   if (!options.isNew && lockEntry) {
-    upsertEntry(cwd, { ...lockEntry, pendingPr: { number: opened.number, url: opened.url } });
+    await upsertEntry(cwd, { ...lockEntry, pendingPr: { number: opened.number, url: opened.url } });
   }
 
   return { url: opened.url, number: opened.number, branch: branchName };

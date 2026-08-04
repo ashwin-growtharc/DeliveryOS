@@ -72,12 +72,12 @@ export function resolveArtifact(
  * present, then upserts the cwd-scoped lockfile. The lockfile is only
  * updated once both the copy and post_install succeed.
  */
-export function pullArtifact(
+export async function pullArtifact(
   id: string,
   remoteName: string | undefined,
   cwd: string,
   onProgress?: ProgressCallback,
-): PullResult {
+): Promise<PullResult> {
   onProgress?.('resolve', `Resolving artifact "${id}"...`);
   const entry = resolveArtifact(id, remoteName);
   const { manifest, remoteName: resolvedRemoteName } = entry;
@@ -136,7 +136,7 @@ export function pullArtifact(
   fs.cpSync(installTarget, pristineTarget, { recursive: true });
 
   onProgress?.('lockfile', 'Updating lockfile...');
-  upsertEntry(cwd, {
+  await upsertEntry(cwd, {
     id: manifest.id,
     version: manifest.version,
     remote: resolvedRemoteName,

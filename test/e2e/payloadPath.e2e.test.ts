@@ -93,7 +93,7 @@ describe('payload_path e2e', () => {
       await registerAndClone(remoteName, fixtureRemoteDir);
 
       const cwd = newScratchCwd('payloadpath-pull');
-      const result = pullArtifact(PAYLOAD_PATH_ARTIFACT.id, remoteName, cwd);
+      const result = await pullArtifact(PAYLOAD_PATH_ARTIFACT.id, remoteName, cwd);
 
       expect(result.manifest.payload_path).toBe(PAYLOAD_PATH_ARTIFACT.payloadPath);
 
@@ -135,7 +135,7 @@ describe('payload_path e2e', () => {
       expect(defaultBranch).toBeTruthy();
 
       const cwd = newScratchCwd('payloadpath-push');
-      pullArtifact(PAYLOAD_PATH_ARTIFACT.id, remoteName, cwd);
+      await pullArtifact(PAYLOAD_PATH_ARTIFACT.id, remoteName, cwd);
 
       const installTarget = path.resolve(cwd, PAYLOAD_PATH_ARTIFACT.installTarget);
       const editedContent = '# real file\n\nEDITED locally via DeliveryOS.\n';

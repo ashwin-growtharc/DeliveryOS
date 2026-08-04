@@ -112,7 +112,7 @@ describe('push e2e', () => {
 
       const artifact = TEST_ARTIFACTS.find((a) => !a.hasPostInstall && a.id === 'welcome-template')!;
       const cwd = newScratchCwd('edit');
-      pullArtifact(artifact.id, remoteName, cwd);
+      await pullArtifact(artifact.id, remoteName, cwd);
 
       const installTarget = path.join(cwd, artifact.installTarget);
       fs.writeFileSync(
@@ -167,7 +167,7 @@ describe('push e2e', () => {
 
       const artifact = TEST_ARTIFACTS.find((a) => !a.hasPostInstall && a.id === 'welcome-template')!;
       const cwd = newScratchCwd('edit-version-bump');
-      pullArtifact(artifact.id, remoteName, cwd);
+      await pullArtifact(artifact.id, remoteName, cwd);
 
       fs.writeFileSync(
         path.join(cwd, artifact.installTarget, 'README.md'),
@@ -199,7 +199,7 @@ describe('push e2e', () => {
 
       const artifact = TEST_ARTIFACTS.find((a) => !a.hasPostInstall && a.id === 'welcome-template')!;
       const cwd = newScratchCwd('edit-bump-minor');
-      pullArtifact(artifact.id, remoteName, cwd);
+      await pullArtifact(artifact.id, remoteName, cwd);
 
       fs.writeFileSync(
         path.join(cwd, artifact.installTarget, 'README.md'),
@@ -226,7 +226,7 @@ describe('push e2e', () => {
       await registerAndClone(remoteName, fixtureRemoteDir);
 
       const cwd = newScratchCwd('edit-preview-png');
-      pullArtifact(UI_COMPONENT_ARTIFACT.id, remoteName, cwd);
+      await pullArtifact(UI_COMPONENT_ARTIFACT.id, remoteName, cwd);
 
       // A real visual edit -- changes what the rendered preview.png should
       // look like, not just a comment/whitespace change.
@@ -455,7 +455,7 @@ describe('push e2e', () => {
 
       const artifact = TEST_ARTIFACTS.find((a) => !a.hasPostInstall && a.id === 'welcome-template')!;
       const cwd = newScratchCwd('metadata-edit');
-      pullArtifact(artifact.id, remoteName, cwd);
+      await pullArtifact(artifact.id, remoteName, cwd);
       // No local edits made at all -- a metadataEdit push must not require
       // (or even look at) any payload diff.
 
@@ -507,7 +507,7 @@ describe('push e2e', () => {
 
       const artifact = TEST_ARTIFACTS.find((a) => !a.hasPostInstall && a.id === 'welcome-template')!;
       const cwd = newScratchCwd('metadata-edit-noop');
-      pullArtifact(artifact.id, remoteName, cwd);
+      await pullArtifact(artifact.id, remoteName, cwd);
 
       await expect(
         pushArtifact(artifact.id, { metadataEdit: { description: 'Test artifact of kind template' } }, cwd, makeFakeOctokit()),
@@ -763,7 +763,7 @@ describe('push e2e', () => {
       await fetchAndReset(cachePath(remoteName));
 
       const pullCwd = newScratchCwd('propose-new-file-install-target-pull');
-      const pullResult = pullArtifact(id, remoteName, pullCwd);
+      const pullResult = await pullArtifact(id, remoteName, pullCwd);
 
       const installedPath = pullResult.installTarget;
       expect(fs.existsSync(installedPath)).toBe(true);
@@ -783,7 +783,7 @@ describe('push e2e', () => {
 
       const artifact = TEST_ARTIFACTS.find((a) => a.id === 'lint-config')!;
       const cwd = newScratchCwd('nochanges');
-      pullArtifact(artifact.id, remoteName, cwd);
+      await pullArtifact(artifact.id, remoteName, cwd);
       // Deliberately no edit made.
 
       const branchesBefore = (await simpleGit(fixtureRemoteDir).branch(['-a'])).all;
@@ -835,7 +835,7 @@ describe('push e2e', () => {
       // default branch.
       const artifactA = TEST_ARTIFACTS.find((a) => a.id === 'welcome-template')!;
       const cwdA = newScratchCwd('contamination-a');
-      pullArtifact(artifactA.id, remoteName, cwdA);
+      await pullArtifact(artifactA.id, remoteName, cwdA);
       fs.writeFileSync(
         path.join(cwdA, artifactA.installTarget, 'README.md'),
         '# welcome-template\n\nartifact A local edit.\n',

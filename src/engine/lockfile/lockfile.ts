@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import * as properLockfile from 'proper-lockfile';
 import { lockfilePath, projectDeliveryOsDir } from '../paths';
 import { LockFile, LockEntry } from './types';
 
@@ -35,14 +36,49 @@ export function writeLockfile(cwd: string, lockfile: LockFile): void {
   fs.renameSync(tmpPath, filePath);
 }
 
-/** Upserts an entry by id: updates in place if present, appends otherwise. */
-export function upsertEntry(cwd: string, entry: LockEntry): void {
-  const lockfile = readLockfile(cwd);
-  const idx = lockfile.entries.findIndex((e) => e.id === entry.id);
-  if (idx >= 0) {
-    lockfile.entries[idx] = entry;
-  } else {
-    lockfile.entries.push(entry);
+/**
+ * Upserts an entry by id: updates in place if present, appends otherwise.
+ *
+ * Wrapped in a real inter-process lock (`proper-lockfile`, an `mkdir`-based
+ * advisory lock -- atomic on any filesystem, no native bindings, so this
+ * can't repeat the SEA-packaging surprise `playwright-core`'s own dynamic
+ * `require` caused earlier this project). Without it, this was a genuine,
+ * present-tense read-modify-write race: the read (`readLockfile`) and the
+ * write (`writeLockfile`) are two separate steps, so two callers racing
+ * (e.g. the app's own 20-minute background auto-sync tick, and a manual
+ * `pull`/`push` run from a terminal at the same moment, on the same
+ * machine) could both read the same pre-race state, each compute a
+ * "new" lockfile in memory from it, and the second writer's rename would
+ * silently clobber the first writer's already-applied update -- a lost
+ * update, not a crash, so nothing would ever surface it as an error.
+ *
+ * The lock target is the lockfile path itself, with `realpath: false` --
+ * this project's lockfile is a plain project-local JSON file, never a
+ * symlink, so there's no need to pay for (or require, per
+ * `proper-lockfile`'s own default behavior) the target file already
+ * existing before the very first lock in a fresh project.
+ */
+export async function upsertEntry(cwd: string, entry: LockEntry): Promise<void> {
+  const dir = projectDeliveryOsDir(cwd);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
   }
-  writeLockfile(cwd, lockfile);
+  const filePath = lockfilePath(cwd);
+
+  const release = await properLockfile.lock(filePath, {
+    realpath: false,
+    retries: { retries: 20, minTimeout: 25, maxTimeout: 500 },
+  });
+  try {
+    const lockfile = readLockfile(cwd);
+    const idx = lockfile.entries.findIndex((e) => e.id === entry.id);
+    if (idx >= 0) {
+      lockfile.entries[idx] = entry;
+    } else {
+      lockfile.entries.push(entry);
+    }
+    writeLockfile(cwd, lockfile);
+  } finally {
+    await release();
+  }
 }
