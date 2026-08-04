@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ManifestSchema } from '../../src/engine/manifest/schema';
+import { ManifestSchema, InstallParamSchema } from '../../src/engine/manifest/schema';
 
 const baseManifest = {
   id: 'my-artifact',
@@ -62,5 +62,98 @@ describe('ManifestSchema', () => {
     if (result.success) {
       expect(result.data.payload_path).toBeUndefined();
     }
+  });
+
+  describe('install_params / content_digest / signature (Phase 7 groundwork)', () => {
+    it('defaults install_params to an empty array when absent -- every pre-Phase-7 manifest still parses unchanged', () => {
+      const result = ManifestSchema.safeParse(baseManifest);
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.install_params).toEqual([]);
+        expect(result.data.content_digest).toBeUndefined();
+        expect(result.data.signature).toBeUndefined();
+      }
+    });
+
+    it('accepts a real install_params array, e.g. the Phase 7 Auth.js target\'s own values', () => {
+      const result = ManifestSchema.safeParse({
+        ...baseManifest,
+        install_params: [
+          { key: 'AUTH_SECRET', description: 'Session-signing secret', secret: true, required: true },
+          { key: 'AUTH_URL', description: 'Canonical app URL', secret: false, required: true, default: 'http://localhost:3000' },
+          { key: 'DATABASE_URL', description: 'Postgres connection string', secret: true, required: true },
+        ],
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.install_params).toHaveLength(3);
+        expect(result.data.install_params[1].default).toBe('http://localhost:3000');
+      }
+    });
+
+    it('rejects an install_param marked secret that also declares a default -- a schema-level impossibility, not just a convention', () => {
+      const result = InstallParamSchema.safeParse({
+        key: 'AUTH_SECRET',
+        description: 'Session-signing secret',
+        secret: true,
+        default: 'not-actually-secret-then',
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it('defaults an install_param\'s secret/required flags (false/true) when omitted', () => {
+      const result = InstallParamSchema.safeParse({
+        key: 'SOME_FLAG',
+        description: 'A non-secret, non-required value',
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.secret).toBe(false);
+        expect(result.data.required).toBe(true);
+      }
+    });
+
+    it('accepts a valid content_digest', () => {
+      const digest = `sha256:${'a'.repeat(64)}`;
+      const result = ManifestSchema.safeParse({ ...baseManifest, content_digest: digest });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.content_digest).toBe(digest);
+      }
+    });
+
+    it('rejects a malformed content_digest (wrong prefix, wrong length, non-hex)', () => {
+      for (const bad of ['sha1:' + 'a'.repeat(64), 'sha256:tooshort', `sha256:${'z'.repeat(64)}`]) {
+        const result = ManifestSchema.safeParse({ ...baseManifest, content_digest: bad });
+        expect(result.success).toBe(false);
+      }
+    });
+
+    it('accepts a valid signature object', () => {
+      const result = ManifestSchema.safeParse({
+        ...baseManifest,
+        signature: {
+          algorithm: 'cosign',
+          certificate_identity: 'https://github.com/ashwin-growtharc/growtharc-ai-helpers/.github/workflows/sign.yml@refs/heads/main',
+          oidc_issuer: 'https://token.actions.githubusercontent.com',
+        },
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.signature?.algorithm).toBe('cosign');
+      }
+    });
+
+    it('rejects a signature with an algorithm other than the literal "cosign"', () => {
+      const result = ManifestSchema.safeParse({
+        ...baseManifest,
+        signature: {
+          algorithm: 'gpg',
+          certificate_identity: 'whoever',
+          oidc_issuer: 'whatever',
+        },
+      });
+      expect(result.success).toBe(false);
+    });
   });
 });

@@ -4,6 +4,20 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- **Phase 7 (backend-plugin artifacts) started for real**: picked a
+  concrete target (Auth.js/NextAuth v5 + Prisma, Credentials provider, in
+  a Next.js App Router project) over Passport.js/Express, a Supabase-auth
+  wrapper, and a Python logger, and built the first real piece —
+  `src/engine/manifest/schema.ts` gained `install_params` (a new
+  `InstallParamSchema[]`, schema-level-impossible to mark `secret` and
+  also declare a `default`), plus `content_digest` and an optional
+  `signature` object for the not-yet-built provenance model. Fully
+  additive: every pre-existing manifest still parses unchanged, verified
+  against the real catalog through the actual packaged sidecar exe, not
+  just `dist/` under `node`. 8 new unit tests; full suite (200 tests, one
+  pre-existing unrelated failure) + typecheck + lint clean. On branch
+  `phase7-schema-install-params`.
+
 - **Two Tier-0 hardening fixes, both merged** (see PLAN.md's "Tier 0
   hardening" section). `fix-lockfile-race` fixes a real, present-tense
   concurrency bug: `upsertEntry` was an unlocked read-modify-write, so the
