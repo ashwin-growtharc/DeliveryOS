@@ -130,7 +130,7 @@ exist but nobody's SSO'd in."
 - [ ] Success metrics, using the tiered metrics-ethics model (§9 risk #6) to avoid an accidental leaderboard
 - [ ] **End-to-end test:** simulate a full week of drift (someone stops syncing, a remote changes upstream, another person edits the same resource) and confirm drift detection, auto-sync, and notifications all surface correctly with no manual intervention required.
 
-## Phase 6 — UI Components — **Done, pending one human glance at the native app**
+## Phase 6 — UI Components — **Done**
 
 Goal: a UI-component artifact can be proposed (via Scan or CLI), reviewed
 with a real live interactive preview, merged as a normal GitHub PR (with an
@@ -151,9 +151,9 @@ fixtures) — real proposes, real merges, a real edit + version bump + a
 second merge, real drift detection across two genuinely separate local
 projects. One of those passes caught a real bug along the way: a docgen
 fix that had been pushed to an already-merged PR's branch and silently
-never reached `main`, fixed via a follow-up PR before continuing. The only
-thing left is a human glance at the native Tauri app (see the first
-checklist item) — nothing else here is simulated or fixture-only anymore.
+never reached `main`, fixed via a follow-up PR before continuing. The final
+human glance at the native Tauri app (pointed at `DOS Demo`) confirmed
+hover state renders correctly — nothing here is simulated or fixture-only.
 
 Each sub-phase below states its own **Goal** (the observable outcome that
 proves it's actually done) before its task checklist, same discipline every
@@ -556,32 +556,30 @@ demonstrably true, not just when every task box is checked.
 
 ### End-to-end tests (Phase 6 isn't done until all of these pass)
 
-- [ ] **Propose → merge → pull, full loop:** a real React Button component
+- [x] **Propose → merge → pull, full loop:** a real React Button component
       (with a `preview.tsx`) proposed via Add New's Scan-originated wizard,
       confirm `artifacts/<id>/manifest.yaml` + payload + `preview.png` land
       correctly in the remote, a real PR opens with the image embedded and
       visible in both the PR body and the Files-changed diff, merge it, then
       `pull` it into a *different* project and confirm the live sandboxed
       preview renders (hover state included) in the app.
-      **Propose→merge→pull now proven for real, up to the native-app
-      glance**: `search` (#45) and `magic-container` (#46) were genuinely
-      proposed, pushed, and merged into `ai-helpers`; both were then
-      `deliveryos pull`ed for real into `DOS Demo` (a genuinely different
-      local project, registered against a different original remote —
-      `arcos-poc` — with no prior history of either component), landing
-      correctly (`src/ui/MagicContainer/`, `src/ui/Search/`, both lockfile
-      entries added). Compiled both pulled copies through the real
-      `compilePreviewHtml` pipeline and rendered the result in a real DOM
-      (jsdom): `magic-container` renders its actual gradient-border markup
-      AND now returns a real docgen props schema (`className`) — confirming
-      the `React.FC<Props>` fix survived the full push→merge→pull round
-      trip, not just the original authoring project; `search` renders a
-      real `<svg>` (its `lucide-react` icon) plus its real recent-searches
-      content. **Only remaining gap**: an actual human glance at the native
-      Tauri window with its project folder pointed at `DOS Demo`, to
-      confirm hover state and visual polish — everything below that bar is
-      now proven the same way every other phase in this codebase is
-      (real git, real compile, real render), not simulated.
+      Done, proven for real end to end: `search` (#45) and `magic-container`
+      (#46) were genuinely proposed, pushed, and merged into `ai-helpers`;
+      both were then `deliveryos pull`ed for real into `DOS Demo` (a
+      genuinely different local project, registered against a different
+      original remote — `arcos-poc` — with no prior history of either
+      component), landing correctly (`src/ui/MagicContainer/`,
+      `src/ui/Search/`, both lockfile entries added). Compiled both pulled
+      copies through the real `compilePreviewHtml` pipeline and rendered
+      the result in a real DOM (jsdom): `magic-container` renders its
+      actual gradient-border markup AND now returns a real docgen props
+      schema (`className`) — confirming the `React.FC<Props>` fix survived
+      the full push→merge→pull round trip, not just the original authoring
+      project; `search` renders a real `<svg>` (its `lucide-react` icon)
+      plus its real recent-searches content. **Final human confirmation**:
+      the user opened the real native Tauri app with its project folder
+      pointed at `DOS Demo` and confirmed hover state genuinely renders —
+      the last gap this item had is now closed.
 - [x] **CLI-driven propose, no GUI:** the same component proposed via
       `deliveryos push <id> --new --kind ui-component ...` alone (no app
       window open) — confirm the headless-render fallback still produces a
