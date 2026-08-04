@@ -4,6 +4,22 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- **Fixed a real, present-tense concurrency bug**: `upsertEntry`
+  (`src/engine/lockfile/lockfile.ts`) was an unlocked read-modify-write —
+  the app's own 20-minute background auto-sync tick and a concurrent
+  manual `pull`/`push` on the same machine could race, with the second
+  writer silently clobbering the first's already-applied lockfile update
+  (a lost update, not a crash, so nothing would ever surface it). Fixed by
+  wrapping the critical section in `proper-lockfile` (a small, pure-JS,
+  `mkdir`-based advisory lock with no native bindings — deliberately
+  checked, so this can't repeat the `playwright-core` SEA-packaging
+  surprise from earlier this session). `upsertEntry` is now `async`;
+  updated its three call sites and every test call site accordingly. Two
+  new regression tests prove both real shapes of the bug are actually
+  fixed: concurrent upserts of different ids, and concurrent upserts of
+  the same id. On branch `fix-lockfile-race`, separate from the UI
+  Components work.
+
 - **Closed out Phase 6's end-to-end test checklist for real** (see
   PLAN.md) — every scenario now walked against the actual `ai-helpers`
   remote, not fixtures. Along the way, **found and fixed a real bug**:

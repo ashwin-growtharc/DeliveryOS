@@ -80,7 +80,7 @@ describe('sync.resolvePendingPushes e2e', () => {
 
       const artifact = TEST_ARTIFACTS.find((a) => !a.hasPostInstall && a.id === 'welcome-template')!;
       const cwd = newScratchCwd('merged');
-      pullArtifact(artifact.id, remoteName, cwd);
+      await pullArtifact(artifact.id, remoteName, cwd);
 
       const installTarget = path.join(cwd, artifact.installTarget);
       fs.writeFileSync(path.join(installTarget, 'README.md'), '# edited for merge test\n', 'utf-8');
@@ -130,7 +130,7 @@ describe('sync.resolvePendingPushes e2e', () => {
 
       const artifact = TEST_ARTIFACTS.find((a) => !a.hasPostInstall && a.id === 'lint-config')!;
       const cwd = newScratchCwd('open');
-      pullArtifact(artifact.id, remoteName, cwd);
+      await pullArtifact(artifact.id, remoteName, cwd);
       const installTarget = path.join(cwd, artifact.installTarget);
       fs.writeFileSync(path.join(installTarget, 'README.md'), '# edited, PR still open\n', 'utf-8');
 
@@ -175,7 +175,7 @@ describe('sync.resolvePendingPushes e2e', () => {
 
       const artifact = TEST_ARTIFACTS.find((a) => !a.hasPostInstall && a.id === 'welcome-template')!;
       const cwd = newScratchCwd('rejected');
-      pullArtifact(artifact.id, remoteName, cwd);
+      await pullArtifact(artifact.id, remoteName, cwd);
       const installTarget = path.join(cwd, artifact.installTarget);
       fs.writeFileSync(path.join(installTarget, 'README.md'), '# edited, PR will be rejected\n', 'utf-8');
 

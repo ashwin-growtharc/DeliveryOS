@@ -179,7 +179,7 @@ describe('scan e2e', () => {
       const cwd = newScratchCwd('tracked');
 
       const artifact = TEST_ARTIFACTS.find((a) => a.id === 'lint-config')!;
-      pullArtifact(artifact.id, remoteName, cwd);
+      await pullArtifact(artifact.id, remoteName, cwd);
 
       // Same id as the just-pulled artifact, sitting directly in
       // .claude/agents -- already tracked, must not show up as a candidate.

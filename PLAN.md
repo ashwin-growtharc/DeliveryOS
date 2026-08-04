@@ -672,6 +672,57 @@ demonstrably true, not just when every task box is checked.
       above need a deliberate human pass rather than another automated test
       — left unchecked as an acknowledged constraint, not a task to close.
 
+## Tier 0 hardening — **In progress, ahead of Phase 7**
+
+Not a numbered phase — a cross-cutting priority list from
+[docs/product-roadmap-vision.md](docs/product-roadmap-vision.md)'s own
+"Priority reset" section, which argues (convincingly enough to track here)
+that these outrank any new artifact kind, Phase 7 included: every real push
+so far has been the builder testing the loop, not another engineer solving
+their own work with it, so proving that — and fixing what's already real
+and broken — is higher value than a new kind built on an unproven
+foundation. Tracked here so it doesn't just live in a brainstorm doc.
+
+- [x] **Fix the lockfile race** — `upsertEntry` (`src/engine/lockfile/lockfile.ts`)
+      was an unlocked read-modify-write: a real race between the 20-minute
+      background auto-sync tick and any concurrent manual pull/push on the
+      same machine, independent of any org rollout. See
+      [scalable-architecture-research.md §3.7](docs/scalable-architecture-research.md)
+      ("a today-sized bug, not a someday one"). Done, on branch
+      `fix-lockfile-race` — wrapped the read-modify-write in
+      `proper-lockfile` (a small, pure-JS, `mkdir`-based advisory lock —
+      no native bindings, confirmed by reading its source, so this can't
+      repeat the `playwright-core` SEA-packaging surprise from earlier
+      this session), keyed on the lockfile path itself with
+      `realpath: false` (so the very first lock in a fresh project doesn't
+      require the file to already exist). `upsertEntry` is now `async`;
+      updated its three call sites (`pull.ts`, `push.ts`, `sync.ts`,
+      each already `async` or made so) and every test call site (14 across
+      4 e2e test files, mechanically prefixed with `await`). Two new
+      regression tests in `lockfile.test.ts`: five concurrent upserts of
+      *different* ids (`Promise.all`) all survive, and ten concurrent
+      upserts of the *same* id never lose the final write (both real
+      shapes of a lost-update bug — a missing entry vs. a wrong final
+      version — worth proving separately since a fix could accidentally
+      cover one and not the other, e.g. a lock keyed by id instead of by
+      the whole file). Full suite (192 tests, one pre-existing unrelated
+      failure) + typecheck + lint all clean.
+- [ ] Prove adoption — get one real engineer outside the build team to
+      pull/push something they'd have built anyway. Not something engine
+      work can do on its own; revisit once there's an actual candidate
+      person/task.
+- [ ] Close the GitHub-polling loop (cross-cutting section of
+      product-roadmap-vision.md) — named from lived experience, not
+      invented for the doc.
+- [ ] Ship the security/provenance model
+      ([scalable-architecture-research.md §3.3](docs/scalable-architecture-research.md))
+      — a real liability the moment anything beyond a UI button is shared
+      further, not hypothetical. Also a hard prerequisite for Phase 7 per
+      that phase's own checklist below, not just a Tier 0 nice-to-have.
+- [ ] Track real usage as a number, not a feeling (ARCHITECTURE.md §9 risk
+      #6) — pulls/pushes/reuse counted from day one, the only way "prove
+      adoption" above becomes evidence instead of anecdote.
+
 ## Phase 7 — Backend plug-and-play artifacts — **Not started, brainstormed only**
 
 Goal: a backend building block (starting with one real auth/login module)

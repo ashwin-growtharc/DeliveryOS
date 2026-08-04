@@ -6,8 +6,8 @@ export function registerPullCommand(program: Command): void {
     .command('pull <id>')
     .description('Pull an artifact by id into the current project')
     .option('-r, --remote <name>', 'Disambiguate which remote to pull the artifact from')
-    .action((id: string, options: { remote?: string }) => {
-      const result = pullArtifact(id, options.remote, process.cwd());
+    .action(async (id: string, options: { remote?: string }) => {
+      const result = await pullArtifact(id, options.remote, process.cwd());
       if (result.postInstallOutput && result.postInstallOutput.trim().length > 0) {
         console.log(result.postInstallOutput.trimEnd());
       }
