@@ -4,18 +4,32 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
-- **Corrected a long-stale PLAN.md status** ("Phase 6 — Not started,
-  brainstormed only" — long false, sub-phases A–E have been implemented and
-  shipped for a while) and, while at it, **ran a real end-to-end pull
-  verification**: pulled the already-merged `search` and `magic-container`
-  artifacts into `DOS Demo`, a genuinely different local project with no
-  prior history of either component, confirming files land correctly and
-  both compile + render through the real preview pipeline there (not just
-  in the project that originally authored them) — `magic-container`'s
-  docgen fix and the `lucide-react` vendoring both proven to survive a real
-  push→merge→pull round trip, closing most of Phase 6's own
-  "propose→merge→pull, full loop" end-to-end test (only a human glance at
-  the native app remains).
+- **Closed out Phase 6's end-to-end test checklist for real** (see
+  PLAN.md) — every scenario now walked against the actual `ai-helpers`
+  remote, not fixtures. Along the way, **found and fixed a real bug**:
+  pulling `magic-container` (still reporting v1.0.0) into a fresh project
+  revealed the earlier `React.FC<Props>` docgen fix had been pushed to
+  PR #46's branch *after* that PR had already auto-merged (~10 minutes
+  later) — the fix was written, committed, and pushed, but never actually
+  reached `main`, invisible until a real pull surfaced the still-broken
+  file. Fixed via a new PR (#48, cherry-picking the original fix commit
+  onto `main`, bumping the manifest to 1.0.1). Then walked the full
+  **edit + drift-detection loop** for real: pulled the corrected 1.0.1
+  into a second, different local project (`DELETER/Github deleter`, no
+  prior history of this artifact), made a real visual edit (swapped the
+  hover-gradient's color stops), pushed via `deliveryos push` (auto-bumped
+  to 1.0.2, PR #49), merged; back in a *first* project (`DOS Demo`, still
+  on 1.0.0), `deliveryos check-updates` correctly reported
+  `1.0.0 -> 1.0.2` — jumping straight to the true latest version rather
+  than a stale intermediate one — and a re-pull's compiled preview
+  genuinely contained the new gradient color, not the old one. Also
+  confirmed, with real evidence rather than incidental: "CLI-driven
+  propose, no GUI" (every real push this session ran via the CLI directly,
+  no app window involved) and "graceful degradation" (an unresolved
+  `lucide-react` import, before it was vendored, was independently
+  observed rendering a clean `Preview unavailable` text-only card in the
+  real running app, never a crash). Corrected PLAN.md's long-stale Phase 6
+  header ("Not started, brainstormed only") to reflect all of this.
 
 - **Fixed a real docgen bug** (`magic-container`'s pushed preview showing
   no interactive props / "showing someother thing") and **vendored

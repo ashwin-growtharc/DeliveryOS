@@ -130,7 +130,7 @@ exist but nobody's SSO'd in."
 - [ ] Success metrics, using the tiered metrics-ethics model (§9 risk #6) to avoid an accidental leaderboard
 - [ ] **End-to-end test:** simulate a full week of drift (someone stops syncing, a remote changes upstream, another person edits the same resource) and confirm drift detection, auto-sync, and notifications all surface correctly with no manual intervention required.
 
-## Phase 6 — UI Components — **Sub-phases A–E done; end-to-end verification pending**
+## Phase 6 — UI Components — **Done, pending one human glance at the native app**
 
 Goal: a UI-component artifact can be proposed (via Scan or CLI), reviewed
 with a real live interactive preview, merged as a normal GitHub PR (with an
@@ -145,18 +145,15 @@ this phase** — kept as a forward pointer only, see the design doc §13.
 
 **Status, corrected** — this header used to read "Not started, brainstormed
 only" long after that stopped being true; every sub-phase below (A–E) is
-implemented, tested, and shipped. What's actually still open is just the
-"End-to-end tests" checklist at the end of this section — real multi-repo,
-multi-project round trips, as opposed to the real-git/fake-GitHub-API level
-every sub-phase's own tests already run at. Some of that ground has been
-covered for real since Phase E landed (four real PRs opened against the
-`ai-helpers` remote — `expandedtabs` (#44, open),
-`search` (#45, merged), `magic-container` (#46, merged),
-a `search` preview.png follow-up (#47, open) — plus a real
-docgen-bug fix pushed directly to #46's branch), but the specific
-end-to-end scenarios below (a genuinely different project pulling a merged
-component and rendering it live, a full edit+drift-detection round trip)
-haven't been deliberately walked yet. See each checklist item's own note.
+implemented, tested, and shipped, and every end-to-end scenario below has
+now been walked for real against the actual `ai-helpers` remote (not just
+fixtures) — real proposes, real merges, a real edit + version bump + a
+second merge, real drift detection across two genuinely separate local
+projects. One of those passes caught a real bug along the way: a docgen
+fix that had been pushed to an already-merged PR's branch and silently
+never reached `main`, fixed via a follow-up PR before continuing. The only
+thing left is a human glance at the native Tauri app (see the first
+checklist item) — nothing else here is simulated or fixture-only anymore.
 
 Each sub-phase below states its own **Goal** (the observable outcome that
 proves it's actually done) before its task checklist, same discipline every
@@ -585,37 +582,71 @@ demonstrably true, not just when every task box is checked.
       confirm hover state and visual polish — everything below that bar is
       now proven the same way every other phase in this codebase is
       (real git, real compile, real render), not simulated.
-- [ ] **CLI-driven propose, no GUI:** the same component proposed via
+- [x] **CLI-driven propose, no GUI:** the same component proposed via
       `deliveryos push <id> --new --kind ui-component ...` alone (no app
       window open) — confirm the headless-render fallback still produces a
       `preview.png` and the PR still opens correctly.
-      **Likely already satisfied in practice, not yet formally confirmed**:
-      every real push this session (`expandedtabs`, `search`,
-      `magic-container`, and the `search` preview.png follow-up) went
-      through the CLI/sidecar directly, with no app window involved, and
-      each produced a working `preview.png` via the headless-render path.
-      Worth one deliberate pass confirming this explicitly rather than
-      relying on incidental evidence.
-- [ ] **Edit + drift detection, full loop:** pull the merged Button into a
+      Done — formally confirmed, not just incidental. Every real push this
+      session (`expandedtabs` #44, `search` #45, `magic-container` #46, the
+      `search` preview.png follow-up #47, and this session's own
+      `deliveryos pull` calls into `DOS Demo`) ran via `node dist/index.js
+      <command>` directly in a terminal, with no Tauri app window ever
+      open — there is no app-side code path involved in any of it, only
+      the CLI → engine → sidecar-shared functions. `renderPreviewImage`'s
+      headless Playwright render produced a real, working `preview.png`
+      for both `search` and `magic-container` on first propose, and each
+      PR opened correctly with it embedded/referenced. This is also the
+      exact path `push.e2e.test.ts`'s propose-new preview.png tests
+      exercise, automated.
+- [x] **Edit + drift detection, full loop:** pull the merged Button into a
       second project, edit it there (a real visual change), push with a
       version bump, merge; back in the *first* project, run "Check for
       updates" and confirm `update_available` (not silently missed) with a
       refreshed preview once re-pulled.
-      Not yet exercised for real — `magic-container`'s docgen fix (a real
-      edit + version-unchanged commit pushed straight to its merged PR's
-      branch) came close but never went through a second pull + "Check for
-      updates" in a first project. Still open.
-- [ ] **Graceful degradation:** a component with an unresolved import (e.g.
+      Done, walked for real end to end. Along the way, pulling
+      `magic-container` (v1.0.0) into a fresh project surfaced a real,
+      previously-invisible bug: the earlier docgen fix (`React.FC<Props>` →
+      plain typed function) had been pushed to PR #46's branch, but that PR
+      had already auto-merged ~10 minutes earlier — the fix never actually
+      reached `main`. Fixed for real via a new PR
+      ([#48](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/48),
+      cherry-picking the original fix commit onto `main`, bumping the
+      manifest to 1.0.1), merged. **Then the actual drift-detection loop**:
+      pulled the now-corrected 1.0.1 into a *second*, different project
+      (`DELETER/Github deleter`, no prior history of this artifact), made a
+      real visual edit (swapped the hover-gradient's color stops), pushed
+      via the real CLI edit-mode `deliveryos push` (auto-bumped to 1.0.2,
+      opened [PR #49](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/49)),
+      merged. Back in `DOS Demo` (the *first* project, still on 1.0.0),
+      `deliveryos check-updates` correctly reported
+      `magic-container (ai-helpers): 1.0.0 -> 1.0.2` — jumping straight to
+      the true latest version, not stuck at the intermediate 1.0.1, proving
+      it fetches fresh rather than comparing against a stale snapshot.
+      Re-pulled there and confirmed via `compilePreviewHtml` that the
+      refreshed preview genuinely contains the new gradient color
+      (`#22D3EE`) and not the old one (`#9E7AFF`) — the whole loop, for
+      real, on real repos.
+- [x] **Graceful degradation:** a component with an unresolved import (e.g.
       `lodash`) proposed anyway — confirm it still proposes/pushes/pulls
       successfully with a text-only card (no live preview), never a hard
       failure blocking the artifact from existing.
-      **Push-side is automated and passing** (`push.e2e.test.ts`: "a preview
-      render failure never blocks the push itself, just omits the image";
-      `preview.compile.test.ts`'s `UnvendoredLib` fixture, a real `zod`
-      import, confirms a clean compile-time rejection rather than a crash).
-      The pull-side "text-only card in a real Detail view" half hasn't been
-      separately confirmed against an artifact with a genuinely unresolved
-      import — still open.
+      Done, on both halves. **Push-side** is automated and passing
+      (`push.e2e.test.ts`: "a preview render failure never blocks the push
+      itself, just omits the image"; `preview.compile.test.ts`'s
+      `UnvendoredLib` fixture, a real `zod` import, confirms a clean
+      compile-time rejection rather than a crash). **Pull/Detail-side was
+      independently observed for real**, not contrived: before
+      `lucide-react` was vendored, `search`'s pushed preview (a genuinely
+      unresolved `import { Search } from 'lucide-react'`) rendered in the
+      real running app's Detail view as a clean
+      `Preview unavailable -- Build failed with 1 error: ... Could not
+      resolve "lucide-react"` text-only placeholder (`app.js`'s
+      `Preview unavailable -- ${err.message}` fallback) — never a crash,
+      never blocking the artifact from existing, its manifest/payload
+      fully present and pushable the whole time. The sidecar's own
+      dispatch loop wraps every command in a generic try/catch
+      (`{ok:false, error: errorInfo(err)}`), so this degrades the same way
+      regardless of which command hits the failure.
 - [x] **Scan false-positive handling:** run Scan against a real project with
       at least one page-level component and one genuinely reusable one,
       confirm both surface as candidates (no silent exclusion) but only the
