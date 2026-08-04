@@ -699,14 +699,22 @@ foundation. Tracked here so it doesn't just live in a brainstorm doc.
       updated its three call sites (`pull.ts`, `push.ts`, `sync.ts`,
       each already `async` or made so) and every test call site (14 across
       4 e2e test files, mechanically prefixed with `await`). Two new
-      regression tests in `lockfile.test.ts`: five concurrent upserts of
-      *different* ids (`Promise.all`) all survive, and ten concurrent
-      upserts of the *same* id never lose the final write (both real
-      shapes of a lost-update bug — a missing entry vs. a wrong final
-      version — worth proving separately since a fix could accidentally
-      cover one and not the other, e.g. a lock keyed by id instead of by
-      the whole file). Full suite (192 tests, one pre-existing unrelated
-      failure) + typecheck + lint all clean.
+      regression tests in `lockfile.test.ts`, both verified BY HAND to
+      actually catch the race (temporarily bypassing the lock, with a
+      small artificial delay between the read and the write to force the
+      interleaving a real race would have): five concurrent upserts of
+      *different* ids all survive (without the lock, only 1 of the 5
+      survived — a real, dramatic loss, not an occasional flake); a mixed
+      burst of repeated same-id updates alongside brand-new distinct ids
+      never drops one of the distinct ids (without the lock, one of the
+      three distinct ids vanished). A same-id-only version of the second
+      test was tried first and quietly turned out to be a non-test: N
+      racing writers to the SAME id can only ever produce "last write
+      wins" (exactly one valid entry), with or without a lock, since
+      there's nothing else for a same-id-only race to lose — caught this
+      by deliberately running it against the unlocked code too and seeing
+      it pass regardless, before trusting it. Full suite (192 tests, one
+      pre-existing unrelated failure) + typecheck + lint all clean.
 - [ ] Prove adoption — get one real engineer outside the build team to
       pull/push something they'd have built anyway. Not something engine
       work can do on its own; revisit once there's an actual candidate
