@@ -4,6 +4,22 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- **Phase 8 item 1: the check-first + propose-back Skill, aimed directly
+  at Tier 0's stuck "prove adoption" item.** With no real adopter
+  candidate identified yet, this reframes the problem: instead of needing
+  someone to deliberately try DeliveryOS, a Claude Code Skill checks the
+  catalog automatically on every relevant task, so reuse becomes a side
+  effect of normal engineering work. Needed no new engine code -- every
+  CLI flag the skill documents was checked against the real `--help`
+  output first. Pushed for real via `deliveryos push --new` as
+  `deliveryos-check-first` (`kind: skill`), opened as
+  [PR #54](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/54)
+  on `ai-helpers` (open, awaiting review), then pulled back through the
+  real packaged sidecar exe to confirm it lands exactly where Claude Code
+  reads skills from (`.claude/skills/deliveryos-check-first/SKILL.md`).
+  Mirrors `find-skills`'s real, already-catalogued structure. On branch
+  `phase8-check-first-skill`.
+
 - **Phase 7's end-to-end test -- Phase 7 is now complete.** A genuinely
   fresh Next.js project (`dos-auth-e2e`, not `DOS Demo`, which already had
   this artifact pulled into it from earlier work) proved every piece of

@@ -1261,7 +1261,7 @@ up again.
       unrelated failure + typecheck/lint clean. On branch
       `phase7-detail-pull-ux`, not yet pushed.
 
-## Phase 8 — Claude Code integration: check-first, wire, and test — **Not started, brainstormed only**
+## Phase 8 — Claude Code integration: check-first, wire, and test — **In progress (item 1 done)**
 
 Goal: Claude Code checks DeliveryOS's catalog before generating new code,
 pulls a matching artifact when one exists, and — for `backend-plugin`
@@ -1285,16 +1285,31 @@ the check-first half of this phase is itself one of the cheapest plausible
 ways to actually cause "prove adoption" to happen — not a contradiction of
 Tier 0, a bet on satisfying it.
 
-- [ ] **Build the check-first + propose-back Skill**, mirroring
-      `ui-component-extractor`'s existing structure — before generating an
-      auth module, a UI component, or a pipeline scaffold from scratch,
-      runs `deliveryos list --json` and offers to pull a match instead;
-      after something reusable gets built, offers `deliveryos push --new`.
-      Needs no new engine code — Phase 7 already proved `push --new` works
-      unmodified even for a brand-new kind, so a Skill invoking either CLI
-      command needs none either. A Skill, not an MCP server — the CLI is
-      already directly Bash-reachable, so there's no system here Claude
-      can't otherwise touch.
+- [x] **Build the check-first + propose-back Skill**, mirroring
+      `find-skills`'s real, already-catalogued structure (frontmatter →
+      "When to use" → step-by-step → concrete example interactions) —
+      before generating an auth module, a UI component, or a reusable
+      script from scratch, checks `deliveryos list --json` and offers to
+      pull a match instead; after something reusable gets built, offers
+      `deliveryos push --new`. Needed no new engine code, confirmed — every
+      flag the skill documents (`list --json`, `pull --set KEY=VALUE`,
+      `push --new` with `--kind`/`--path`/`--description`/`--roles`/
+      `--teams`/`--stacks`) was checked against the real CLI's own
+      `--help` output before writing the skill's instructions, not assumed
+      from memory. A Skill, not an MCP server — the CLI is already
+      directly Bash-reachable, so there's no system here Claude can't
+      otherwise touch.
+      **Real dogfooding, not just written and left untested**: pushed as
+      `deliveryos-check-first` (`kind: skill`) via the actual
+      `deliveryos push --new` CLI — opened as
+      [PR #54](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/54)
+      on `ai-helpers`, open, awaiting review. Then pulled it back through
+      the real packaged sidecar exe into a fresh scratch project and
+      confirmed the manifest parsed correctly and `SKILL.md` landed at
+      exactly `.claude/skills/deliveryos-check-first/SKILL.md` — the real
+      convention Claude Code itself reads skills from. DeliveryOS's own
+      catalog now contains the thing that drives its own adoption, proven
+      through the same pipeline it recommends to everyone else.
 - [ ] **Expose `resolveWiringActions` via the CLI.** Today it's sidecar-only
       (used by the Tauri app's IPC, per Phase 7 item 6); nothing analogous
       exists for the CLI. Smallest real shape: a new flag on `pull`
