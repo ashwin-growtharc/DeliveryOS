@@ -209,6 +209,49 @@ describe('pull e2e', () => {
   });
 
   describe('install_params (Phase 7)', () => {
+    it('list --json includes tags/installTarget/installParams/signed (Phase 8 item 4) -- enough to judge fit and trust without pulling first', async () => {
+      const remoteDir = await createTestRemoteWithInstallParamsArtifact();
+      // Deliberately its OWN isolated DELIVERYOS_HOME, not the shared one --
+      // registering a second remote carrying the same fixture artifact id
+      // under the shared home would make every OTHER unscoped pull in this
+      // file genuinely ambiguous (the exact regression already documented
+      // elsewhere in this file).
+      const isolatedHome = fs.mkdtempSync(path.join(os.tmpdir(), 'deliveryos-e2e-list-json-fields-home-'));
+      const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'deliveryos-e2e-list-json-fields-'));
+      try {
+        const addResult = runCli(
+          ['remote', 'add', remoteDir, '--name', 'list-json-fields-remote'],
+          cwd,
+          isolatedHome,
+        );
+        expect(addResult.status).toBe(0);
+
+        const result = runCli(['list', '--json', '--remote', 'list-json-fields-remote'], cwd, isolatedHome);
+        expect(result.status).toBe(0);
+
+        interface ExtendedEntry extends CatalogJsonEntry {
+          tags: { stacks: string[] };
+          installTarget: string;
+          installParams: { key: string; secret: boolean; required: boolean; hasDefault: boolean }[];
+          signed: boolean;
+        }
+        const entries = JSON.parse(result.stdout) as ExtendedEntry[];
+        const entry = entries.find((e) => e.id === INSTALL_PARAMS_ARTIFACT.id)!;
+
+        expect(entry.installTarget).toBe(INSTALL_PARAMS_ARTIFACT.installTarget);
+        expect(entry.signed).toBe(false); // this fixture declares no signature
+        expect(entry.installParams).toEqual([
+          { key: 'AUTH_SECRET', secret: true, required: true, hasDefault: false },
+          { key: 'AUTH_URL', secret: false, required: true, hasDefault: true },
+          { key: 'DATABASE_URL', secret: true, required: true, hasDefault: false },
+        ]);
+      } finally {
+        await teardownTestRemote(remoteDir);
+        fs.rmSync(isolatedHome, { recursive: true, force: true });
+        fs.rmSync(cwd, { recursive: true, force: true });
+      }
+    }, 30_000);
+
     let paramsRemoteDir: string;
     let paramsCwd: string;
 
@@ -342,6 +385,35 @@ describe('pull e2e', () => {
   });
 
   describe('signature verification (Phase 7 item 3)', () => {
+    it('list --json reports signed: true for an artifact that declares a signature (Phase 8 item 4)', async () => {
+      const remoteDir = await createTestRemoteWithSignedArtifact({
+        contentDigestMatchesPayload: true,
+        includeSignatureBundle: true,
+      });
+      // Its own isolated home -- see the same note on the install_params
+      // version of this test, above.
+      const isolatedHome = fs.mkdtempSync(path.join(os.tmpdir(), 'deliveryos-e2e-list-json-signed-home-'));
+      const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'deliveryos-e2e-list-json-signed-'));
+      try {
+        const addResult = runCli(
+          ['remote', 'add', remoteDir, '--name', 'list-json-signed-remote'],
+          cwd,
+          isolatedHome,
+        );
+        expect(addResult.status).toBe(0);
+
+        const result = runCli(['list', '--json', '--remote', 'list-json-signed-remote'], cwd, isolatedHome);
+        expect(result.status).toBe(0);
+        const entries = JSON.parse(result.stdout) as (CatalogJsonEntry & { signed: boolean })[];
+        const entry = entries.find((e) => e.id === SIGNED_ARTIFACT.id)!;
+        expect(entry.signed).toBe(true);
+      } finally {
+        await teardownTestRemote(remoteDir);
+        fs.rmSync(isolatedHome, { recursive: true, force: true });
+        fs.rmSync(cwd, { recursive: true, force: true });
+      }
+    }, 30_000);
+
     it('refuses the pull, before any files are written, when a signature is declared but no signature.bundle file exists', async () => {
       const remoteDir = await createTestRemoteWithSignedArtifact({
         contentDigestMatchesPayload: true,

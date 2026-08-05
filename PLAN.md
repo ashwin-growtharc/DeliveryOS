@@ -1261,7 +1261,7 @@ up again.
       unrelated failure + typecheck/lint clean. On branch
       `phase7-detail-pull-ux`, not yet pushed.
 
-## Phase 8 — Claude Code integration: check-first, wire, and test — **In progress (item 1 done)**
+## Phase 8 — Claude Code integration: check-first, wire, and test — **Complete**
 
 Goal: Claude Code checks DeliveryOS's catalog before generating new code,
 pulls a matching artifact when one exists, and — for `backend-plugin`
@@ -1310,39 +1310,61 @@ Tier 0, a bet on satisfying it.
       convention Claude Code itself reads skills from. DeliveryOS's own
       catalog now contains the thing that drives its own adoption, proven
       through the same pipeline it recommends to everyone else.
-- [ ] **Expose `resolveWiringActions` via the CLI.** Today it's sidecar-only
-      (used by the Tauri app's IPC, per Phase 7 item 6); nothing analogous
-      exists for the CLI. Smallest real shape: a new flag on `pull`
-      (e.g. `--show-wiring`) or a standalone `deliveryos wiring <id>`
-      command, returning the same resolved cards (target file,
-      exists/not-found, description, instructions, snippet) the Detail UI
-      already renders. This is the one concrete blocker for everything
-      below it.
-- [ ] **The wire-and-test loop.** Once the CLI can surface wiring actions,
-      the Skill applies the Tier 2 snippets to the real target file(s),
-      then runs the project's own real build/test command (whatever it
-      already is — `next build`, `npm test`, etc.), and fixes what fails
-      before reporting success. Grounded in a real precedent, not a
-      hypothetical: Phase 7's own end-to-end test found a real wiring
-      snippet bug (`GET`/`POST` weren't exported the way the snippet
-      assumed) *only because a person ran `next build` by hand afterward*
-      — this loop exists specifically to catch that class of bug
-      automatically.
-      **Scope boundary, decide explicitly before building, same as Phase
-      7's own wiring-agent decision:** applying a snippet is mechanical
-      (matches the manifest-declared card exactly); reacting to a real
-      build failure and deciding how to fix it is genuine judgment again —
-      keep these two conceptually distinct rather than assuming "the wiring
-      is deterministic" covers the whole loop.
-      Tier 3 (real secrets, DB migrations/schema) stays untouched by this
-      loop exactly as it already is by every other mechanism — nothing
-      here changes that boundary.
-- [ ] **End-to-end test:** a fresh project, no manual CLI flags typed by a
-      person — ask Claude Code for something `nextauth-credentials` (or a
-      similarly-shaped future artifact) already covers, confirm it checks
-      the catalog first, pulls the real signed artifact, applies the wiring
-      snippets, runs the project's real build, and either reports success
-      or fixes a deliberately-introduced break before reporting it.
+- [x] **Expose `resolveWiringActions` via the CLI.** Done — a new
+      standalone `deliveryos wiring <id> [--remote <name>] [--json]`
+      command (`src/cli/commands/wiring.ts`), returning the same resolved
+      cards (target file, exists/not-found, description, instructions,
+      snippet) the Detail UI and sidecar already render, via a new
+      `printWiringActions` in `src/cli/output.ts`. Verified against the
+      real, already-merged `nextauth-credentials` artifact through the
+      real CLI (auth.ts/middleware.ts/the API route resolve `NOT FOUND`,
+      `layout.tsx` resolves `EXISTS` with merge guidance) before writing
+      any test. 3 new e2e tests (`test/e2e/wiring.e2e.test.ts`): resolves
+      both actions fresh, flips to `whenPresent` once a target file is
+      seeded (purely read-only, confirmed nothing else was touched), and
+      hard-errors cleanly on a nonexistent id.
+- [x] **The wire-and-test loop.** Done, as `deliveryos-check-first`'s own
+      Step 3b: for each resolved wiring action, applying the declared
+      snippet is mechanical (matches the manifest-declared card exactly);
+      then running the project's own real build/test command and fixing
+      what fails is called out EXPLICITLY as genuine judgment again, not
+      assumed covered by "the wiring step was deterministic" — the exact
+      scope boundary this item asked to decide explicitly, decided the
+      same way Phase 7's own wiring-agent question was. Tier 3 (real
+      secrets, DB migrations/schema) stays untouched by this loop exactly
+      as it already is by every other mechanism.
+- [x] **End-to-end test:** done, for real, including the "fixes what
+      fails" half, not just the happy path. A second genuinely fresh
+      Next.js project (`dos-phase8-e2e`) was used to literally follow
+      `deliveryos-check-first`'s own instructions step by step: checked
+      `deliveryos list --json` first (found `nextauth-credentials` among
+      several loose/irrelevant matches in the real ~200-artifact catalog),
+      evaluated it honestly (`signed: true`, matching stack), pulled it
+      (real signature verified), ran `deliveryos wiring` to get the
+      resolved cards, and applied them. To prove the "fixes a
+      deliberately-introduced break before reporting it" half for real
+      (not hypothetically), the OLD, pre-PR-#53 buggy `route.ts` snippet
+      was deliberately applied first — reproduced the exact real
+      `next build` failure
+      (`Export GET doesn't exist in target module`), then fixed it by
+      reasoning from the error message itself (not just recalling the
+      known fix), and confirmed a clean `next build` afterward.
+      **A real, second finding from doing this for real, not
+      hypothetically**: `list --json` only returned
+      `id`/`kind`/`version`/`remote`/`description` before this — Step 2's
+      own guidance to check `tags.stacks`/`install_target`/
+      `install_params`/whether it's signed wasn't actually followable
+      without pulling first. Fixed by extending `list --json`'s output
+      (additive, `src/cli/output.ts`) to also include `tags`,
+      `installTarget`, `installParams` (key/secret/required/hasDefault
+      per param), and `signed` — verified against the real, signed
+      `nextauth-credentials` manifest. 2 new e2e tests confirming the
+      extended shape for both a real `install_params` fixture and a real
+      signed-vs-unsigned fixture. `deliveryos-check-first`'s own SKILL.md
+      updated to describe what `list --json` actually returns, pushed as
+      follow-up commits to the same open PR #54 on `ai-helpers`.
+      Full suite: 271 passed, 1 pre-existing unrelated failure +
+      typecheck/lint clean.
 
 **Deliberately out of scope for this phase** (later, per the roadmap doc's
 own sequencing — depend on the above existing first, not parallel work):
@@ -1350,3 +1372,10 @@ self-healing catalog (proposing a fix back when the loop finds a stale
 snippet), merge-assist for `both_changed` conflicts (§9 risk #3, uses
 three-way-merge tooling, not this loop's own mechanism), and the
 engagement-lifecycle features (harvest prompts, known-good-stack bundles).
+
+**Real artifact, not just a design**: `deliveryos-check-first` (`kind:
+skill`) lives in `growtharc-ai-helpers` as
+[PR #54](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/54)
+— open, awaiting review. DeliveryOS's own catalog now contains the thing
+that drives its own adoption, pushed and pulled through the exact same
+pipeline it recommends to everyone else.

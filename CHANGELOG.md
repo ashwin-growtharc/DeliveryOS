@@ -4,6 +4,38 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- **Phase 8 is now complete: items 2-4 (CLI wiring exposure, the
+  wire-and-test loop, and a real end-to-end test).** New
+  `deliveryos wiring <id> [--remote <name>] [--json]` CLI command
+  (`src/cli/commands/wiring.ts`), the one concrete gap blocking a Claude
+  Code Skill from doing anything with Tier 2 wiring at all -- verified
+  against the real `nextauth-credentials` artifact, 3 new e2e tests.
+  `deliveryos-check-first`'s own instructions gained an explicit
+  wire-and-test loop step: apply a resolved snippet mechanically, then
+  actually run the project's real build/test command and fix what fails
+  -- called out explicitly as genuine judgment, not assumed covered by
+  "the wiring step was deterministic."
+  **Real end-to-end proof, including the "fixes what fails" half, not
+  just the happy path**: a second fresh Next.js project
+  (`dos-phase8-e2e`) literally followed the skill's own instructions --
+  checked the catalog, evaluated and pulled `nextauth-credentials` (real
+  signature verified), resolved wiring, applied it. The old, pre-PR-#53
+  buggy `route.ts` snippet was deliberately reapplied first to prove the
+  "fix a deliberately-introduced break" half for real: reproduced the
+  exact `next build` failure, fixed it by reasoning from the error
+  message, confirmed a clean build afterward. This real run found a
+  second genuine gap: `list --json` didn't return enough to actually
+  follow the skill's own "evaluate a match honestly" step without
+  pulling first -- fixed by extending it (additive) with `tags`,
+  `installTarget`, `installParams`, and `signed`. 2 new e2e tests for the
+  extended shape. `deliveryos-check-first`'s SKILL.md updated to match,
+  pushed as follow-up commits to the same open
+  [PR #54](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/54).
+  Full suite: 271 tests, one pre-existing unrelated failure, typecheck/lint
+  clean. On branch `phase8-check-first-skill`, PR
+  [#4](https://github.com/ashwin-growtharc/DeliveryOS/pull/4) open on
+  DeliveryOS itself.
+
 - **Phase 8 item 1: the check-first + propose-back Skill, aimed directly
   at Tier 0's stuck "prove adoption" item.** With no real adopter
   candidate identified yet, this reframes the problem: instead of needing

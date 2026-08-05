@@ -5,6 +5,7 @@ import { registerPullCommand } from './commands/pull';
 import { registerPushCommand } from './commands/push';
 import { registerCheckUpdatesCommand } from './commands/checkUpdates';
 import { registerScanCommand } from './commands/scan';
+import { registerWiringCommand } from './commands/wiring';
 
 export function buildProgram(): Command {
   const program = new Command();
@@ -20,6 +21,7 @@ export function buildProgram(): Command {
   registerPushCommand(program);
   registerCheckUpdatesCommand(program);
   registerScanCommand(program);
+  registerWiringCommand(program);
 
   return program;
 }
