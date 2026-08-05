@@ -6,11 +6,21 @@ import { GitOperationError } from '../errors';
  * Thin wrapper around simple-git. Clones `url` into `dest` (which must not
  * already exist). On failure, any partial directory created by the clone
  * attempt is removed and git's own stderr/message is bubbled up.
+ *
+ * Forces `core.autocrlf=false` for this clone specifically (not the user's
+ * global git config) -- a real bug found via Phase 7's end-to-end test:
+ * without this, a Windows machine with the (very common) global
+ * `core.autocrlf=true` setting checks text payload files out with CRLF
+ * line endings, while a Linux CI runner signing/hashing that same content
+ * sees LF -- `computePayloadDigest` would then never match a real,
+ * untampered artifact's recorded `content_digest` for any such user. This
+ * keeps every DeliveryOS-managed cache byte-faithful to what's actually
+ * committed, regardless of the host machine's own git config.
  */
 export async function cloneTo(url: string, dest: string): Promise<void> {
   const git = simpleGit();
   try {
-    await git.clone(url, dest);
+    await git.clone(url, dest, ['--config', 'core.autocrlf=false']);
   } catch (err) {
     if (fs.existsSync(dest)) {
       fs.rmSync(dest, { recursive: true, force: true });

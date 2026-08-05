@@ -4,6 +4,129 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- **Phase 7's end-to-end test -- Phase 7 is now complete.** A genuinely
+  fresh Next.js project (`dos-auth-e2e`, not `DOS Demo`, which already had
+  this artifact pulled into it from earlier work) proved every piece of
+  Phase 7 together for real: pull + install-time config collection,
+  signature verification before any files are written, both branches of
+  the wiring agent's tier boundaries on real unmodified scaffold content
+  (a fresh `create-next-app` already has `layout.tsx` but not `auth.ts`),
+  and a real `next build` after hand-applying every Tier 2 suggestion
+  exactly as given. Found and fixed three real bugs this way -- none
+  catchable by schema/unit tests, since those never compile or clone the
+  resulting code: (1) `wiring_actions`' `targetFile` paths assumed a
+  non-`src/` layout, inconsistent with the artifact's own
+  `install_target: src/lib/auth` (fixed on PR #51); (2) the API route
+  wiring snippet was wrong -- `export { GET, POST } from '@/auth'`
+  doesn't work since `auth.ts` exports `handlers`, not top-level `GET`/
+  `POST` (fixed on PR
+  [#53](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/53),
+  confirmed with a clean `next build`); (3) a real cross-platform bug --
+  git's common Windows `core.autocrlf=true` default checks text payload
+  files out with CRLF while the Linux CI runner that signed them saw LF,
+  silently breaking verification for any such Windows user on an
+  untampered artifact. Fixed at the root: `cloneTo`
+  (`src/engine/git/git.ts`) now forces `core.autocrlf=false` on every
+  DeliveryOS-managed clone, so caches are always byte-faithful regardless
+  of the host's own git config. 2 new regression tests. Full suite: 265
+  tests, one pre-existing unrelated failure, typecheck/lint clean. On
+  branch `phase7-detail-pull-ux`, not yet pushed.
+
+- **Phase 7's security/provenance model: keyless Sigstore signing,
+  verified at pull, before any files are written.** Chose the `sigstore`
+  npm package over the `cosign` CLI binary deliberately -- verification
+  runs inside DeliveryOS's own packaged executable on arbitrary end-user
+  machines, where requiring a separately-installed `cosign` binary would
+  be a real distribution problem. New `src/engine/provenance/digest.ts`
+  (`computePayloadDigest`, a deterministic sha256 over a payload's actual
+  content, directory-order-independent) and `verify.ts`
+  (`verifyArtifactSignature`: a no-op when `manifest.signature` is absent;
+  else checks the digest before touching any cryptography, then calls
+  `sigstore`'s `verify()` pinned to the manifest's own
+  `certificate_identity`/`oidc_issuer`). New `SignatureVerificationError`.
+  Wired into `pullArtifact` as a new `verify` progress stage, genuinely
+  before `fs.cpSync`. On `growtharc-ai-helpers`: a new GitHub Actions
+  workflow (PR
+  [#52](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/52),
+  merged) signs every `kind: backend-plugin` artifact's payload on push to
+  `main` using the workflow's own ambient GitHub Actions OIDC identity --
+  no key material anywhere. Writing the workflow YAML itself was blocked
+  by Claude Code's own auto-mode classifier (CI workflow files with
+  `id-token`/`contents: write` are a real supply-chain surface); the user
+  created that one file via the GitHub UI, everything else proceeded
+  normally. **Real, live proof**: merging the PR triggered a real signing
+  run against `nextauth-credentials`, producing an actual Fulcio
+  certificate and Rekor log entry; pulled that real signed artifact
+  through the rebuilt packaged sidecar exe and confirmed verification
+  succeeded and the payload landed correctly. Also proved it fails closed
+  against that same real bundle, twice: a hand-tampered local payload
+  (digest mismatch, refused before any crypto ran) and a hand-edited
+  `certificate_identity` (a genuine cryptographic rejection from
+  `sigstore`'s own `verify()`) -- neither wrote anything to disk. 20 new
+  tests (unit + CLI e2e + sidecar e2e); full suite (264 tests, one
+  pre-existing unrelated failure) + typecheck/lint clean. Deliberately
+  deferred: full SLSA Level 3 conformance, retrofitting signing onto
+  other kinds, any key-management scheme, build-time-pinned trust root
+  (pull already needs live network access to clone from GitHub, so
+  `sigstore`'s own live TUF fetch is consistent with that). On branch
+  `phase7-detail-pull-ux`, not yet pushed.
+
+- **Phase 7's wiring agent (Tier 1 + Tier 2), deterministic and
+  manifest-declared, not an LLM-reasoning agent** (confirmed with the user
+  before building). Tier 1 needed no new manifest field at all:
+  `.env.example` placeholders are fully derivable from the already-shipped
+  `install_params`, so `installParams.ts`'s upsert logic was extracted
+  into a shared `upsertEnvFile(filePath, values)` reused by both
+  `applyInstallParams` (`.env.local`) and the new
+  `applyEnvExamplePlaceholders` (`.env.example`). Tier 2 gained a new
+  `wiring_actions` manifest field (`WiringActionSchema`:
+  `type: 'suggest_snippet'`, `targetFile` resolved against `cwd` --
+  never `install_target` -- `whenAbsent` requiring a snippet,
+  `whenPresent` optional so a declared action can honestly say "review
+  before replacing" instead of forcing one snippet to serve both cases)
+  and a new, purely read-only `resolveWiringActions(wiringActions, cwd)`
+  (`src/engine/pull/wiring.ts`) that never writes or mutates anything.
+  Deliberately excludes the Prisma schema merge -- that's Tier 3 per this
+  project's own three-tier table, already surfaced passively via the
+  prior item's `artifact.readPayloadFile` + rendered README. New sidecar
+  command `artifact.resolveWiringActions`. Detail gained a "Wiring"
+  subsection (one card per resolved action: target file, exists/not-found
+  badge, description, instructions, snippet if applicable) -- no "apply"
+  button, since Tier 2 is inherently "go do this in your own editor."
+  The real, already-merged `nextauth-credentials` manifest on
+  `ai-helpers` was updated with its real 4 `wiring_actions`, opened as
+  [PR #51](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/51)
+  -- open, awaiting review, not yet merged. Verified in a real browser
+  against a mocked harness, and `artifact.resolveWiringActions` verified
+  against the real (locally checked-out) manifest content through the
+  actual rebuilt packaged sidecar exe. 20 new tests across schema, unit,
+  and e2e coverage; full suite (247 tests, one pre-existing unrelated
+  failure) + typecheck + lint clean. On branch `phase7-detail-pull-ux`,
+  not yet pushed.
+
+- **Phase 7's Detail/Pull UX for non-visual artifacts**: a new
+  `src/engine/pull/installParams.ts` resolves and applies an artifact's
+  declared `install_params` (provided value > already-configured
+  `.env.local` value > the manifest's own `default`), writing to
+  `<cwd>/.env.local` -- a project-ROOT file, deliberately never anything
+  under `install_target`, since the pristine-snapshot step would otherwise
+  capture a secret value baked into a "pristine reference copy". CLI:
+  `deliveryos pull <id> --set KEY=VALUE` (repeatable). Sidecar: two new
+  commands, `artifact.applyInstallParams` (configure later without a
+  re-pull) and `artifact.readPayloadFile` (reads a real file, e.g.
+  README.md, out of an artifact's payload, sandboxed against
+  path-traversal). Caught a real bug while wiring this up: configuring one
+  missing value later made every OTHER already-satisfied param look
+  missing again, since the resolver only ever saw what was provided THAT
+  call -- fixed by folding in whatever's already in `.env.local` first.
+  Detail gained a new section (gated on `install_params` being non-empty,
+  never a `kind` check): a provenance badge, the rendered README, and a
+  required-config checklist. Verified in a real browser against a mocked
+  harness, and the real packaged sidecar exe reading the real, merged
+  `nextauth-credentials` artifact's README from `ai-helpers`. 29 new
+  tests; full suite (222 tests, one pre-existing unrelated failure) +
+  typecheck + lint clean. On branch `phase7-detail-pull-ux`.
+
 - **Phase 7 (backend-plugin artifacts) started for real**: picked a
   concrete target (Auth.js/NextAuth v5 + Prisma, Credentials provider, in
   a Next.js App Router project) over Passport.js/Express, a Supabase-auth

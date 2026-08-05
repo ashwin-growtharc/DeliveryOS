@@ -993,6 +993,18 @@
   // stops before touching the DOM.
   let detailPreviewRequestId = 0;
 
+  // Same request-token-guard discipline as detailPreviewRequestId, above,
+  // for renderInstallParamsSection's own async README fetch -- switching
+  // Detail to a different artifact before an in-flight
+  // artifact.readPayloadFile call resolves must never let that stale
+  // call overwrite the NOW-current artifact's README with the PREVIOUS
+  // one's content.
+  let installParamsRequestId = 0;
+
+  // Same request-token-guard discipline, for renderWiringSection's own
+  // async artifact.resolveWiringActions call.
+  let wiringRequestId = 0;
+
   /** Clears any live Detail-preview iframe/listener -- called both at the
    * top of loadDetailPreview (about to replace it with a new one) and
    * from renderDetail when switching to a NON-ui-component artifact
@@ -1103,6 +1115,200 @@
       });
     };
     window.addEventListener('message', detailPreviewMessageHandler);
+  }
+
+  /** Detail view's non-visual counterpart to loadDetailPreview (Phase 7,
+   * kind: backend-plugin): a signed/provenance badge, the artifact's
+   * rendered README (if it has one), and a required-config checklist for
+   * every declared install_param, collecting the PROJECT's own values --
+   * never the artifact's own defaults, which only ever seed the form as a
+   * starting point, exactly like Add New's own auto-scaffold placeholders
+   * are a starting point, not a finished value. Shown only when
+   * `manifest.install_params` is non-empty -- see renderDetail. */
+  async function renderInstallParamsSection(entry) {
+    const requestId = ++installParamsRequestId;
+    const { manifest } = entry;
+
+    // Provenance badge: honest about what's actually been verified. No
+    // artifact has a real signature yet (Phase 7's item 3, the actual
+    // signing pipeline, isn't built) -- this already renders the "Signed"
+    // state correctly for whenever one does, without needing to come back
+    // and wire this up again later.
+    const badge = $('detail-provenance-badge');
+    if (manifest.signature) {
+      badge.textContent = `✓ Signed (${manifest.signature.algorithm})`;
+      badge.className = 'provenance-badge signed';
+    } else {
+      badge.textContent = 'Unverified -- no provenance signature yet';
+      badge.className = 'provenance-badge unsigned';
+    }
+
+    const readmeEl = $('detail-readme');
+    readmeEl.hidden = true;
+    readmeEl.textContent = '';
+    try {
+      const { content } = await call('artifact.readPayloadFile', {
+        remote: entry.remoteName,
+        id: manifest.id,
+        path: 'README.md',
+      });
+      if (requestId !== installParamsRequestId) return; // superseded while awaiting
+      if (content) {
+        // Shown as plain preformatted text, not rendered HTML -- no
+        // markdown renderer is vendored anywhere in this app, and adding
+        // one is a bigger scope increase than this item calls for; a
+        // real, readable README beats no README, even unstyled.
+        readmeEl.textContent = content;
+        readmeEl.hidden = false;
+      }
+    } catch {
+      // No README is a normal, common case (most artifacts don't have
+      // one) -- fail silent here, the checklist below is the actually
+      // required part of this section.
+    }
+
+    const fieldsContainer = $('detail-install-params-fields');
+    fieldsContainer.innerHTML = '';
+    for (const param of manifest.install_params) {
+      const field = document.createElement('div');
+      field.className = 'field';
+      const label = document.createElement('label');
+      label.textContent = `${param.key}${param.required ? ' *' : ''}`;
+      label.htmlFor = `install-param-${param.key}`;
+      const help = document.createElement('div');
+      help.className = 'install-param-help';
+      help.textContent = param.description;
+      const input = document.createElement('input');
+      input.id = `install-param-${param.key}`;
+      input.name = param.key;
+      input.type = param.secret ? 'password' : 'text';
+      input.placeholder = param.default ?? (param.secret ? '(secret -- never defaulted)' : '');
+      if (param.default !== undefined) {
+        input.value = param.default;
+      }
+      field.appendChild(label);
+      field.appendChild(help);
+      field.appendChild(input);
+      fieldsContainer.appendChild(field);
+    }
+
+    const form = $('detail-install-params-form');
+    form.onsubmit = (ev) => {
+      ev.preventDefault();
+      void handleApplyInstallParams(entry);
+    };
+  }
+
+  /** Collects whatever was actually typed into the required-config
+   * checklist (blank fields are simply omitted, not sent as empty-string
+   * overwrites -- re-opening Detail without retyping an already-configured
+   * secret must never blank it back out) and applies it via
+   * artifact.applyInstallParams -- no re-pull needed, the real point of
+   * that command existing separately from artifact.pull at all. */
+  async function handleApplyInstallParams(entry) {
+    const values = {};
+    for (const param of entry.manifest.install_params) {
+      const input = $(`install-param-${param.key}`);
+      if (input && input.value.trim().length > 0) {
+        values[param.key] = input.value;
+      }
+    }
+
+    try {
+      const result = await call('artifact.applyInstallParams', {
+        id: entry.manifest.id,
+        remote: entry.remoteName,
+        cwd: state.projectDir,
+        values,
+      });
+      if (result.missingRequiredParams.length > 0) {
+        toastError(new Error(
+          `Still missing required value(s): ${result.missingRequiredParams.join(', ')}.`,
+        ));
+      } else {
+        toastSuccess('Configuration applied.');
+      }
+    } catch (err) {
+      toastError(err);
+    }
+  }
+
+  /** Tier 2 of the wiring agent (Phase 7 item 6): resolves this artifact's
+   * declared `wiring_actions` against the real project at `state.projectDir`
+   * and renders one card per action -- description, which real file it
+   * targets, whether that file already exists, and the applicable
+   * instructions/snippet. Deliberately no "apply" button anywhere here:
+   * Tier 2 is inherently "go do this in your own editor," matching the
+   * tier's own definition ("shown as a diff; applied only on explicit
+   * confirmation" means a PERSON applies it, not that DeliveryOS silently
+   * generates and commits one). Hidden entirely when the manifest declares
+   * no wiring_actions at all -- the overwhelming majority of artifacts. */
+  async function renderWiringSection(entry) {
+    const requestId = ++wiringRequestId;
+    const section = $('detail-wiring-section');
+    const container = $('detail-wiring-actions');
+
+    if (!entry.manifest.wiring_actions || entry.manifest.wiring_actions.length === 0) {
+      section.hidden = true;
+      return;
+    }
+
+    let resolved;
+    try {
+      resolved = await call('artifact.resolveWiringActions', {
+        id: entry.manifest.id,
+        remote: entry.remoteName,
+        cwd: state.projectDir,
+      });
+    } catch (err) {
+      if (requestId !== wiringRequestId) return; // superseded while awaiting
+      section.hidden = false;
+      container.innerHTML = '';
+      const errorEl = document.createElement('div');
+      errorEl.className = 'wiring-action-card';
+      errorEl.textContent = `Could not resolve wiring actions -- ${err instanceof Error ? err.message : String(err)}`;
+      container.appendChild(errorEl);
+      return;
+    }
+    if (requestId !== wiringRequestId) return; // superseded while awaiting
+
+    section.hidden = false;
+    container.innerHTML = '';
+    for (const action of resolved) {
+      const card = document.createElement('div');
+      card.className = 'wiring-action-card';
+
+      const header = document.createElement('div');
+      header.className = 'wiring-action-header';
+      const fileEl = document.createElement('code');
+      fileEl.textContent = action.targetFile;
+      const statusEl = document.createElement('span');
+      statusEl.className = `wiring-action-status ${action.targetFileExists ? 'exists' : 'absent'}`;
+      statusEl.textContent = action.targetFileExists ? 'exists' : 'not found';
+      header.appendChild(fileEl);
+      header.appendChild(statusEl);
+
+      const descEl = document.createElement('div');
+      descEl.className = 'wiring-action-description';
+      descEl.textContent = action.description;
+
+      const instructionsEl = document.createElement('div');
+      instructionsEl.className = 'wiring-action-instructions';
+      instructionsEl.textContent = action.instructions;
+
+      card.appendChild(header);
+      card.appendChild(descEl);
+      card.appendChild(instructionsEl);
+
+      if (action.snippet) {
+        const snippetEl = document.createElement('pre');
+        snippetEl.className = 'wiring-action-snippet';
+        snippetEl.textContent = action.snippet;
+        card.appendChild(snippetEl);
+      }
+
+      container.appendChild(card);
+    }
   }
 
   /** Builds the generated props-controls panel for whichever component is
@@ -1877,6 +2083,27 @@
       // iframe/listener (just hidden, not removed) would otherwise sit
       // around indefinitely instead of being cleaned up here.
       clearDetailPreviewListener();
+    }
+
+    // Phase 7 (kind: backend-plugin, or any future kind that declares
+    // install_params/wiring_actions): shown purely on whether the manifest
+    // HAS any of either -- never a kind check, matching this codebase's
+    // own established "file/field presence, not kind" convention
+    // (preview.png's own gating in push.ts is the precedent this
+    // follows). Gated on EITHER, not just install_params: a hypothetical
+    // future artifact with wiring_actions but no install_params should
+    // still show the outer section (renderInstallParamsSection/
+    // renderWiringSection each independently no-op on their own empty
+    // list, via the same convention).
+    const backendPluginSection = $('detail-backend-plugin-section');
+    const hasInstallParams = manifest.install_params && manifest.install_params.length > 0;
+    const hasWiringActions = manifest.wiring_actions && manifest.wiring_actions.length > 0;
+    if (hasInstallParams || hasWiringActions) {
+      backendPluginSection.hidden = false;
+      void renderInstallParamsSection(entry);
+      void renderWiringSection(entry);
+    } else {
+      backendPluginSection.hidden = true;
     }
 
     $('detail-install-path').textContent = entry.installTarget;

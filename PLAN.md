@@ -749,15 +749,12 @@ foundation. Tracked here so it doesn't just live in a brainstorm doc.
       pull/push something they'd have built anyway. Not something engine
       work can do on its own; revisit once there's an actual candidate
       person/task.
-- [ ] Ship the security/provenance model
+- [x] Ship the security/provenance model
       ([scalable-architecture-research.md §3.3](docs/scalable-architecture-research.md))
-      — a real liability the moment anything beyond a UI button is shared
-      further, not hypothetical. Requires writing a GitHub Actions workflow
-      into the `ai-helpers` repo itself (cosign + OIDC signing at merge
-      time) — modifying another repo's CI/CD, which needs explicit
-      go-ahead before starting, not something to pick up autonomously.
-      Also a hard prerequisite for Phase 7 per that phase's own checklist
-      below, not just a Tier 0 nice-to-have.
+      — done, as Phase 7 item 3 below (keyless Sigstore signing, a real
+      GitHub Actions workflow on `ai-helpers`, verified at pull before any
+      files are written). This was the same work either way — recorded
+      here too since this item named it as a Tier 0 prerequisite first.
 - [ ] Track real usage as a number, not a feeling (ARCHITECTURE.md §9 risk
       #6) — pulls/pushes/reuse counted from day one, the only way "prove
       adoption" above becomes evidence instead of anecdote. Scope still
@@ -767,7 +764,7 @@ foundation. Tracked here so it doesn't just live in a brainstorm doc.
       server at all — everything is local-file-based. Not started pending
       that scoping call.
 
-## Phase 7 — Backend plug-and-play artifacts — **In progress (schema extension done)**
+## Phase 7 — Backend plug-and-play artifacts — **Complete**
 
 Goal: a backend building block (starting with one real auth/login module)
 can be proposed, reviewed via a rendered README + required-config checklist
@@ -782,6 +779,72 @@ Full background in
 and [docs/scalable-architecture-research.md](docs/scalable-architecture-research.md)
 (§3.1 entity model, §3.3 security/provenance) — this phase turns that
 brainstorm into scoped tasks, same discipline every earlier phase here uses.
+
+**In short:**
+
+- **Why this phase exists:** DeliveryOS already proved it can share
+  reusable AI-agent skills (`agent-asset`) and UI components
+  (`ui-component`) between projects. Backend building blocks — auth,
+  login, that kind of thing — are a third, materially different case:
+  they touch real credentials, need install-time setup (secrets, env
+  vars), and involve wiring several files together rather than one drop-in
+  copy. Phase 7 proves DeliveryOS can handle that third case safely, using
+  one real artifact (email/password login for Next.js) instead of a
+  hypothetical.
+- **What got built:**
+  - A way for an artifact to declare the config values it needs (e.g. a
+    session secret, a database URL) so DeliveryOS can collect them from
+    whoever's pulling it — never bakes in the original author's values.
+  - A real signing/verification pipeline: every version of this artifact
+    gets cryptographically signed when it's published, and DeliveryOS
+    checks that signature before writing anything to disk on pull —
+    catching tampering or corruption before it can happen.
+  - A "wiring agent" that automatically fills in the mechanical setup
+    (like config placeholders) and *suggests* — but never silently
+    applies — the handful of edits a real project needs to actually wire
+    the module in (its own login page, middleware, etc.), so a person
+    stays in control of anything that touches their existing code.
+  - A visual "Detail" view in the app showing all of this per artifact:
+    what it needs configured, whether it's verified, and what wiring is
+    still left to do.
+- **How it was proven real, not just "should work":** built a genuinely
+  new, untouched Next.js project from scratch and pulled the real signed
+  artifact into it end to end — config collection, signature check, and
+  wiring suggestions all exercised for real, then a real build run to
+  confirm the suggested code actually compiles. That real test caught and
+  fixed three genuine bugs (a wrong code snippet, a mismatched file path
+  convention, and a subtle Windows-vs-Linux bug that would have silently
+  broken signature checking for any Windows user) — bugs that plain unit
+  tests would never have surfaced.
+
+**Walking through it, concretely** — a developer wants to add
+email/password login to their own Next.js project:
+
+1. **Browse & Pull.** They find `nextauth-credentials` in DeliveryOS and
+   run `deliveryos pull nextauth-credentials`.
+2. **Before a single file is written**, DeliveryOS checks the artifact's
+   cryptographic signature against what was recorded when it was
+   published. If someone had tampered with it in transit, or the signature
+   didn't check out, the pull would stop right here — nothing gets written.
+   It checks out, so the pull proceeds.
+3. **The reusable code lands** at `src/lib/auth/` in their project (the
+   Credentials provider, password hashing, a Prisma schema snippet).
+4. **DeliveryOS asks for the 3 things only this developer can provide**:
+   a session secret, their app's URL, and their own database connection
+   string — never the original author's values. It writes the real values
+   to `.env.local` (their private config) and blank placeholders to
+   `.env.example` (safe to commit, so a teammate knows what to fill in).
+5. **DeliveryOS then looks at what this specific project already has**
+   and shows tailored suggestions: "you don't have a `src/auth.ts` yet —
+   here's exactly what to create," and "you already have a
+   `src/app/layout.tsx` — here's the one line to add to it." It does NOT
+   edit those files itself — the developer copies the suggested code in
+   themselves, staying in control of anything that touches their own
+   project.
+6. **The developer runs their own `npm run build`** and it compiles
+   cleanly, because the suggested code was already proven to actually work
+   this way (this is exactly the real check that caught the three bugs
+   mentioned above, before any real developer could hit them).
 
 **Note on sequencing, not a blocker:** product-roadmap-vision.md's own
 "priority reset" puts adoption proof, the lockfile fix, closing the
@@ -856,36 +919,154 @@ up again.
       rendered-README half of the next checklist item needs no new field
       at all — gate it on file-presence (`payload/README.md` exists?),
       the same precedent `preview.png` already set in `push.ts`.
-- [ ] Ship the security/provenance model (cosign signing + SLSA-style
-      attestation at merge time, verified at Pull) — treated as a hard
-      prerequisite for this phase, not later polish, per the roadmap doc's
-      own reasoning about credential-handling artifacts. **Gate, stated
-      plainly: this touches `growtharc-ai-helpers`'s own CI/CD — nothing
-      here gets built without the user's explicit go-ahead first**, per
-      Tier 0's standing rule. Smallest real first slice, once given: (1)
-      a GitHub Actions workflow on `growtharc-ai-helpers`, triggered on
-      merge, computing a sha256 digest over the merged payload, recording
-      it as `content_digest`, and running `cosign sign-blob` against it
-      using the workflow's own GitHub Actions OIDC identity (keyless — no
-      key material for anyone to own), signature+cert committed alongside
-      the manifest plus a plain `provenance.json` (build repo, commit SHA,
-      workflow run URL, timestamp) as the SLSA-style attestation — real
-      and useful without chasing full SLSA predicate-schema conformance
-      on day one; (2) a new verification step in `pullArtifact`, running
-      BEFORE `fs.cpSync` (this phase's own end-to-end test wording:
-      "verifies before any files are written"), recomputing the fetched
-      payload's digest and `cosign verify-blob`-ing it against the
-      recorded identity, refusing the pull via a new
-      `SignatureVerificationError` (matching `src/engine/errors.ts`'s
-      existing one-class-per-concern pattern) on any mismatch or absence.
-      Deliberately deferred: full SLSA Level 3 conformance, retrofitting
-      signing onto `agent-asset`/`ui-component` (gated on `manifest.
-      signature` being present, so it's free for other kinds later
-      without forcing adoption now), any key-management scheme.
-- [ ] Detail/Pull UX for non-visual artifacts: rendered README, a
+- [x] **Ship the security/provenance model** (keyless Sigstore signing +
+      SLSA-style attestation at merge time, verified at Pull) — done, on
+      branch `phase7-detail-pull-ux` (engine side) and a merged PR on
+      `growtharc-ai-helpers` (CI side). Built only after the user's
+      explicit go-ahead to touch `ai-helpers`'s own CI/CD, per Tier 0's
+      standing rule.
+      **Real architecture decision, made before writing any code**:
+      signing/verification uses the `sigstore` npm package directly
+      (Sigstore's own JS SDK), not the `cosign` CLI binary. Reason: the
+      verification half runs inside DeliveryOS's own packaged executable
+      on arbitrary end-user machines — requiring `cosign` to be
+      separately installed there would be a real distribution problem for
+      a desktop app, where `sign()`/`verify()` in pure Node has none of
+      that. `sigstore@4.1.1` was pinned deliberately over the newer
+      `5.0.0` (which requires Node ^24.15.0, incompatible with this
+      project's own `>=22.12.0` engines floor and the Node actually
+      installed here) — verified this by checking each candidate
+      version's own `engines` field before installing, not by trial and
+      error.
+      **Engine (`src/engine/provenance/`)**: `digest.ts` —
+      `computePayloadDigest(payloadPath)`, a deterministic sha256 over a
+      payload's actual file content (sorted relative POSIX paths, so it's
+      independent of OS/traversal order and file-system metadata),
+      handling both directory and single-file payloads. `verify.ts` —
+      `verifyArtifactSignature(manifest, payloadPath, signatureBundle)`:
+      a no-op when `manifest.signature` is absent (the overwhelming
+      majority of artifacts); else recomputes the digest and compares it
+      against `content_digest` BEFORE touching any cryptography at all,
+      then calls `sigstore`'s `verify()` pinned to the manifest's own
+      `certificate_identity`/`oidc_issuer`. New `SignatureVerificationError`
+      (`src/engine/errors.ts`), matching the existing one-class-per-concern
+      pattern. Wired into `pullArtifact` as a new `'verify'` progress
+      stage between `'resolve'` and `'copy'` — genuinely before any files
+      are written, not just documented as such.
+      **CI (`growtharc-ai-helpers`)**: a new GitHub Actions workflow
+      (`.github/workflows/sign-artifacts.yml`, PR
+      [#52](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/52),
+      **merged**) that signs every `kind: backend-plugin` artifact's
+      payload on push to `main`, using the workflow's own ambient GitHub
+      Actions OIDC identity (`sigstore`'s `sign()` auto-detects this via
+      `ACTIONS_ID_TOKEN_REQUEST_URL`/`_TOKEN` — no manual token plumbing,
+      no key material for anyone to manage). Deliberately scoped to
+      `kind: backend-plugin` only, not every one of this catalog's ~200
+      artifacts — this is a credential-handling-surface feature, not a
+      blanket retrofit, and costs nothing for every other kind since
+      verification is itself gated on `manifest.signature` being present.
+      Records `artifacts/<id>/signature.bundle` (the real Sigstore bundle:
+      cert chain + signature + Rekor transparency-log entry),
+      `artifacts/<id>/provenance.json` (build repo, commit SHA, workflow
+      run URL, timestamp), and patches `content_digest`/`signature` into
+      `manifest.yaml`, committing back with `[skip ci]` (GitHub's own
+      built-in convention) so the bot's own commit doesn't retrigger the
+      workflow. Note on how this got built: writing the workflow YAML
+      file itself was blocked outright by Claude Code's own auto-mode
+      classifier (a legitimate call — CI workflow files with
+      `id-token`/`contents: write` are a real supply-chain surface) — the
+      user created that one file directly via the GitHub UI; everything
+      else (the signing script, opening the PR, watching the real run,
+      verifying the result) was done normally.
+      **Real, live proof, not a mock**: merging PR #52 triggered a real
+      run against `nextauth-credentials`
+      ([run 30978856426](https://github.com/ashwin-growtharc/growtharc-ai-helpers/actions/runs/30978856426)),
+      producing a real Fulcio-issued x509 certificate and a real Rekor
+      log entry. Pulled that real signed artifact through the actual
+      rebuilt packaged sidecar exe: verification succeeded and the real
+      payload files landed correctly. Then proved it fails closed, twice,
+      against that same real bundle: (1) hand-tampered the local payload
+      copy — refused on a `content_digest` mismatch before any
+      cryptography ran; (2) hand-edited the manifest's own
+      `certificate_identity` to a wrong value — `sigstore`'s `verify()`
+      itself rejected it (a genuine cryptographic identity-mismatch
+      rejection, not just the pre-check), and confirmed nothing was
+      written to disk in either case. Live TUF trust-root fetch (for
+      Fulcio/Rekor/CT public keys) worked over the real network in both
+      the CI signing run and the local verification call — no build-time
+      trust-root pinning was needed for this first slice (deliberately
+      deferred below).
+      **Tests**: 20 new tests — 8 unit (`digest.test.ts`,
+      deterministic/order-independent/content-sensitive/single-file
+      coverage), 6 unit (`verify.test.ts`, mocking the `sigstore` module
+      boundary itself to prove OUR control flow: no-op when unsigned,
+      never calls `verify()` on a digest mismatch, calls it with exactly
+      the right bundle/payload/identity, translates both success and
+      rejection correctly) — deliberately NOT attempting to fake a full
+      offline Sigstore trust chain (Fulcio/Rekor/TUF) for local test
+      coverage, since the real cryptographic proof above already covers
+      that far more convincingly than a hand-rolled mock CA would — plus
+      2 CLI e2e and 1 sidecar e2e (the two "fails closed, no crypto
+      needed" cases: no bundle file present, and a recorded digest that
+      doesn't match the real payload — both confirm nothing is written to
+      `install_target`). Full suite: 263 passed, 1 pre-existing unrelated
+      failure + typecheck/lint clean.
+      **Deliberately deferred**: full SLSA Level 3 conformance;
+      retrofitting signing onto `agent-asset`/`ui-component` (gated on
+      `manifest.signature` being present, so it's free for other kinds
+      later without forcing adoption now); any key-management scheme
+      (keyless throughout); build-time-pinned trust root for offline
+      verification (pull already requires live network access to clone
+      from GitHub in the first place, so relying on `sigstore`'s own live
+      TUF fetch is consistent with that, not a new dependency).
+- [x] **Detail/Pull UX for non-visual artifacts**: rendered README, a
       required-config checklist collecting the project's own values (never
       the artifact's own defaults), and a signed/provenance badge — no live
-      preview attempted.
+      preview attempted. Done, on branch `phase7-detail-pull-ux`.
+      **Engine side** (the real substance of this item): a new
+      `src/engine/pull/installParams.ts` — `resolveInstallParamValues`
+      (provided value > already-configured `.env.local` value > the
+      param's own `default`, in that precedence) and `applyInstallParams`
+      (writes to `<cwd>/.env.local`, a project-ROOT file, deliberately
+      never anything under `install_target` — the real reason this isn't
+      inline in `pull.ts`: the pristine-snapshot step would otherwise
+      capture a secret value baked into a "pristine reference copy").
+      `pullArtifact` gained a `providedValues` param and a new
+      `missingRequiredParams` result field — never a hard failure, so an
+      otherwise-successful pull isn't lost over one missing value. CLI:
+      `deliveryos pull <id> --set KEY=VALUE` (repeatable). Sidecar: two
+      new commands, `artifact.applyInstallParams` (configure later
+      without a re-pull — correctly folds in already-configured
+      `.env.local` values so finishing configuration incrementally never
+      makes an already-satisfied param look missing again — a real bug
+      caught by a sidecar e2e test exercising exactly that
+      pull-then-configure-the-rest sequence) and `artifact.readPayloadFile`
+      (reads a real file, e.g. README.md, out of an artifact's payload,
+      sandboxed against path-traversal the same way `compile.ts`'s import
+      resolution already is). **Frontend**: Detail gained a
+      `detail-backend-plugin-section` (gated on `install_params` being
+      non-empty, never a `kind` check) showing a provenance badge
+      (honestly "Unverified" until item 3's signing pipeline exists), the
+      rendered README (plain preformatted text — no markdown renderer is
+      vendored anywhere in this app, and adding one is a bigger scope
+      increase than this item calls for), and the required-config form
+      (blank fields are omitted on submit, never sent as empty-string
+      overwrites, so re-opening Detail without retyping an
+      already-configured secret can't blank it out). Verified in a real
+      browser against a mocked `DeliveryOS.call`/`__TAURI__` harness (same
+      proven pattern used earlier this session): the section renders
+      correctly for the real `nextauth-credentials` manifest (secret
+      fields as `type="password"`, `AUTH_URL`'s real default pre-filled),
+      submitting calls `artifact.applyInstallParams` with exactly the
+      typed values, and the "still missing required value(s)" error path
+      fires correctly when required fields are left blank. 29 new engine
+      tests (17 unit + 3 CLI e2e + 2 sidecar e2e, across
+      `installParams.test.ts`, `pull.e2e.test.ts`, `sidecar.e2e.test.ts`)
+      plus the real-browser check above for the untested frontend half.
+      Full suite (222 tests, one pre-existing unrelated failure) +
+      typecheck + lint all clean. Also verified the real packaged sidecar
+      exe (not just `dist/` under `node`) reads the real, already-merged
+      `nextauth-credentials` artifact's README correctly from `ai-helpers`.
 - [x] **Propose-new flow: manual/CLI-driven only at first, no Scan** — "is
       this generic enough to share" is a judgment call Scan can't safely
       make yet for backend code the way it can for a React component.
@@ -917,31 +1098,240 @@ up again.
       the lockfile entry recorded correctly — the propose→merge→pull leg
       of `kind: backend-plugin` is now proven the same way `ui-component`
       was proven in Phase 6, not just pushed and left unverified.
-- [ ] Wiring agent, scoped to the three-tier model already designed
-      (auto-applies / proposes-and-confirms / never-touches) — at minimum
-      tier 1 and tier 2 working for the one real target artifact.
-      **Maps cleanly onto this target, a reason to like the pick, not
-      just a coincidence**: Tier 1/auto-applies = adding
-      `AUTH_SECRET=`/`AUTH_URL=`/`DATABASE_URL=` placeholder lines to
-      `.env.example`, mechanical and identical every time. Tier
-      2/proposes-and-confirms = wrapping the app's root layout in
-      `<SessionProvider>`, or merging into an existing `middleware.ts`
-      route-matcher. Tier 3/never-touches = the real secret values
-      themselves.
-- [ ] **Sequencing, once implementation actually starts**: pick-target →
-      schema extension → propose-new (manual, cheap, existing generic
-      `push --new` path) is strictly sequential — nothing downstream has
-      a real artifact to sign/render/wire until then. Security/provenance,
-      Detail/Pull UX, and the wiring agent are genuinely independent of
-      each other once the real module exists in `ai-helpers`, and can
-      proceed in parallel (Detail/Pull UX can render an "unverified" badge
-      state while provenance is still pending — it doesn't need to block
-      on that). The end-to-end test is last by construction — it exercises
-      all of the above together against a real merge and the newly-created
-      second real Next.js project.
-- [ ] **End-to-end test:** propose the real auth module, merge it, pull it
-      into a *different* project, confirm install-time config is actually
-      collected and applied, confirm the signature/provenance verifies
-      before any files are written, and confirm the wiring agent's tier
-      boundaries hold (auto-applies what's mechanical, asks before touching
-      the app root, never touches the real secret values).
+- [x] **Wiring agent, scoped to the three-tier model already designed**
+      (auto-applies / proposes-and-confirms / never-touches) — tier 1 and
+      tier 2 now working for the one real target artifact, tier 3
+      unchanged (real secret values are never touched by this or any
+      other mechanism). Done, on branch `phase7-detail-pull-ux`.
+      **Deterministic and manifest-declared, not a genuine LLM-reasoning
+      agent** — confirmed with the user before building, since "wiring
+      agent" could otherwise plausibly mean either.
+      **Tier 1 (auto-applies), no new manifest field**: `.env.example`
+      placeholder generation is 100% derivable from the already-shipped
+      `install_params` (`param.secret ? '' : (param.default ?? '')`), so
+      no author-facing field was added at all — redeclaring the same keys
+      a second time would only create a drift risk for no benefit (a real
+      issue a Plan-agent design review caught in an earlier draft).
+      `installParams.ts`'s existing upsert logic was extracted into a
+      shared, file-path-parameterized `upsertEnvFile(filePath, values)`;
+      `applyInstallParams` (`.env.local`, real values) and the new
+      `applyEnvExamplePlaceholders` (`.env.example`, placeholders) both
+      reuse it rather than duplicating the parse/update/append/preserve
+      logic. Wired into `pullArtifact` as part of the existing
+      install-params pull stage.
+      **Tier 2 (proposes-and-confirms), new `wiring_actions` manifest
+      field**: `WiringActionSchema` (`type: 'suggest_snippet'`,
+      `description`, `targetFile` — project-ROOT-relative, resolved
+      against `cwd`, never `install_target`-relative — `whenAbsent`
+      requiring a snippet, `whenPresent` optional so a declared action can
+      honestly say "review before replacing" instead of forcing a snippet
+      to serve both "create from scratch" and "don't blindly overwrite" —
+      a real conflation an earlier draft had, caught before it shipped).
+      New `resolveWiringActions(wiringActions, cwd)`
+      (`src/engine/pull/wiring.ts`) — purely read-only detection, resolves
+      each action's target file against `cwd`, returns the applicable
+      variant or a synthesized "review before touching it" fallback;
+      **never writes or mutates anything**. Deliberately excludes the
+      Prisma schema merge — that's Tier 3 ("DB schema/migrations") per
+      this project's own three-tier table, not Tier 2, and needs no new
+      mechanism since the payload's `.prisma` reference file is already
+      surfaced passively via the prior item's `artifact.readPayloadFile` +
+      rendered README.
+      **Sidecar**: new `artifact.resolveWiringActions` command. **CLI**:
+      unchanged — `pull --set` already covers Tier 1's inputs.
+      **Frontend**: Detail's `detail-backend-plugin-section` gained a
+      "Wiring" subsection (gated on `wiring_actions` being non-empty, in
+      addition to the existing `install_params` gate, never a `kind`
+      check) — one card per resolved action showing the target file, an
+      exists/not-found status badge, description, instructions, and the
+      snippet when one applies. Deliberately no "apply" button anywhere in
+      this subsection — Tier 2 is inherently "go do this in your own
+      editor," matching the tier's own definition. Verified in a real
+      browser against a mocked `DeliveryOS.call`/`__TAURI__` harness (same
+      proven pattern used for the prior item): confirmed two cards render
+      for the mocked `nextauth-credentials` entry, `auth.ts` showing
+      "NOT FOUND" with its real snippet and `middleware.ts` showing
+      "EXISTS" (warning-colored) with merge-guidance instructions and no
+      snippet — matching the design exactly.
+      **Real content**: the actual, already-merged `nextauth-credentials`
+      manifest on `ai-helpers` was updated with its real 4 `wiring_actions`
+      (`auth.ts`, `middleware.ts`, the API route, `app/layout.tsx`) on a
+      new branch, verified against the rebuilt `ManifestSchema`, and
+      opened as
+      [PR #51](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/51)
+      — open, awaiting review/merge, not yet merged. Also verified
+      `artifact.resolveWiringActions` against this real (locally
+      checked-out, not-yet-merged) manifest content through the actual
+      rebuilt packaged sidecar exe: all 4 actions resolved correctly with
+      real snippet/instructions text, `targetFileExists: false` for all
+      four against a fresh fake project dir.
+      **Tests**: 6 new schema tests (`manifest.schema.test.ts`), 7 new
+      `applyEnvExamplePlaceholders` tests plus upsert-idempotency/CRLF
+      coverage (`installParams.test.ts`, 27 tests total in that file), a
+      new `wiring.test.ts` (7 tests for `resolveWiringActions`, including
+      an explicit regression guard that it resolves against `cwd` and not
+      an `install_target`-shaped subdirectory), plus new e2e coverage in
+      both `pull.e2e.test.ts` (12 tests total) and `sidecar.e2e.test.ts`
+      (19 tests: 18 pass + the same 1 pre-existing unrelated
+      GitHub-auth-boundary failure confirmed unrelated to this work on the
+      base commit). Full suite: 246 passed, 1 failed (same pre-existing,
+      unrelated failure) + typecheck + lint all clean.
+- [x] **Sequencing, once implementation actually starts**: held exactly as
+      planned — pick-target → schema extension → propose-new happened
+      strictly in order, security/provenance/Detail-Pull-UX/wiring-agent
+      proceeded independently once the real module existed, and the
+      end-to-end test came last, exercising all of it together.
+- [x] **End-to-end test:** done. A genuinely fresh Next.js App Router +
+      TypeScript project (`dos-auth-e2e`, standing up as a sibling of
+      `DOS Demo`/`DELETER` on the Desktop, via `create-next-app --src-dir`
+      — deliberately NOT `DOS Demo`, which already had this artifact
+      pulled into it from earlier, pre-signing/pre-wiring work) was used
+      as the pull target, proving every piece of Phase 7 together for
+      real, not separately:
+      - **Pull + install-time config**: `deliveryos pull nextauth-credentials
+        --set AUTH_SECRET=... --set DATABASE_URL=...` against the real,
+        merged, signed artifact — `.env.local` got the real values plus
+        `AUTH_URL`'s default, `.env.example` (Tier 1) got the right 3
+        placeholders, `missingRequiredParams` came back empty.
+      - **Signature/provenance verifies before any files are written**:
+        the real signed bundle verified successfully against a
+        completely uninitialized project.
+      - **Wiring tier boundaries, proven on real unmodified scaffold
+        content, no synthetic setup needed**: `create-next-app` already
+        generates a real `src/app/layout.tsx`, while `src/auth.ts`/
+        `src/middleware.ts`/the API route genuinely don't exist yet — so
+        calling `artifact.resolveWiringActions` here exercised BOTH
+        `whenAbsent` and `whenPresent` branches for real in one pull,
+        rather than needing a hand-built fixture for each.
+      - **Hand-applied every Tier 2 suggestion exactly as given**
+        (exactly matching the tier's own definition — a person applies
+        it, nothing auto-splices), merged the Tier 3 Prisma schema
+        snippet by hand, and ran a real `next build` (scoped to a
+        build-time proof, not a live login flow against a real Postgres
+        — deliberately out of scope for this phase, confirmed with the
+        user before starting).
+      **Three real, genuine bugs were found and fixed this way — exactly
+      what a real end-to-end test is for, none of them catchable by
+      schema/unit tests since those never compile or clone the resulting
+      code**:
+      1. **`wiring_actions`' `targetFile` paths assumed a non-`src/`
+         Next.js layout** (`auth.ts`, `app/layout.tsx`, ...), inconsistent
+         with the artifact's own `install_target: src/lib/auth`, which
+         already commits to a `src/`-based project. The real scaffold's
+         `layout.tsx` living at `src/app/layout.tsx` (not `app/layout.tsx`)
+         surfaced this immediately. Fixed on PR #51 before merging (all
+         four paths now `src/`-prefixed, matching `install_target`'s own
+         existing convention — not a new assumption, just made internally
+         consistent).
+      2. **The API route wiring snippet was wrong**: `export { GET, POST }
+         from '@/auth'` doesn't work, since `src/auth.ts`'s `NextAuth()`
+         call exports `handlers` (a bundled object), not top-level `GET`/
+         `POST` — a real `next build` failure
+         (`Export GET doesn't exist in target module`). Fixed to
+         `import { handlers } from '@/auth'; export const { GET, POST } =
+         handlers;` in both the manifest's `wiring_actions` and the
+         payload's README, via
+         [PR #53](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/53)
+         (merged) — confirmed with a clean `next build` afterward.
+      3. **A real, significant cross-platform bug in `content_digest`
+         verification itself**: `computePayloadDigest` hashes raw file
+         bytes, and git's very common Windows default
+         (`core.autocrlf=true`) checks text payload files out with CRLF
+         line endings, while the Linux GitHub Actions runner that signed
+         the artifact saw LF — a genuine, reproducible digest mismatch on
+         a completely untampered artifact, confirmed by directly
+         comparing a fresh local clone's computed digest against the
+         signed value. This would have silently broken signature
+         verification for any Windows user with this (extremely common)
+         git setting. Fixed at the root — not by normalizing at hash
+         time, but by making `cloneTo` (`src/engine/git/git.ts`) force
+         `core.autocrlf=false` on every DeliveryOS-managed clone via
+         `git clone --config core.autocrlf=false`, so the cache is always
+         byte-faithful to what's actually committed regardless of the
+         host machine's own git config. 2 new regression tests
+         (`git.test.ts`): confirms the cloned repo's local
+         `core.autocrlf` config, and confirms a real LF-committed file's
+         bytes survive checkout unconverted. Re-verified after the fix:
+         a genuinely fresh `remote.remove`/`remote.add` through the real
+         rebuilt packaged sidecar exe produced a byte-faithful clone
+         whose computed digest matched the signed value exactly, and the
+         full pull → wiring → hand-apply → `next build` chain was
+         re-run end to end afterward, cleanly.
+      Full suite after all three fixes: 265 passed, 1 pre-existing
+      unrelated failure + typecheck/lint clean. On branch
+      `phase7-detail-pull-ux`, not yet pushed.
+
+## Phase 8 — Claude Code integration: check-first, wire, and test — **Not started, brainstormed only**
+
+Goal: Claude Code checks DeliveryOS's catalog before generating new code,
+pulls a matching artifact when one exists, and — for `backend-plugin`
+artifacts — wires it in and verifies the target project actually
+builds/tests successfully afterward, catching real integration bugs the way
+a person would, not just copying files and hoping.
+
+Full background in
+[docs/product-roadmap-vision.md](docs/product-roadmap-vision.md) ("Good to
+have, later phase — a Claude Code integration" section, including the
+"How to actually build it" and tiered feature list) and a plain-language
+walkthrough was drawn out before any of this was built — see the
+conversation history for the artifact if it's still needed for reference.
+This phase turns that brainstorm into scoped tasks, same discipline every
+earlier phase here uses.
+
+**Note on sequencing, not a blocker:** same as Phase 7's own note — Tier 0's
+still-open items ("prove adoption," "track usage") outrank this in real
+priority. Recorded here because it's been asked for directly, and because
+the check-first half of this phase is itself one of the cheapest plausible
+ways to actually cause "prove adoption" to happen — not a contradiction of
+Tier 0, a bet on satisfying it.
+
+- [ ] **Build the check-first + propose-back Skill**, mirroring
+      `ui-component-extractor`'s existing structure — before generating an
+      auth module, a UI component, or a pipeline scaffold from scratch,
+      runs `deliveryos list --json` and offers to pull a match instead;
+      after something reusable gets built, offers `deliveryos push --new`.
+      Needs no new engine code — Phase 7 already proved `push --new` works
+      unmodified even for a brand-new kind, so a Skill invoking either CLI
+      command needs none either. A Skill, not an MCP server — the CLI is
+      already directly Bash-reachable, so there's no system here Claude
+      can't otherwise touch.
+- [ ] **Expose `resolveWiringActions` via the CLI.** Today it's sidecar-only
+      (used by the Tauri app's IPC, per Phase 7 item 6); nothing analogous
+      exists for the CLI. Smallest real shape: a new flag on `pull`
+      (e.g. `--show-wiring`) or a standalone `deliveryos wiring <id>`
+      command, returning the same resolved cards (target file,
+      exists/not-found, description, instructions, snippet) the Detail UI
+      already renders. This is the one concrete blocker for everything
+      below it.
+- [ ] **The wire-and-test loop.** Once the CLI can surface wiring actions,
+      the Skill applies the Tier 2 snippets to the real target file(s),
+      then runs the project's own real build/test command (whatever it
+      already is — `next build`, `npm test`, etc.), and fixes what fails
+      before reporting success. Grounded in a real precedent, not a
+      hypothetical: Phase 7's own end-to-end test found a real wiring
+      snippet bug (`GET`/`POST` weren't exported the way the snippet
+      assumed) *only because a person ran `next build` by hand afterward*
+      — this loop exists specifically to catch that class of bug
+      automatically.
+      **Scope boundary, decide explicitly before building, same as Phase
+      7's own wiring-agent decision:** applying a snippet is mechanical
+      (matches the manifest-declared card exactly); reacting to a real
+      build failure and deciding how to fix it is genuine judgment again —
+      keep these two conceptually distinct rather than assuming "the wiring
+      is deterministic" covers the whole loop.
+      Tier 3 (real secrets, DB migrations/schema) stays untouched by this
+      loop exactly as it already is by every other mechanism — nothing
+      here changes that boundary.
+- [ ] **End-to-end test:** a fresh project, no manual CLI flags typed by a
+      person — ask Claude Code for something `nextauth-credentials` (or a
+      similarly-shaped future artifact) already covers, confirm it checks
+      the catalog first, pulls the real signed artifact, applies the wiring
+      snippets, runs the project's real build, and either reports success
+      or fixes a deliberately-introduced break before reporting it.
+
+**Deliberately out of scope for this phase** (later, per the roadmap doc's
+own sequencing — depend on the above existing first, not parallel work):
+self-healing catalog (proposing a fix back when the loop finds a stale
+snippet), merge-assist for `both_changed` conflicts (§9 risk #3, uses
+three-way-merge tooling, not this loop's own mechanism), and the
+engagement-lifecycle features (harvest prompts, known-good-stack bundles).

@@ -297,6 +297,29 @@
               <div id="detail-preview-controls" class="controls-panel"></div>
             </div>
 
+            <!-- Non-visual artifacts (Phase 7, kind: backend-plugin): a
+                 rendered README, a signed/provenance badge, and a
+                 required-config checklist collecting the PROJECT's own
+                 install_params values, never the artifact's own defaults.
+                 Shown only when the manifest declares install_params --
+                 see renderDetail/renderInstallParamsSection in app.js. -->
+            <div id="detail-backend-plugin-section" hidden>
+              <div id="detail-provenance-badge" class="provenance-badge"></div>
+              <div id="detail-readme" class="detail-readme" hidden></div>
+              <form id="detail-install-params-form" class="install-params-form">
+                <div id="detail-install-params-fields"></div>
+                <button type="submit" class="btn btn-primary btn-sm">Apply configuration</button>
+              </form>
+
+              <!-- Tier 2 of the wiring agent (Phase 7 item 6): a concrete,
+                   tailored suggestion per declared wiring_action -- never an
+                   auto-applied edit. See renderWiringSection in app.js. -->
+              <div id="detail-wiring-section" hidden>
+                <div class="wiring-section-label">Wiring</div>
+                <div id="detail-wiring-actions"></div>
+              </div>
+            </div>
+
             <div class="meta-grid">
               <div><span class="k">Kind</span><br /><span id="meta-kind" class="v"></span></div>
               <div><span class="k">Version</span><br /><span id="meta-version" class="v"></span></div>

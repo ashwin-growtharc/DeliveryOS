@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import simpleGit from 'simple-git';
+import { computePayloadDigest } from '../../src/engine/provenance/digest';
 
 export interface TestArtifact {
   id: string;
@@ -212,6 +213,184 @@ export async function createTestRemoteWithPayloadPathArtifact(): Promise<string>
 
   await git.add('.');
   await git.commit('seed payload_path test artifact');
+
+  return dir;
+}
+
+/** id/installTarget/params of the extra `kind: backend-plugin` artifact
+ * seeded by createTestRemoteWithInstallParamsArtifact() -- mirrors the real
+ * `nextauth-credentials` artifact's shape (Phase 7) at test scale: one
+ * secret+required param with no default (must come from --set or the app's
+ * checklist, or it's reported missing), one non-secret+required param WITH
+ * a default (satisfied even with no input at all), and one more
+ * secret+required param with no default. Also declares two `wiring_actions`
+ * (Phase 7 item 6) mirroring the real target's two representative shapes:
+ * one with no `whenPresent` at all ("this already exists, review before
+ * touching it"), one WITH a `whenPresent` (merge-guidance instructions,
+ * still no snippet -- the real `middleware.ts` case). */
+export const INSTALL_PARAMS_ARTIFACT = {
+  id: 'test-backend-plugin',
+  installTarget: 'test-backend-plugin',
+} as const;
+
+function installParamsManifestYaml(): string {
+  const lines = [
+    `id: ${INSTALL_PARAMS_ARTIFACT.id}`,
+    `kind: backend-plugin`,
+    `description: Test backend-plugin artifact with real install_params`,
+    `owner: test-team`,
+    `version: 1.0.0`,
+    `tags:`,
+    `  roles: []`,
+    `  teams: []`,
+    `  stacks: []`,
+    `source_repo: https://example.invalid/test-remote`,
+    `install_target: ${INSTALL_PARAMS_ARTIFACT.installTarget}`,
+    `review_required: false`,
+    `install_params:`,
+    `  - key: AUTH_SECRET`,
+    `    description: Session-signing secret`,
+    `    secret: true`,
+    `    required: true`,
+    `  - key: AUTH_URL`,
+    `    description: Canonical app URL`,
+    `    secret: false`,
+    `    required: true`,
+    `    default: http://localhost:3000`,
+    `  - key: DATABASE_URL`,
+    `    description: Postgres connection string`,
+    `    secret: true`,
+    `    required: true`,
+    `wiring_actions:`,
+    `  - type: suggest_snippet`,
+    `    description: Wire up the root auth entry point`,
+    `    targetFile: auth.ts`,
+    `    whenAbsent:`,
+    `      instructions: Create auth.ts at your project root.`,
+    `      snippet: "export const { handlers, auth } = NextAuth(authConfig);"`,
+    `  - type: suggest_snippet`,
+    `    description: Wire up the auth middleware`,
+    `    targetFile: middleware.ts`,
+    `    whenAbsent:`,
+    `      instructions: Create middleware.ts at your project root.`,
+    `      snippet: "export { auth as middleware } from './auth';"`,
+    `    whenPresent:`,
+    `      instructions: Merge the auth re-export into your existing middleware.ts.`,
+  ];
+  return lines.join('\n') + '\n';
+}
+
+/**
+ * Like createTestRemote(), but seeds one additional `kind: backend-plugin`
+ * artifact (INSTALL_PARAMS_ARTIFACT) declaring real install_params -- the
+ * shape Phase 7's item 2/4 work (manifest schema + Pull-time collection)
+ * actually needs to exercise. Kept separate from createTestRemote() for the
+ * same reason every other `createTestRemoteWith*` variant is: every
+ * pre-existing test that assumes "exactly 3 seeded artifacts" keeps working
+ * unmodified.
+ */
+export async function createTestRemoteWithInstallParamsArtifact(): Promise<string> {
+  const dir = await createTestRemote();
+  const git = simpleGit(dir);
+
+  const payloadDir = path.join(dir, 'artifacts', INSTALL_PARAMS_ARTIFACT.id, 'payload');
+  fs.mkdirSync(payloadDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(payloadDir, 'README.md'),
+    `# ${INSTALL_PARAMS_ARTIFACT.id}\n\nTest backend-plugin payload.\n`,
+    'utf-8',
+  );
+
+  const manifestDir = path.join(dir, 'artifacts', INSTALL_PARAMS_ARTIFACT.id);
+  fs.writeFileSync(path.join(manifestDir, 'manifest.yaml'), installParamsManifestYaml(), 'utf-8');
+
+  await git.add('.');
+  await git.commit('seed install_params test artifact');
+
+  return dir;
+}
+
+/** id/installTarget of the extra artifact seeded by
+ * createTestRemoteWithSignedArtifact() (Phase 7 item 3). Deliberately does
+ * NOT attempt to fake a real, valid Sigstore signature -- that's proven for
+ * real against live GitHub Actions/Fulcio/Rekor (see PLAN.md). This fixture
+ * covers the two "fails closed, before any files are written" cases that
+ * DON'T require real cryptography: a declared signature with no bundle file
+ * present, and a declared signature whose content_digest doesn't match the
+ * actual payload. */
+export const SIGNED_ARTIFACT = {
+  id: 'test-signed-artifact',
+  installTarget: 'test-signed-artifact',
+} as const;
+
+function signedArtifactManifestYaml(contentDigest: string): string {
+  const lines = [
+    `id: ${SIGNED_ARTIFACT.id}`,
+    `kind: backend-plugin`,
+    `description: Test artifact declaring a signature (Phase 7 item 3)`,
+    `owner: test-team`,
+    `version: 1.0.0`,
+    `tags:`,
+    `  roles: []`,
+    `  teams: []`,
+    `  stacks: []`,
+    `source_repo: https://example.invalid/test-remote`,
+    `install_target: ${SIGNED_ARTIFACT.installTarget}`,
+    `review_required: false`,
+    `content_digest: "${contentDigest}"`,
+    `signature:`,
+    `  algorithm: cosign`,
+    `  certificate_identity: https://github.com/example/repo/.github/workflows/sign-artifacts.yml@refs/heads/main`,
+    `  oidc_issuer: https://token.actions.githubusercontent.com`,
+  ];
+  return lines.join('\n') + '\n';
+}
+
+/**
+ * Like createTestRemote(), but seeds one additional `kind: backend-plugin`
+ * artifact that declares a `content_digest`/`signature`, matching the real
+ * shape a signed `nextauth-credentials`-style artifact has once item 3's
+ * signing workflow has run. `contentDigestMatchesPayload: false` produces a
+ * manifest whose recorded digest doesn't match the real payload (a tampered/
+ * stale-record case); `includeSignatureBundle: false` omits the sibling
+ * signature.bundle file entirely (a never-signed-for-real case). Both
+ * should refuse the pull before any files are written, with no cryptography
+ * needed to prove it -- see verifyArtifactSignature's own digest-then-bundle
+ * ordering.
+ */
+export async function createTestRemoteWithSignedArtifact(options: {
+  contentDigestMatchesPayload: boolean;
+  includeSignatureBundle: boolean;
+}): Promise<string> {
+  const dir = await createTestRemote();
+  const git = simpleGit(dir);
+
+  const manifestDir = path.join(dir, 'artifacts', SIGNED_ARTIFACT.id);
+  const payloadDir = path.join(manifestDir, 'payload');
+  fs.mkdirSync(payloadDir, { recursive: true });
+  fs.writeFileSync(path.join(payloadDir, 'index.js'), 'module.exports = 1;\n', 'utf-8');
+
+  const realDigest = computePayloadDigest(payloadDir);
+  const recordedDigest = options.contentDigestMatchesPayload
+    ? realDigest
+    : `sha256:${'0'.repeat(64)}`;
+
+  fs.writeFileSync(
+    path.join(manifestDir, 'manifest.yaml'),
+    signedArtifactManifestYaml(recordedDigest),
+    'utf-8',
+  );
+
+  if (options.includeSignatureBundle) {
+    fs.writeFileSync(
+      path.join(manifestDir, 'signature.bundle'),
+      JSON.stringify({ mediaType: 'application/vnd.dev.sigstore.bundle+json;version=0.3', fake: true }),
+      'utf-8',
+    );
+  }
+
+  await git.add('.');
+  await git.commit('seed signed test artifact');
 
   return dir;
 }
