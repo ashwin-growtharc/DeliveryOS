@@ -757,12 +757,20 @@ foundation. Tracked here so it doesn't just live in a brainstorm doc.
       here too since this item named it as a Tier 0 prerequisite first.
 - [ ] Track real usage as a number, not a feeling (ARCHITECTURE.md §9 risk
       #6) — pulls/pushes/reuse counted from day one, the only way "prove
-      adoption" above becomes evidence instead of anecdote. Scope still
-      needs a decision: the doc's own governance model ("team-level
-      visible, individual restricted, no leaderboard") presupposes
-      multi-user/team-level aggregation, but DeliveryOS today has no
-      server at all — everything is local-file-based. Not started pending
-      that scoping call.
+      adoption" above becomes evidence instead of anecdote. **Scoping
+      decision made, explicitly: hold off entirely for now.** The doc's
+      own governance model ("team-level visible, individual restricted,
+      no leaderboard") presupposes multi-user/team-level aggregation, but
+      DeliveryOS today has no server at all — everything is
+      local-file-based, and guessing at a tracking shape before there's a
+      real adopter (the item above) and real usage patterns to design
+      around isn't worth building yet. Revisit once "prove adoption" has
+      an actual candidate. (Push-side reuse is a plausible free/no-new-infra
+      first cut, worth remembering when this reopens: every `push`
+      already creates a real GitHub PR with a consistent title/commit
+      convention, so "reuse via propose-back" could be counted for free
+      by querying GitHub across the org's repos — it just doesn't cover
+      pulls, which leave no signal anywhere today.)
 
 ## Phase 7 — Backend plug-and-play artifacts — **Complete**
 
