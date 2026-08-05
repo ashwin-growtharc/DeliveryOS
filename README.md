@@ -16,7 +16,13 @@ Storybook-style variant tabs and a generated props-controls panel on a
 component's Detail view — see
 [docs/ui-components-feature-design.md](docs/ui-components-feature-design.md)
 and `PLAN.md`'s Phase A/B/C entries. Phase 7 (`kind: backend-plugin` —
-auth/login-style artifacts) is now scoped in `PLAN.md` but not started. See
+auth/login-style artifacts, e.g. a real email/password Auth.js module) is
+now **complete**: install-time config collection, keyless signing verified
+at pull time before any files are written, a deterministic wiring agent
+(auto-applies mechanical setup, suggests but never silently applies edits
+to existing project files), a Detail view surfacing all of it, and a real
+end-to-end test against a freshly-scaffolded second project — see
+`PLAN.md`'s Phase 7 "In short" summary for the plain-language version. See
 [CHANGELOG.md](CHANGELOG.md) for what's shipped, [PLAN.md](PLAN.md) for
 what's left, and the [docs index](#docs-index) below for everything else.
 

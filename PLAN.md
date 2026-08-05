@@ -783,6 +783,43 @@ and [docs/scalable-architecture-research.md](docs/scalable-architecture-research
 (§3.1 entity model, §3.3 security/provenance) — this phase turns that
 brainstorm into scoped tasks, same discipline every earlier phase here uses.
 
+**In short:**
+
+- **Why this phase exists:** DeliveryOS already proved it can share
+  reusable AI-agent skills (`agent-asset`) and UI components
+  (`ui-component`) between projects. Backend building blocks — auth,
+  login, that kind of thing — are a third, materially different case:
+  they touch real credentials, need install-time setup (secrets, env
+  vars), and involve wiring several files together rather than one drop-in
+  copy. Phase 7 proves DeliveryOS can handle that third case safely, using
+  one real artifact (email/password login for Next.js) instead of a
+  hypothetical.
+- **What got built:**
+  - A way for an artifact to declare the config values it needs (e.g. a
+    session secret, a database URL) so DeliveryOS can collect them from
+    whoever's pulling it — never bakes in the original author's values.
+  - A real signing/verification pipeline: every version of this artifact
+    gets cryptographically signed when it's published, and DeliveryOS
+    checks that signature before writing anything to disk on pull —
+    catching tampering or corruption before it can happen.
+  - A "wiring agent" that automatically fills in the mechanical setup
+    (like config placeholders) and *suggests* — but never silently
+    applies — the handful of edits a real project needs to actually wire
+    the module in (its own login page, middleware, etc.), so a person
+    stays in control of anything that touches their existing code.
+  - A visual "Detail" view in the app showing all of this per artifact:
+    what it needs configured, whether it's verified, and what wiring is
+    still left to do.
+- **How it was proven real, not just "should work":** built a genuinely
+  new, untouched Next.js project from scratch and pulled the real signed
+  artifact into it end to end — config collection, signature check, and
+  wiring suggestions all exercised for real, then a real build run to
+  confirm the suggested code actually compiles. That real test caught and
+  fixed three genuine bugs (a wrong code snippet, a mismatched file path
+  convention, and a subtle Windows-vs-Linux bug that would have silently
+  broken signature checking for any Windows user) — bugs that plain unit
+  tests would never have surfaced.
+
 **Note on sequencing, not a blocker:** product-roadmap-vision.md's own
 "priority reset" puts adoption proof, the lockfile fix, closing the
 GitHub-polling loop, and usage tracking (Tier 0) ahead of this in real
