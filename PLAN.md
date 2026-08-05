@@ -749,15 +749,12 @@ foundation. Tracked here so it doesn't just live in a brainstorm doc.
       pull/push something they'd have built anyway. Not something engine
       work can do on its own; revisit once there's an actual candidate
       person/task.
-- [ ] Ship the security/provenance model
+- [x] Ship the security/provenance model
       ([scalable-architecture-research.md §3.3](docs/scalable-architecture-research.md))
-      — a real liability the moment anything beyond a UI button is shared
-      further, not hypothetical. Requires writing a GitHub Actions workflow
-      into the `ai-helpers` repo itself (cosign + OIDC signing at merge
-      time) — modifying another repo's CI/CD, which needs explicit
-      go-ahead before starting, not something to pick up autonomously.
-      Also a hard prerequisite for Phase 7 per that phase's own checklist
-      below, not just a Tier 0 nice-to-have.
+      — done, as Phase 7 item 3 below (keyless Sigstore signing, a real
+      GitHub Actions workflow on `ai-helpers`, verified at pull before any
+      files are written). This was the same work either way — recorded
+      here too since this item named it as a Tier 0 prerequisite first.
 - [ ] Track real usage as a number, not a feeling (ARCHITECTURE.md §9 risk
       #6) — pulls/pushes/reuse counted from day one, the only way "prove
       adoption" above becomes evidence instead of anecdote. Scope still
