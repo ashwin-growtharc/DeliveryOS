@@ -820,6 +820,35 @@ brainstorm into scoped tasks, same discipline every earlier phase here uses.
   broken signature checking for any Windows user) — bugs that plain unit
   tests would never have surfaced.
 
+**Walking through it, concretely** — a developer wants to add
+email/password login to their own Next.js project:
+
+1. **Browse & Pull.** They find `nextauth-credentials` in DeliveryOS and
+   run `deliveryos pull nextauth-credentials`.
+2. **Before a single file is written**, DeliveryOS checks the artifact's
+   cryptographic signature against what was recorded when it was
+   published. If someone had tampered with it in transit, or the signature
+   didn't check out, the pull would stop right here — nothing gets written.
+   It checks out, so the pull proceeds.
+3. **The reusable code lands** at `src/lib/auth/` in their project (the
+   Credentials provider, password hashing, a Prisma schema snippet).
+4. **DeliveryOS asks for the 3 things only this developer can provide**:
+   a session secret, their app's URL, and their own database connection
+   string — never the original author's values. It writes the real values
+   to `.env.local` (their private config) and blank placeholders to
+   `.env.example` (safe to commit, so a teammate knows what to fill in).
+5. **DeliveryOS then looks at what this specific project already has**
+   and shows tailored suggestions: "you don't have a `src/auth.ts` yet —
+   here's exactly what to create," and "you already have a
+   `src/app/layout.tsx` — here's the one line to add to it." It does NOT
+   edit those files itself — the developer copies the suggested code in
+   themselves, staying in control of anything that touches their own
+   project.
+6. **The developer runs their own `npm run build`** and it compiles
+   cleanly, because the suggested code was already proven to actually work
+   this way (this is exactly the real check that caught the three bugs
+   mentioned above, before any real developer could hit them).
+
 **Note on sequencing, not a blocker:** product-roadmap-vision.md's own
 "priority reset" puts adoption proof, the lockfile fix, closing the
 GitHub-polling loop, and usage tracking (Tier 0) ahead of this in real
