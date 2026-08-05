@@ -767,7 +767,7 @@ foundation. Tracked here so it doesn't just live in a brainstorm doc.
       server at all — everything is local-file-based. Not started pending
       that scoping call.
 
-## Phase 7 — Backend plug-and-play artifacts — **In progress (security/provenance model + wiring agent done; end-to-end test remains)**
+## Phase 7 — Backend plug-and-play artifacts — **Complete**
 
 Goal: a backend building block (starting with one real auth/login module)
 can be proposed, reviewed via a rendered README + required-config checklist
@@ -1113,20 +1113,87 @@ up again.
       GitHub-auth-boundary failure confirmed unrelated to this work on the
       base commit). Full suite: 246 passed, 1 failed (same pre-existing,
       unrelated failure) + typecheck + lint all clean.
-- [ ] **Sequencing, once implementation actually starts**: pick-target →
-      schema extension → propose-new (manual, cheap, existing generic
-      `push --new` path) is strictly sequential — nothing downstream has
-      a real artifact to sign/render/wire until then. Security/provenance,
-      Detail/Pull UX, and the wiring agent are genuinely independent of
-      each other once the real module exists in `ai-helpers`, and can
-      proceed in parallel (Detail/Pull UX can render an "unverified" badge
-      state while provenance is still pending — it doesn't need to block
-      on that). The end-to-end test is last by construction — it exercises
-      all of the above together against a real merge and the newly-created
-      second real Next.js project.
-- [ ] **End-to-end test:** propose the real auth module, merge it, pull it
-      into a *different* project, confirm install-time config is actually
-      collected and applied, confirm the signature/provenance verifies
-      before any files are written, and confirm the wiring agent's tier
-      boundaries hold (auto-applies what's mechanical, asks before touching
-      the app root, never touches the real secret values).
+- [x] **Sequencing, once implementation actually starts**: held exactly as
+      planned — pick-target → schema extension → propose-new happened
+      strictly in order, security/provenance/Detail-Pull-UX/wiring-agent
+      proceeded independently once the real module existed, and the
+      end-to-end test came last, exercising all of it together.
+- [x] **End-to-end test:** done. A genuinely fresh Next.js App Router +
+      TypeScript project (`dos-auth-e2e`, standing up as a sibling of
+      `DOS Demo`/`DELETER` on the Desktop, via `create-next-app --src-dir`
+      — deliberately NOT `DOS Demo`, which already had this artifact
+      pulled into it from earlier, pre-signing/pre-wiring work) was used
+      as the pull target, proving every piece of Phase 7 together for
+      real, not separately:
+      - **Pull + install-time config**: `deliveryos pull nextauth-credentials
+        --set AUTH_SECRET=... --set DATABASE_URL=...` against the real,
+        merged, signed artifact — `.env.local` got the real values plus
+        `AUTH_URL`'s default, `.env.example` (Tier 1) got the right 3
+        placeholders, `missingRequiredParams` came back empty.
+      - **Signature/provenance verifies before any files are written**:
+        the real signed bundle verified successfully against a
+        completely uninitialized project.
+      - **Wiring tier boundaries, proven on real unmodified scaffold
+        content, no synthetic setup needed**: `create-next-app` already
+        generates a real `src/app/layout.tsx`, while `src/auth.ts`/
+        `src/middleware.ts`/the API route genuinely don't exist yet — so
+        calling `artifact.resolveWiringActions` here exercised BOTH
+        `whenAbsent` and `whenPresent` branches for real in one pull,
+        rather than needing a hand-built fixture for each.
+      - **Hand-applied every Tier 2 suggestion exactly as given**
+        (exactly matching the tier's own definition — a person applies
+        it, nothing auto-splices), merged the Tier 3 Prisma schema
+        snippet by hand, and ran a real `next build` (scoped to a
+        build-time proof, not a live login flow against a real Postgres
+        — deliberately out of scope for this phase, confirmed with the
+        user before starting).
+      **Three real, genuine bugs were found and fixed this way — exactly
+      what a real end-to-end test is for, none of them catchable by
+      schema/unit tests since those never compile or clone the resulting
+      code**:
+      1. **`wiring_actions`' `targetFile` paths assumed a non-`src/`
+         Next.js layout** (`auth.ts`, `app/layout.tsx`, ...), inconsistent
+         with the artifact's own `install_target: src/lib/auth`, which
+         already commits to a `src/`-based project. The real scaffold's
+         `layout.tsx` living at `src/app/layout.tsx` (not `app/layout.tsx`)
+         surfaced this immediately. Fixed on PR #51 before merging (all
+         four paths now `src/`-prefixed, matching `install_target`'s own
+         existing convention — not a new assumption, just made internally
+         consistent).
+      2. **The API route wiring snippet was wrong**: `export { GET, POST }
+         from '@/auth'` doesn't work, since `src/auth.ts`'s `NextAuth()`
+         call exports `handlers` (a bundled object), not top-level `GET`/
+         `POST` — a real `next build` failure
+         (`Export GET doesn't exist in target module`). Fixed to
+         `import { handlers } from '@/auth'; export const { GET, POST } =
+         handlers;` in both the manifest's `wiring_actions` and the
+         payload's README, via
+         [PR #53](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/53)
+         (merged) — confirmed with a clean `next build` afterward.
+      3. **A real, significant cross-platform bug in `content_digest`
+         verification itself**: `computePayloadDigest` hashes raw file
+         bytes, and git's very common Windows default
+         (`core.autocrlf=true`) checks text payload files out with CRLF
+         line endings, while the Linux GitHub Actions runner that signed
+         the artifact saw LF — a genuine, reproducible digest mismatch on
+         a completely untampered artifact, confirmed by directly
+         comparing a fresh local clone's computed digest against the
+         signed value. This would have silently broken signature
+         verification for any Windows user with this (extremely common)
+         git setting. Fixed at the root — not by normalizing at hash
+         time, but by making `cloneTo` (`src/engine/git/git.ts`) force
+         `core.autocrlf=false` on every DeliveryOS-managed clone via
+         `git clone --config core.autocrlf=false`, so the cache is always
+         byte-faithful to what's actually committed regardless of the
+         host machine's own git config. 2 new regression tests
+         (`git.test.ts`): confirms the cloned repo's local
+         `core.autocrlf` config, and confirms a real LF-committed file's
+         bytes survive checkout unconverted. Re-verified after the fix:
+         a genuinely fresh `remote.remove`/`remote.add` through the real
+         rebuilt packaged sidecar exe produced a byte-faithful clone
+         whose computed digest matched the signed value exactly, and the
+         full pull → wiring → hand-apply → `next build` chain was
+         re-run end to end afterward, cleanly.
+      Full suite after all three fixes: 265 passed, 1 pre-existing
+      unrelated failure + typecheck/lint clean. On branch
+      `phase7-detail-pull-ux`, not yet pushed.

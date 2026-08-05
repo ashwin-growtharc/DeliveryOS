@@ -4,6 +4,34 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- **Phase 7's end-to-end test -- Phase 7 is now complete.** A genuinely
+  fresh Next.js project (`dos-auth-e2e`, not `DOS Demo`, which already had
+  this artifact pulled into it from earlier work) proved every piece of
+  Phase 7 together for real: pull + install-time config collection,
+  signature verification before any files are written, both branches of
+  the wiring agent's tier boundaries on real unmodified scaffold content
+  (a fresh `create-next-app` already has `layout.tsx` but not `auth.ts`),
+  and a real `next build` after hand-applying every Tier 2 suggestion
+  exactly as given. Found and fixed three real bugs this way -- none
+  catchable by schema/unit tests, since those never compile or clone the
+  resulting code: (1) `wiring_actions`' `targetFile` paths assumed a
+  non-`src/` layout, inconsistent with the artifact's own
+  `install_target: src/lib/auth` (fixed on PR #51); (2) the API route
+  wiring snippet was wrong -- `export { GET, POST } from '@/auth'`
+  doesn't work since `auth.ts` exports `handlers`, not top-level `GET`/
+  `POST` (fixed on PR
+  [#53](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/53),
+  confirmed with a clean `next build`); (3) a real cross-platform bug --
+  git's common Windows `core.autocrlf=true` default checks text payload
+  files out with CRLF while the Linux CI runner that signed them saw LF,
+  silently breaking verification for any such Windows user on an
+  untampered artifact. Fixed at the root: `cloneTo`
+  (`src/engine/git/git.ts`) now forces `core.autocrlf=false` on every
+  DeliveryOS-managed clone, so caches are always byte-faithful regardless
+  of the host's own git config. 2 new regression tests. Full suite: 265
+  tests, one pre-existing unrelated failure, typecheck/lint clean. On
+  branch `phase7-detail-pull-ux`, not yet pushed.
+
 - **Phase 7's security/provenance model: keyless Sigstore signing,
   verified at pull, before any files are written.** Chose the `sigstore`
   npm package over the `cosign` CLI binary deliberately -- verification
