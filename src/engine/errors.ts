@@ -62,3 +62,12 @@ export class UnsupportedRemoteError extends DeliveryOsError {}
  * were introduced). Tells the caller to re-pull rather than silently
  * treating everything as changed. */
 export class PristineSnapshotMissingError extends DeliveryOsError {}
+
+/** Thrown when a pulled artifact declares a `signature` but verification
+ * fails -- payload doesn't match the recorded `content_digest`, no
+ * signature bundle was found alongside the manifest, or the Sigstore
+ * signature over that digest doesn't check out against the recorded
+ * `certificate_identity`/`oidc_issuer`. Refuses the pull entirely, before
+ * any files are written. Never thrown for the overwhelming majority of
+ * artifacts, which declare no `signature` at all. */
+export class SignatureVerificationError extends DeliveryOsError {}

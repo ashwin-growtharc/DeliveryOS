@@ -13,6 +13,7 @@ import {
   readExistingEnvValues,
   applyEnvExamplePlaceholders,
 } from './installParams';
+import { verifyArtifactSignature } from '../provenance/verify';
 
 export interface PullResult {
   manifest: Manifest;
@@ -107,6 +108,19 @@ export async function pullArtifact(
     ? path.join(remoteDir, manifest.payload_path)
     : path.join(remoteDir, 'artifacts', manifest.id, 'payload');
   const installTarget = path.resolve(cwd, manifest.install_target);
+
+  // Verifies BEFORE any files are written -- a no-op for the overwhelming
+  // majority of artifacts, which declare no `signature` at all. The
+  // signature bundle (a real Sigstore bundle, if present) always lives
+  // alongside the manifest at artifacts/<id>/signature.bundle, regardless
+  // of any `payload_path` override -- it's a property of the manifest
+  // record, not the payload location.
+  onProgress?.('verify', 'Verifying artifact signature...');
+  const signatureBundlePath = path.join(remoteDir, 'artifacts', manifest.id, 'signature.bundle');
+  const signatureBundle = fs.existsSync(signatureBundlePath)
+    ? JSON.parse(fs.readFileSync(signatureBundlePath, 'utf-8'))
+    : undefined;
+  await verifyArtifactSignature(manifest, payloadSrc, signatureBundle);
 
   onProgress?.('copy', `Copying payload files to ${installTarget}...`);
   fs.cpSync(payloadSrc, installTarget, { recursive: true });

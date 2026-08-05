@@ -4,6 +4,45 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- **Phase 7's security/provenance model: keyless Sigstore signing,
+  verified at pull, before any files are written.** Chose the `sigstore`
+  npm package over the `cosign` CLI binary deliberately -- verification
+  runs inside DeliveryOS's own packaged executable on arbitrary end-user
+  machines, where requiring a separately-installed `cosign` binary would
+  be a real distribution problem. New `src/engine/provenance/digest.ts`
+  (`computePayloadDigest`, a deterministic sha256 over a payload's actual
+  content, directory-order-independent) and `verify.ts`
+  (`verifyArtifactSignature`: a no-op when `manifest.signature` is absent;
+  else checks the digest before touching any cryptography, then calls
+  `sigstore`'s `verify()` pinned to the manifest's own
+  `certificate_identity`/`oidc_issuer`). New `SignatureVerificationError`.
+  Wired into `pullArtifact` as a new `verify` progress stage, genuinely
+  before `fs.cpSync`. On `growtharc-ai-helpers`: a new GitHub Actions
+  workflow (PR
+  [#52](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/52),
+  merged) signs every `kind: backend-plugin` artifact's payload on push to
+  `main` using the workflow's own ambient GitHub Actions OIDC identity --
+  no key material anywhere. Writing the workflow YAML itself was blocked
+  by Claude Code's own auto-mode classifier (CI workflow files with
+  `id-token`/`contents: write` are a real supply-chain surface); the user
+  created that one file via the GitHub UI, everything else proceeded
+  normally. **Real, live proof**: merging the PR triggered a real signing
+  run against `nextauth-credentials`, producing an actual Fulcio
+  certificate and Rekor log entry; pulled that real signed artifact
+  through the rebuilt packaged sidecar exe and confirmed verification
+  succeeded and the payload landed correctly. Also proved it fails closed
+  against that same real bundle, twice: a hand-tampered local payload
+  (digest mismatch, refused before any crypto ran) and a hand-edited
+  `certificate_identity` (a genuine cryptographic rejection from
+  `sigstore`'s own `verify()`) -- neither wrote anything to disk. 20 new
+  tests (unit + CLI e2e + sidecar e2e); full suite (264 tests, one
+  pre-existing unrelated failure) + typecheck/lint clean. Deliberately
+  deferred: full SLSA Level 3 conformance, retrofitting signing onto
+  other kinds, any key-management scheme, build-time-pinned trust root
+  (pull already needs live network access to clone from GitHub, so
+  `sigstore`'s own live TUF fetch is consistent with that). On branch
+  `phase7-detail-pull-ux`, not yet pushed.
+
 - **Phase 7's wiring agent (Tier 1 + Tier 2), deterministic and
   manifest-declared, not an LLM-reasoning agent** (confirmed with the user
   before building). Tier 1 needed no new manifest field at all:

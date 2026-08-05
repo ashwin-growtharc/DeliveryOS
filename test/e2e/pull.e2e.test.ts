@@ -6,9 +6,11 @@ import { spawnSync } from 'child_process';
 import {
   createTestRemote,
   createTestRemoteWithInstallParamsArtifact,
+  createTestRemoteWithSignedArtifact,
   teardownTestRemote,
   TEST_ARTIFACTS,
   INSTALL_PARAMS_ARTIFACT,
+  SIGNED_ARTIFACT,
 } from '../fixtures/testRemote';
 
 // This e2e test drives the CLI as a real subprocess (via `tsx src/index.ts`)
@@ -337,5 +339,65 @@ describe('pull e2e', () => {
         fs.rmSync(cwd, { recursive: true, force: true });
       }
     });
+  });
+
+  describe('signature verification (Phase 7 item 3)', () => {
+    it('refuses the pull, before any files are written, when a signature is declared but no signature.bundle file exists', async () => {
+      const remoteDir = await createTestRemoteWithSignedArtifact({
+        contentDigestMatchesPayload: true,
+        includeSignatureBundle: false,
+      });
+      const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'deliveryos-e2e-signed-nobundle-'));
+      try {
+        const addResult = runCli(
+          ['remote', 'add', remoteDir, '--name', 'signed-remote-nobundle'],
+          cwd,
+          deliveryOsHome,
+        );
+        expect(addResult.status).toBe(0);
+
+        const result = runCli(
+          ['pull', SIGNED_ARTIFACT.id, '--remote', 'signed-remote-nobundle'],
+          cwd,
+          deliveryOsHome,
+        );
+
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain('no signature bundle was found');
+        expect(fs.existsSync(path.join(cwd, SIGNED_ARTIFACT.installTarget))).toBe(false);
+      } finally {
+        await teardownTestRemote(remoteDir);
+        fs.rmSync(cwd, { recursive: true, force: true });
+      }
+    }, 30_000);
+
+    it('refuses the pull, before any files are written, when the recorded content_digest does not match the actual payload', async () => {
+      const remoteDir = await createTestRemoteWithSignedArtifact({
+        contentDigestMatchesPayload: false,
+        includeSignatureBundle: true,
+      });
+      const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'deliveryos-e2e-signed-mismatch-'));
+      try {
+        const addResult = runCli(
+          ['remote', 'add', remoteDir, '--name', 'signed-remote-mismatch'],
+          cwd,
+          deliveryOsHome,
+        );
+        expect(addResult.status).toBe(0);
+
+        const result = runCli(
+          ['pull', SIGNED_ARTIFACT.id, '--remote', 'signed-remote-mismatch'],
+          cwd,
+          deliveryOsHome,
+        );
+
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain('does not match its recorded content_digest');
+        expect(fs.existsSync(path.join(cwd, SIGNED_ARTIFACT.installTarget))).toBe(false);
+      } finally {
+        await teardownTestRemote(remoteDir);
+        fs.rmSync(cwd, { recursive: true, force: true });
+      }
+    }, 30_000);
   });
 });

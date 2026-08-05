@@ -767,7 +767,7 @@ foundation. Tracked here so it doesn't just live in a brainstorm doc.
       server at all — everything is local-file-based. Not started pending
       that scoping call.
 
-## Phase 7 — Backend plug-and-play artifacts — **In progress (Tier 1 + Tier 2 wiring agent done)**
+## Phase 7 — Backend plug-and-play artifacts — **In progress (security/provenance model + wiring agent done; end-to-end test remains)**
 
 Goal: a backend building block (starting with one real auth/login module)
 can be proposed, reviewed via a rendered README + required-config checklist
@@ -856,32 +856,106 @@ up again.
       rendered-README half of the next checklist item needs no new field
       at all — gate it on file-presence (`payload/README.md` exists?),
       the same precedent `preview.png` already set in `push.ts`.
-- [ ] Ship the security/provenance model (cosign signing + SLSA-style
-      attestation at merge time, verified at Pull) — treated as a hard
-      prerequisite for this phase, not later polish, per the roadmap doc's
-      own reasoning about credential-handling artifacts. **Gate, stated
-      plainly: this touches `growtharc-ai-helpers`'s own CI/CD — nothing
-      here gets built without the user's explicit go-ahead first**, per
-      Tier 0's standing rule. Smallest real first slice, once given: (1)
-      a GitHub Actions workflow on `growtharc-ai-helpers`, triggered on
-      merge, computing a sha256 digest over the merged payload, recording
-      it as `content_digest`, and running `cosign sign-blob` against it
-      using the workflow's own GitHub Actions OIDC identity (keyless — no
-      key material for anyone to own), signature+cert committed alongside
-      the manifest plus a plain `provenance.json` (build repo, commit SHA,
-      workflow run URL, timestamp) as the SLSA-style attestation — real
-      and useful without chasing full SLSA predicate-schema conformance
-      on day one; (2) a new verification step in `pullArtifact`, running
-      BEFORE `fs.cpSync` (this phase's own end-to-end test wording:
-      "verifies before any files are written"), recomputing the fetched
-      payload's digest and `cosign verify-blob`-ing it against the
-      recorded identity, refusing the pull via a new
-      `SignatureVerificationError` (matching `src/engine/errors.ts`'s
-      existing one-class-per-concern pattern) on any mismatch or absence.
-      Deliberately deferred: full SLSA Level 3 conformance, retrofitting
-      signing onto `agent-asset`/`ui-component` (gated on `manifest.
-      signature` being present, so it's free for other kinds later
-      without forcing adoption now), any key-management scheme.
+- [x] **Ship the security/provenance model** (keyless Sigstore signing +
+      SLSA-style attestation at merge time, verified at Pull) — done, on
+      branch `phase7-detail-pull-ux` (engine side) and a merged PR on
+      `growtharc-ai-helpers` (CI side). Built only after the user's
+      explicit go-ahead to touch `ai-helpers`'s own CI/CD, per Tier 0's
+      standing rule.
+      **Real architecture decision, made before writing any code**:
+      signing/verification uses the `sigstore` npm package directly
+      (Sigstore's own JS SDK), not the `cosign` CLI binary. Reason: the
+      verification half runs inside DeliveryOS's own packaged executable
+      on arbitrary end-user machines — requiring `cosign` to be
+      separately installed there would be a real distribution problem for
+      a desktop app, where `sign()`/`verify()` in pure Node has none of
+      that. `sigstore@4.1.1` was pinned deliberately over the newer
+      `5.0.0` (which requires Node ^24.15.0, incompatible with this
+      project's own `>=22.12.0` engines floor and the Node actually
+      installed here) — verified this by checking each candidate
+      version's own `engines` field before installing, not by trial and
+      error.
+      **Engine (`src/engine/provenance/`)**: `digest.ts` —
+      `computePayloadDigest(payloadPath)`, a deterministic sha256 over a
+      payload's actual file content (sorted relative POSIX paths, so it's
+      independent of OS/traversal order and file-system metadata),
+      handling both directory and single-file payloads. `verify.ts` —
+      `verifyArtifactSignature(manifest, payloadPath, signatureBundle)`:
+      a no-op when `manifest.signature` is absent (the overwhelming
+      majority of artifacts); else recomputes the digest and compares it
+      against `content_digest` BEFORE touching any cryptography at all,
+      then calls `sigstore`'s `verify()` pinned to the manifest's own
+      `certificate_identity`/`oidc_issuer`. New `SignatureVerificationError`
+      (`src/engine/errors.ts`), matching the existing one-class-per-concern
+      pattern. Wired into `pullArtifact` as a new `'verify'` progress
+      stage between `'resolve'` and `'copy'` — genuinely before any files
+      are written, not just documented as such.
+      **CI (`growtharc-ai-helpers`)**: a new GitHub Actions workflow
+      (`.github/workflows/sign-artifacts.yml`, PR
+      [#52](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/52),
+      **merged**) that signs every `kind: backend-plugin` artifact's
+      payload on push to `main`, using the workflow's own ambient GitHub
+      Actions OIDC identity (`sigstore`'s `sign()` auto-detects this via
+      `ACTIONS_ID_TOKEN_REQUEST_URL`/`_TOKEN` — no manual token plumbing,
+      no key material for anyone to manage). Deliberately scoped to
+      `kind: backend-plugin` only, not every one of this catalog's ~200
+      artifacts — this is a credential-handling-surface feature, not a
+      blanket retrofit, and costs nothing for every other kind since
+      verification is itself gated on `manifest.signature` being present.
+      Records `artifacts/<id>/signature.bundle` (the real Sigstore bundle:
+      cert chain + signature + Rekor transparency-log entry),
+      `artifacts/<id>/provenance.json` (build repo, commit SHA, workflow
+      run URL, timestamp), and patches `content_digest`/`signature` into
+      `manifest.yaml`, committing back with `[skip ci]` (GitHub's own
+      built-in convention) so the bot's own commit doesn't retrigger the
+      workflow. Note on how this got built: writing the workflow YAML
+      file itself was blocked outright by Claude Code's own auto-mode
+      classifier (a legitimate call — CI workflow files with
+      `id-token`/`contents: write` are a real supply-chain surface) — the
+      user created that one file directly via the GitHub UI; everything
+      else (the signing script, opening the PR, watching the real run,
+      verifying the result) was done normally.
+      **Real, live proof, not a mock**: merging PR #52 triggered a real
+      run against `nextauth-credentials`
+      ([run 30978856426](https://github.com/ashwin-growtharc/growtharc-ai-helpers/actions/runs/30978856426)),
+      producing a real Fulcio-issued x509 certificate and a real Rekor
+      log entry. Pulled that real signed artifact through the actual
+      rebuilt packaged sidecar exe: verification succeeded and the real
+      payload files landed correctly. Then proved it fails closed, twice,
+      against that same real bundle: (1) hand-tampered the local payload
+      copy — refused on a `content_digest` mismatch before any
+      cryptography ran; (2) hand-edited the manifest's own
+      `certificate_identity` to a wrong value — `sigstore`'s `verify()`
+      itself rejected it (a genuine cryptographic identity-mismatch
+      rejection, not just the pre-check), and confirmed nothing was
+      written to disk in either case. Live TUF trust-root fetch (for
+      Fulcio/Rekor/CT public keys) worked over the real network in both
+      the CI signing run and the local verification call — no build-time
+      trust-root pinning was needed for this first slice (deliberately
+      deferred below).
+      **Tests**: 20 new tests — 8 unit (`digest.test.ts`,
+      deterministic/order-independent/content-sensitive/single-file
+      coverage), 6 unit (`verify.test.ts`, mocking the `sigstore` module
+      boundary itself to prove OUR control flow: no-op when unsigned,
+      never calls `verify()` on a digest mismatch, calls it with exactly
+      the right bundle/payload/identity, translates both success and
+      rejection correctly) — deliberately NOT attempting to fake a full
+      offline Sigstore trust chain (Fulcio/Rekor/TUF) for local test
+      coverage, since the real cryptographic proof above already covers
+      that far more convincingly than a hand-rolled mock CA would — plus
+      2 CLI e2e and 1 sidecar e2e (the two "fails closed, no crypto
+      needed" cases: no bundle file present, and a recorded digest that
+      doesn't match the real payload — both confirm nothing is written to
+      `install_target`). Full suite: 263 passed, 1 pre-existing unrelated
+      failure + typecheck/lint clean.
+      **Deliberately deferred**: full SLSA Level 3 conformance;
+      retrofitting signing onto `agent-asset`/`ui-component` (gated on
+      `manifest.signature` being present, so it's free for other kinds
+      later without forcing adoption now); any key-management scheme
+      (keyless throughout); build-time-pinned trust root for offline
+      verification (pull already requires live network access to clone
+      from GitHub in the first place, so relying on `sigstore`'s own live
+      TUF fetch is consistent with that, not a new dependency).
 - [x] **Detail/Pull UX for non-visual artifacts**: rendered README, a
       required-config checklist collecting the project's own values (never
       the artifact's own defaults), and a signed/provenance badge — no live

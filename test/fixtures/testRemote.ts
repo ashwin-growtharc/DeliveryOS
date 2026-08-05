@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import simpleGit from 'simple-git';
+import { computePayloadDigest } from '../../src/engine/provenance/digest';
 
 export interface TestArtifact {
   id: string;
@@ -305,6 +306,91 @@ export async function createTestRemoteWithInstallParamsArtifact(): Promise<strin
 
   await git.add('.');
   await git.commit('seed install_params test artifact');
+
+  return dir;
+}
+
+/** id/installTarget of the extra artifact seeded by
+ * createTestRemoteWithSignedArtifact() (Phase 7 item 3). Deliberately does
+ * NOT attempt to fake a real, valid Sigstore signature -- that's proven for
+ * real against live GitHub Actions/Fulcio/Rekor (see PLAN.md). This fixture
+ * covers the two "fails closed, before any files are written" cases that
+ * DON'T require real cryptography: a declared signature with no bundle file
+ * present, and a declared signature whose content_digest doesn't match the
+ * actual payload. */
+export const SIGNED_ARTIFACT = {
+  id: 'test-signed-artifact',
+  installTarget: 'test-signed-artifact',
+} as const;
+
+function signedArtifactManifestYaml(contentDigest: string): string {
+  const lines = [
+    `id: ${SIGNED_ARTIFACT.id}`,
+    `kind: backend-plugin`,
+    `description: Test artifact declaring a signature (Phase 7 item 3)`,
+    `owner: test-team`,
+    `version: 1.0.0`,
+    `tags:`,
+    `  roles: []`,
+    `  teams: []`,
+    `  stacks: []`,
+    `source_repo: https://example.invalid/test-remote`,
+    `install_target: ${SIGNED_ARTIFACT.installTarget}`,
+    `review_required: false`,
+    `content_digest: "${contentDigest}"`,
+    `signature:`,
+    `  algorithm: cosign`,
+    `  certificate_identity: https://github.com/example/repo/.github/workflows/sign-artifacts.yml@refs/heads/main`,
+    `  oidc_issuer: https://token.actions.githubusercontent.com`,
+  ];
+  return lines.join('\n') + '\n';
+}
+
+/**
+ * Like createTestRemote(), but seeds one additional `kind: backend-plugin`
+ * artifact that declares a `content_digest`/`signature`, matching the real
+ * shape a signed `nextauth-credentials`-style artifact has once item 3's
+ * signing workflow has run. `contentDigestMatchesPayload: false` produces a
+ * manifest whose recorded digest doesn't match the real payload (a tampered/
+ * stale-record case); `includeSignatureBundle: false` omits the sibling
+ * signature.bundle file entirely (a never-signed-for-real case). Both
+ * should refuse the pull before any files are written, with no cryptography
+ * needed to prove it -- see verifyArtifactSignature's own digest-then-bundle
+ * ordering.
+ */
+export async function createTestRemoteWithSignedArtifact(options: {
+  contentDigestMatchesPayload: boolean;
+  includeSignatureBundle: boolean;
+}): Promise<string> {
+  const dir = await createTestRemote();
+  const git = simpleGit(dir);
+
+  const manifestDir = path.join(dir, 'artifacts', SIGNED_ARTIFACT.id);
+  const payloadDir = path.join(manifestDir, 'payload');
+  fs.mkdirSync(payloadDir, { recursive: true });
+  fs.writeFileSync(path.join(payloadDir, 'index.js'), 'module.exports = 1;\n', 'utf-8');
+
+  const realDigest = computePayloadDigest(payloadDir);
+  const recordedDigest = options.contentDigestMatchesPayload
+    ? realDigest
+    : `sha256:${'0'.repeat(64)}`;
+
+  fs.writeFileSync(
+    path.join(manifestDir, 'manifest.yaml'),
+    signedArtifactManifestYaml(recordedDigest),
+    'utf-8',
+  );
+
+  if (options.includeSignatureBundle) {
+    fs.writeFileSync(
+      path.join(manifestDir, 'signature.bundle'),
+      JSON.stringify({ mediaType: 'application/vnd.dev.sigstore.bundle+json;version=0.3', fake: true }),
+      'utf-8',
+    );
+  }
+
+  await git.add('.');
+  await git.commit('seed signed test artifact');
 
   return dir;
 }

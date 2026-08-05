@@ -8,9 +8,11 @@ import simpleGit from 'simple-git';
 import {
   createTestRemote,
   createTestRemoteWithInstallParamsArtifact,
+  createTestRemoteWithSignedArtifact,
   teardownTestRemote,
   TEST_ARTIFACTS,
   INSTALL_PARAMS_ARTIFACT,
+  SIGNED_ARTIFACT,
 } from '../fixtures/testRemote';
 import { addRemoteEntry } from '../../src/engine/remote/remoteRegistry';
 import { cloneRemote, cachePath } from '../../src/engine/remote/remoteCache';
@@ -610,6 +612,7 @@ describe('sidecar e2e', () => {
         const progressLines = session.takeProgressLines();
         expect(progressLines.map((p) => p.stage)).toEqual([
           'resolve',
+          'verify',
           'copy',
           'post_install',
           'snapshot',
@@ -656,7 +659,7 @@ describe('sidecar e2e', () => {
         expect(pullResp.ok).toBe(true);
 
         const stages = session.takeProgressLines().map((p) => p.stage);
-        expect(stages).toEqual(['resolve', 'copy', 'snapshot', 'install-params', 'lockfile']);
+        expect(stages).toEqual(['resolve', 'verify', 'copy', 'snapshot', 'install-params', 'lockfile']);
       } finally {
         await session.close();
       }
@@ -990,6 +993,38 @@ describe('sidecar e2e', () => {
       } finally {
         await session.close();
         await teardownTestRemote(wiringRemoteDir);
+      }
+    },
+    30_000,
+  );
+
+  it(
+    'artifact.pull refuses via the sidecar too (ok: false, real error surfaced), before any files are written, when a declared signature has no bundle on disk',
+    async () => {
+      const signedRemoteDir = await createTestRemoteWithSignedArtifact({
+        contentDigestMatchesPayload: true,
+        includeSignatureBundle: false,
+      });
+      const cwd = newScratchCwd('signed-nobundle');
+      const session = new SidecarSession(cwd, deliveryOsHome);
+      try {
+        const remoteName = 'sidecar-remote-signed-nobundle';
+        const addResp = await session.request('remote.add', { url: signedRemoteDir, name: remoteName });
+        expect(addResp.ok).toBe(true);
+
+        const pullResp = await session.request('artifact.pull', {
+          id: SIGNED_ARTIFACT.id,
+          remote: remoteName,
+          cwd,
+        });
+
+        expect(pullResp.ok).toBe(false);
+        expect(pullResp.error?.type).toBe('SignatureVerificationError');
+        expect(pullResp.error?.message).toContain('no signature bundle was found');
+        expect(fs.existsSync(path.join(cwd, SIGNED_ARTIFACT.installTarget))).toBe(false);
+      } finally {
+        await session.close();
+        await teardownTestRemote(signedRemoteDir);
       }
     },
     30_000,
