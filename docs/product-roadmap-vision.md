@@ -361,6 +361,11 @@ few bullet points in a brainstorm doc.
 
 ## Good to have, later phase — a Claude Code integration (MCP/skill)
 
+**Now scoped into [PLAN.md](../PLAN.md)'s Phase 8** (check-first Skill →
+expose wiring via the CLI → the wire-and-test loop → an end-to-end test) —
+this section is the background that phase turns into real tasks, same
+relationship Wave 1 has to Phase 7.
+
 **Different in kind from Waves 1–4 below: not a new artifact kind, and not
 parked for lack of validated value — placed here as good-to-have, later
 phase, by explicit choice, not because the case for it is weak.**
@@ -394,6 +399,111 @@ without asking anyone to change their habits.
 Placed at good-to-have/later-phase by explicit direction, not because the
 reasoning above is wrong — revisit once Tier 0 is real and there's a
 concrete engagement to build the first version against.
+
+### How to actually build it: a Skill first, not an MCP server
+
+Checked against how Claude Code's own ecosystem is actually being built in
+practice: the working 2026 pattern is "pin one MCP per external system
+[GitHub, Postgres, Linear, Sentry], then write thin Skills that orchestrate
+them" — MCP servers exist to reach systems Claude can't otherwise touch.
+DeliveryOS's CLI doesn't qualify as one of those — it's already directly
+runnable via Bash, the same way `ui-component-extractor` already works. **A
+Skill wrapping the existing CLI is the whole v1**, not a new MCP server; a
+Skill costs about 100 tokens of context until it's actually needed, so
+there's no real cost to having it always available. An MCP server only
+becomes worth it later if something needs typed, structured calls beyond
+what shelling out provides (e.g. streaming progress) — not needed for
+anything listed below.
+
+### What it unlocks, tiered by what it actually costs
+
+**Free today — a Skill only, zero engine changes:**
+- **Check-before-build**: `deliveryos list --json` before generating an
+  auth module or component from scratch — does GrowthArc already have one?
+- **Propose-back**: `deliveryos push --new` the moment something reusable
+  gets built — Phase 7 already proved this needs no new engine code even
+  for a whole new kind, so a Skill invoking it needs none either.
+- **Guided install-param collection**: `deliveryos pull <id> --set
+  KEY=VALUE`, already real — Claude Code can just ask for the values in
+  conversation instead of a person filling out Detail's form.
+- **Fit-check**: Claude Code already sits inside the target project with
+  full context — comparing an artifact's assumed structure/dependency
+  versions against the real project needs no new mechanism at all.
+- **A smarter Scan for kinds mechanical Scan can't cover**: Phase 7
+  deliberately shipped `backend-plugin` with no Scan, since "is this
+  generic enough to share" is a judgment call a pattern-matcher can't
+  safely make. Claude Code, reasoning in conversation with whoever wrote
+  the code, is exactly the missing piece for kinds Scan doesn't reach.
+
+**One real, small gap to close first:**
+- **Wire, then verify it actually works** — apply the real shipped Wiring
+  cards' Tier 2 snippets, then run the project's own build/test command,
+  and fix what fails before declaring done. Not hypothetical: Phase 7's own
+  end-to-end test found a real wiring-snippet bug (`GET`/`POST` weren't
+  exported the way the snippet assumed) *only because a human ran `next
+  build` by hand afterward* — this loop would have caught that
+  automatically. Blocked on one real thing: `resolveWiringActions` is
+  sidecar-only today (used by the Tauri app's IPC); the CLI was
+  deliberately left unchanged in that work. Exposing it via the CLI (e.g.
+  `deliveryos pull <id> --show-wiring`) is the actual first ticket here,
+  not a detail to defer.
+- **Self-healing catalog**: once the loop above exists, a snippet it had to
+  fix (like the real API-route bug) is a live signal the *artifact's own*
+  wiring instructions are stale. Offer to propose that fix back the same
+  way Phase 7's own PR #53 fixed it by hand — every real pull becomes free
+  QA for the next person instead of the same bug getting silently
+  rediscovered per project.
+
+**Genuinely new, not just wiring things together:**
+- Visible confirmation in the transcript ("checked DeliveryOS: found
+  `nextauth-credentials`, signed ✓") so this doesn't read as a black box —
+  worth designing once the Skill above is real, not before.
+
+### Engagement-lifecycle features, same Skill, different moment
+
+Two more ideas that ride the same Skill rather than needing their own
+mechanism, aimed specifically at GrowthArc's actual delivery-shop shape
+(engagements start and end, not just "a project exists"):
+
+- **Engagement-end harvest prompt** — the moment a client engagement wraps
+  is exactly when reusable work is about to be archived and forgotten. A
+  prompt right there ("you built X/Y/Z this engagement — anything worth
+  proposing back before this closes out?") catches reuse at the cheapest
+  possible moment, instead of depending on someone remembering Scan exists
+  weeks later.
+- **"Known-good-stack" bundles per engagement type** — a single bundle
+  (template + `nextauth-credentials` + CI config + a UI kit) for "new
+  Next.js client engagement," cutting setup from days to minutes. Given
+  duplication-per-engagement is the validated pain the backend/data kinds
+  already exist to solve, this is arguably the single highest
+  time-saved-per-engagement lever on this whole page.
+
+## Also worth doing — closing the update/merge gap (§9 risk #3, still open)
+
+Not a Claude Code idea specifically — a real, already-named gap in how
+*any* pulled artifact (UI components especially, since people are most
+likely to have customized one locally) gets updated. Today: drift detection
+says `update_available`, but there's no diff — you pull and hope. Worse,
+`both_changed` (local edits *and* an upstream update collide) offers no
+merge help at all, just "pick one" — this is precisely ARCHITECTURE.md §9
+risk #3, "conflict resolution is hand-waved," still unaddressed since it
+was first flagged.
+
+**Two concrete fixes, not a research problem — this is well-trodden
+ground:**
+- **Show a real diff before updating** — old version vs. new, not just a
+  version-number bump. Cheap, especially for small self-contained UI
+  component files.
+- **Merge-assist for `both_changed`**, using the actual right tool instead
+  of reinventing one: three-way merge (diff3) is a 1979-vintage, extremely
+  well-understood algorithm — it auto-resolves everything that changed on
+  only one side and only flags true conflicts (both sides changed the same
+  line) for a person (or Claude Code) to actually reason about. Either
+  `git merge-file` (git is already a hard dependency here) or the pure-JS
+  `node-diff3` package does the mechanical three-way merge; an LLM's
+  judgment is only needed for the genuine conflict markers, not the whole
+  diff — squarely the same shape as the wire-and-test loop above, and a
+  natural second job for the same Skill once it exists.
 
 ## Wave 3 (parked, not now) — voice AI integration
 
@@ -448,13 +558,19 @@ A fork is a much bigger, much later bet, if ever.
 
 ## Open questions carried forward (not answered here, on purpose)
 
-1. Manifest schema gap: does `post_install` grow install-time *parameters*
-   (not just a fixed shell command), or does that live somewhere else
-   entirely? Backend-plugin kinds need this; nothing today provides it.
-2. Security/provenance model (§9 risk #2) — was "nice to have," should
-   probably become a real prerequisite once an auth/login kind is real.
+1. ~~Manifest schema gap: does `post_install` grow install-time
+   *parameters*~~ **Resolved, shipped in Phase 7**: `install_params` on
+   `ManifestSchema`, collected via `pull --set KEY=VALUE`.
+2. ~~Security/provenance model (§9 risk #2)~~ **Resolved, shipped in Phase
+   7**: keyless Sigstore signing + SLSA-style attestation at merge time,
+   verified before any files are written — proven against a real signed
+   artifact, including two real fails-closed cases (tampered payload,
+   wrong identity).
 3. Preview mechanism for non-visual, multi-file artifacts (data pipelines,
-   backend modules) — genuinely unsolved, not just unbuilt.
+   backend modules) — genuinely unsolved, not just unbuilt. `backend-plugin`
+   answered this with a rendered README + config checklist + provenance
+   badge (no live preview attempted) — data-pipeline kinds still don't have
+   an answer.
 4. Voice AI: new kind, new interaction modality, or both — undecided.
 5. IDE surface: extension vs. fork, replaces vs. adds-to the Tauri app —
    undecided, and probably the single highest-leverage decision in this
@@ -469,8 +585,19 @@ A fork is a much bigger, much later bet, if ever.
 8. Project context (scratch/client/internal/brownfield) as a stored,
    consulted-by-Pull-and-Push concept — currently doesn't exist at all;
    today's lockfile has no notion of *why* a project exists.
-9. Wiring/integration agent scope — a candidate three-tier framework now
-   exists above (auto-applies / proposes-and-confirms / never-touches), but
-   which concrete edits sort into which tier is still a judgment call, not
-   a designed rule — revisit once a real backend-plugin artifact exists to
-   test it against.
+9. ~~Wiring/integration agent scope~~ **Resolved, shipped in Phase 7, with
+   one answer worth remembering**: built as deterministic and
+   manifest-declared, not a live LLM-reasoning agent — confirmed with the
+   user before building, since "wiring agent" could otherwise plausibly
+   mean either. Tier 1/2 both proven against the real `nextauth-credentials`
+   artifact; Tier 3 (real secrets, DB migrations) untouched by any
+   mechanism, as designed.
+10. Whether a Claude Code Skill should ever *execute* Tier 2 wiring actions
+    (the "wire, then verify it works" idea) reopens the AI-vs-system
+    question at a different layer — the manifest-declared snippet itself
+    stays deterministic, but an agent applying it and reacting to a real
+    build failure is genuine judgment again. Worth being as explicit about
+    this boundary as the original wiring-agent decision was.
+11. Exposing `resolveWiringActions` via the CLI (today sidecar-only) — the
+    one concrete, small gap blocking any Claude Code Skill from doing
+    anything with Tier 2 wiring at all.

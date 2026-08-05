@@ -1260,3 +1260,78 @@ up again.
       Full suite after all three fixes: 265 passed, 1 pre-existing
       unrelated failure + typecheck/lint clean. On branch
       `phase7-detail-pull-ux`, not yet pushed.
+
+## Phase 8 — Claude Code integration: check-first, wire, and test — **Not started, brainstormed only**
+
+Goal: Claude Code checks DeliveryOS's catalog before generating new code,
+pulls a matching artifact when one exists, and — for `backend-plugin`
+artifacts — wires it in and verifies the target project actually
+builds/tests successfully afterward, catching real integration bugs the way
+a person would, not just copying files and hoping.
+
+Full background in
+[docs/product-roadmap-vision.md](docs/product-roadmap-vision.md) ("Good to
+have, later phase — a Claude Code integration" section, including the
+"How to actually build it" and tiered feature list) and a plain-language
+walkthrough was drawn out before any of this was built — see the
+conversation history for the artifact if it's still needed for reference.
+This phase turns that brainstorm into scoped tasks, same discipline every
+earlier phase here uses.
+
+**Note on sequencing, not a blocker:** same as Phase 7's own note — Tier 0's
+still-open items ("prove adoption," "track usage") outrank this in real
+priority. Recorded here because it's been asked for directly, and because
+the check-first half of this phase is itself one of the cheapest plausible
+ways to actually cause "prove adoption" to happen — not a contradiction of
+Tier 0, a bet on satisfying it.
+
+- [ ] **Build the check-first + propose-back Skill**, mirroring
+      `ui-component-extractor`'s existing structure — before generating an
+      auth module, a UI component, or a pipeline scaffold from scratch,
+      runs `deliveryos list --json` and offers to pull a match instead;
+      after something reusable gets built, offers `deliveryos push --new`.
+      Needs no new engine code — Phase 7 already proved `push --new` works
+      unmodified even for a brand-new kind, so a Skill invoking either CLI
+      command needs none either. A Skill, not an MCP server — the CLI is
+      already directly Bash-reachable, so there's no system here Claude
+      can't otherwise touch.
+- [ ] **Expose `resolveWiringActions` via the CLI.** Today it's sidecar-only
+      (used by the Tauri app's IPC, per Phase 7 item 6); nothing analogous
+      exists for the CLI. Smallest real shape: a new flag on `pull`
+      (e.g. `--show-wiring`) or a standalone `deliveryos wiring <id>`
+      command, returning the same resolved cards (target file,
+      exists/not-found, description, instructions, snippet) the Detail UI
+      already renders. This is the one concrete blocker for everything
+      below it.
+- [ ] **The wire-and-test loop.** Once the CLI can surface wiring actions,
+      the Skill applies the Tier 2 snippets to the real target file(s),
+      then runs the project's own real build/test command (whatever it
+      already is — `next build`, `npm test`, etc.), and fixes what fails
+      before reporting success. Grounded in a real precedent, not a
+      hypothetical: Phase 7's own end-to-end test found a real wiring
+      snippet bug (`GET`/`POST` weren't exported the way the snippet
+      assumed) *only because a person ran `next build` by hand afterward*
+      — this loop exists specifically to catch that class of bug
+      automatically.
+      **Scope boundary, decide explicitly before building, same as Phase
+      7's own wiring-agent decision:** applying a snippet is mechanical
+      (matches the manifest-declared card exactly); reacting to a real
+      build failure and deciding how to fix it is genuine judgment again —
+      keep these two conceptually distinct rather than assuming "the wiring
+      is deterministic" covers the whole loop.
+      Tier 3 (real secrets, DB migrations/schema) stays untouched by this
+      loop exactly as it already is by every other mechanism — nothing
+      here changes that boundary.
+- [ ] **End-to-end test:** a fresh project, no manual CLI flags typed by a
+      person — ask Claude Code for something `nextauth-credentials` (or a
+      similarly-shaped future artifact) already covers, confirm it checks
+      the catalog first, pulls the real signed artifact, applies the wiring
+      snippets, runs the project's real build, and either reports success
+      or fixes a deliberately-introduced break before reporting it.
+
+**Deliberately out of scope for this phase** (later, per the roadmap doc's
+own sequencing — depend on the above existing first, not parallel work):
+self-healing catalog (proposing a fix back when the loop finds a stale
+snippet), merge-assist for `both_changed` conflicts (§9 risk #3, uses
+three-way-merge tooling, not this loop's own mechanism), and the
+engagement-lifecycle features (harvest prompts, known-good-stack bundles).
