@@ -1609,6 +1609,50 @@ repeat the exact mistake Tier 0 already flagged twice this session, just
 at a bigger scale. Recorded here because it was asked for directly, not
 because that gate has been satisfied.
 
+**In short (not built yet — this is the plan, not an outcome):**
+
+- **Why this phase exists:** Phase 8 made "check first" something you ask
+  Claude Code for in conversation. This phase asks: could the app itself
+  do the mechanical half automatically, the moment someone clicks
+  **Pull**, instead of needing a conversation at all? And separately —
+  could Scan/Add New fill in an artifact's own config fields (what env
+  vars it needs, etc.) by actually reading the code, instead of a person
+  typing them in by hand?
+- **What it would build:** two genuinely different things bundled under
+  one heading, on purpose, because they carry very different risk:
+  1. **Deterministic apply-and-test on Pull** — the app applies a
+     backend-plugin's mechanical wiring itself and runs the project's
+     real build, reporting pass/fail right in the existing Pull/Push
+     progress log. No AI involved in this half at all — it's exactly the
+     same deterministic mechanism Phase 7's wiring agent already proved,
+     just triggered by a click instead of a person copying a snippet.
+  2. **An explicit "want help fixing this?" escalation on failure** —
+     only offered after something breaks, never fired automatically. This
+     one genuinely shells out to a real Claude Code process
+     (`claude --bare -p ... --allowedTools "Bash,Read,Edit"`) from the
+     desktop app itself — a materially bigger, less-supervised step than
+     anything built so far, and explicitly held for a separate, direct
+     go-ahead before any of it gets built, the same way Phase 7's
+     CI/CD-touching item was.
+- **What's still open:** whether Phase 8's ask-first version has actually
+  been tried enough to justify this yet, and the real go/no-go on the
+  agent-escalation piece specifically. Neither is assumed — both need a
+  real decision before this phase starts.
+
+**Walking through it, concretely — once built** (this hasn't happened
+yet; this is what it's meant to feel like):
+
+1. Someone clicks **Pull** on `nextauth-credentials` in the app.
+2. The app pulls it, applies the wiring automatically, and runs the
+   target project's real build — all visible in the existing progress
+   log, no terminal needed.
+3. If the build passes: done, reported right there.
+4. If it fails (say, a stale wiring snippet): the app offers "want Claude
+   Code to try fixing this?" as an explicit button — never automatic —
+   and only on that explicit click does it invoke Claude Code for real,
+   restricted to exactly the tools it needs, to diagnose and fix the
+   break before reporting back.
+
 - [ ] **Deterministic apply-and-test on Pull, no agent involved yet.** The
       app applies the mechanical wiring itself (matching the
       manifest-declared card exactly, same as the existing wiring feature)
