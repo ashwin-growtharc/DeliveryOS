@@ -1618,7 +1618,7 @@ because that gate has been satisfied.
   could Scan/Add New fill in an artifact's own config fields (what env
   vars it needs, etc.) by actually reading the code, instead of a person
   typing them in by hand?
-- **What it would build:** two genuinely different things bundled under
+- **What it would build:** three genuinely different pieces bundled under
   one heading, on purpose, because they carry very different risk:
   1. **Deterministic apply-and-test on Pull** — the app applies a
      backend-plugin's mechanical wiring itself and runs the project's
@@ -1634,6 +1634,18 @@ because that gate has been satisfied.
      anything built so far, and explicitly held for a separate, direct
      go-ahead before any of it gets built, the same way Phase 7's
      CI/CD-touching item was.
+  3. **Auto-filling Scan/Add New's own fields from real code analysis** —
+     a genuinely separate, unrelated-to-Pull piece: when someone's
+     proposing a NEW artifact (not pulling an existing one), the app reads
+     the actual code being pushed and proposes a description, tags, and —
+     concretely, not speculatively — `install_params`, by detecting real
+     `process.env.X` usage and guessing each one's key/description/
+     likely-secret/likely-required. Closes a real, already-known gap:
+     Phase 7's own `install_params` had to be hand-added after the fact,
+     since `push --new` has no way to author them today. Same lesson this
+     project already learned once (Scan's old "AI guessed" sparkle badge
+     was removed because the guess was useful but badging it as
+     AI-generated wasn't) — make the autofill good, don't decorate it.
 - **What's still open:** whether Phase 8's ask-first version has actually
   been tried enough to justify this yet, and the real go/no-go on the
   agent-escalation piece specifically. Neither is assumed — both need a
@@ -1642,6 +1654,7 @@ because that gate has been satisfied.
 **Walking through it, concretely — once built** (this hasn't happened
 yet; this is what it's meant to feel like):
 
+*Pulling an existing artifact:*
 1. Someone clicks **Pull** on `nextauth-credentials` in the app.
 2. The app pulls it, applies the wiring automatically, and runs the
    target project's real build — all visible in the existing progress
@@ -1652,6 +1665,15 @@ yet; this is what it's meant to feel like):
    and only on that explicit click does it invoke Claude Code for real,
    restricted to exactly the tools it needs, to diagnose and fix the
    break before reporting back.
+
+*Proposing a brand-new one (a genuinely separate flow, no Pull involved):*
+1. Someone's built a new backend module and opens Add New to propose it.
+2. Instead of typing out its description, tags, and every config value it
+   needs by hand, the app has already scanned the actual code, found
+   `process.env.AUTH_SECRET`/`process.env.DATABASE_URL` usage, and
+   pre-filled a draft `install_params` list — real key names, a sensible
+   guess at which ones are secrets, ready to review and correct rather
+   than author from a blank field.
 
 - [ ] **Deterministic apply-and-test on Pull, no agent involved yet.** The
       app applies the mechanical wiring itself (matching the
