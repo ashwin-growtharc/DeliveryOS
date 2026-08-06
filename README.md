@@ -23,9 +23,14 @@ at pull time before any files are written, a deterministic wiring agent
 to existing project files), a Detail view surfacing all of it, and a real
 end-to-end test against a freshly-scaffolded second project — see
 `PLAN.md`'s Phase 7 "In short" summary for the plain-language version.
-Phase 8 (a Claude Code integration — check the catalog before generating
-new code, pull a match, wire it in, and verify the target project actually
-builds before calling it done) is scoped in `PLAN.md` but not started. See
+Phase 8 (a Claude Code Skill — check the catalog before generating new
+code, pull a match, wire it in, and verify the target project actually
+builds) is now **complete** and pushed for real as `deliveryos-check-first`
+on the project's own catalog. Phase 9 (the same principle, applied to
+checking DeliveryOS's own health/status instead of generating code) is
+also **complete**, as `deliveryos-status`. Phase 10 (wiring the check→
+pull→wire→test loop directly into the app's own **Pull** button) is
+scoped in `PLAN.md` but not started. See
 [CHANGELOG.md](CHANGELOG.md) for what's shipped, [PLAN.md](PLAN.md) for
 what's left, and the [docs index](#docs-index) below for everything else.
 

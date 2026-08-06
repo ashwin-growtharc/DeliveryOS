@@ -1436,7 +1436,149 @@ type-check cleanly in a real, isolated external project (`react`/
 `MagicContainer` actually renders correctly via `react-dom/server` with
 zero DeliveryOS-specific globals present. Opened as
 [ai-helpers PR #55](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/55)
-— open, awaiting review.
+(merged).
 This is exactly the kind of finding "prove adoption" is supposed to
 surface — a real gap that only showed up from actually trying to consume
 a pulled artifact for real, not from more unit tests.
+
+## Phase 9 — Claude Code as the status/health interface — **Complete**
+
+Goal: minimal manual work, applied to checking DeliveryOS's *own* health —
+asking Claude Code "what's the status" produces the same consolidated
+typecheck/lint/test/PR-reconciliation report this session kept producing
+by hand, across several separate commands and a manual cross-check of
+PLAN.md's PR links against live GitHub state. **This is the same principle
+Phase 8 already established, applied to status-checking instead of
+code-generation** — not a new, separate initiative, and explicitly not a
+standalone dashboard/script to build in parallel.
+
+**Real friction this responds to, from this very session:** checking
+progress meant running `tsc --noEmit`, `eslint`, `vitest run`, and
+`gh pr view` separately, then noticing by hand that PLAN.md's own text
+called PR #54 and #51 "open, awaiting review" when both were already
+merged. That reconciliation step — docs vs. live reality — is exactly the
+kind of judgment call a Skill should absorb, not something a person
+re-derives every time they ask.
+
+- [x] **Built as a genuinely separate companion skill, `deliveryos-status`**
+      — not a new step bolted onto `deliveryos-check-first`. Their trigger
+      moments don't overlap (check-first fires on "build me X"; status
+      fires on "what's the status") and Claude Code's own skill
+      auto-invocation matches a request's phrasing against the skill's
+      `description` field, so blending both into one description would
+      weaken auto-triggering for both. Runs the same three commands this
+      session ran separately (`npm run typecheck`, `npm run lint`,
+      `npm test`) and summarizes pass/fail in one answer, surfacing real
+      failure output rather than a bare badge.
+- [x] **The doc-sync check, taught as judgment, not a hardcoded parser**:
+      grep both files for the real PR-URL pattern
+      (`https://github\.com/[^)]+/pull/[0-9]+`, grep-verified against this
+      repo's own docs), dedupe, `gh pr view <url> --json state,mergedAt`
+      for real state, then read each mention's surrounding text and judge
+      in plain reading comprehension whether it claims merged/open/closed
+      — deliberately not keyword-matching, since real phrasing varies
+      ("merged," "landed," "open, awaiting review, not yet merged" all
+      appear in this repo's own history). Handles the real edge cases
+      explicitly: a genuinely `CLOSED` (never merged) PR isn't drift
+      against doc text that also says closed; a `gh pr view` failure
+      reports "state unknown," never a silent skip or an assumed
+      mismatch; owner/repo is always resolved from the URL itself, since
+      this repo's own docs link PRs on both `growtharc-ai-helpers` and
+      DeliveryOS's own repo.
+- [x] **Confirmed: no new engine code.** Every check is an existing
+      CLI/`gh` call; nothing in `src/` changed for this phase.
+- [x] **Decided explicitly**: stays a request-triggered snapshot, never a
+      persistent/self-refreshing status page. Every underlying check is
+      already fast and stateless — a persistent page would mean building
+      real new infrastructure (a server, a poll schedule, staleness
+      handling) to solve a problem a ~30-second on-demand run already
+      fully solves, directly against this phase's own stated goal.
+      **Real dogfooding, not just written and left untested**: pushed as
+      `deliveryos-status` (`kind: skill`) via the actual
+      `deliveryos push --new` CLI, opened as
+      [PR #56](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/56)
+      on `ai-helpers` — open, awaiting review. Pulled back through the
+      real packaged sidecar exe into the same global skills directory
+      `deliveryos-check-first` already lives in
+      (`~/.claude/skills/deliveryos-status`), confirming it lands where
+      Claude Code actually reads skills from.
+      **A genuine run-through of the skill's own instructions against
+      this real repo, not a staged demo**: typecheck/lint/test all ran
+      for real (270 passed, 1 pre-existing unrelated failure — the same
+      one this whole session has confirmed unrelated). The doc-sync check
+      found **7 real, genuine drift cases**, none manufactured: 3 in
+      PLAN.md and 4 in CHANGELOG.md, all the same shape (PR #4/#50/#51/#54
+      still described as "open, awaiting review" / "not yet merged" long
+      after they'd actually merged) — exactly the class of bug this phase
+      exists to catch, caught for real by literally following the skill's
+      own written instructions, then fixed. Re-ran the check afterward to
+      confirm zero remaining drift in either file.
+
+## Phase 10 — Claude Code wired directly into the DeliveryOS app UI — **Not started, brainstormed only**
+
+Goal: pressing **Pull** on a `backend-plugin` artifact in the app itself
+triggers check → pull → wire → test automatically, and Scan/Add New
+auto-fill their fields (description, tags, and — concretely useful, not
+speculative — `install_params`, by reading the code for `process.env.X`
+usage) instead of a person typing them in by hand.
+
+Full background in
+[docs/product-roadmap-vision.md](docs/product-roadmap-vision.md) ("A
+bigger, later step — wiring this directly into the app UI") — this phase
+turns that brainstorm into scoped tasks, same discipline every earlier
+phase here uses.
+
+**Note on sequencing, not a blocker, stated as directly as Phase 7/8/9's
+own notes were:** this is explicitly gated on Phase 8's simpler,
+ask-first version actually being tried for real first — building the
+in-app version before anyone's confirmed the CLI version even helps would
+repeat the exact mistake Tier 0 already flagged twice this session, just
+at a bigger scale. Recorded here because it was asked for directly, not
+because that gate has been satisfied.
+
+- [ ] **Deterministic apply-and-test on Pull, no agent involved yet.** The
+      app applies the mechanical wiring itself (matching the
+      manifest-declared card exactly, same as the existing wiring feature)
+      and runs the target project's own build/test command, reporting
+      pass/fail through the app's existing Pull/Push progress-log UI — no
+      new UI surface needed for this half.
+- [ ] **An explicit escalation step on failure, not an automatic one.** "Want
+      Claude Code to try fixing this?" — only offered after a real failure,
+      never fired unsupervised the instant Pull is clicked. Real reason
+      this matters, not just caution for its own sake: a terminal
+      conversation with Claude Code is inherently watched as it happens; a
+      UI button silently kicking off an agent is a materially less
+      supervised moment, and that's exactly where the Tier 3 boundary
+      ("never touches secrets/migrations") needs to be a real wall, not
+      good behavior.
+      **Settled technical decision, not left open**: shells out to
+      `claude --bare -p "<task>" --allowedTools "Bash,Read,Edit"
+      --output-format json` as a subprocess — the same shape as every
+      other CLI this project already shells out to (`git`, `gh`,
+      `deliveryos` itself) — not the Agent SDK. `--allowedTools`/`--bare`
+      give real, CLI-enforced tool restriction, which is what actually
+      matters for the Tier 3 boundary; the SDK would only earn its keep
+      for real-time per-tool approval callbacks or token-level UI
+      streaming, neither needed here. `--output-format stream-json` can
+      feed the existing progress-log UI later if a live feed is ever
+      wanted. One real limitation to remember: background Bash processes
+      it spawns are killed ~5s after the main task ends — fine for a
+      one-shot build/test, would matter if a future version ever needed to
+      keep a dev server running for a deeper smoke test.
+- [ ] **Auto-fill Scan/Add New fields from real code analysis** —
+      description, tags, and specifically `install_params` (detecting
+      `process.env.X` usage to propose key/description/likely-secret/
+      likely-required). Closes a real, already-documented gap: Phase 7's
+      own `install_params` had to be hand-added after the fact, since
+      `push --new` has no way to author them yet. **Same lesson this
+      codebase already learned, apply it again**: Scan's old "AI guessed"
+      sparkle badge was removed because the guess was useful but badging
+      it as AI-generated wasn't — make the autofill good, don't decorate
+      it.
+- [ ] **End-to-end test:** click Pull on a real `backend-plugin` artifact
+      in the app, confirm the deterministic wiring+build path runs and
+      reports correctly on a clean pull, then deliberately break a wiring
+      snippet to confirm the escalation step offers to fix it, actually
+      fixes it via the CLI subprocess, and re-reports success — plus a
+      real Scan/Add New run confirming autofilled `install_params` match
+      a real artifact's actual `process.env.X` usage.
