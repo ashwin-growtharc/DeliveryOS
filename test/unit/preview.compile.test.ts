@@ -138,6 +138,41 @@ describe('vendored React runtime (Phase B)', () => {
       fs.renameSync(reactDomHidden, reactDomDir);
     }
   });
+
+  it('compiles a component that imports { useState } from a real, untouched "react" import, and hook state actually works', async () => {
+    // A real bug found via Phase 8's own adoption test: several
+    // already-pushed ui-component artifacts (magic-container,
+    // decrypting-text, orbiting-skills, search) used
+    // `window.__DeliveryOSReactRuntime.React` directly instead of a normal
+    // `import { useState } from 'react'`, because that normal import
+    // wasn't resolvable here before REACT_EXTERNAL_NAMES was added --
+    // making them non-portable outside DeliveryOS's own preview (a real
+    // consuming project has no `window.__DeliveryOSReactRuntime` at all).
+    // This proves the fix: not just that a real `import ... from 'react'`
+    // compiles, but that the resulting hook state is REAL and reactive --
+    // clicking the button twice must show "Count: 2", not a static "0"
+    // that a stubbed-out useState might produce.
+    const realReactImportPreviewPath = path.join(
+      __dirname, '..', 'fixtures', 'preview-spike', 'RealReactImport', 'preview.tsx',
+    );
+    const { html } = await compilePreviewHtml(realReactImportPreviewPath);
+    const dom = new JSDOM(html, { runScripts: 'dangerously' });
+
+    const deadline = Date.now() + 2000;
+    let button: HTMLElement | null = null;
+    while (Date.now() < deadline) {
+      button = dom.window.document.querySelector('[data-testid="counter-button"]');
+      if (button) break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(button?.textContent).toBe('Count: 0');
+
+    button!.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    button!.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(button?.textContent).toBe('Count: 2');
+  });
 });
 
 describe('import sandboxing (Phase B)', () => {

@@ -1167,7 +1167,7 @@ up again.
       new branch, verified against the rebuilt `ManifestSchema`, and
       opened as
       [PR #51](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/51)
-      — open, awaiting review/merge, not yet merged. Also verified
+      (merged). Also verified
       `artifact.resolveWiringActions` against this real (locally
       checked-out, not-yet-merged) manifest content through the actual
       rebuilt packaged sidecar exe: all 4 actions resolved correctly with
@@ -1266,8 +1266,8 @@ up again.
          full pull → wiring → hand-apply → `next build` chain was
          re-run end to end afterward, cleanly.
       Full suite after all three fixes: 265 passed, 1 pre-existing
-      unrelated failure + typecheck/lint clean. On branch
-      `phase7-detail-pull-ux`, not yet pushed.
+      unrelated failure + typecheck/lint clean. Merged via
+      [DeliveryOS PR #2](https://github.com/ashwin-growtharc/DeliveryOS/pull/2).
 
 ## Phase 8 — Claude Code integration: check-first, wire, and test — **Complete**
 
@@ -1311,7 +1311,7 @@ Tier 0, a bet on satisfying it.
       `deliveryos-check-first` (`kind: skill`) via the actual
       `deliveryos push --new` CLI — opened as
       [PR #54](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/54)
-      on `ai-helpers`, open, awaiting review. Then pulled it back through
+      on `ai-helpers` (merged). Then pulled it back through
       the real packaged sidecar exe into a fresh scratch project and
       confirmed the manifest parsed correctly and `SKILL.md` landed at
       exactly `.claude/skills/deliveryos-check-first/SKILL.md` — the real
@@ -1382,8 +1382,61 @@ three-way-merge tooling, not this loop's own mechanism), and the
 engagement-lifecycle features (harvest prompts, known-good-stack bundles).
 
 **Real artifact, not just a design**: `deliveryos-check-first` (`kind:
-skill`) lives in `growtharc-ai-helpers` as
-[PR #54](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/54)
-— open, awaiting review. DeliveryOS's own catalog now contains the thing
-that drives its own adoption, pushed and pulled through the exact same
-pipeline it recommends to everyone else.
+skill`) lives, merged, in `growtharc-ai-helpers`
+([PR #54](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/54)).
+DeliveryOS's own catalog now contains the thing that drives its own
+adoption, pushed and pulled through the exact same pipeline it recommends
+to everyone else.
+
+**A real "prove adoption" attempt, and what it actually found**: with no
+external adopter candidate identified yet, `deliveryos-check-first` was
+installed for real into the user's own global Claude Code skills directory
+(`~/.claude/skills/deliveryos-check-first`, via a real `deliveryos pull`
+into the home directory — the manifest's `install_target:
+.claude/skills/deliveryos-check-first` resolves correctly there), then
+exercised on a genuinely undirected small task ("a card component with a
+subtle hover effect"). The check-first → evaluate → pull loop worked
+exactly as designed — `magic-container` was a real, honest match, not
+forced. But inspecting the actual pulled code surfaced a real, previously
+undiscovered bug in Phase 6's own work, not Phase 8's: **4 of the
+catalog's 6 `ui-component` artifacts (`magic-container`,
+`decrypting-text`, `orbiting-skills`, `search`) were fundamentally
+non-portable outside DeliveryOS's own preview sandbox**, destructuring
+hooks from `window.__DeliveryOSReactRuntime.React` instead of a real
+`import { useState } from 'react'` — dropped into any real consuming
+project, they crashed immediately on import
+(`Cannot read properties of undefined`). The other 2
+(`badge-showcase`, `button-showcase`) were confirmed genuinely fine
+(stateless, no hooks; `React.ReactNode`/`CSSProperties` resolve as an
+ambient global via `@types/react` itself, empirically verified with a
+real isolated `tsc` run).
+**Root cause was in DeliveryOS's own preview compiler, not the artifact
+authors**: `src/engine/preview/compile.ts`'s `esbuild.build()` call never
+marked `'react'`/`'react-dom'` `external` for a component's own source
+(only third-party vendored libraries got that treatment via
+`VENDORED_LIBRARY_NAMES`), so a real `import { useState } from 'react'`
+couldn't resolve there -- esbuild would try to resolve a real `node_modules`
+that doesn't exist in this build context and fail the whole compile. The
+runtime-global workaround was the only way anyone found to get hooks
+working under that constraint, not a mistake. **Fixed at the root**: new
+`REACT_EXTERNAL_NAMES` constant, added to the same `external` list
+alongside `VENDORED_LIBRARY_NAMES` -- the require shim already handled
+`'react'`/`'react-dom'` (`VENDORED_LIBRARY_REQUIRE_SHIM_JS`), it was just
+never reachable for a component's own source before this. New regression
+test (`preview.compile.test.ts`): a real `import { useState } from
+'react'` compiles AND produces genuinely reactive hook state (a counter
+that increments on real click events, not just "the build succeeded").
+Full suite: 42/42 existing preview tests still pass (no regression), plus
+the 1 new test. The 4 real, broken artifacts were fixed on `ai-helpers`
+(mechanical: swap the runtime-global destructuring for a normal import,
+nothing else touched) and verified three ways before pushing: (1) compile
+successfully through the real, rebuilt DeliveryOS preview compiler: (2)
+type-check cleanly in a real, isolated external project (`react`/
+`@types/react`/`lucide-react` only, no DeliveryOS runtime at all); (3)
+`MagicContainer` actually renders correctly via `react-dom/server` with
+zero DeliveryOS-specific globals present. Opened as
+[ai-helpers PR #55](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/55)
+— open, awaiting review.
+This is exactly the kind of finding "prove adoption" is supposed to
+surface — a real gap that only showed up from actually trying to consume
+a pulled artifact for real, not from more unit tests.

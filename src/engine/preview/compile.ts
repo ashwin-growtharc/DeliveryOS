@@ -116,6 +116,33 @@ async function generateTailwindCss(resolveDir: string, previewEntryPath: string)
 }
 
 /**
+ * Lets a component's own source use a real, portable `import { useState }
+ * from 'react'` (or `'react-dom'`) for hooks, instead of reaching into
+ * `window.__DeliveryOSReactRuntime.React` directly -- a real bug found via
+ * DeliveryOS's own Phase 8 adoption test: several real, already-pushed
+ * `ui-component` artifacts (`magic-container`, `decrypting-text`,
+ * `orbiting-skills`, `search`) used the runtime-global form because a
+ * normal `import` of 'react' wasn't resolvable here before this fix --
+ * esbuild would try to resolve it from a real `node_modules` that doesn't
+ * exist in this build context and fail the whole compile. That made those
+ * components' payload source fundamentally non-portable: dropped into a
+ * real consuming project, `window.__DeliveryOSReactRuntime` doesn't exist
+ * and the component crashes immediately on import.
+ *
+ * The require shim (`VENDORED_LIBRARY_REQUIRE_SHIM_JS`, below) already
+ * handles both specifiers (`if (specifier === 'react') return React;`) --
+ * it was only ever unreachable for a component's OWN source because
+ * neither name was in the `external` list passed to `esbuild.build()`.
+ * Marking them external here, same mechanism as `VENDORED_LIBRARY_NAMES`,
+ * makes a real `import { useState } from 'react'` in a component's own
+ * source resolve to the exact same vendored runtime instance JSX itself
+ * already uses (via `jsxFactory`, unaffected by this -- orthogonal
+ * mechanisms, JSX syntax vs. an explicit hook import) -- so the preview
+ * keeps working AND the component is genuinely portable outside DeliveryOS.
+ */
+const REACT_EXTERNAL_NAMES = ['react', 'react-dom'];
+
+/**
  * The allow-listed third-party UI-kit libraries a component's own source
  * may import directly (left completely untouched, per
  * .claude/skills/ui-component-extractor/SKILL.md) and still compile --
@@ -497,9 +524,11 @@ async function compileReactPreview(previewEntryPath: string): Promise<CompiledPr
     // Lets a component's own untouched `import { motion } from
     // 'framer-motion'` (etc.) compile at all -- see VENDORED_LIBRARY_NAMES
     // and VENDORED_LIBRARY_REQUIRE_SHIM_JS's own doc comments for the full
-    // mechanism. Anything NOT in this list still hits
-    // createDirectorySandboxPlugin's existing rejection exactly as before.
-    external: VENDORED_LIBRARY_NAMES,
+    // mechanism. `REACT_EXTERNAL_NAMES` (own doc comment above) does the
+    // same for a real `import { useState } from 'react'`. Anything NOT in
+    // this list still hits createDirectorySandboxPlugin's existing
+    // rejection exactly as before.
+    external: [...REACT_EXTERNAL_NAMES, ...VENDORED_LIBRARY_NAMES],
     minify: true,
     // esbuild's minifier renames top-level identifiers, which changes a
     // function's own runtime `.name` -- since the harness above reports
