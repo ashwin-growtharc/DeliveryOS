@@ -20,7 +20,7 @@ design rationale.
   stateless, so there's no real problem a dashboard would solve here.
   Pushed for real via `deliveryos push --new`
   ([PR #56](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/56),
-  open, awaiting review), pulled back through the real packaged sidecar exe
+  merged), pulled back through the real packaged sidecar exe
   into the same global skills directory `deliveryos-check-first` lives in.
   Then genuinely run against this real repo, not staged: typecheck/lint/test
   all passed (270/271, 1 pre-existing unrelated failure), and the doc-sync
