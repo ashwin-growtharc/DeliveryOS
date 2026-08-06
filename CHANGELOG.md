@@ -4,6 +4,36 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- **A real "prove adoption" attempt found a real, previously-undiscovered
+  bug in Phase 6's own work.** `deliveryos-check-first` was installed for
+  real into the user's own global Claude Code skills directory and
+  exercised on a genuinely undirected task ("a card with a hover effect").
+  The check-first/pull loop worked exactly as designed, but inspecting the
+  pulled code surfaced that 4 of the catalog's 6 `ui-component` artifacts
+  (`magic-container`, `decrypting-text`, `orbiting-skills`, `search`) were
+  fundamentally non-portable -- they destructured hooks from
+  `window.__DeliveryOSReactRuntime.React` instead of a real `import` from
+  `'react'`, crashing immediately if dropped into a real project. Root
+  cause was in DeliveryOS's own preview compiler
+  (`src/engine/preview/compile.ts`): `'react'`/`'react-dom'` were never
+  marked `external` for a component's own source, so a real `import`
+  couldn't resolve there -- the runtime-global workaround was the only way
+  anyone found to get hooks working, not a mistake. Fixed at the root: new
+  `REACT_EXTERNAL_NAMES`, added alongside the existing
+  `VENDORED_LIBRARY_NAMES` mechanism (the require shim already handled
+  both specifiers, it was just unreachable before). New regression test
+  proves real, reactive hook state works through a genuinely portable
+  import (a counter that increments on real click events). All 42
+  existing preview tests still pass -- no regression. The 4 real broken
+  artifacts were fixed and verified three ways: compile through the real
+  rebuilt preview compiler, type-check cleanly in an isolated external
+  project with no DeliveryOS runtime, and actually render via
+  `react-dom/server` with zero DeliveryOS-specific globals present.
+  Opened as
+  [ai-helpers PR #55](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/55)
+  -- open, awaiting review. Full suite: 271 passed, 1 pre-existing
+  unrelated failure.
+
 - **Phase 8 is now complete: items 2-4 (CLI wiring exposure, the
   wire-and-test loop, and a real end-to-end test).** New
   `deliveryos wiring <id> [--remote <name>] [--json]` CLI command
