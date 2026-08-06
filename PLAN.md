@@ -1293,6 +1293,45 @@ the check-first half of this phase is itself one of the cheapest plausible
 ways to actually cause "prove adoption" to happen — not a contradiction of
 Tier 0, a bet on satisfying it.
 
+**In short:**
+
+- **Why this phase exists:** with no external volunteer to "prove
+  adoption" (Tier 0's stuck item), waiting for one wasn't working. This
+  phase removes the need for one — instead of someone having to remember
+  DeliveryOS exists and deliberately go try it, a Claude Code Skill checks
+  automatically, every time, as a normal side effect of asking Claude Code
+  to build something.
+- **What got built:** `deliveryos-check-first`, a real, installed Claude
+  Code Skill — checks DeliveryOS's catalog before generating a plausible
+  reusable building block (auth, a UI component, a script), pulls a real
+  match if one exists, surfaces what wiring is still needed, applies it,
+  and runs the real project's own build to confirm it actually works
+  (not just "files got copied"). Offers to propose back anything
+  genuinely reusable once it's built.
+- **How it was proven real:** installed for real into a real global Claude
+  Code skills directory, then run on a genuinely undirected small task —
+  not a rehearsed demo. It found a real match, pulled it, and inspecting
+  the result surfaced a real, previously-unknown bug in unrelated,
+  already-shipped work (see the "real prove adoption attempt" note further
+  below) — exactly the kind of thing this phase exists to catch.
+
+**Walking through it, concretely** — someone says "add a card component
+with a hover effect to this page":
+
+1. Claude Code checks the catalog first: `deliveryos list --json`.
+2. It finds a real, honest match — `magic-container`, a container with a
+   cursor-following glow effect on hover. Not a forced fit; a genuine one.
+3. It pulls it: `deliveryos pull magic-container --remote ai-helpers`.
+4. It checks what else needs wiring in: `deliveryos wiring
+   magic-container --remote ai-helpers` (for artifacts that need it —
+   backend modules mostly; a plain UI component like this one usually
+   needs none).
+5. Real code lands in the project, ready to use — instead of writing a
+   hover-glow container from scratch.
+
+If nothing in the catalog actually fits, it just says so and builds
+normally — that's a completely normal outcome, not a failure of the check.
+
 - [x] **Build the check-first + propose-back Skill**, mirroring
       `find-skills`'s real, already-catalogued structure (frontmatter →
       "When to use" → step-by-step → concrete example interactions) —
@@ -1459,6 +1498,40 @@ called PR #54 and #51 "open, awaiting review" when both were already
 merged. That reconciliation step — docs vs. live reality — is exactly the
 kind of judgment call a Skill should absorb, not something a person
 re-derives every time they ask.
+
+**In short:**
+
+- **Why this phase exists:** checking whether DeliveryOS itself is
+  healthy used to mean running three separate commands, then manually
+  re-reading PLAN.md/CHANGELOG.md to see if any of the PR links they cite
+  had since merged without the text ever being updated. That's exactly
+  the kind of small, tedious reconciliation a person stops doing
+  regularly — and exactly the kind of thing a Skill should just do.
+- **What got built:** `deliveryos-status`, a real, installed Claude Code
+  Skill, separate from `deliveryos-check-first` (different trigger —
+  "what's the status" vs. "build me X"). Runs the project's own
+  typecheck/lint/test commands and reports pass/fail in one answer, then
+  checks every PR link in PLAN.md/CHANGELOG.md against GitHub's real,
+  live state and flags any that have drifted (a doc still says "open,
+  awaiting review" for something that's actually merged).
+- **How it was proven real:** run for real against this very repo, not
+  staged. It genuinely found 8 real cases of exactly that drift — PRs
+  that had merged after their write-up but before anyone went back and
+  updated the text — and they were fixed as a direct result.
+
+**Walking through it, concretely** — someone asks "is everything passing,
+and are the docs up to date?":
+
+1. Claude Code runs `npm run typecheck`, `npm run lint`, `npm test` and
+   reports: typecheck clean, lint clean, tests 270/271 (1 pre-existing,
+   already-confirmed-unrelated failure).
+2. It greps PLAN.md/CHANGELOG.md for every PR link, checks each one's
+   real state via `gh pr view`, and compares that against what the
+   nearby doc text actually claims.
+3. It reports, plainly: "PR #51 is described as 'open, awaiting review'
+   in PLAN.md, but it's actually merged — worth updating." Or, just as
+   often and just as valid an outcome: "No drift found — the docs match
+   reality."
 
 - [x] **Built as a genuinely separate companion skill, `deliveryos-status`**
       — not a new step bolted onto `deliveryos-check-first`. Their trigger
