@@ -4,6 +4,30 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- **Phase 9 is complete: `deliveryos-status`, a real Claude Code Skill
+  teaching the status/health check this session kept doing by hand.**
+  Genuinely separate from `deliveryos-check-first` (different trigger
+  moments -- "build me X" vs. "what's the status" -- would weaken
+  auto-invocation for both if blended into one description). Runs
+  `npm run typecheck`/`lint`/`test` and summarizes pass/fail, plus the real
+  capability this phase exists for: a doc-sync check that greps PLAN.md/
+  CHANGELOG.md for PR links, checks their real state via `gh pr view`, and
+  flags drift against what the doc text claims -- taught as reading
+  comprehension over the surrounding text, not keyword-matching, with
+  explicit handling for closed-not-merged PRs, failed lookups, and
+  cross-repo URLs. Decided explicitly: stays a request-triggered snapshot,
+  never a persistent status page -- every check is already fast and
+  stateless, so there's no real problem a dashboard would solve here.
+  Pushed for real via `deliveryos push --new`
+  ([PR #56](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/56),
+  open, awaiting review), pulled back through the real packaged sidecar exe
+  into the same global skills directory `deliveryos-check-first` lives in.
+  Then genuinely run against this real repo, not staged: typecheck/lint/test
+  all passed (270/271, 1 pre-existing unrelated failure), and the doc-sync
+  check found 8 real, unmanufactured drift cases across PLAN.md/
+  CHANGELOG.md (PRs #4/#50/#51/#54/#55 all still described as "open,
+  awaiting review" long after merging) -- fixed, then re-verified clean.
+
 - **A real "prove adoption" attempt found a real, previously-undiscovered
   bug in Phase 6's own work.** `deliveryos-check-first` was installed for
   real into the user's own global Claude Code skills directory and
@@ -31,8 +55,7 @@ design rationale.
   `react-dom/server` with zero DeliveryOS-specific globals present.
   Opened as
   [ai-helpers PR #55](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/55)
-  -- open, awaiting review. Full suite: 271 passed, 1 pre-existing
-  unrelated failure.
+  (merged). Full suite: 271 passed, 1 pre-existing unrelated failure.
 
 - **Phase 8 is now complete: items 2-4 (CLI wiring exposure, the
   wire-and-test loop, and a real end-to-end test).** New
@@ -62,8 +85,8 @@ design rationale.
   pushed as follow-up commits to the same open
   [PR #54](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/54).
   Full suite: 271 tests, one pre-existing unrelated failure, typecheck/lint
-  clean. On branch `phase8-check-first-skill`, PR
-  [#4](https://github.com/ashwin-growtharc/DeliveryOS/pull/4) open on
+  clean. Merged via
+  [PR #4](https://github.com/ashwin-growtharc/DeliveryOS/pull/4) on
   DeliveryOS itself.
 
 - **Phase 8 item 1: the check-first + propose-back Skill, aimed directly
@@ -76,7 +99,7 @@ design rationale.
   output first. Pushed for real via `deliveryos push --new` as
   `deliveryos-check-first` (`kind: skill`), opened as
   [PR #54](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/54)
-  on `ai-helpers` (open, awaiting review), then pulled back through the
+  on `ai-helpers` (merged), then pulled back through the
   real packaged sidecar exe to confirm it lands exactly where Claude Code
   reads skills from (`.claude/skills/deliveryos-check-first/SKILL.md`).
   Mirrors `find-skills`'s real, already-catalogued structure. On branch
@@ -174,7 +197,7 @@ design rationale.
   The real, already-merged `nextauth-credentials` manifest on
   `ai-helpers` was updated with its real 4 `wiring_actions`, opened as
   [PR #51](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/51)
-  -- open, awaiting review, not yet merged. Verified in a real browser
+  (merged). Verified in a real browser
   against a mocked harness, and `artifact.resolveWiringActions` verified
   against the real (locally checked-out) manifest content through the
   actual rebuilt packaged sidecar exe. 20 new tests across schema, unit,
@@ -232,7 +255,7 @@ design rationale.
   not a project-root-wide copy: `pullArtifact` has no file-merge concept,
   so scattering files across an existing project (overwriting a real
   `prisma/schema.prisma` wholesale, for instance) would be actively
-  destructive. Not yet merged — left for review.
+  destructive. Merged.
 
 - **Two Tier-0 hardening fixes, both merged** (see PLAN.md's "Tier 0
   hardening" section). `fix-lockfile-race` fixes a real, present-tense

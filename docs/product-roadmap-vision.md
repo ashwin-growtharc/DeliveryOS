@@ -505,6 +505,53 @@ ground:**
   diff — squarely the same shape as the wire-and-test loop above, and a
   natural second job for the same Skill once it exists.
 
+## A bigger, later step — wiring this directly into the app UI
+
+Everything above (the Skill, the wire-and-test loop) is initiated by
+*asking* Claude Code something. A further idea, explicitly bigger and
+explicitly gated on the Skill above actually getting tried for real first:
+pressing **Pull** on a `backend-plugin` artifact in the DeliveryOS app
+itself triggers the check → pull → wire → test loop automatically, and
+Scan/Add New auto-fill their fields (description, tags, and — concretely
+useful, not speculative — `install_params`, by reading the code for
+`process.env.X` usage) instead of a person typing them in by hand.
+
+**Two things resolved about this before it's built, not left vague:**
+
+1. **Deterministic-apply-and-test first, an agent only as an explicit
+   escalation** — not "click Pull, an autonomous agent runs unsupervised."
+   A terminal conversation with Claude Code is inherently watched as it
+   happens; a UI button silently kicking off an agent is a materially less
+   supervised moment, which is exactly where the Tier 3 boundary needs to
+   be a real wall, not good behavior. First version: the app applies the
+   mechanical wiring and runs the build itself, no LLM involved, and
+   reports pass/fail. Only on failure does it offer "want Claude Code to
+   try fixing this?" as a separate, explicit step.
+2. **The CLI, not the Agent SDK, and this is a real technical
+   conclusion, not a guess:** `claude -p` is a real, documented headless
+   mode (non-interactive, real exit codes), and — the point that actually
+   settles this — `--allowedTools`/`--bare` provide **real, CLI-enforced
+   tool restriction** (e.g. `--allowedTools "Bash,Read,Edit"`, `--bare`
+   skipping hooks/plugins/MCP entirely), not just a prompt-level
+   instruction to behave. That's exactly the enforced boundary Tier 3
+   needs, with no SDK required. The Agent SDK would only earn its keep for
+   real-time per-tool approval callbacks or token-level streaming into the
+   UI, neither of which this flow needs — `--output-format stream-json`
+   already gives a live feed compatible with the app's existing Pull/Push
+   progress log if that's ever wanted. Net: shell out to `claude --bare -p
+   ... --allowedTools "Bash,Read,Edit" --output-format json`, the same
+   shape as every other CLI this project already shells out to (`git`,
+   `gh`, `deliveryos` itself) — consistent with the codebase's own pattern,
+   not a new one. One real limitation worth remembering later: background
+   Bash processes it spawns are killed ~5s after the main task ends — fine
+   for a one-shot build/test, would matter if a future version ever needed
+   to keep a dev server running for a deeper smoke test.
+
+**Now scoped into [PLAN.md](../PLAN.md)'s Phase 10** — genuinely gated on
+Phase 8's simpler, ask-first version being tried for real first. (The
+earlier "portal?" open question was a typo, not a real concept — removed,
+nothing there to resolve.)
+
 ## Wave 3 (parked, not now) — voice AI integration
 
 **Parked as of this reprioritization** — no validated pain behind it yet;
