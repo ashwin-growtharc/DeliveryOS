@@ -1641,12 +1641,72 @@ because that gate has been satisfied.
      defaults from the local machine's real git identity
      (`git config user.name`), not a guess. Every field stays freely
      editable/removable before proposing, same as `install_params` always
-     was. **Deliberately still not attempted**: `componentTypes`
-     (button/badge/effect/...) and `roles`/`teams` — these require a
-     semantic judgment about what something *is* or *who owns it* that no
-     regex or import scan can honestly make; guessing wrong there silently
-     is worse than leaving it blank, the same argument `scan.ts`'s own doc
-     comment already made for `roles`/`teams`.
+     was. `componentTypes` and `roles`/`teams` are not guessed
+     *mechanically* — see the next bullet for how `componentTypes`'
+     gap actually got closed instead.
+  3. **"Suggest with Claude" — real judgment for the two fields static
+     analysis honestly can't fill.** Built after direct feedback that
+     mechanical detection alone left too much blank on components with no
+     JSDoc/env-var signal (`description`, `componentTypes`) — the first
+     AI-invoking capability in Add New's autofill; everything above is
+     regex/AST only. An explicit "Suggest with Claude ✨" button (never
+     automatic — costs real latency and a real API call) on the
+     Description step shells out to a real `claude -p` subprocess with
+     the payload's own source piped to it via stdin, asking for strict
+     JSON (`{description, componentTypes}`); a second button on the
+     Component Type step re-runs (or reuses the cached result from) the
+     same call. Both fields stay fully editable, same as every other
+     autofilled field. **`roles`/`teams` are still not touched even by
+     this** — they're organization-internal concepts (who owns this,
+     which team) that aren't recoverable from the code by a model any
+     more than by a regex; an LLM guessing an org's team names would just
+     sound more confident while being equally made up.
+     **Two real, tested findings that shaped how this actually got
+     built, not assumed:**
+     - **The tool-restriction flags are not a hard sandbox.** `--bare`
+       (used in item 2's own settled design) breaks authentication
+       outright here — it skips keychain reads, so a nested invocation
+       can't find real credentials (confirmed via a real failed call:
+       "Not logged in"). Dropped it. Worse: `--allowedTools ''` did
+       nothing at all in real testing (a call given zero allowed tools
+       still ran a real Bash command), and `--disallowedTools` naming
+       every real tool explicitly blocked it on 2 of 3 real attempts but
+       let it through on the third. This is accepted as a known,
+       stated limitation rather than a solved one — DeliveryOS's own
+       engine already runs arbitrary trusted shell commands on this same
+       machine under the same user (`verifyBuild.ts`, real `git`
+       pushes), so this doesn't introduce a new class of risk, but it
+       means item 2's own "CLI-enforced tool restriction" framing needs
+       revisiting whenever that item is actually built.
+     - **A real Windows command-injection bug, found and fixed, not
+       shipped.** A global npm install of `claude` is a `.cmd` shim on
+       Windows, not a raw `.exe` — `execFileSync('claude', ...)` fails
+       with `ENOENT` without `shell: true` (and `execFileSync('claude.cmd', ...)`
+       fails a different way, `EINVAL`, confirming this isn't a name
+       issue). But `shell: true` means argv gets concatenated into a
+       shell command line unescaped — putting the arbitrary,
+       payload-derived prompt text directly in argv would have been a
+       real command-injection hole (a component file containing a stray
+       `&`/`"`/`^` could break out into an arbitrary second command).
+       Fixed by never putting the prompt in argv at all: it's piped to
+       the child's stdin via the `input` option instead (confirmed
+       empirically that `claude -p` reads from stdin when piped) — only
+       fixed, hardcoded flag strings this code controls ever pass
+       through the shell-concatenated argv.
+     New `src/engine/scan/suggestMetadata.ts`
+     (`buildSuggestionPrompt`/`parseSuggestionResponse` kept pure and
+     unit-tested directly; the real subprocess call itself verified by
+     manual dogfood, not an automated test spawning a real `claude`
+     process each run). New `artifact.suggestMetadata` sidecar command.
+     **Real, unstaged verification**: ran it against a real sign-in
+     form component with zero JSDoc/frontmatter signal — returned "A
+     sign-in form component that collects email and password input and
+     calls a submit handler with the entered credentials." and
+     `componentTypes: ["form"]`, both genuinely accurate and in the
+     real catalog's own tag style. Also verified the failure path
+     cleanly (simulated `claude` missing from PATH → a real,
+     non-crashing `SuggestionError`, not a hang or a crash). 10 new unit
+     tests.
 - **What's still held back (item 2):** the actual agent-escalation piece
   — shelling out to a real `claude --bare -p ...` process from the app
   itself when a build fails — stays gated on a separate, explicit
@@ -1699,6 +1759,14 @@ packaged sidecar exe, not just tests):*
    payload with no signals produced `stacks: [typescript]` (a real fact,
    the file extension) and no `description` key at all, not an invented
    one.
+4. If Description/Component type are still blank because there's
+   genuinely nothing mechanical to find, an explicit "Suggest with
+   Claude ✨" button offers real judgment instead — verified for real: a
+   sign-in form component with no JSDoc at all got back "A sign-in form
+   component that collects email and password input and calls a submit
+   handler with the entered credentials." and `componentTypes: ["form"]`
+   from a live `claude` call, both accurate. Still just a suggestion —
+   editable/overwritable before Propose, same as everything else here.
 
 - [x] **Deterministic apply-and-test on Pull, no agent involved yet.** Done.
       New `applyDeterministicWiring` (`src/engine/pull/applyWiring.ts`) —
@@ -1757,16 +1825,26 @@ packaged sidecar exe, not just tests):*
       `claude --bare -p "<task>" --allowedTools "Bash,Read,Edit"
       --output-format json` as a subprocess — the same shape as every
       other CLI this project already shells out to (`git`, `gh`,
-      `deliveryos` itself) — not the Agent SDK. `--allowedTools`/`--bare`
-      give real, CLI-enforced tool restriction, which is what actually
-      matters for the Tier 3 boundary; the SDK would only earn its keep
-      for real-time per-tool approval callbacks or token-level UI
-      streaming, neither needed here. `--output-format stream-json` can
-      feed the existing progress-log UI later if a live feed is ever
-      wanted. One real limitation to remember: background Bash processes
-      it spawns are killed ~5s after the main task ends — fine for a
-      one-shot build/test, would matter if a future version ever needed to
-      keep a dev server running for a deeper smoke test.
+      `deliveryos` itself) — not the Agent SDK. `--output-format
+      stream-json` can feed the existing progress-log UI later if a live
+      feed is ever wanted. One real limitation to remember: background
+      Bash processes it spawns are killed ~5s after the main task ends —
+      fine for a one-shot build/test, would matter if a future version
+      ever needed to keep a dev server running for a deeper smoke test.
+      **Update, found while building the "Suggest with Claude" bullet
+      below, real testing not assumption**: the `--allowedTools`/`--bare`
+      "real, CLI-enforced tool restriction" claim this paragraph
+      originally made does not hold up. `--bare` breaks authentication
+      outright (skips keychain reads); `--allowedTools ''` didn't stop a
+      real Bash call from running at all; `--disallowedTools` naming
+      every real tool blocked it on 2 of 3 real attempts but not the
+      third. Whenever this item actually gets built, its tool-restriction
+      story needs re-deciding with that in mind — the Tier 3 boundary
+      this item exists to protect can't lean on a flag that isn't
+      reliably enforced. Not a blocker for item 2 specifically staying
+      unbuilt (nothing here changes that it's still gated on a separate
+      go-ahead), just a real correction to what was previously stated as
+      settled.
 - [x] **Auto-fill Scan/Add New's own fields from real code analysis.**
       Shipped in two passes: first scoped specifically to `install_params`
       (the concrete, closable gap this item originally named), then

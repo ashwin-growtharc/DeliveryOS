@@ -4,6 +4,40 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- **Phase 10 item 3, "Suggest with Claude": the first AI-invoking
+  capability in Add New's autofill.** Every other autofilled field is
+  pure regex/AST analysis; this adds an explicit "Suggest with Claude ✨"
+  button (never automatic) that shells out to a real `claude -p`
+  subprocess for the two fields static analysis honestly can't fill --
+  `description` and `componentTypes` -- when there's no JSDoc/frontmatter/
+  comment signal to draw from. `roles`/`teams` are still not touched even
+  by this: they're organization-internal concepts no model can recover
+  from code any better than a regex can. New
+  `src/engine/scan/suggestMetadata.ts` and `artifact.suggestMetadata`
+  sidecar command.
+  **Two real, tested findings that shaped the actual implementation:**
+  (1) the tool-restriction flags used in item 2's own "settled" design
+  aren't a hard sandbox -- `--bare` breaks authentication outright here
+  (skips keychain reads), `--allowedTools ''` didn't stop a real Bash
+  call from running, and `--disallowedTools` naming every tool blocked it
+  on 2 of 3 real attempts but not the third; accepted as a known
+  limitation rather than a solved one, since this same engine already
+  runs arbitrary trusted shell commands on this machine anyway. (2) a
+  real Windows command-injection bug, found and fixed before shipping:
+  `claude` is a `.cmd` npm shim on Windows, which `execFileSync` can only
+  invoke with `shell: true` -- but that concatenates argv into a shell
+  command line unescaped, so putting the arbitrary payload-derived prompt
+  text directly in argv would have let a stray `&`/`"`/`^` in someone's
+  source file break out into an arbitrary second command. Fixed by never
+  putting the prompt in argv at all: piped to the child's stdin instead
+  (`claude -p` reads from stdin when piped), so only fixed, hardcoded
+  flag strings ever pass through the shell-concatenated argv. Verified
+  for real against the rebuilt packaged sidecar exe: a sign-in form
+  component with zero JSDoc got back an accurate description and
+  `componentTypes: ["form"]`; a simulated missing-`claude` PATH failed
+  cleanly with a real `SuggestionError`, not a hang or a crash. 10 new
+  unit tests for the pure prompt-building/response-parsing logic.
+
 - **Phase 10 item 3 extended: real autofill now covers `stacks`,
   `description`, and `owner`, for every kind, not just `install_params`
   on backend-plugin-shaped payloads.** Follow-up to the entry below, in

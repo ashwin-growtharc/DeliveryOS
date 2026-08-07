@@ -450,7 +450,11 @@
             <div class="wizard-step" data-step="description">
               <div class="field">
                 <label for="f-description">Description</label>
-                <textarea id="f-description" required rows="3"></textarea>
+                <div class="field-with-suggest">
+                  <textarea id="f-description" required rows="3"></textarea>
+                  <button type="button" id="suggest-metadata-btn" class="btn btn-sm btn-ghost suggest-btn">Suggest with Claude ✨</button>
+                </div>
+                <p class="field-hint">Reads the real payload code and proposes a description + component type via a real Claude call -- always reviewable/editable before proposing.</p>
               </div>
             </div>
 
@@ -490,6 +494,7 @@
                 <label>Component type</label>
                 <div id="f-component-types-picker"></div>
                 <p class="field-hint">For "UI Components" artifacts (e.g. "button", "navbar", "card") -- leave blank for every other kind.</p>
+                <button type="button" id="suggest-component-types-btn" class="btn btn-sm btn-ghost suggest-btn">Suggest with Claude ✨</button>
               </div>
             </div>
 

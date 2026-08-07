@@ -41,6 +41,7 @@ import { pushArtifact, PushOptions } from './engine/push/push';
 import { checkForUpdates, resolvePendingPushes } from './engine/sync/sync';
 import { scanForNewArtifacts } from './engine/scan/scan';
 import { detectArtifactMetadata } from './engine/scan/detectArtifactMetadata';
+import { suggestMetadata } from './engine/scan/suggestMetadata';
 import { getCommitIdentity } from './engine/git/git';
 import {
   listRemotes,
@@ -352,6 +353,17 @@ const commands: Record<string, CommandHandler> = {
   'git.identity': (args) => {
     const cwd = requireString(args, 'cwd');
     return getCommitIdentity(cwd);
+  },
+
+  // The first AI-invoking command in Add New's autofill -- everything
+  // else here is static analysis. Only called on an explicit "Suggest
+  // with Claude" button click, never automatically. See
+  // suggestMetadata.ts's own doc comment for the real, tested limitations
+  // of the tool-restriction flags used here.
+  'artifact.suggestMetadata': (args) => {
+    const payloadPath = requireString(args, 'payloadPath');
+    const kind = requireString(args, 'kind');
+    return suggestMetadata(payloadPath, kind);
   },
 
   // Real preview-compile command (Phase 6, Phase B), replacing Phase A's

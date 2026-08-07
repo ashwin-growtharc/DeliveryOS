@@ -33,7 +33,9 @@ pull→wire→test loop directly into the app's own **Pull** button, plus
 code-driven autofill for Add New) is **partially complete**: deterministic
 apply-and-test on Pull is done, and Add New's autofill now covers
 `install_params`, `stacks`, `description`, and `owner` for every kind
-(not just backend-plugin); an explicit agent-escalation button on build
+(not just backend-plugin), plus an explicit "Suggest with Claude ✨"
+button for real judgment on `description`/`componentTypes` when static
+analysis finds nothing; an explicit agent-escalation button on build
 failure remains gated on a separate go-ahead. See
 [CHANGELOG.md](CHANGELOG.md) for what's shipped, [PLAN.md](PLAN.md) for
 what's left, and the [docs index](#docs-index) below for everything else.

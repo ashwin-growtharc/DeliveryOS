@@ -2610,6 +2610,58 @@
     }
   }
 
+  // "Suggest with Claude" -- the first AI-invoking capability in Add New
+  // (everything above is pure static analysis). Explicit-click only,
+  // never automatic on payload pick, since it costs real latency and a
+  // real API call. Cached per payload so clicking the second button
+  // (Component Type step) after already suggesting from Description
+  // doesn't spend a second real call for the same payload.
+  let pendingSuggestion = null; // { payloadPath, promise } | null
+
+  function runMetadataSuggestion(payloadPath, kind) {
+    if (pendingSuggestion && pendingSuggestion.payloadPath === payloadPath) {
+      return pendingSuggestion.promise;
+    }
+    const promise = call('artifact.suggestMetadata', { payloadPath, kind });
+    pendingSuggestion = { payloadPath, promise };
+    return promise;
+  }
+
+  /** Shared handler for both "Suggest with Claude" buttons -- fills
+   * whichever fields the suggestion actually returned, always overwriting
+   * (unlike the passive autofill's "only if blank" rule: clicking this is
+   * an explicit request for a fresh suggestion, so it should actually
+   * replace what's there). Never blocks/breaks the form on failure -- a
+   * toast error and the button returning to normal is the whole failure
+   * mode, same as every other detector here. */
+  async function suggestMetadataForCurrentPayload(button) {
+    if (!pendingPayloadPath) {
+      toastError(new Error('Pick a payload first.'));
+      return;
+    }
+    const kind = resolveKindFieldValue();
+    const originalLabel = button.textContent;
+    button.disabled = true;
+    button.textContent = 'Suggesting…';
+    try {
+      const suggestion = await runMetadataSuggestion(pendingPayloadPath, kind);
+      if (suggestion.description) {
+        $('f-description').value = suggestion.description;
+      }
+      if (suggestion.componentTypes && suggestion.componentTypes.length > 0) {
+        addNewComponentTypesPicker.setValues(suggestion.componentTypes);
+      }
+      if (!suggestion.description && (!suggestion.componentTypes || suggestion.componentTypes.length === 0)) {
+        toastError(new Error('Claude had no suggestion for this payload.'));
+      }
+    } catch (err) {
+      toastError(err);
+    } finally {
+      button.disabled = false;
+      button.textContent = originalLabel;
+    }
+  }
+
   /** Real default for Add New's Owner field -- the local machine's own git
    * identity (`git config user.name`), not a guess. Non-fatal on failure
    * (e.g. `state.projectDir` isn't a git repo yet): the field just stays
@@ -2647,6 +2699,7 @@
     pendingCandidateWarnings = [];
     pendingInstallParams = [];
     renderInstallParamsList();
+    pendingSuggestion = null;
     clearAddNewReviewPreviewListener();
     void prefillOwnerFromGitIdentity();
   }
@@ -3607,6 +3660,8 @@
       pendingInstallParams.push({ key: '', description: '', secret: false, required: true });
       renderInstallParamsList();
     });
+    $('suggest-metadata-btn').addEventListener('click', (ev) => void suggestMetadataForCurrentPayload(ev.currentTarget));
+    $('suggest-component-types-btn').addEventListener('click', (ev) => void suggestMetadataForCurrentPayload(ev.currentTarget));
 
     $('wizard-next-btn').addEventListener('click', () => wizardGoNext());
     $('wizard-back-btn').addEventListener('click', () => wizardGoBack());
