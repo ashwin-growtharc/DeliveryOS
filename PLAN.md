@@ -1570,7 +1570,7 @@ and are the docs up to date?":
       `deliveryos-status` (`kind: skill`) via the actual
       `deliveryos push --new` CLI, opened as
       [PR #56](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/56)
-      on `ai-helpers` — open, awaiting review. Pulled back through the
+      on `ai-helpers` (merged). Pulled back through the
       real packaged sidecar exe into the same global skills directory
       `deliveryos-check-first` already lives in
       (`~/.claude/skills/deliveryos-status`), confirming it lands where
