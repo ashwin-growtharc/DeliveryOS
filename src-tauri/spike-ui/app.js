@@ -3316,12 +3316,23 @@
     pendingPayloadPath = candidate.payloadPath;
     $('payload-path-display').textContent = candidate.payloadPath;
     pendingCandidateWarnings = candidate.warnings ?? [];
+    // Real metadata detection (Phase 10 item 3, extended) runs here too,
+    // not just from the file-picker's own pickPayload -- a scan candidate
+    // already has a real, on-disk payload path, and detection is a
+    // payload-driven signal that doesn't care how that path was chosen.
+    // Previously this only ran for the plain "+ Add New" -> pick-a-file
+    // path, so anything opened via Scan silently skipped install_params/
+    // stacks/description/owner autofill entirely -- a real gap, not a
+    // deliberate one (unlike roles/teams/componentTypes below, which stay
+    // blank on purpose).
+    await detectAndPrefillMetadata(candidate.payloadPath);
     // Jump straight to Review -- everything a scan candidate can prefill is
-    // already filled in (roles/stacks/teams are deliberately left blank for
-    // manual review, same as before), so forcing a click through 9 empty-
-    // looking steps just to reach Propose would be worse than the old flat
-    // form, not better. The Edit button on any review row still jumps back
-    // to fill in something more, roles/stacks/teams included.
+    // already filled in (roles/teams/componentTypes are deliberately left
+    // blank for manual review, same as before), so forcing a click through
+    // 9 empty-looking steps just to reach Propose would be worse than the
+    // old flat form, not better. The Edit button on any review row still
+    // jumps back to fill in something more, roles/teams/componentTypes
+    // included.
     goToWizardStep('review');
   }
 
