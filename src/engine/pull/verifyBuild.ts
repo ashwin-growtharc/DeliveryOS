@@ -1,6 +1,9 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { execSync } from 'child_process';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+
+const execAsync = promisify(exec);
 
 export interface BuildVerificationResult {
   /** False when no build command could be detected at all -- not a
@@ -60,20 +63,32 @@ export function detectBuildCommand(cwd: string): string | undefined {
 /**
  * Runs the detected build command for real, in `cwd`, and reports whether
  * it actually passed -- this is the "-and-test" half of "deterministic
- * apply-and-test on Pull" (Phase 10 item 1). `stdio: 'pipe'` (not
- * 'inherit'), matching `pullArtifact`'s own `post_install` precedent: this
- * runs inside the Tauri sidecar, whose stdout is a newline-delimited JSON
- * stream that a build command's raw output would otherwise corrupt.
+ * apply-and-test on Pull" (Phase 10 item 1).
+ *
+ * Async (`exec`, promisified), not `execSync` -- the sidecar
+ * (`src/sidecar.ts`) is a single Node process explicitly designed to
+ * handle overlapping requests concurrently (`handleLine` is fired without
+ * being awaited per line); a synchronous, blocking build command here
+ * would freeze that whole process, and every other in-flight or new
+ * command, for the build's entire duration. `exec` keeps the event loop
+ * free for that whole time instead, matching the same fix applied to
+ * `suggestMetadata`'s own subprocess call for the identical reason. Also
+ * still never lets the build's raw output touch the sidecar's own
+ * stdout (which is a newline-delimited JSON stream a build command's
+ * output would otherwise corrupt) -- `exec` always captures child
+ * stdout/stderr via pipes to produce its own `stdout`/`stderr` strings,
+ * the same effective behavior `execSync`'s explicit `stdio: 'pipe'` had
+ * to spell out.
  */
-export function runProjectBuild(cwd: string): BuildVerificationResult {
+export async function runProjectBuild(cwd: string): Promise<BuildVerificationResult> {
   const command = detectBuildCommand(cwd);
   if (!command) {
     return { ran: false };
   }
 
   try {
-    const output = execSync(command, { cwd, stdio: 'pipe' }).toString('utf-8');
-    return { ran: true, command, success: true, output };
+    const { stdout } = await execAsync(command, { cwd });
+    return { ran: true, command, success: true, output: stdout };
   } catch (err) {
     const stdout = isExecError(err) ? err.stdout?.toString('utf-8') ?? '' : '';
     const stderr = isExecError(err) ? err.stderr?.toString('utf-8') ?? '' : '';

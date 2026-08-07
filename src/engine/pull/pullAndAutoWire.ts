@@ -43,7 +43,7 @@ export async function pullAndAutoWire(
   const wiring = applyDeterministicWiring(resolved, cwd);
 
   onProgress?.('build', 'Verifying the project still builds...');
-  const build = runProjectBuild(cwd);
+  const build = await runProjectBuild(cwd);
 
   return { pullResult, wiring, build };
 }

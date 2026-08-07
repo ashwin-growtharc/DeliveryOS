@@ -1,8 +1,14 @@
 import * as fs from 'fs';
-import * as path from 'path';
+import { listFilesRecursively } from './listFiles';
 
 const SOURCE_FILE_PATTERN = /\.(ts|tsx|js|jsx|prisma)$/;
-const PROCESS_ENV_PATTERN = /process\.env\.([A-Z_][A-Z0-9_]*)/g;
+const PROCESS_ENV_DOT_PATTERN = /process\.env\.([A-Z_][A-Z0-9_]*)/g;
+// Bracket-notation access (`process.env['FOO']`/`process.env["FOO"]`) is
+// real, valid syntax distinct from dot-notation -- e.g. used when a key
+// needs to be read dynamically, or just by author preference. Missing it
+// entirely would silently under-detect any payload that happens to use
+// this form for a real env var.
+const PROCESS_ENV_BRACKET_PATTERN = /process\.env\[\s*["']([A-Z_][A-Z0-9_]*)["']\s*\]/g;
 // Prisma's own convention for referencing an env var from a schema file
 // (`datasource db { url = env("DATABASE_URL") }`) -- a real, distinct
 // syntax from `process.env.X`, worth matching directly rather than
@@ -34,26 +40,12 @@ export interface DetectedInstallParam {
   required: boolean;
 }
 
-function listSourceFiles(dir: string): string[] {
-  const found: string[] = [];
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (entry.name === 'node_modules' || entry.name.startsWith('.')) {
-      continue;
-    }
-    const fullPath = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      found.push(...listSourceFiles(fullPath));
-    } else if (SOURCE_FILE_PATTERN.test(entry.name)) {
-      found.push(fullPath);
-    }
-  }
-  return found;
-}
-
 /**
  * Phase 10 item 3: proposes `install_params` for a new artifact by
- * actually reading its payload source for real `process.env.X` (and
- * Prisma's own `env("X")`) usage -- a genuinely reliable, mechanical fact
+ * actually reading its payload source for real `process.env.X`,
+ * `process.env['X']` (bracket notation is real, distinct syntax --
+ * missing it would silently under-detect), and Prisma's own `env("X")`
+ * usage -- a genuinely reliable, mechanical fact
  * (the key name really is referenced in the code), unlike guessing what
  * it's FOR. Every proposed entry defaults `required: true` (a real,
  * deliberate simplification: a plain regex over source text can't
@@ -84,7 +76,7 @@ export function detectInstallParams(payloadPath: string): DetectedInstallParam[]
   // already-supported shape elsewhere in this codebase -- see
   // computePayloadDigest's own same handling).
   const stat = fs.statSync(payloadPath);
-  const files = stat.isFile() ? [payloadPath] : listSourceFiles(payloadPath);
+  const files = stat.isFile() ? [payloadPath] : listFilesRecursively(payloadPath, SOURCE_FILE_PATTERN);
   const keys = new Set<string>();
 
   for (const file of files) {
@@ -98,7 +90,10 @@ export function detectInstallParams(payloadPath: string): DetectedInstallParam[]
       continue;
     }
 
-    for (const match of content.matchAll(PROCESS_ENV_PATTERN)) {
+    for (const match of content.matchAll(PROCESS_ENV_DOT_PATTERN)) {
+      keys.add(match[1]);
+    }
+    for (const match of content.matchAll(PROCESS_ENV_BRACKET_PATTERN)) {
       keys.add(match[1]);
     }
     for (const match of content.matchAll(PRISMA_ENV_PATTERN)) {

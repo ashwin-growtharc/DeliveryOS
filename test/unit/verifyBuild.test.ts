@@ -54,30 +54,30 @@ describe('runProjectBuild (Phase 10 item 1)', () => {
     fs.rmSync(cwd, { recursive: true, force: true });
   });
 
-  it('reports ran: false when no build command is detected -- not an error', () => {
-    const result = runProjectBuild(cwd);
+  it('reports ran: false when no build command is detected -- not an error', async () => {
+    const result = await runProjectBuild(cwd);
     expect(result).toEqual({ ran: false });
   });
 
-  it('runs a real, genuinely passing build command for real and reports success', () => {
+  it('runs a real, genuinely passing build command for real and reports success', async () => {
     fs.writeFileSync(
       path.join(cwd, 'package.json'),
       JSON.stringify({ name: 'x', scripts: { build: 'node -e "console.log(1)"' } }),
       'utf-8',
     );
-    const result = runProjectBuild(cwd);
+    const result = await runProjectBuild(cwd);
     expect(result.ran).toBe(true);
     expect(result.command).toBe('npm run build');
     expect(result.success).toBe(true);
   }, 30_000);
 
-  it('runs a real, genuinely failing build command for real and reports failure with real output', () => {
+  it('runs a real, genuinely failing build command for real and reports failure with real output', async () => {
     fs.writeFileSync(
       path.join(cwd, 'package.json'),
       JSON.stringify({ name: 'x', scripts: { build: 'node -e "console.error(\'real build error\'); process.exit(1)"' } }),
       'utf-8',
     );
-    const result = runProjectBuild(cwd);
+    const result = await runProjectBuild(cwd);
     expect(result.ran).toBe(true);
     expect(result.success).toBe(false);
     expect(result.output).toContain('real build error');

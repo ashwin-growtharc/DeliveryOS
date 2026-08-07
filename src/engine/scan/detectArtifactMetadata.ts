@@ -3,6 +3,7 @@ import * as path from 'path';
 import { detectInstallParams, DetectedInstallParam } from './detectInstallParams';
 import { detectStacks } from './detectStacks';
 import { extractLeadingComment } from './extractLeadingComment';
+import { listFilesRecursively } from './listFiles';
 import { guessDescriptionFromFrontmatter } from '../manifest/frontmatter';
 import { parseComponentFile } from '../preview/docgen';
 
@@ -15,22 +16,6 @@ export interface DetectedArtifactMetadata {
   description: string | undefined;
 }
 
-function listComponentFiles(dir: string): string[] {
-  const found: string[] = [];
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (entry.name === 'node_modules' || entry.name.startsWith('.')) {
-      continue;
-    }
-    const fullPath = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      found.push(...listComponentFiles(fullPath));
-    } else if (COMPONENT_FILE_PATTERN.test(entry.name)) {
-      found.push(fullPath);
-    }
-  }
-  return found;
-}
-
 /** Real, author-written JSDoc on the first component that has one --
  * mirrors `detectUiComponents.ts`'s own `doc.description` wiring, but run
  * directly against a manually-picked Add New payload rather than a
@@ -38,7 +23,7 @@ function listComponentFiles(dir: string): string[] {
  * carry this through their own `ScanCandidate.description`). */
 function describeUiComponentPayload(payloadPath: string): string | undefined {
   const stat = fs.statSync(payloadPath);
-  const files = stat.isFile() ? [payloadPath] : listComponentFiles(payloadPath);
+  const files = stat.isFile() ? [payloadPath] : listFilesRecursively(payloadPath, COMPONENT_FILE_PATTERN);
 
   for (const file of files) {
     if (!COMPONENT_FILE_PATTERN.test(file)) {

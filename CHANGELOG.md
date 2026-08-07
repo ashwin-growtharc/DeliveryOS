@@ -4,6 +4,53 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- **The rest of the same top-to-bottom code review's findings, fixed the
+  same day.** Five more, all real:
+  - **Sidecar-blocking subprocess calls made async.** `suggestMetadata`
+    (`claude` calls) and `verifyBuild`'s `runProjectBuild` (`npm run
+    build`) both used synchronous, blocking `execFileSync`/`execSync` --
+    the sidecar is a single Node process explicitly designed to handle
+    overlapping requests concurrently (`handleLine` fired without being
+    awaited per line), so a blocking call froze the ENTIRE process,
+    including any other in-flight or new command, for the call's whole
+    duration -- realistically many seconds for a live AI call. Converted
+    both to real async (`execFile`/`exec`), and proved the fix, not just
+    the intent: fired a slow `artifact.suggestMetadata` call and a fast
+    `remote.list` call at the same running sidecar process 200ms apart --
+    the fast one's response came back at 1.6s while the slow one was
+    still running until 9.7s, confirming the process genuinely stayed
+    responsive. `execFile`'s async form has no `input` convenience option
+    the way the sync versions do (confirmed directly: passing one is
+    silently ignored) -- the prompt is now written to the child's own
+    `stdin` stream by hand instead.
+  - **Prompt-injection hardening for "Suggest with Claude."** A payload's
+    own source -- which could be third-party code someone didn't author
+    themselves -- is embedded in the prompt sent to `claude`, and this
+    project's own tool-restriction flags are already known not to be
+    reliably enforced (see below). The embedded source is now wrapped in
+    explicit `<UNTRUSTED_SOURCE>`/`</UNTRUSTED_SOURCE>` delimiters with a
+    direct instruction to treat it as inert data, never as instructions,
+    even if it contains text that reads like a command -- a standard,
+    real mitigation, though not a substitute for the tool-restriction
+    actually holding.
+  - **Two real "Suggest with Claude" UI bugs fixed.** The Component Type
+    step's Suggest button was silently overwriting an already-edited
+    Description (both buttons shared one handler that always touched both
+    fields) -- each button now only ever touches the field(s) it's
+    actually associated with. The suggestion cache was keyed only by
+    payload path, not kind -- changing kind after already requesting a
+    suggestion (reachable via Review's own Edit links) silently returned
+    a stale, wrong-kind suggestion; the cache key now includes kind.
+  - **A real duplicated-code cleanup.** The recursive "list every source
+    file in this payload, skipping node_modules/dotfiles" walk was
+    copy-pasted near-verbatim across four detector files. Consolidated
+    into one shared `listFilesRecursively`
+    (`src/engine/scan/listFiles.ts`).
+  - **A real detection gap closed.** `detectInstallParams` only matched
+    dot-notation (`process.env.FOO`); bracket-notation
+    (`process.env['FOO']`) is real, valid, sometimes-seen syntax that was
+    silently invisible to it. Now detects both, deduped.
+
 - **Security fix: path traversal in Phase 10 item 1's automatic wiring
   writer, found in a top-to-bottom code review and fixed the same day.**
   `applyDeterministicWiring` resolved a manifest's `wiring_actions[].target_file`

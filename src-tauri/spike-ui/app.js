@@ -2613,28 +2613,38 @@
   // "Suggest with Claude" -- the first AI-invoking capability in Add New
   // (everything above is pure static analysis). Explicit-click only,
   // never automatic on payload pick, since it costs real latency and a
-  // real API call. Cached per payload so clicking the second button
-  // (Component Type step) after already suggesting from Description
-  // doesn't spend a second real call for the same payload.
-  let pendingSuggestion = null; // { payloadPath, promise } | null
+  // real API call. Cached per (payloadPath, kind) so clicking the second
+  // button (Component Type step) after already suggesting from
+  // Description doesn't spend a second real call for the same payload --
+  // keyed on kind too, not just payloadPath: the wizard lets someone
+  // return to the Kind step via Review's Edit links and change kind
+  // after already requesting a suggestion for the same payload, and a
+  // payload-only cache key would silently hand back a suggestion
+  // generated under the wrong kind's prompt framing.
+  let pendingSuggestion = null; // { payloadPath, kind, promise } | null
 
   function runMetadataSuggestion(payloadPath, kind) {
-    if (pendingSuggestion && pendingSuggestion.payloadPath === payloadPath) {
+    if (pendingSuggestion && pendingSuggestion.payloadPath === payloadPath && pendingSuggestion.kind === kind) {
       return pendingSuggestion.promise;
     }
     const promise = call('artifact.suggestMetadata', { payloadPath, kind });
-    pendingSuggestion = { payloadPath, promise };
+    pendingSuggestion = { payloadPath, kind, promise };
     return promise;
   }
 
-  /** Shared handler for both "Suggest with Claude" buttons -- fills
-   * whichever fields the suggestion actually returned, always overwriting
-   * (unlike the passive autofill's "only if blank" rule: clicking this is
-   * an explicit request for a fresh suggestion, so it should actually
-   * replace what's there). Never blocks/breaks the form on failure -- a
-   * toast error and the button returning to normal is the whole failure
-   * mode, same as every other detector here. */
-  async function suggestMetadataForCurrentPayload(button) {
+  /** Shared handler for both "Suggest with Claude" buttons -- each button
+   * only touches the field(s) it's actually associated with, via `fields`
+   * (`{updateDescription, updateComponentTypes}`), never the other one:
+   * the Component Type step's button must never reach back and overwrite
+   * a Description someone already reviewed and hand-edited after an
+   * earlier suggestion, just because this click happens to reuse the same
+   * cached suggestion. Whichever field(s) this button does own are always
+   * overwritten (unlike the passive autofill's "only if blank" rule --
+   * clicking this is an explicit request for a fresh suggestion, so it
+   * should actually replace what's there). Never blocks/breaks the form
+   * on failure -- a toast error and the button returning to normal is the
+   * whole failure mode, same as every other detector here. */
+  async function suggestMetadataForCurrentPayload(button, fields) {
     if (!pendingPayloadPath) {
       toastError(new Error('Pick a payload first.'));
       return;
@@ -2645,13 +2655,16 @@
     button.textContent = 'Suggesting…';
     try {
       const suggestion = await runMetadataSuggestion(pendingPayloadPath, kind);
-      if (suggestion.description) {
+      const appliedDescription = fields.updateDescription && !!suggestion.description;
+      const appliedComponentTypes = fields.updateComponentTypes
+        && suggestion.componentTypes && suggestion.componentTypes.length > 0;
+      if (appliedDescription) {
         $('f-description').value = suggestion.description;
       }
-      if (suggestion.componentTypes && suggestion.componentTypes.length > 0) {
+      if (appliedComponentTypes) {
         addNewComponentTypesPicker.setValues(suggestion.componentTypes);
       }
-      if (!suggestion.description && (!suggestion.componentTypes || suggestion.componentTypes.length === 0)) {
+      if (!appliedDescription && !appliedComponentTypes) {
         toastError(new Error('Claude had no suggestion for this payload.'));
       }
     } catch (err) {
@@ -3660,8 +3673,14 @@
       pendingInstallParams.push({ key: '', description: '', secret: false, required: true });
       renderInstallParamsList();
     });
-    $('suggest-metadata-btn').addEventListener('click', (ev) => void suggestMetadataForCurrentPayload(ev.currentTarget));
-    $('suggest-component-types-btn').addEventListener('click', (ev) => void suggestMetadataForCurrentPayload(ev.currentTarget));
+    $('suggest-metadata-btn').addEventListener('click', (ev) => void suggestMetadataForCurrentPayload(
+      ev.currentTarget,
+      { updateDescription: true, updateComponentTypes: true },
+    ));
+    $('suggest-component-types-btn').addEventListener('click', (ev) => void suggestMetadataForCurrentPayload(
+      ev.currentTarget,
+      { updateDescription: false, updateComponentTypes: true },
+    ));
 
     $('wizard-next-btn').addEventListener('click', () => wizardGoNext());
     $('wizard-back-btn').addEventListener('click', () => wizardGoBack());

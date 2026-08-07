@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { listFilesRecursively } from './listFiles';
 
 const SOURCE_FILE_PATTERN = /\.(ts|tsx|js|jsx|prisma|json)$/;
 // Matches `from '...'`/`require('...')` (the common cases) as well as a
@@ -21,22 +22,6 @@ const PACKAGE_STACK_TABLE: Array<{ specifier: string; tag: string }> = [
   { specifier: '@prisma/client', tag: 'prisma' },
   { specifier: 'express', tag: 'express' },
 ];
-
-function listSourceFiles(dir: string): string[] {
-  const found: string[] = [];
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (entry.name === 'node_modules' || entry.name.startsWith('.')) {
-      continue;
-    }
-    const fullPath = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      found.push(...listSourceFiles(fullPath));
-    } else if (SOURCE_FILE_PATTERN.test(entry.name)) {
-      found.push(fullPath);
-    }
-  }
-  return found;
-}
 
 function tagForSpecifier(specifier: string): string | undefined {
   const match = PACKAGE_STACK_TABLE.find(
@@ -61,7 +46,7 @@ function tagForSpecifier(specifier: string): string | undefined {
  */
 export function detectStacks(payloadPath: string): string[] {
   const stat = fs.statSync(payloadPath);
-  const files = stat.isFile() ? [payloadPath] : listSourceFiles(payloadPath);
+  const files = stat.isFile() ? [payloadPath] : listFilesRecursively(payloadPath, SOURCE_FILE_PATTERN);
   const tags = new Set<string>();
 
   let hasTsFile = false;

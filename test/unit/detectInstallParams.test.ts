@@ -21,6 +21,25 @@ describe('detectInstallParams (Phase 10 item 3)', () => {
     expect(result).toEqual([{ key: 'AUTH_SECRET', description: '', secret: true, required: true }]);
   });
 
+  it('detects bracket-notation access (process.env[\'X\']), a real distinct syntax from dot-notation', () => {
+    fs.writeFileSync(
+      path.join(dir, 'config.ts'),
+      'const secret = process.env[\'AUTH_SECRET\'];\nconst url = process.env["AUTH_URL"];\n',
+      'utf-8',
+    );
+    const result = detectInstallParams(dir);
+    expect(result.map((p) => p.key)).toEqual(['AUTH_SECRET', 'AUTH_URL']);
+  });
+
+  it('dedupes a key referenced via both dot- and bracket-notation in the same payload', () => {
+    fs.writeFileSync(
+      path.join(dir, 'config.ts'),
+      'const a = process.env.AUTH_SECRET;\nconst b = process.env[\'AUTH_SECRET\'];\n',
+      'utf-8',
+    );
+    expect(detectInstallParams(dir)).toHaveLength(1);
+  });
+
   it('matches the real nextauth-credentials shape: AUTH_SECRET/AUTH_URL/DATABASE_URL, with the same secret/non-secret split', () => {
     fs.writeFileSync(
       path.join(dir, 'auth.config.ts'),

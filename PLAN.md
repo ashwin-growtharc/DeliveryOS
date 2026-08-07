@@ -1707,6 +1707,29 @@ because that gate has been satisfied.
      cleanly (simulated `claude` missing from PATH → a real,
      non-crashing `SuggestionError`, not a hang or a crash). 10 new unit
      tests.
+     **Four fixes from a later top-to-bottom code review, same day**:
+     (1) the subprocess call was originally `execFileSync` (blocking) --
+     converted to real async `execFile`, writing the prompt to the
+     child's own stdin by hand (the async form has no `input`
+     convenience option the sync ones do). Proved the fix for real: fired
+     a slow suggestion call and a fast, unrelated `remote.list` call at
+     the same running sidecar 200ms apart -- the fast one answered at
+     1.6s while the slow one was still running until 9.7s, confirming the
+     whole process no longer freezes during a live AI call.
+     (2) the embedded payload source (real code, possibly not the
+     proposer's own) is now wrapped in explicit
+     `<UNTRUSTED_SOURCE>`/`</UNTRUSTED_SOURCE>` delimiters with an
+     instruction to treat it as inert data, never instructions --
+     mitigates prompt injection, though it's not a substitute for the
+     tool-restriction flags actually holding (they don't, reliably --
+     see item 2's own corrected note above).
+     (3) the Component Type button was silently overwriting an
+     already-edited Description (one shared handler touched both fields
+     regardless of which button fired it) -- each button now only
+     touches the field(s) it's actually associated with.
+     (4) the suggestion cache was keyed only by payload path, missing a
+     kind change made via Review's own Edit links -- now keyed by
+     (payload path, kind) together.
 - **What's still held back (item 2):** the actual agent-escalation piece
   — shelling out to a real `claude --bare -p ...` process from the app
   itself when a build fails — stays gated on a separate, explicit
@@ -1826,6 +1849,13 @@ packaged sidecar exe, not just tests):*
       second layer, the actual write site itself. An escaping target is
       now refused and reported as needing manual review, never silently
       applied. 8 new unit tests.
+      **A second fix from the same review**: `runProjectBuild` used
+      blocking `execSync`, freezing the entire single-process sidecar
+      (and every other in-flight/new command) for the build's whole
+      duration. Converted to real async (`exec`, promisified) — see
+      item 3's own "Suggest with Claude" entry below for the matching fix
+      to `suggestMetadata` and the real concurrency proof that covers
+      both.
 - [ ] **An explicit escalation step on failure, not an automatic one.** "Want
       Claude Code to try fixing this?" — only offered after a real failure,
       never fired unsupervised the instant Pull is clicked. Real reason
@@ -1965,6 +1995,14 @@ packaged sidecar exe, not just tests):*
       browser click-through this round — a deliberate scope call (see
       the standing "avoid heavy GUI simulation" guidance), not an
       oversight.
+      **Two more fixes from the later top-to-bottom review**: bracket
+      notation (`process.env['X']`) was invisible to the original
+      dot-notation-only regex — real, valid, sometimes-seen syntax, now
+      detected too, deduped against the dot-notation form. And the
+      recursive "list every source file, skip node_modules/dotfiles" walk
+      — copy-pasted near-verbatim across this file, `detectStacks.ts`,
+      `detectArtifactMetadata.ts`, and `suggestMetadata.ts` — is now one
+      shared `listFilesRecursively` (`src/engine/scan/listFiles.ts`).
 - [ ] **The agent-escalation piece (item 2, above) and the full
       end-to-end test that depends on it** — still not started, still
       gated on a separate, explicit go-ahead given its materially
