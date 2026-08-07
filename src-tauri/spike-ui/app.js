@@ -1719,12 +1719,44 @@
       await beginProgress();
       try {
         if (action === 'pull') {
-          const result = await call('artifact.pull', {
-            id: entry.manifest.id,
-            remote: entry.remoteName,
-            cwd: state.projectDir,
-          });
-          toastSuccess(`Pulled ${result.manifest.id}`);
+          // Phase 10 item 1: only artifacts that actually declare
+          // wiring_actions opt into the auto-apply-and-test path -- every
+          // other artifact (the overwhelming majority) keeps using the
+          // plain pull command, unchanged, same "gate on field presence,
+          // never a kind check" convention every earlier Phase 7/8 piece
+          // already established.
+          const hasWiring = entry.manifest.wiring_actions && entry.manifest.wiring_actions.length > 0;
+          if (hasWiring) {
+            const { pullResult, wiring, build } = await call('artifact.pullAndAutoWire', {
+              id: entry.manifest.id,
+              remote: entry.remoteName,
+              cwd: state.projectDir,
+            });
+            const parts = [`Pulled ${pullResult.manifest.id}`];
+            if (wiring.applied.length > 0) {
+              parts.push(`applied ${wiring.applied.length} wiring action${wiring.applied.length === 1 ? '' : 's'} automatically`);
+            }
+            if (wiring.needsReview.length > 0) {
+              parts.push(`${wiring.needsReview.length} still need${wiring.needsReview.length === 1 ? 's' : ''} manual review (${wiring.needsReview.join(', ')})`);
+            }
+            if (build.ran) {
+              parts.push(build.success ? 'build passed' : 'build FAILED -- see progress log');
+            }
+            toastSuccess(parts.join('; '));
+            if (build.ran && !build.success) {
+              // Surface the real build output where it's actually visible
+              // -- reuses the existing progress log rather than inventing
+              // a new UI surface for this.
+              appendProgressLine('build', build.output || 'Build failed.');
+            }
+          } else {
+            const result = await call('artifact.pull', {
+              id: entry.manifest.id,
+              remote: entry.remoteName,
+              cwd: state.projectDir,
+            });
+            toastSuccess(`Pulled ${result.manifest.id}`);
+          }
         } else {
           const result = await call('artifact.push', {
             id: entry.manifest.id,
@@ -2507,6 +2539,162 @@
   // candidate to have warned about anything.
   let pendingCandidateWarnings = [];
 
+  // Phase 10 item 3: the Add New wizard's editable install_params list --
+  // pre-filled from a real deliveryos-side scan of the picked payload's
+  // actual `process.env.X` usage (pickPayload triggers the detection call
+  // below), then freely editable/addable/removable by hand before
+  // proposing. Each entry: {key, description, secret, required}.
+  let pendingInstallParams = [];
+
+  function renderInstallParamsList() {
+    const container = $('install-params-list');
+    container.innerHTML = '';
+
+    pendingInstallParams.forEach((param, index) => {
+      const row = document.createElement('div');
+      row.className = 'install-param-row';
+      row.innerHTML = `
+        <input type="text" class="install-param-key" placeholder="KEY_NAME" />
+        <input type="text" class="install-param-description" placeholder="What this value is for" />
+        <label class="install-param-checkbox"><input type="checkbox" class="install-param-secret" /> Secret</label>
+        <label class="install-param-checkbox"><input type="checkbox" class="install-param-required" /> Required</label>
+        <button type="button" class="btn btn-sm btn-ghost install-param-remove">Remove</button>
+      `;
+
+      const keyInput = row.querySelector('.install-param-key');
+      const descInput = row.querySelector('.install-param-description');
+      const secretInput = row.querySelector('.install-param-secret');
+      const requiredInput = row.querySelector('.install-param-required');
+
+      keyInput.value = param.key;
+      descInput.value = param.description;
+      secretInput.checked = param.secret;
+      requiredInput.checked = param.required;
+
+      keyInput.addEventListener('input', () => { pendingInstallParams[index].key = keyInput.value.trim(); });
+      descInput.addEventListener('input', () => { pendingInstallParams[index].description = descInput.value; });
+      secretInput.addEventListener('change', () => { pendingInstallParams[index].secret = secretInput.checked; });
+      requiredInput.addEventListener('change', () => { pendingInstallParams[index].required = requiredInput.checked; });
+      row.querySelector('.install-param-remove').addEventListener('click', () => {
+        pendingInstallParams.splice(index, 1);
+        renderInstallParamsList();
+      });
+
+      container.appendChild(row);
+    });
+  }
+
+  /** Runs the real detection scan against the payload just picked --
+   * called from pickPayload, never blocking form entry if it fails (a
+   * detection error here shouldn't stop someone from filling out the rest
+   * of the form and proposing by hand instead). Covers install_params,
+   * stacks, and description together (Phase 10 item 3, extended) -- for
+   * every kind, not just backend-plugin-shaped payloads. install_params
+   * and stacks always reflect the just-picked payload (re-picking a
+   * payload is already a big change); description only fills in when the
+   * field is still blank, so it never clobbers something already typed. */
+  async function detectAndPrefillMetadata(payloadPath) {
+    try {
+      const kind = resolveKindFieldValue();
+      const detected = await call('artifact.detectMetadata', { payloadPath, kind });
+      pendingInstallParams = detected.installParams;
+      renderInstallParamsList();
+      addNewStacksPicker.setValues(detected.stacks);
+      if (detected.description && !$('f-description').value.trim()) {
+        $('f-description').value = detected.description;
+      }
+    } catch (err) {
+      // Non-fatal -- the step just starts with empty, fully-manual fields
+      // instead of pre-filled ones.
+      console.warn('artifact metadata detection failed', err);
+    }
+  }
+
+  // "Suggest with Claude" -- the first AI-invoking capability in Add New
+  // (everything above is pure static analysis). Explicit-click only,
+  // never automatic on payload pick, since it costs real latency and a
+  // real API call. Cached per (payloadPath, kind) so clicking the second
+  // button (Component Type step) after already suggesting from
+  // Description doesn't spend a second real call for the same payload --
+  // keyed on kind too, not just payloadPath: the wizard lets someone
+  // return to the Kind step via Review's Edit links and change kind
+  // after already requesting a suggestion for the same payload, and a
+  // payload-only cache key would silently hand back a suggestion
+  // generated under the wrong kind's prompt framing.
+  let pendingSuggestion = null; // { payloadPath, kind, promise } | null
+
+  function runMetadataSuggestion(payloadPath, kind) {
+    if (pendingSuggestion && pendingSuggestion.payloadPath === payloadPath && pendingSuggestion.kind === kind) {
+      return pendingSuggestion.promise;
+    }
+    const promise = call('artifact.suggestMetadata', { payloadPath, kind });
+    pendingSuggestion = { payloadPath, kind, promise };
+    return promise;
+  }
+
+  /** Shared handler for both "Suggest with Claude" buttons -- each button
+   * only touches the field(s) it's actually associated with, via `fields`
+   * (`{updateDescription, updateComponentTypes}`), never the other one:
+   * the Component Type step's button must never reach back and overwrite
+   * a Description someone already reviewed and hand-edited after an
+   * earlier suggestion, just because this click happens to reuse the same
+   * cached suggestion. Whichever field(s) this button does own are always
+   * overwritten (unlike the passive autofill's "only if blank" rule --
+   * clicking this is an explicit request for a fresh suggestion, so it
+   * should actually replace what's there). Never blocks/breaks the form
+   * on failure -- a toast error and the button returning to normal is the
+   * whole failure mode, same as every other detector here. */
+  async function suggestMetadataForCurrentPayload(button, fields) {
+    if (!pendingPayloadPath) {
+      toastError(new Error('Pick a payload first.'));
+      return;
+    }
+    const kind = resolveKindFieldValue();
+    const originalLabel = button.textContent;
+    button.disabled = true;
+    button.textContent = 'Suggesting…';
+    try {
+      const suggestion = await runMetadataSuggestion(pendingPayloadPath, kind);
+      const appliedDescription = fields.updateDescription && !!suggestion.description;
+      const appliedComponentTypes = fields.updateComponentTypes
+        && suggestion.componentTypes && suggestion.componentTypes.length > 0;
+      if (appliedDescription) {
+        $('f-description').value = suggestion.description;
+      }
+      if (appliedComponentTypes) {
+        addNewComponentTypesPicker.setValues(suggestion.componentTypes);
+      }
+      if (!appliedDescription && !appliedComponentTypes) {
+        toastError(new Error('Claude had no suggestion for this payload.'));
+      }
+    } catch (err) {
+      toastError(err);
+    } finally {
+      button.disabled = false;
+      button.textContent = originalLabel;
+    }
+  }
+
+  /** Real default for Add New's Owner field -- the local machine's own git
+   * identity (`git config user.name`), not a guess. Non-fatal on failure
+   * (e.g. `state.projectDir` isn't a git repo yet): the field just stays
+   * blank for manual entry, same as before this existed. Never overwrites
+   * something already typed (checked at the call site via the blank-field
+   * guard, same pattern as description autofill). */
+  async function prefillOwnerFromGitIdentity() {
+    if (!state.projectDir) {
+      return;
+    }
+    try {
+      const identity = await call('git.identity', { cwd: state.projectDir });
+      if (identity.name && !$('f-owner').value.trim()) {
+        $('f-owner').value = identity.name;
+      }
+    } catch (err) {
+      console.warn('git identity lookup failed', err);
+    }
+  }
+
   /** Clears every Add New field back to blank -- shared by the plain "+ Add
    * new" entry point (a fresh proposal) and a successful submit (ready for
    * the next one). Deliberately NOT used by openAddNewFromScanCandidate,
@@ -2522,7 +2710,11 @@
     pendingPayloadPath = null;
     $('payload-path-display').textContent = 'No file or folder selected';
     pendingCandidateWarnings = [];
+    pendingInstallParams = [];
+    renderInstallParamsList();
+    pendingSuggestion = null;
     clearAddNewReviewPreviewListener();
+    void prefillOwnerFromGitIdentity();
   }
 
   // ---------- add new: Review step live preview (Phase 6, Phase D) ----------
@@ -2670,7 +2862,8 @@
 
   const ADDNEW_STEPS = [
     'id', 'kind', 'payload', 'description', 'owner',
-    'roles', 'stacks', 'teams', 'component-types', 'install-target', 'post-install', 'remote',
+    'roles', 'stacks', 'teams', 'component-types', 'install-target', 'post-install',
+    'install-params', 'remote',
     'review',
   ];
 
@@ -2686,6 +2879,7 @@
     'component-types': 'Component type',
     'install-target': 'Install target',
     'post-install': 'Setup command',
+    'install-params': 'Install-time config',
     remote: 'Remote',
     review: 'Review',
   };
@@ -2850,6 +3044,9 @@
       ['component-types', 'Component type', addNewComponentTypesPicker.getValues().join(', ') || '(none)'],
       ['install-target', 'Install target', $('f-install-target').value.trim() || '(default)'],
       ['post-install', 'Setup command', $('f-post-install').value.trim() || '(none)'],
+      ['install-params', 'Install-time config', pendingInstallParams.length > 0
+        ? pendingInstallParams.map((p) => p.key).join(', ')
+        : '(none)'],
       ['remote', 'Remote', addNewRemotePicker.getValue() || '(none selected)'],
     ];
 
@@ -2882,6 +3079,7 @@
       }
       pendingPayloadPath = picked;
       $('payload-path-display').textContent = picked;
+      await detectAndPrefillMetadata(picked);
     } catch (err) {
       toastError(err);
     }
@@ -2951,6 +3149,11 @@
       focusAddNewField('remote');
       return;
     }
+    // A row with a blank key can't become a real install_param entry --
+    // filtered out (someone who added a row and never filled in the key
+    // clearly didn't mean to keep it) rather than sent as-is and failing
+    // manifest validation with a confusing error.
+    const installParams = pendingInstallParams.filter((p) => p.key.trim().length > 0);
 
     await withBusy(submitBtn, 'Working...', async () => {
       try {
@@ -2970,6 +3173,7 @@
             componentTypes,
             installTarget,
             postInstall,
+            installParams,
           },
         });
         toastSuccess(`Proposed ${id}: opened PR #${result.number}`, result.url);
@@ -3178,12 +3382,23 @@
     pendingPayloadPath = candidate.payloadPath;
     $('payload-path-display').textContent = candidate.payloadPath;
     pendingCandidateWarnings = candidate.warnings ?? [];
+    // Real metadata detection (Phase 10 item 3, extended) runs here too,
+    // not just from the file-picker's own pickPayload -- a scan candidate
+    // already has a real, on-disk payload path, and detection is a
+    // payload-driven signal that doesn't care how that path was chosen.
+    // Previously this only ran for the plain "+ Add New" -> pick-a-file
+    // path, so anything opened via Scan silently skipped install_params/
+    // stacks/description/owner autofill entirely -- a real gap, not a
+    // deliberate one (unlike roles/teams/componentTypes below, which stay
+    // blank on purpose).
+    await detectAndPrefillMetadata(candidate.payloadPath);
     // Jump straight to Review -- everything a scan candidate can prefill is
-    // already filled in (roles/stacks/teams are deliberately left blank for
-    // manual review, same as before), so forcing a click through 9 empty-
-    // looking steps just to reach Propose would be worse than the old flat
-    // form, not better. The Edit button on any review row still jumps back
-    // to fill in something more, roles/stacks/teams included.
+    // already filled in (roles/teams/componentTypes are deliberately left
+    // blank for manual review, same as before), so forcing a click through
+    // 9 empty-looking steps just to reach Propose would be worse than the
+    // old flat form, not better. The Edit button on any review row still
+    // jumps back to fill in something more, roles/teams/componentTypes
+    // included.
     goToWizardStep('review');
   }
 
@@ -3454,6 +3669,18 @@
     $('addnew-form').addEventListener('submit', (ev) => void submitAddNew(ev));
     $('pick-payload-file-btn').addEventListener('click', () => void pickPayload(false));
     $('pick-payload-dir-btn').addEventListener('click', () => void pickPayload(true));
+    $('install-params-add-btn').addEventListener('click', () => {
+      pendingInstallParams.push({ key: '', description: '', secret: false, required: true });
+      renderInstallParamsList();
+    });
+    $('suggest-metadata-btn').addEventListener('click', (ev) => void suggestMetadataForCurrentPayload(
+      ev.currentTarget,
+      { updateDescription: true, updateComponentTypes: true },
+    ));
+    $('suggest-component-types-btn').addEventListener('click', (ev) => void suggestMetadataForCurrentPayload(
+      ev.currentTarget,
+      { updateDescription: false, updateComponentTypes: true },
+    ));
 
     $('wizard-next-btn').addEventListener('click', () => wizardGoNext());
     $('wizard-back-btn').addEventListener('click', () => wizardGoBack());

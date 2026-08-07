@@ -71,3 +71,10 @@ export class PristineSnapshotMissingError extends DeliveryOsError {}
  * any files are written. Never thrown for the overwhelming majority of
  * artifacts, which declare no `signature` at all. */
 export class SignatureVerificationError extends DeliveryOsError {}
+
+/** Thrown when `suggestMetadata`'s real `claude` CLI subprocess call fails
+ * outright (not on PATH, not logged in, times out) or returns something
+ * that can't be parsed as the requested JSON shape. Never thrown for a
+ * merely-empty suggestion (a model returning `{}` is a valid, if useless,
+ * response) -- only for a genuine failure to get a real answer at all. */
+export class SuggestionError extends DeliveryOsError {}

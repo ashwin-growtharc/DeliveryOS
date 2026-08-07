@@ -320,6 +320,88 @@ describe('push e2e', () => {
   );
 
   it(
+    'propose-new mode: install_params passed via options land in the real committed manifest (Phase 10 item 3)',
+    async () => {
+      const remoteName = 'test-remote-new-install-params';
+      await registerAndClone(remoteName, fixtureRemoteDir);
+
+      const payloadDir = fs.mkdtempSync(path.join(scratchRoot, 'new-backend-plugin-payload-'));
+      fs.writeFileSync(
+        path.join(payloadDir, 'auth.config.ts'),
+        'const secret = process.env.AUTH_SECRET;\nconst db = process.env.DATABASE_URL;\n',
+        'utf-8',
+      );
+
+      const octokit = makeFakeOctokit();
+      const newId = 'test-backend-plugin-new';
+      const result = await pushArtifact(
+        newId,
+        {
+          remote: remoteName,
+          isNew: true,
+          payloadPath: payloadDir,
+          kind: 'backend-plugin',
+          owner: 'test-team',
+          description: 'A brand-new backend plugin, with real install_params',
+          installParams: [
+            { key: 'AUTH_SECRET', description: 'Session signing secret', secret: true, required: true },
+            { key: 'DATABASE_URL', description: 'Postgres connection string', secret: true, required: true },
+          ],
+        },
+        newScratchCwd('new-install-params'),
+        octokit,
+      );
+
+      const fixtureGit = simpleGit(fixtureRemoteDir);
+      const manifestYaml = await fixtureGit.show([`${result.branch}:artifacts/${newId}/manifest.yaml`]);
+      const manifest = parseYaml(manifestYaml);
+
+      expect(manifest.install_params).toEqual([
+        { key: 'AUTH_SECRET', description: 'Session signing secret', secret: true, required: true },
+        { key: 'DATABASE_URL', description: 'Postgres connection string', secret: true, required: true },
+      ]);
+    },
+    60_000,
+  );
+
+  it(
+    'propose-new mode: omitting install_params entirely still works exactly as before (Phase 10 item 3, zero regression)',
+    async () => {
+      const remoteName = 'test-remote-new-no-install-params';
+      await registerAndClone(remoteName, fixtureRemoteDir);
+
+      const payloadDir = fs.mkdtempSync(path.join(scratchRoot, 'new-plain-payload-'));
+      fs.writeFileSync(path.join(payloadDir, 'index.js'), 'module.exports = 1;\n', 'utf-8');
+
+      const octokit = makeFakeOctokit();
+      const newId = 'test-plain-new';
+      const result = await pushArtifact(
+        newId,
+        {
+          remote: remoteName,
+          isNew: true,
+          payloadPath: payloadDir,
+          kind: 'skill',
+          owner: 'test-team',
+          description: 'A brand-new artifact with no install_params at all',
+        },
+        newScratchCwd('new-no-install-params'),
+        octokit,
+      );
+
+      const fixtureGit = simpleGit(fixtureRemoteDir);
+      const manifestYaml = await fixtureGit.show([`${result.branch}:artifacts/${newId}/manifest.yaml`]);
+      const manifest = parseYaml(manifestYaml);
+      // ManifestSchema defaults install_params to [] regardless -- this
+      // confirms omitting the new option doesn't change that
+      // already-established, correct behavior, not that the field
+      // vanishes entirely.
+      expect(manifest.install_params).toEqual([]);
+    },
+    60_000,
+  );
+
+  it(
     'propose-new mode: a preview render failure never blocks the push itself, just omits the image (Phase E)',
     async () => {
       // Regression guard for a real, serious bug found by hand: adding

@@ -4,6 +4,209 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- **The rest of the same top-to-bottom code review's findings, fixed the
+  same day.** Five more, all real:
+  - **Sidecar-blocking subprocess calls made async.** `suggestMetadata`
+    (`claude` calls) and `verifyBuild`'s `runProjectBuild` (`npm run
+    build`) both used synchronous, blocking `execFileSync`/`execSync` --
+    the sidecar is a single Node process explicitly designed to handle
+    overlapping requests concurrently (`handleLine` fired without being
+    awaited per line), so a blocking call froze the ENTIRE process,
+    including any other in-flight or new command, for the call's whole
+    duration -- realistically many seconds for a live AI call. Converted
+    both to real async (`execFile`/`exec`), and proved the fix, not just
+    the intent: fired a slow `artifact.suggestMetadata` call and a fast
+    `remote.list` call at the same running sidecar process 200ms apart --
+    the fast one's response came back at 1.6s while the slow one was
+    still running until 9.7s, confirming the process genuinely stayed
+    responsive. `execFile`'s async form has no `input` convenience option
+    the way the sync versions do (confirmed directly: passing one is
+    silently ignored) -- the prompt is now written to the child's own
+    `stdin` stream by hand instead.
+  - **Prompt-injection hardening for "Suggest with Claude."** A payload's
+    own source -- which could be third-party code someone didn't author
+    themselves -- is embedded in the prompt sent to `claude`, and this
+    project's own tool-restriction flags are already known not to be
+    reliably enforced (see below). The embedded source is now wrapped in
+    explicit `<UNTRUSTED_SOURCE>`/`</UNTRUSTED_SOURCE>` delimiters with a
+    direct instruction to treat it as inert data, never as instructions,
+    even if it contains text that reads like a command -- a standard,
+    real mitigation, though not a substitute for the tool-restriction
+    actually holding.
+  - **Two real "Suggest with Claude" UI bugs fixed.** The Component Type
+    step's Suggest button was silently overwriting an already-edited
+    Description (both buttons shared one handler that always touched both
+    fields) -- each button now only ever touches the field(s) it's
+    actually associated with. The suggestion cache was keyed only by
+    payload path, not kind -- changing kind after already requesting a
+    suggestion (reachable via Review's own Edit links) silently returned
+    a stale, wrong-kind suggestion; the cache key now includes kind.
+  - **A real duplicated-code cleanup.** The recursive "list every source
+    file in this payload, skipping node_modules/dotfiles" walk was
+    copy-pasted near-verbatim across four detector files. Consolidated
+    into one shared `listFilesRecursively`
+    (`src/engine/scan/listFiles.ts`).
+  - **A real detection gap closed.** `detectInstallParams` only matched
+    dot-notation (`process.env.FOO`); bracket-notation
+    (`process.env['FOO']`) is real, valid, sometimes-seen syntax that was
+    silently invisible to it. Now detects both, deduped.
+
+- **Security fix: path traversal in Phase 10 item 1's automatic wiring
+  writer, found in a top-to-bottom code review and fixed the same day.**
+  `applyDeterministicWiring` resolved a manifest's `wiring_actions[].target_file`
+  via plain `path.resolve(cwd, targetFile)` with no containment check
+  before writing to it -- proved directly (and reproduced via a real,
+  temporarily-reverted-then-restored test) that a `target_file` of
+  `"../../../../evil.txt"` or an absolute path genuinely resolves outside
+  the target project and genuinely gets written to. Fixed at the root:
+  new `resolveContainedTargetFile` (`src/engine/pull/wiring.ts`) resolves
+  a target only when the result is verifiably inside `cwd`, used both by
+  `resolveWiringActions`'s own (lower-severity, read-only) existence
+  check -- which had the identical unguarded pattern -- and, as a second,
+  independent layer of defense, by `applyDeterministicWiring`'s actual
+  write site itself, which no longer trusts that every
+  `ResolvedWiringAction` it's ever handed necessarily came from the
+  now-fixed upstream resolver. A target that escapes is reported as
+  `needsReview` (write) / `targetFileExists: true` with an explicit
+  "resolves outside this project and was refused for safety" message
+  (resolve), never silently applied and never crashing. 8 new unit tests,
+  including two that genuinely prove the fix: each was run once against
+  the pre-fix code (confirmed to fail, with the malicious write actually
+  landing on disk) before being restored alongside the fix.
+
+- **Phase 10 item 3, "Suggest with Claude": the first AI-invoking
+  capability in Add New's autofill.** Every other autofilled field is
+  pure regex/AST analysis; this adds an explicit "Suggest with Claude ✨"
+  button (never automatic) that shells out to a real `claude -p`
+  subprocess for the two fields static analysis honestly can't fill --
+  `description` and `componentTypes` -- when there's no JSDoc/frontmatter/
+  comment signal to draw from. `roles`/`teams` are still not touched even
+  by this: they're organization-internal concepts no model can recover
+  from code any better than a regex can. New
+  `src/engine/scan/suggestMetadata.ts` and `artifact.suggestMetadata`
+  sidecar command.
+  **Two real, tested findings that shaped the actual implementation:**
+  (1) the tool-restriction flags used in item 2's own "settled" design
+  aren't a hard sandbox -- `--bare` breaks authentication outright here
+  (skips keychain reads), `--allowedTools ''` didn't stop a real Bash
+  call from running, and `--disallowedTools` naming every tool blocked it
+  on 2 of 3 real attempts but not the third; accepted as a known
+  limitation rather than a solved one, since this same engine already
+  runs arbitrary trusted shell commands on this machine anyway. (2) a
+  real Windows command-injection bug, found and fixed before shipping:
+  `claude` is a `.cmd` npm shim on Windows, which `execFileSync` can only
+  invoke with `shell: true` -- but that concatenates argv into a shell
+  command line unescaped, so putting the arbitrary payload-derived prompt
+  text directly in argv would have let a stray `&`/`"`/`^` in someone's
+  source file break out into an arbitrary second command. Fixed by never
+  putting the prompt in argv at all: piped to the child's stdin instead
+  (`claude -p` reads from stdin when piped), so only fixed, hardcoded
+  flag strings ever pass through the shell-concatenated argv. Verified
+  for real against the rebuilt packaged sidecar exe: a sign-in form
+  component with zero JSDoc got back an accurate description and
+  `componentTypes: ["form"]`; a simulated missing-`claude` PATH failed
+  cleanly with a real `SuggestionError`, not a hang or a crash. 10 new
+  unit tests for the pure prompt-building/response-parsing logic.
+
+- **Phase 10 item 3 extended: real autofill now covers `stacks`,
+  `description`, and `owner`, for every kind, not just `install_params`
+  on backend-plugin-shaped payloads.** Follow-up to the entry below, in
+  response to direct feedback that autofill should reach "mostly
+  everything," not one field on one kind. New `detectStacks`
+  (`src/engine/scan/detectStacks.ts`) reads real `import`/`require`
+  specifiers and `package.json` dependencies against a small lookup
+  table verified against the real catalog's own existing tag vocabulary
+  (`next`→`nextjs`, `react`→`react`, `@prisma/client`/a `.prisma` file→
+  `prisma`, `express`→`express`, plus real file-extension-based
+  `typescript`/`javascript`). `description` now has a real source for
+  every kind: `ui-component` gets `react-docgen-typescript`'s own
+  `ComponentDoc.description` -- a real JSDoc comment that was already
+  being parsed and then silently thrown away
+  (`detectUiComponents.ts` previously hardcoded `undefined`, with a
+  comment claiming no reliable signal existed; that was simply stale).
+  The four markdown kinds now get frontmatter-based guessing from Add
+  New's own manual payload-pick path too (previously Scan-only). Anything
+  else falls back to a new `extractLeadingComment`
+  (`src/engine/scan/extractLeadingComment.ts`), reading a real leading
+  comment off a conventional entry file, never fabricating one. `owner`
+  now defaults from the real local git identity (`git config
+  user.name`, already resolved via the existing `getCommitIdentity`) --
+  confirmed to exactly match the convention already used in every real
+  shipped manifest. **Deliberately still not attempted**:
+  `componentTypes`/`roles`/`teams` -- checked real catalog values and
+  concluded there is no equally reliable code signal for either; both
+  require a semantic judgment no regex or import scan can honestly make,
+  so they stay manual on purpose. One consolidated sidecar command,
+  `artifact.detectMetadata`, replaces the narrower
+  `artifact.detectInstallParams`. Verified for real against the
+  rebuilt packaged sidecar exe (not just unit tests) across four real
+  fixtures -- a ui-component's JSDoc, a skill's frontmatter, a
+  backend-shaped payload's comment/imports/env-var, and a signal-free
+  payload that correctly came back blank rather than fabricated -- plus
+  20 new unit tests. Also fixed, while investigating a reported "Unknown
+  command" error: the packaged sidecar `.exe` Tauri actually spawns
+  (`src-tauri/target/**/deliveryos-engine.exe`) was stale relative to the
+  freshly rebuilt `build/deliveryos-engine-*.exe`, since `cargo`/`tauri
+  dev` hadn't rerun since the last rebuild -- not a code bug, fixed by
+  clearing the stale copies so the next `tauri dev`/`tauri build`
+  re-copies fresh ones.
+
+- **Phase 10 items 1 and 3 are complete: deterministic apply-and-test on
+  Pull, and real code-driven autofill for Add New's `install_params`.**
+  Item 2 (an explicit agent-escalation button on build failure) stays
+  gated on a separate, explicit go-ahead and was not touched.
+  - **Item 1** — a new `pullAndAutoWire` orchestration
+    (`src/engine/pull/pullAndAutoWire.ts`) wraps the existing, unchanged
+    `pullArtifact`: for artifacts declaring `wiring_actions`, it now also
+    applies every `whenAbsent`-shaped action for real
+    (`src/engine/pull/applyWiring.ts` — writes only genuinely new files;
+    anything that already exists is left alone and flagged for manual
+    review, even when a `whenPresent` merge-guidance snippet exists, since
+    that snippet is guidance, not a full file to overwrite) and then runs
+    the target project's own real build if one is detectable
+    (`src/engine/pull/verifyBuild.ts` — `npm run build` when
+    `package.json` declares a `scripts.build`, otherwise `{ran: false}`,
+    never an error). Wired into the desktop app's own Pull button via a
+    new sidecar command, `artifact.pullAndAutoWire`, used only when an
+    artifact's manifest actually has `wiring_actions` — `pullArtifact`
+    itself and its existing sidecar command are untouched. 13 new unit
+    tests plus a new real e2e test
+    (`test/e2e/sidecar.e2e.test.ts`) proving all three outcomes against a
+    real fixture: a fresh file applied verbatim, an existing file left
+    alone and flagged, and a real `npm run build` executed and reported.
+  - **Item 3** — a new `detectInstallParams`
+    (`src/engine/scan/detectInstallParams.ts`) scans a proposed artifact's
+    actual payload source for real `process.env.X` and Prisma's own
+    `env("X")` references, proposing a starting `install_params` list:
+    real key names, `required: true` always (a plain regex can't reliably
+    tell whether a call site has its own fallback, so this is the safe
+    direction to be wrong in), and a secret guess from a naming heuristic
+    (`SECRET`/`TOKEN`/`PASSWORD`/`_KEY`/`DATABASE_URL`/etc). Description
+    text is deliberately left blank rather than fabricated — the same
+    "make the autofill good, don't decorate it" lesson as Scan's own,
+    already-removed "AI guessed" badge. `push.ts` gained a real
+    `installParams` option that lands directly in the committed manifest
+    when present, and is a complete no-op (`install_params: []`, unchanged
+    from today) when omitted. Wired into the desktop app's Add New wizard
+    as a new "Install-time config" step, auto-triggered the moment a
+    payload is picked, editable before submit. 10 new unit tests plus 2
+    new e2e tests against real `pushArtifact` calls.
+    **A real, honest limitation, found by running this against the
+    actual, already-shipped `nextauth-credentials` artifact**: it detects
+    nothing there, because `AUTH_SECRET`/`AUTH_URL` are read implicitly by
+    Auth.js's own internal library code (never referenced in this
+    artifact's own payload source), and `DATABASE_URL` lives in the
+    *consuming* project's own `prisma/schema.prisma`, not the
+    `prisma-schema-snippet.prisma` reference file this payload actually
+    ships. Static analysis over payload text genuinely can't see either —
+    stated plainly rather than papered over.
+  - Verified against a genuinely fresh, real Next.js project
+    (`dos-phase10-e2e`), through the rebuilt packaged sidecar exe, not
+    just unit tests: pulling the real, signed `nextauth-credentials`
+    artifact applied its fresh-file wiring actions correctly, correctly
+    left an already-existing file alone, and the real `next build`
+    passed.
+
 - **Phase 9 is complete: `deliveryos-status`, a real Claude Code Skill
   teaching the status/health check this session kept doing by hand.**
   Genuinely separate from `deliveryos-check-first` (different trigger

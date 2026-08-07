@@ -999,6 +999,60 @@ describe('sidecar e2e', () => {
   );
 
   it(
+    'artifact.pullAndAutoWire (Phase 10 item 1) applies whenAbsent actions for real, leaves an existing file alone, and reports a build result',
+    async () => {
+      const remoteDir = await createTestRemoteWithInstallParamsArtifact();
+      const cwd = newScratchCwd('pull-and-auto-wire');
+      const session = new SidecarSession(cwd, deliveryOsHome);
+      try {
+        const remoteName = 'sidecar-remote-auto-wire';
+        const addResp = await session.request('remote.add', { url: remoteDir, name: remoteName });
+        expect(addResp.ok).toBe(true);
+
+        // Seed middleware.ts by hand first -- INSTALL_PARAMS_ARTIFACT
+        // declares whenPresent for this one, so it must be left
+        // completely untouched; auth.ts has no whenPresent, so it must
+        // get auto-created.
+        fs.writeFileSync(path.join(cwd, 'middleware.ts'), 'export default function middleware() {}', 'utf-8');
+        // A real, passing build command -- proves the "-and-test" half
+        // for real, not just that wiring got applied.
+        fs.writeFileSync(
+          path.join(cwd, 'package.json'),
+          JSON.stringify({ name: 'x', scripts: { build: 'node -e "console.log(1)"' } }),
+          'utf-8',
+        );
+
+        const resp = await session.request('artifact.pullAndAutoWire', {
+          id: INSTALL_PARAMS_ARTIFACT.id,
+          remote: remoteName,
+          cwd,
+          values: { AUTH_SECRET: 'x', DATABASE_URL: 'postgres://x' },
+        });
+
+        expect(resp.ok).toBe(true);
+        const result = resp.result as {
+          pullResult: { manifest: { id: string } };
+          wiring: { applied: string[]; needsReview: string[] };
+          build: { ran: boolean; command?: string; success?: boolean };
+        };
+        expect(result.pullResult.manifest.id).toBe(INSTALL_PARAMS_ARTIFACT.id);
+        expect(result.wiring.applied).toEqual(['auth.ts']);
+        expect(result.wiring.needsReview).toEqual(['middleware.ts']);
+        expect(result.build).toEqual({ ran: true, command: 'npm run build', success: true, output: expect.any(String) });
+
+        // Real, on-disk proof, not just the returned result.
+        expect(fs.existsSync(path.join(cwd, 'auth.ts'))).toBe(true);
+        expect(fs.readFileSync(path.join(cwd, 'middleware.ts'), 'utf-8'))
+          .toBe('export default function middleware() {}');
+      } finally {
+        await session.close();
+        await teardownTestRemote(remoteDir);
+      }
+    },
+    30_000,
+  );
+
+  it(
     'artifact.pull refuses via the sidecar too (ok: false, real error surfaced), before any files are written, when a declared signature has no bundle on disk',
     async () => {
       const signedRemoteDir = await createTestRemoteWithSignedArtifact({

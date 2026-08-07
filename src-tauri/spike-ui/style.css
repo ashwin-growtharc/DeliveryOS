@@ -1776,6 +1776,64 @@ input, textarea, select {
   flex-shrink: 0;
 }
 
+/* ---------- add new: install-params list (Phase 10 item 3) ---------- */
+
+.install-param-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--card);
+  margin-bottom: 6px;
+}
+
+.install-param-row .install-param-key {
+  flex: 0 0 160px;
+  font-family: var(--font-mono, monospace);
+}
+
+.install-param-row .install-param-description {
+  flex: 1;
+  min-width: 0;
+}
+
+.install-param-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.install-param-row .install-param-remove {
+  flex-shrink: 0;
+}
+
+/* ---------- add new: Suggest with Claude (Phase 10 item 3) ---------- */
+
+.field-with-suggest {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.field-with-suggest textarea {
+  width: 100%;
+}
+
+.suggest-btn {
+  align-self: flex-end;
+}
+
+.suggest-btn:disabled {
+  opacity: 0.7;
+  cursor: wait;
+}
+
 /* ---------- settings ---------- */
 
 .settings-row {

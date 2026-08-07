@@ -6,7 +6,7 @@ import { findRemote } from '../remote/remoteRegistry';
 import { cachePath } from '../remote/remoteCache';
 import { resolveArtifact, ProgressCallback } from '../pull/pull';
 import { buildCatalog } from '../catalog/catalog';
-import { ManifestSchema, Manifest } from '../manifest/schema';
+import { ManifestSchema, Manifest, InstallParam } from '../manifest/schema';
 import { bumpVersion, VersionBumpKind } from '../manifest/version';
 import { renderPreviewImage } from '../preview/renderPreviewImage';
 import { findPreviewEntryFile } from '../preview/resolveArtifactPreview';
@@ -66,6 +66,12 @@ export interface PushOptions {
   stacks?: string[];
   componentTypes?: string[];
   postInstall?: string;
+  // Phase 10 item 3: lets a caller (the app's Add New wizard, after
+  // reviewing/correcting Scan's detected process.env.X proposals) author
+  // install_params directly at propose-new time -- previously the only
+  // way to add these was hand-editing manifest.yaml after the fact (see
+  // Phase 7's own nextauth-credentials history).
+  installParams?: InstallParam[];
   // edit mode only, mutually exclusive with a payload-content diff push:
   // changes description/roles/teams/stacks on an already-tracked artifact's
   // manifest.yaml without touching its payload at all. See Detail's Edit
@@ -308,6 +314,9 @@ export async function pushArtifact(
       // `if (manifest.post_install)` check skips it cleanly.
       ...(options.postInstall ? { post_install: options.postInstall } : {}),
       ...(payloadPathOverride ? { payload_path: payloadPathOverride } : {}),
+      ...(options.installParams && options.installParams.length > 0
+        ? { install_params: options.installParams }
+        : {}),
     };
 
     const result = ManifestSchema.safeParse(candidateManifest);

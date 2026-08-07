@@ -450,7 +450,11 @@
             <div class="wizard-step" data-step="description">
               <div class="field">
                 <label for="f-description">Description</label>
-                <textarea id="f-description" required rows="3"></textarea>
+                <div class="field-with-suggest">
+                  <textarea id="f-description" required rows="3"></textarea>
+                  <button type="button" id="suggest-metadata-btn" class="btn btn-sm btn-ghost suggest-btn">Suggest with Claude ✨</button>
+                </div>
+                <p class="field-hint">Reads the real payload code and proposes a description + component type via a real Claude call -- always reviewable/editable before proposing.</p>
               </div>
             </div>
 
@@ -490,6 +494,7 @@
                 <label>Component type</label>
                 <div id="f-component-types-picker"></div>
                 <p class="field-hint">For "UI Components" artifacts (e.g. "button", "navbar", "card") -- leave blank for every other kind.</p>
+                <button type="button" id="suggest-component-types-btn" class="btn btn-sm btn-ghost suggest-btn">Suggest with Claude ✨</button>
               </div>
             </div>
 
@@ -506,6 +511,15 @@
                 <label for="f-post-install">Setup command (optional)</label>
                 <input id="f-post-install" type="text" placeholder="e.g. npm install, pip install -e &quot;.[dev]&quot;" />
                 <p class="field-hint">Runs automatically right after someone pulls this, in the folder it lands in. Leave blank if nothing needs to be installed.</p>
+              </div>
+            </div>
+
+            <div class="wizard-step" data-step="install-params">
+              <div class="field">
+                <label>Install-time configuration (optional)</label>
+                <p class="field-hint">Detected automatically from real <code>process.env.X</code> usage in the payload you picked -- review and correct before proposing (a detected key name is reliable; the description and secret/required guesses are a starting point, not a fact). Add more by hand if anything's missing.</p>
+                <div id="install-params-list"></div>
+                <button type="button" id="install-params-add-btn" class="btn btn-sm btn-ghost">+ Add param</button>
               </div>
             </div>
 
