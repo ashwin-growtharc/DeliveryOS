@@ -37,6 +37,7 @@ import { pullArtifact, resolveArtifact, ProgressCallback } from './engine/pull/p
 import { resolveInstallParamValues, applyInstallParams, readExistingEnvValues } from './engine/pull/installParams';
 import { resolveWiringActions } from './engine/pull/wiring';
 import { pullAndAutoWire } from './engine/pull/pullAndAutoWire';
+import { requestBuildFix, applyBuildFix } from './engine/pull/fixBuildFailure';
 import { pushArtifact, PushOptions } from './engine/push/push';
 import { checkForUpdates, resolvePendingPushes } from './engine/sync/sync';
 import { scanForNewArtifacts } from './engine/scan/scan';
@@ -364,6 +365,33 @@ const commands: Record<string, CommandHandler> = {
     const payloadPath = requireString(args, 'payloadPath');
     const kind = requireString(args, 'kind');
     return suggestMetadata(payloadPath, kind);
+  },
+
+  // Phase 10 item 2: the "ask" half of "want help fixing this?" -- only
+  // ever offered by the UI for a file item 1's own auto-wiring just
+  // wrote (AppliedWiringResult.applied), never an arbitrary file guessed
+  // from build-error text. No write, no audit-log entry -- see
+  // fixBuildFailure.ts's own doc comments for why.
+  'artifact.requestBuildFix': (args) => {
+    const cwd = requireString(args, 'cwd');
+    const filePath = requireString(args, 'filePath');
+    const buildError = requireString(args, 'buildError');
+    return requestBuildFix(cwd, filePath, buildError);
+  },
+
+  // Phase 10 item 2: the "apply" half -- writes the fix for real, re-runs
+  // the real build to confirm it, rolls back automatically if it doesn't
+  // actually resolve the failure, and appends exactly one audit-log
+  // entry either way. Only reached after an explicit human confirmation
+  // click in the UI; never automatic.
+  'artifact.applyBuildFix': (args) => {
+    const cwd = requireString(args, 'cwd');
+    const filePath = requireString(args, 'filePath');
+    const fixedFile = requireString(args, 'fixedFile');
+    const buildError = requireString(args, 'buildError');
+    const costUsd = typeof args.costUsd === 'number' ? args.costUsd : undefined;
+    const durationMs = typeof args.durationMs === 'number' ? args.durationMs : undefined;
+    return applyBuildFix(cwd, filePath, fixedFile, buildError, { costUsd, durationMs });
   },
 
   // Real preview-compile command (Phase 6, Phase B), replacing Phase A's

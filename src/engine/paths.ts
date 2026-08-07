@@ -45,6 +45,17 @@ export function lockfilePath(cwd: string): string {
   return path.join(projectDeliveryOsDir(cwd), 'lock.json');
 }
 
+/** Project-local (cwd-scoped) audit log for Phase 10 item 2's "want help
+ * fixing this?" flow -- append-only JSON-lines, one entry per fix
+ * actually APPLIED (never on a request or a discard, which leave no
+ * trace by design). The first append-only log file in this codebase;
+ * kept deliberately simple (no read-modify-write, no existing log
+ * convention to match) rather than introducing a heavier
+ * logging/rotation mechanism this project doesn't otherwise need. */
+export function buildFixLogPath(cwd: string): string {
+  return path.join(projectDeliveryOsDir(cwd), 'build-fix-log.jsonl');
+}
+
 /** Project-local (cwd-scoped) directory holding pristine (as-pulled)
  * snapshots of every pulled artifact's payload, keyed by id. Used by
  * `push` to diff a local edit against what was actually pulled. */
