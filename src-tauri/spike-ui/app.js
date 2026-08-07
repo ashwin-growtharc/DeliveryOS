@@ -1719,12 +1719,44 @@
       await beginProgress();
       try {
         if (action === 'pull') {
-          const result = await call('artifact.pull', {
-            id: entry.manifest.id,
-            remote: entry.remoteName,
-            cwd: state.projectDir,
-          });
-          toastSuccess(`Pulled ${result.manifest.id}`);
+          // Phase 10 item 1: only artifacts that actually declare
+          // wiring_actions opt into the auto-apply-and-test path -- every
+          // other artifact (the overwhelming majority) keeps using the
+          // plain pull command, unchanged, same "gate on field presence,
+          // never a kind check" convention every earlier Phase 7/8 piece
+          // already established.
+          const hasWiring = entry.manifest.wiring_actions && entry.manifest.wiring_actions.length > 0;
+          if (hasWiring) {
+            const { pullResult, wiring, build } = await call('artifact.pullAndAutoWire', {
+              id: entry.manifest.id,
+              remote: entry.remoteName,
+              cwd: state.projectDir,
+            });
+            const parts = [`Pulled ${pullResult.manifest.id}`];
+            if (wiring.applied.length > 0) {
+              parts.push(`applied ${wiring.applied.length} wiring action${wiring.applied.length === 1 ? '' : 's'} automatically`);
+            }
+            if (wiring.needsReview.length > 0) {
+              parts.push(`${wiring.needsReview.length} still need${wiring.needsReview.length === 1 ? 's' : ''} manual review (${wiring.needsReview.join(', ')})`);
+            }
+            if (build.ran) {
+              parts.push(build.success ? 'build passed' : 'build FAILED -- see progress log');
+            }
+            toastSuccess(parts.join('; '));
+            if (build.ran && !build.success) {
+              // Surface the real build output where it's actually visible
+              // -- reuses the existing progress log rather than inventing
+              // a new UI surface for this.
+              appendProgressLine('build', build.output || 'Build failed.');
+            }
+          } else {
+            const result = await call('artifact.pull', {
+              id: entry.manifest.id,
+              remote: entry.remoteName,
+              cwd: state.projectDir,
+            });
+            toastSuccess(`Pulled ${result.manifest.id}`);
+          }
         } else {
           const result = await call('artifact.push', {
             id: entry.manifest.id,
@@ -2507,6 +2539,67 @@
   // candidate to have warned about anything.
   let pendingCandidateWarnings = [];
 
+  // Phase 10 item 3: the Add New wizard's editable install_params list --
+  // pre-filled from a real deliveryos-side scan of the picked payload's
+  // actual `process.env.X` usage (pickPayload triggers the detection call
+  // below), then freely editable/addable/removable by hand before
+  // proposing. Each entry: {key, description, secret, required}.
+  let pendingInstallParams = [];
+
+  function renderInstallParamsList() {
+    const container = $('install-params-list');
+    container.innerHTML = '';
+
+    pendingInstallParams.forEach((param, index) => {
+      const row = document.createElement('div');
+      row.className = 'install-param-row';
+      row.innerHTML = `
+        <input type="text" class="install-param-key" placeholder="KEY_NAME" />
+        <input type="text" class="install-param-description" placeholder="What this value is for" />
+        <label class="install-param-checkbox"><input type="checkbox" class="install-param-secret" /> Secret</label>
+        <label class="install-param-checkbox"><input type="checkbox" class="install-param-required" /> Required</label>
+        <button type="button" class="btn btn-sm btn-ghost install-param-remove">Remove</button>
+      `;
+
+      const keyInput = row.querySelector('.install-param-key');
+      const descInput = row.querySelector('.install-param-description');
+      const secretInput = row.querySelector('.install-param-secret');
+      const requiredInput = row.querySelector('.install-param-required');
+
+      keyInput.value = param.key;
+      descInput.value = param.description;
+      secretInput.checked = param.secret;
+      requiredInput.checked = param.required;
+
+      keyInput.addEventListener('input', () => { pendingInstallParams[index].key = keyInput.value.trim(); });
+      descInput.addEventListener('input', () => { pendingInstallParams[index].description = descInput.value; });
+      secretInput.addEventListener('change', () => { pendingInstallParams[index].secret = secretInput.checked; });
+      requiredInput.addEventListener('change', () => { pendingInstallParams[index].required = requiredInput.checked; });
+      row.querySelector('.install-param-remove').addEventListener('click', () => {
+        pendingInstallParams.splice(index, 1);
+        renderInstallParamsList();
+      });
+
+      container.appendChild(row);
+    });
+  }
+
+  /** Runs the real detection scan against the payload just picked --
+   * called from pickPayload, never blocking form entry if it fails (a
+   * detection error here shouldn't stop someone from filling out the rest
+   * of the form and proposing by hand instead). */
+  async function detectAndPrefillInstallParams(payloadPath) {
+    try {
+      const detected = await call('artifact.detectInstallParams', { payloadPath });
+      pendingInstallParams = detected;
+      renderInstallParamsList();
+    } catch (err) {
+      // Non-fatal -- the step just starts with an empty, fully-manual
+      // list instead of a pre-filled one.
+      console.warn('install_params detection failed', err);
+    }
+  }
+
   /** Clears every Add New field back to blank -- shared by the plain "+ Add
    * new" entry point (a fresh proposal) and a successful submit (ready for
    * the next one). Deliberately NOT used by openAddNewFromScanCandidate,
@@ -2522,6 +2615,8 @@
     pendingPayloadPath = null;
     $('payload-path-display').textContent = 'No file or folder selected';
     pendingCandidateWarnings = [];
+    pendingInstallParams = [];
+    renderInstallParamsList();
     clearAddNewReviewPreviewListener();
   }
 
@@ -2670,7 +2765,8 @@
 
   const ADDNEW_STEPS = [
     'id', 'kind', 'payload', 'description', 'owner',
-    'roles', 'stacks', 'teams', 'component-types', 'install-target', 'post-install', 'remote',
+    'roles', 'stacks', 'teams', 'component-types', 'install-target', 'post-install',
+    'install-params', 'remote',
     'review',
   ];
 
@@ -2686,6 +2782,7 @@
     'component-types': 'Component type',
     'install-target': 'Install target',
     'post-install': 'Setup command',
+    'install-params': 'Install-time config',
     remote: 'Remote',
     review: 'Review',
   };
@@ -2850,6 +2947,9 @@
       ['component-types', 'Component type', addNewComponentTypesPicker.getValues().join(', ') || '(none)'],
       ['install-target', 'Install target', $('f-install-target').value.trim() || '(default)'],
       ['post-install', 'Setup command', $('f-post-install').value.trim() || '(none)'],
+      ['install-params', 'Install-time config', pendingInstallParams.length > 0
+        ? pendingInstallParams.map((p) => p.key).join(', ')
+        : '(none)'],
       ['remote', 'Remote', addNewRemotePicker.getValue() || '(none selected)'],
     ];
 
@@ -2882,6 +2982,7 @@
       }
       pendingPayloadPath = picked;
       $('payload-path-display').textContent = picked;
+      await detectAndPrefillInstallParams(picked);
     } catch (err) {
       toastError(err);
     }
@@ -2951,6 +3052,11 @@
       focusAddNewField('remote');
       return;
     }
+    // A row with a blank key can't become a real install_param entry --
+    // filtered out (someone who added a row and never filled in the key
+    // clearly didn't mean to keep it) rather than sent as-is and failing
+    // manifest validation with a confusing error.
+    const installParams = pendingInstallParams.filter((p) => p.key.trim().length > 0);
 
     await withBusy(submitBtn, 'Working...', async () => {
       try {
@@ -2970,6 +3076,7 @@
             componentTypes,
             installTarget,
             postInstall,
+            installParams,
           },
         });
         toastSuccess(`Proposed ${id}: opened PR #${result.number}`, result.url);
@@ -3454,6 +3561,10 @@
     $('addnew-form').addEventListener('submit', (ev) => void submitAddNew(ev));
     $('pick-payload-file-btn').addEventListener('click', () => void pickPayload(false));
     $('pick-payload-dir-btn').addEventListener('click', () => void pickPayload(true));
+    $('install-params-add-btn').addEventListener('click', () => {
+      pendingInstallParams.push({ key: '', description: '', secret: false, required: true });
+      renderInstallParamsList();
+    });
 
     $('wizard-next-btn').addEventListener('click', () => wizardGoNext());
     $('wizard-back-btn').addEventListener('click', () => wizardGoBack());

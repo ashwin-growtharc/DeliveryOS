@@ -509,6 +509,15 @@
               </div>
             </div>
 
+            <div class="wizard-step" data-step="install-params">
+              <div class="field">
+                <label>Install-time configuration (optional)</label>
+                <p class="field-hint">Detected automatically from real <code>process.env.X</code> usage in the payload you picked -- review and correct before proposing (a detected key name is reliable; the description and secret/required guesses are a starting point, not a fact). Add more by hand if anything's missing.</p>
+                <div id="install-params-list"></div>
+                <button type="button" id="install-params-add-btn" class="btn btn-sm btn-ghost">+ Add param</button>
+              </div>
+            </div>
+
             <div class="wizard-step" data-step="remote">
               <div class="field">
                 <label>Remote</label>

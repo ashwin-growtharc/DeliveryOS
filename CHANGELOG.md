@@ -4,6 +4,62 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- **Phase 10 items 1 and 3 are complete: deterministic apply-and-test on
+  Pull, and real code-driven autofill for Add New's `install_params`.**
+  Item 2 (an explicit agent-escalation button on build failure) stays
+  gated on a separate, explicit go-ahead and was not touched.
+  - **Item 1** — a new `pullAndAutoWire` orchestration
+    (`src/engine/pull/pullAndAutoWire.ts`) wraps the existing, unchanged
+    `pullArtifact`: for artifacts declaring `wiring_actions`, it now also
+    applies every `whenAbsent`-shaped action for real
+    (`src/engine/pull/applyWiring.ts` — writes only genuinely new files;
+    anything that already exists is left alone and flagged for manual
+    review, even when a `whenPresent` merge-guidance snippet exists, since
+    that snippet is guidance, not a full file to overwrite) and then runs
+    the target project's own real build if one is detectable
+    (`src/engine/pull/verifyBuild.ts` — `npm run build` when
+    `package.json` declares a `scripts.build`, otherwise `{ran: false}`,
+    never an error). Wired into the desktop app's own Pull button via a
+    new sidecar command, `artifact.pullAndAutoWire`, used only when an
+    artifact's manifest actually has `wiring_actions` — `pullArtifact`
+    itself and its existing sidecar command are untouched. 13 new unit
+    tests plus a new real e2e test
+    (`test/e2e/sidecar.e2e.test.ts`) proving all three outcomes against a
+    real fixture: a fresh file applied verbatim, an existing file left
+    alone and flagged, and a real `npm run build` executed and reported.
+  - **Item 3** — a new `detectInstallParams`
+    (`src/engine/scan/detectInstallParams.ts`) scans a proposed artifact's
+    actual payload source for real `process.env.X` and Prisma's own
+    `env("X")` references, proposing a starting `install_params` list:
+    real key names, `required: true` always (a plain regex can't reliably
+    tell whether a call site has its own fallback, so this is the safe
+    direction to be wrong in), and a secret guess from a naming heuristic
+    (`SECRET`/`TOKEN`/`PASSWORD`/`_KEY`/`DATABASE_URL`/etc). Description
+    text is deliberately left blank rather than fabricated — the same
+    "make the autofill good, don't decorate it" lesson as Scan's own,
+    already-removed "AI guessed" badge. `push.ts` gained a real
+    `installParams` option that lands directly in the committed manifest
+    when present, and is a complete no-op (`install_params: []`, unchanged
+    from today) when omitted. Wired into the desktop app's Add New wizard
+    as a new "Install-time config" step, auto-triggered the moment a
+    payload is picked, editable before submit. 10 new unit tests plus 2
+    new e2e tests against real `pushArtifact` calls.
+    **A real, honest limitation, found by running this against the
+    actual, already-shipped `nextauth-credentials` artifact**: it detects
+    nothing there, because `AUTH_SECRET`/`AUTH_URL` are read implicitly by
+    Auth.js's own internal library code (never referenced in this
+    artifact's own payload source), and `DATABASE_URL` lives in the
+    *consuming* project's own `prisma/schema.prisma`, not the
+    `prisma-schema-snippet.prisma` reference file this payload actually
+    ships. Static analysis over payload text genuinely can't see either —
+    stated plainly rather than papered over.
+  - Verified against a genuinely fresh, real Next.js project
+    (`dos-phase10-e2e`), through the rebuilt packaged sidecar exe, not
+    just unit tests: pulling the real, signed `nextauth-credentials`
+    artifact applied its fresh-file wiring actions correctly, correctly
+    left an already-existing file alone, and the real `next build`
+    passed.
+
 - **Phase 9 is complete: `deliveryos-status`, a real Claude Code Skill
   teaching the status/health check this session kept doing by hand.**
   Genuinely separate from `deliveryos-check-first` (different trigger
@@ -20,7 +76,7 @@ design rationale.
   stateless, so there's no real problem a dashboard would solve here.
   Pushed for real via `deliveryos push --new`
   ([PR #56](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/56),
-  open, awaiting review), pulled back through the real packaged sidecar exe
+  merged), pulled back through the real packaged sidecar exe
   into the same global skills directory `deliveryos-check-first` lives in.
   Then genuinely run against this real repo, not staged: typecheck/lint/test
   all passed (270/271, 1 pre-existing unrelated failure), and the doc-sync

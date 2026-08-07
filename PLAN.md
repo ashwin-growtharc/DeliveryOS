@@ -1587,7 +1587,7 @@ and are the docs up to date?":
       own written instructions, then fixed. Re-ran the check afterward to
       confirm zero remaining drift in either file.
 
-## Phase 10 — Claude Code wired directly into the DeliveryOS app UI — **Not started, brainstormed only**
+## Phase 10 — Claude Code wired directly into the DeliveryOS app UI — **In progress (items 1 and 3 done; item 2's agent escalation still gated)**
 
 Goal: pressing **Pull** on a `backend-plugin` artifact in the app itself
 triggers check → pull → wire → test automatically, and Scan/Add New
@@ -1609,78 +1609,115 @@ repeat the exact mistake Tier 0 already flagged twice this session, just
 at a bigger scale. Recorded here because it was asked for directly, not
 because that gate has been satisfied.
 
-**In short (not built yet — this is the plan, not an outcome):**
+**In short:**
 
 - **Why this phase exists:** Phase 8 made "check first" something you ask
   Claude Code for in conversation. This phase asks: could the app itself
   do the mechanical half automatically, the moment someone clicks
   **Pull**, instead of needing a conversation at all? And separately —
-  could Scan/Add New fill in an artifact's own config fields (what env
-  vars it needs, etc.) by actually reading the code, instead of a person
-  typing them in by hand?
-- **What it would build:** three genuinely different pieces bundled under
-  one heading, on purpose, because they carry very different risk:
+  could Scan/Add New fill in an artifact's own config fields by actually
+  reading the code, instead of a person typing them in by hand?
+- **What got built (items 1 and 3):**
   1. **Deterministic apply-and-test on Pull** — the app applies a
-     backend-plugin's mechanical wiring itself and runs the project's
-     real build, reporting pass/fail right in the existing Pull/Push
-     progress log. No AI involved in this half at all — it's exactly the
-     same deterministic mechanism Phase 7's wiring agent already proved,
-     just triggered by a click instead of a person copying a snippet.
-  2. **An explicit "want help fixing this?" escalation on failure** —
-     only offered after something breaks, never fired automatically. This
-     one genuinely shells out to a real Claude Code process
-     (`claude --bare -p ... --allowedTools "Bash,Read,Edit"`) from the
-     desktop app itself — a materially bigger, less-supervised step than
-     anything built so far, and explicitly held for a separate, direct
-     go-ahead before any of it gets built, the same way Phase 7's
-     CI/CD-touching item was.
-  3. **Auto-filling Scan/Add New's own fields from real code analysis** —
-     a genuinely separate, unrelated-to-Pull piece: when someone's
-     proposing a NEW artifact (not pulling an existing one), the app reads
-     the actual code being pushed and proposes a description, tags, and —
-     concretely, not speculatively — `install_params`, by detecting real
-     `process.env.X` usage and guessing each one's key/description/
-     likely-secret/likely-required. Closes a real, already-known gap:
-     Phase 7's own `install_params` had to be hand-added after the fact,
-     since `push --new` has no way to author them today. Same lesson this
-     project already learned once (Scan's old "AI guessed" sparkle badge
-     was removed because the guess was useful but badging it as
-     AI-generated wasn't) — make the autofill good, don't decorate it.
-- **What's still open:** whether Phase 8's ask-first version has actually
-  been tried enough to justify this yet, and the real go/no-go on the
-  agent-escalation piece specifically. Neither is assumed — both need a
-  real decision before this phase starts.
+     backend-plugin's mechanical wiring itself (only ever a genuinely
+     fresh file; anything that already exists is left alone, even when a
+     merge-guidance snippet is offered) and runs the project's real
+     build, reporting pass/fail right in the existing Pull/Push progress
+     log. No AI involved in this half at all — it's exactly the same
+     deterministic mechanism Phase 7's wiring agent already proved, just
+     triggered by a click instead of a person copying a snippet.
+  2. **Auto-filling Add New's `install_params` from real code analysis** —
+     when proposing a NEW artifact, the app reads the actual payload
+     source for real `process.env.X` (and Prisma's own `env("X")`) usage
+     and proposes a starting `install_params` list — real key names, a
+     sensible secret/required guess, ready to review and correct rather
+     than author from a blank field. Description text is deliberately
+     left blank, not fabricated (same "make the autofill good, don't
+     decorate it" lesson as Scan's old, removed "AI guessed" badge).
+- **What's still held back (item 2):** the actual agent-escalation piece
+  — shelling out to a real `claude --bare -p ...` process from the app
+  itself when a build fails — stays gated on a separate, explicit
+  go-ahead, unbuilt. A materially bigger, less-supervised step than
+  anything else here, and not something to slide into just because the
+  cheaper two-thirds of the phase turned out fine.
+- **A real, honest limitation found while proving item 2 — sorry, item 3 —
+  for real**: running the new detection against the actual, already-shipped
+  `nextauth-credentials` artifact finds *nothing*, because `AUTH_SECRET`/
+  `AUTH_URL` are read implicitly by Auth.js's own library internals and
+  `DATABASE_URL` lives in the consuming project's own schema file, not
+  this payload's source. Pure static analysis can't see either — a real,
+  structural boundary, not a bug to paper over.
 
-**Walking through it, concretely — once built** (this hasn't happened
-yet; this is what it's meant to feel like):
+**Walking through it, concretely:**
 
-*Pulling an existing artifact:*
+*Pulling an existing artifact (real, verified — not a mock):*
 1. Someone clicks **Pull** on `nextauth-credentials` in the app.
 2. The app pulls it, applies the wiring automatically, and runs the
    target project's real build — all visible in the existing progress
-   log, no terminal needed.
-3. If the build passes: done, reported right there.
-4. If it fails (say, a stale wiring snippet): the app offers "want Claude
-   Code to try fixing this?" as an explicit button — never automatic —
-   and only on that explicit click does it invoke Claude Code for real,
-   restricted to exactly the tools it needs, to diagnose and fix the
-   break before reporting back.
+   log, no terminal needed. This was run for real, against the actual
+   signed artifact, into a genuinely fresh Next.js project: all 3
+   fresh-file actions applied correctly, the one file that already
+   existed (`layout.tsx`) was correctly left alone, and the real
+   `next build` passed.
+3. **Not yet real**: if the build had failed, there's no "want Claude
+   Code to try fixing this?" escalation yet (item 2) — today, a failure
+   just reports as a failure, same as it always did.
 
-*Proposing a brand-new one (a genuinely separate flow, no Pull involved):*
+*Proposing a brand-new artifact (a genuinely separate flow, no Pull
+involved):*
 1. Someone's built a new backend module and opens Add New to propose it.
-2. Instead of typing out its description, tags, and every config value it
-   needs by hand, the app has already scanned the actual code, found
-   `process.env.AUTH_SECRET`/`process.env.DATABASE_URL` usage, and
-   pre-filled a draft `install_params` list — real key names, a sensible
-   guess at which ones are secrets, ready to review and correct rather
-   than author from a blank field.
+2. The app scans the actual payload code the moment it's picked. If the
+   code contains real `process.env.X`/Prisma `env("X")` references, it
+   pre-fills a draft `install_params` list from them — real key names, a
+   sensible guess at which ones are secrets, ready to review and correct.
+   If the code has neither (the real `nextauth-credentials` case,
+   confirmed above), the list simply starts empty, same as it always did
+   — a normal, honest outcome, not a failure.
 
-- [ ] **Deterministic apply-and-test on Pull, no agent involved yet.** The
-      app applies the mechanical wiring itself (matching the
-      manifest-declared card exactly, same as the existing wiring feature)
-      and runs the target project's own build/test command, reporting
-      pass/fail through the app's existing Pull/Push progress-log UI — no
-      new UI surface needed for this half.
+- [x] **Deterministic apply-and-test on Pull, no agent involved yet.** Done.
+      New `applyDeterministicWiring` (`src/engine/pull/applyWiring.ts`) —
+      auto-writes ONLY the genuinely safe case: a resolved wiring action
+      where the target file doesn't exist yet (`whenAbsent`, which the
+      schema itself requires to declare a complete, verbatim snippet).
+      Anything that already exists is left completely untouched, even
+      when a `whenPresent.snippet` is offered — that snippet is merge
+      GUIDANCE for a person (e.g. "wrap `{children}` in
+      `<SessionProvider>`"), not the file's own full content; overwriting
+      a real, existing file with just that fragment would destroy the
+      rest of it. New `detectBuildCommand`/`runProjectBuild`
+      (`src/engine/pull/verifyBuild.ts`) — the smallest real heuristic
+      matching this project's own proven target ecosystem: a
+      `package.json` with a `"build"` script means `npm run build`;
+      anything else reports `ran: false`, not an error (a project with no
+      detectable build command is a normal outcome). New
+      `pullAndAutoWire` (`src/engine/pull/pullAndAutoWire.ts`) — a
+      genuinely SEPARATE orchestration function, not a change to
+      `pullArtifact` itself: the CLI's `deliveryos pull` and every
+      existing test keep using the plain function, exactly as Phase 7
+      left it (Tier 2 never auto-applied by default). New sidecar command
+      `artifact.pullAndAutoWire`; the app's own Pull action
+      (`runArtifactAction` in `app.js`) opts into it only for artifacts
+      that actually declare `wiring_actions` — every other artifact (the
+      overwhelming majority) keeps calling the plain `artifact.pull`,
+      unchanged, same "gate on field presence" convention every earlier
+      Phase 7/8 piece already used. New `'wiring'`/`'build'` progress
+      stages surface through the app's existing progress-log UI, no new
+      UI surface built for this half.
+      **Real, unstaged verification**: pulled the real, signed
+      `nextauth-credentials` artifact into a genuinely fresh Next.js
+      project via the real rebuilt packaged sidecar exe's new
+      `artifact.pullAndAutoWire` command. All 3 fresh-file wiring actions
+      (`src/auth.ts`, `src/middleware.ts`, the API route) were applied
+      automatically and correctly; `src/app/layout.tsx` (which
+      `create-next-app` already generates) was correctly left in
+      `needsReview`, genuinely untouched — confirmed on disk, not just
+      from the returned result. The real project's own `next build` then
+      ran automatically and passed, with zero manual wiring by a person
+      at any point. 5 new unit tests (`applyWiring.test.ts`) + 7 new unit
+      tests (`verifyBuild.test.ts`, including two that actually run a
+      real passing and a real failing build command, not mocked) + 1 new
+      sidecar e2e test proving the mixed applied/needs-review/build-result
+      shape end to end.
 - [ ] **An explicit escalation step on failure, not an automatic one.** "Want
       Claude Code to try fixing this?" — only offered after a real failure,
       never fired unsupervised the instant Pull is clicked. Real reason
@@ -1704,20 +1741,60 @@ yet; this is what it's meant to feel like):
       it spawns are killed ~5s after the main task ends — fine for a
       one-shot build/test, would matter if a future version ever needed to
       keep a dev server running for a deeper smoke test.
-- [ ] **Auto-fill Scan/Add New fields from real code analysis** —
-      description, tags, and specifically `install_params` (detecting
-      `process.env.X` usage to propose key/description/likely-secret/
-      likely-required). Closes a real, already-documented gap: Phase 7's
-      own `install_params` had to be hand-added after the fact, since
-      `push --new` has no way to author them yet. **Same lesson this
-      codebase already learned, apply it again**: Scan's old "AI guessed"
-      sparkle badge was removed because the guess was useful but badging
-      it as AI-generated wasn't — make the autofill good, don't decorate
-      it.
-- [ ] **End-to-end test:** click Pull on a real `backend-plugin` artifact
-      in the app, confirm the deterministic wiring+build path runs and
-      reports correctly on a clean pull, then deliberately break a wiring
-      snippet to confirm the escalation step offers to fix it, actually
-      fixes it via the CLI subprocess, and re-reports success — plus a
-      real Scan/Add New run confirming autofilled `install_params` match
-      a real artifact's actual `process.env.X` usage.
+- [x] **Auto-fill Scan/Add New's `install_params` from real code
+      analysis.** Done, scoped specifically to `install_params` — the
+      concrete, closable gap this item named (description/tags autofill
+      was not attempted; a plausible-sounding guess at what a field means
+      is exactly the "guess was useful but badging it as AI-generated
+      wasn't" trap this item's own text warns against, worse for prose
+      than for a mechanical key name). New `detectInstallParams`
+      (`src/engine/scan/detectInstallParams.ts`) — walks a payload's real
+      source for actual `process.env.X` **and** Prisma's own `env("X")`
+      schema syntax (a real, distinct convention, added after finding it
+      mattered — see below), proposing key/secret-guess/required for
+      each. Every detected key name is a reliable, mechanical fact (it
+      really is referenced in the code); the **description is
+      deliberately left blank**, never fabricated, for a person to fill
+      in themselves — the same "make the autofill good, don't decorate
+      it" lesson this item's own text names. `required` defaults `true`
+      (a plain regex can't reliably tell whether a call site has its own
+      fallback; wrong-in-the-safe-direction beats silently marking
+      something optional that the code actually needs). New
+      `artifact.detectInstallParams` sidecar command; the Add New
+      wizard gains a new step (`install-params`) that runs detection the
+      moment a payload is picked, pre-fills an editable list (key,
+      description, secret/required checkboxes, add/remove), and includes
+      it in the final `artifact.push` call. `PushOptions` gains
+      `installParams`, written into a new manifest's `install_params`
+      exactly like every other propose-new field.
+      **A real, honest limitation, found by running this against the
+      actual shipped `nextauth-credentials` artifact, not hidden**: it
+      detects **nothing** there. `AUTH_SECRET`/`AUTH_URL` are read
+      implicitly by Auth.js's own internal library code, never referenced
+      in this artifact's own payload source at all; `DATABASE_URL` lives
+      in the CONSUMING project's own `prisma/schema.prisma` (Tier 3,
+      deliberately never part of this payload), not the
+      `prisma-schema-snippet.prisma` reference file this payload actually
+      ships. Pure static analysis over a payload's own text genuinely
+      cannot see either of these — a real, structural limit of what this
+      mechanism can catch, stated plainly rather than papered over. It
+      still does exactly what it was built for: an artifact whose own
+      payload code contains real, explicit env-var references. 10 new
+      unit tests (`detectInstallParams.test.ts`), 2 new push e2e tests
+      (a real `installParams` option landing in a real committed
+      manifest, and confirming omitting it entirely is zero regression).
+      **Frontend verification note**: the new wizard step was checked for
+      syntax validity and structural consistency with every existing
+      step's own convention, not re-verified via a full interactive
+      browser click-through this round — a deliberate scope call (see
+      the standing "avoid heavy GUI simulation" guidance), not an
+      oversight.
+- [ ] **The agent-escalation piece (item 2, above) and the full
+      end-to-end test that depends on it** — still not started, still
+      gated on a separate, explicit go-ahead given its materially
+      different risk (a real Claude Code subprocess invoked from a GUI
+      button, unsupervised, vs. a terminal conversation someone is
+      actively watching). Items 1 and 3 above were each verified for real
+      independently in the meantime — this remaining item is specifically
+      the escalation mechanism plus the deliberately-introduced-break
+      test that exercises it.

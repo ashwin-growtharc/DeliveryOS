@@ -36,9 +36,11 @@ import { pristinePath } from './engine/paths';
 import { pullArtifact, resolveArtifact, ProgressCallback } from './engine/pull/pull';
 import { resolveInstallParamValues, applyInstallParams, readExistingEnvValues } from './engine/pull/installParams';
 import { resolveWiringActions } from './engine/pull/wiring';
+import { pullAndAutoWire } from './engine/pull/pullAndAutoWire';
 import { pushArtifact, PushOptions } from './engine/push/push';
 import { checkForUpdates, resolvePendingPushes } from './engine/sync/sync';
 import { scanForNewArtifacts } from './engine/scan/scan';
+import { detectInstallParams } from './engine/scan/detectInstallParams';
 import {
   listRemotes,
   addRemoteEntry,
@@ -239,6 +241,19 @@ const commands: Record<string, CommandHandler> = {
     return pullArtifact(id, remote, cwd, onProgress, values);
   },
 
+  // Phase 10 item 1: "deterministic apply-and-test on Pull, no agent
+  // involved yet." A separate command from artifact.pull, not a change to
+  // it -- the app's own Pull button opts into this explicitly (only for
+  // artifacts that declare wiring_actions); the CLI's `deliveryos pull`
+  // keeps using the plain command above, unchanged.
+  'artifact.pullAndAutoWire': (args, { onProgress }) => {
+    const id = requireString(args, 'id');
+    const cwd = requireString(args, 'cwd');
+    const remote = optionalString(args, 'remote');
+    const values = optionalStringRecord(args, 'values');
+    return pullAndAutoWire(id, remote, cwd, onProgress, values);
+  },
+
   // Configures an already-pulled artifact's install_params without a full
   // re-pull -- e.g. the user filled in the required-config checklist
   // AFTER pulling, or is going back to fix one value later. Resolves the
@@ -314,6 +329,15 @@ const commands: Record<string, CommandHandler> = {
     const cwd = requireString(args, 'cwd');
     const remote = requireString(args, 'remote');
     return scanForNewArtifacts(cwd, remote, onProgress);
+  },
+
+  // Phase 10 item 3: reads a real payload directory's actual source for
+  // process.env.X usage and proposes install_params -- the Add New
+  // wizard calls this once a payload path is picked, pre-filling an
+  // editable list rather than a blank one.
+  'artifact.detectInstallParams': (args) => {
+    const payloadPath = requireString(args, 'payloadPath');
+    return detectInstallParams(payloadPath);
   },
 
   // Real preview-compile command (Phase 6, Phase B), replacing Phase A's

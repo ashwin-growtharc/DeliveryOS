@@ -29,8 +29,11 @@ builds) is now **complete** and pushed for real as `deliveryos-check-first`
 on the project's own catalog. Phase 9 (the same principle, applied to
 checking DeliveryOS's own health/status instead of generating code) is
 also **complete**, as `deliveryos-status`. Phase 10 (wiring the check→
-pull→wire→test loop directly into the app's own **Pull** button) is
-scoped in `PLAN.md` but not started. See
+pull→wire→test loop directly into the app's own **Pull** button, plus
+code-driven autofill for Add New) is **partially complete**: deterministic
+apply-and-test on Pull and Add New's `install_params` autofill are done;
+an explicit agent-escalation button on build failure remains gated on a
+separate go-ahead. See
 [CHANGELOG.md](CHANGELOG.md) for what's shipped, [PLAN.md](PLAN.md) for
 what's left, and the [docs index](#docs-index) below for everything else.
 
