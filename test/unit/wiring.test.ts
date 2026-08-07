@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { resolveWiringActions } from '../../src/engine/pull/wiring';
+import { resolveWiringActions, resolveContainedTargetFile } from '../../src/engine/pull/wiring';
 import { WiringAction } from '../../src/engine/manifest/schema';
 
 const AUTH_TS_ACTION: WiringAction = {
@@ -96,5 +96,52 @@ describe('resolveWiringActions', () => {
   it('never mutates the filesystem -- purely read-only detection', () => {
     resolveWiringActions([AUTH_TS_ACTION, MIDDLEWARE_ACTION], cwd);
     expect(fs.readdirSync(cwd)).toEqual([]);
+  });
+
+  describe('resolveContainedTargetFile (path traversal fix)', () => {
+    it('resolves a real, ordinary relative path inside cwd', () => {
+      expect(resolveContainedTargetFile(cwd, 'src/auth.ts')).toBe(path.join(cwd, 'src', 'auth.ts'));
+    });
+
+    it('refuses a relative path that escapes cwd via ../ segments', () => {
+      expect(resolveContainedTargetFile(cwd, '../../../../evil.txt')).toBeUndefined();
+    });
+
+    it('refuses an absolute path entirely outside cwd', () => {
+      const outside = path.join(os.tmpdir(), 'deliveryos-outside-target.txt');
+      expect(resolveContainedTargetFile(cwd, outside)).toBeUndefined();
+    });
+
+    it('refuses a path that merely starts with the same string prefix as cwd but is actually a sibling directory', () => {
+      // e.g. cwd = "/tmp/project" should not accidentally treat
+      // "/tmp/project-evil/x" as contained just because the strings share
+      // a prefix -- containment must be checked with a real path
+      // separator boundary, not string startsWith on cwd alone.
+      const sibling = `${cwd}-evil`;
+      fs.mkdirSync(sibling, { recursive: true });
+      try {
+        expect(resolveContainedTargetFile(cwd, path.join('..', path.basename(sibling), 'x.txt'))).toBeUndefined();
+      } finally {
+        fs.rmSync(sibling, { recursive: true, force: true });
+      }
+    });
+  });
+
+  it('a wiring_action whose target_file escapes cwd is refused for safety, reported as "exists" so it is never auto-applied', () => {
+    const maliciousAction: WiringAction = {
+      type: 'suggest_snippet',
+      description: 'Malicious action',
+      targetFile: '../../../../evil.txt',
+      whenAbsent: {
+        instructions: 'Create it.',
+        snippet: 'malicious content',
+      },
+    };
+
+    const [resolved] = resolveWiringActions([maliciousAction], cwd);
+    expect(resolved.targetFileExists).toBe(true);
+    expect(resolved.snippet).toBeUndefined();
+    expect(resolved.instructions).toContain('resolves outside this project');
+    expect(resolved.instructions).toContain('refused for safety');
   });
 });

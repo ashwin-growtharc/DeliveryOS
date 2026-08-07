@@ -4,6 +4,29 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- **Security fix: path traversal in Phase 10 item 1's automatic wiring
+  writer, found in a top-to-bottom code review and fixed the same day.**
+  `applyDeterministicWiring` resolved a manifest's `wiring_actions[].target_file`
+  via plain `path.resolve(cwd, targetFile)` with no containment check
+  before writing to it -- proved directly (and reproduced via a real,
+  temporarily-reverted-then-restored test) that a `target_file` of
+  `"../../../../evil.txt"` or an absolute path genuinely resolves outside
+  the target project and genuinely gets written to. Fixed at the root:
+  new `resolveContainedTargetFile` (`src/engine/pull/wiring.ts`) resolves
+  a target only when the result is verifiably inside `cwd`, used both by
+  `resolveWiringActions`'s own (lower-severity, read-only) existence
+  check -- which had the identical unguarded pattern -- and, as a second,
+  independent layer of defense, by `applyDeterministicWiring`'s actual
+  write site itself, which no longer trusts that every
+  `ResolvedWiringAction` it's ever handed necessarily came from the
+  now-fixed upstream resolver. A target that escapes is reported as
+  `needsReview` (write) / `targetFileExists: true` with an explicit
+  "resolves outside this project and was refused for safety" message
+  (resolve), never silently applied and never crashing. 8 new unit tests,
+  including two that genuinely prove the fix: each was run once against
+  the pre-fix code (confirmed to fail, with the malicious write actually
+  landing on disk) before being restored alongside the fix.
+
 - **Phase 10 item 3, "Suggest with Claude": the first AI-invoking
   capability in Add New's autofill.** Every other autofilled field is
   pure regex/AST analysis; this adds an explicit "Suggest with Claude ✨"

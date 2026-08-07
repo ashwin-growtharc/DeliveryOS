@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { ResolvedWiringAction } from './wiring';
+import { ResolvedWiringAction, resolveContainedTargetFile } from './wiring';
 
 /** What `applyDeterministicWiring` actually did against a real project.
  * `applied` are target files it safely wrote for real; `needsReview` are
@@ -49,7 +49,22 @@ export function applyDeterministicWiring(
       continue;
     }
 
-    const fullPath = path.resolve(cwd, action.targetFile);
+    // Defense in depth, not the only guard: `resolveWiringActions` already
+    // refuses a target_file that escapes `cwd` by reporting it as
+    // "exists" (routing it to needsReview above before this line is ever
+    // reached), but this is the actual filesystem-write call -- it
+    // re-validates containment itself rather than trusting that every
+    // `ResolvedWiringAction` it's ever handed necessarily went through
+    // that upstream check. A manifest's target_file is untrusted input
+    // (see resolveContainedTargetFile's own doc comment); a real test
+    // confirmed `../../../../evil.txt` genuinely resolves outside a
+    // project root.
+    const fullPath = resolveContainedTargetFile(cwd, action.targetFile);
+    if (!fullPath) {
+      needsReview.push(action.targetFile);
+      continue;
+    }
+
     fs.mkdirSync(path.dirname(fullPath), { recursive: true });
     fs.writeFileSync(fullPath, action.snippet, 'utf-8');
     applied.push(action.targetFile);

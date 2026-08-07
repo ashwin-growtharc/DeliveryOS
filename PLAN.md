@@ -1812,6 +1812,20 @@ packaged sidecar exe, not just tests):*
       real passing and a real failing build command, not mocked) + 1 new
       sidecar e2e test proving the mixed applied/needs-review/build-result
       shape end to end.
+      **Security fix, found in a later top-to-bottom code review and
+      fixed the same day**: `applyDeterministicWiring` originally resolved
+      `target_file` via plain `path.resolve(cwd, targetFile)` with no
+      containment check before writing to it — a manifest declaring
+      `target_file: "../../../../evil.txt"` (or an absolute path)
+      genuinely escapes the project entirely, proved directly (and via a
+      test temporarily run against the pre-fix code, confirmed to
+      actually write the file outside the project, before the fix was
+      restored). Fixed with a new `resolveContainedTargetFile`
+      (`src/engine/pull/wiring.ts`), used by both the read-only resolver
+      (which had the identical unguarded pattern) and, as an independent
+      second layer, the actual write site itself. An escaping target is
+      now refused and reported as needing manual review, never silently
+      applied. 8 new unit tests.
 - [ ] **An explicit escalation step on failure, not an automatic one.** "Want
       Claude Code to try fixing this?" — only offered after a real failure,
       never fired unsupervised the instant Pull is clicked. Real reason
