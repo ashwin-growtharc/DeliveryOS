@@ -4,6 +4,49 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- **Phase 10 item 3 extended: real autofill now covers `stacks`,
+  `description`, and `owner`, for every kind, not just `install_params`
+  on backend-plugin-shaped payloads.** Follow-up to the entry below, in
+  response to direct feedback that autofill should reach "mostly
+  everything," not one field on one kind. New `detectStacks`
+  (`src/engine/scan/detectStacks.ts`) reads real `import`/`require`
+  specifiers and `package.json` dependencies against a small lookup
+  table verified against the real catalog's own existing tag vocabulary
+  (`next`→`nextjs`, `react`→`react`, `@prisma/client`/a `.prisma` file→
+  `prisma`, `express`→`express`, plus real file-extension-based
+  `typescript`/`javascript`). `description` now has a real source for
+  every kind: `ui-component` gets `react-docgen-typescript`'s own
+  `ComponentDoc.description` -- a real JSDoc comment that was already
+  being parsed and then silently thrown away
+  (`detectUiComponents.ts` previously hardcoded `undefined`, with a
+  comment claiming no reliable signal existed; that was simply stale).
+  The four markdown kinds now get frontmatter-based guessing from Add
+  New's own manual payload-pick path too (previously Scan-only). Anything
+  else falls back to a new `extractLeadingComment`
+  (`src/engine/scan/extractLeadingComment.ts`), reading a real leading
+  comment off a conventional entry file, never fabricating one. `owner`
+  now defaults from the real local git identity (`git config
+  user.name`, already resolved via the existing `getCommitIdentity`) --
+  confirmed to exactly match the convention already used in every real
+  shipped manifest. **Deliberately still not attempted**:
+  `componentTypes`/`roles`/`teams` -- checked real catalog values and
+  concluded there is no equally reliable code signal for either; both
+  require a semantic judgment no regex or import scan can honestly make,
+  so they stay manual on purpose. One consolidated sidecar command,
+  `artifact.detectMetadata`, replaces the narrower
+  `artifact.detectInstallParams`. Verified for real against the
+  rebuilt packaged sidecar exe (not just unit tests) across four real
+  fixtures -- a ui-component's JSDoc, a skill's frontmatter, a
+  backend-shaped payload's comment/imports/env-var, and a signal-free
+  payload that correctly came back blank rather than fabricated -- plus
+  20 new unit tests. Also fixed, while investigating a reported "Unknown
+  command" error: the packaged sidecar `.exe` Tauri actually spawns
+  (`src-tauri/target/**/deliveryos-engine.exe`) was stale relative to the
+  freshly rebuilt `build/deliveryos-engine-*.exe`, since `cargo`/`tauri
+  dev` hadn't rerun since the last rebuild -- not a code bug, fixed by
+  clearing the stale copies so the next `tauri dev`/`tauri build`
+  re-copies fresh ones.
+
 - **Phase 10 items 1 and 3 are complete: deterministic apply-and-test on
   Pull, and real code-driven autofill for Add New's `install_params`.**
   Item 2 (an explicit agent-escalation button on build failure) stays

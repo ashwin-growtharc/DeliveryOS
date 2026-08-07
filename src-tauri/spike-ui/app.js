@@ -2587,16 +2587,46 @@
   /** Runs the real detection scan against the payload just picked --
    * called from pickPayload, never blocking form entry if it fails (a
    * detection error here shouldn't stop someone from filling out the rest
-   * of the form and proposing by hand instead). */
-  async function detectAndPrefillInstallParams(payloadPath) {
+   * of the form and proposing by hand instead). Covers install_params,
+   * stacks, and description together (Phase 10 item 3, extended) -- for
+   * every kind, not just backend-plugin-shaped payloads. install_params
+   * and stacks always reflect the just-picked payload (re-picking a
+   * payload is already a big change); description only fills in when the
+   * field is still blank, so it never clobbers something already typed. */
+  async function detectAndPrefillMetadata(payloadPath) {
     try {
-      const detected = await call('artifact.detectInstallParams', { payloadPath });
-      pendingInstallParams = detected;
+      const kind = resolveKindFieldValue();
+      const detected = await call('artifact.detectMetadata', { payloadPath, kind });
+      pendingInstallParams = detected.installParams;
       renderInstallParamsList();
+      addNewStacksPicker.setValues(detected.stacks);
+      if (detected.description && !$('f-description').value.trim()) {
+        $('f-description').value = detected.description;
+      }
     } catch (err) {
-      // Non-fatal -- the step just starts with an empty, fully-manual
-      // list instead of a pre-filled one.
-      console.warn('install_params detection failed', err);
+      // Non-fatal -- the step just starts with empty, fully-manual fields
+      // instead of pre-filled ones.
+      console.warn('artifact metadata detection failed', err);
+    }
+  }
+
+  /** Real default for Add New's Owner field -- the local machine's own git
+   * identity (`git config user.name`), not a guess. Non-fatal on failure
+   * (e.g. `state.projectDir` isn't a git repo yet): the field just stays
+   * blank for manual entry, same as before this existed. Never overwrites
+   * something already typed (checked at the call site via the blank-field
+   * guard, same pattern as description autofill). */
+  async function prefillOwnerFromGitIdentity() {
+    if (!state.projectDir) {
+      return;
+    }
+    try {
+      const identity = await call('git.identity', { cwd: state.projectDir });
+      if (identity.name && !$('f-owner').value.trim()) {
+        $('f-owner').value = identity.name;
+      }
+    } catch (err) {
+      console.warn('git identity lookup failed', err);
     }
   }
 
@@ -2618,6 +2648,7 @@
     pendingInstallParams = [];
     renderInstallParamsList();
     clearAddNewReviewPreviewListener();
+    void prefillOwnerFromGitIdentity();
   }
 
   // ---------- add new: Review step live preview (Phase 6, Phase D) ----------
@@ -2982,7 +3013,7 @@
       }
       pendingPayloadPath = picked;
       $('payload-path-display').textContent = picked;
-      await detectAndPrefillInstallParams(picked);
+      await detectAndPrefillMetadata(picked);
     } catch (err) {
       toastError(err);
     }

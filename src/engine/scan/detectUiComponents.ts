@@ -157,10 +157,13 @@ export function detectUiComponentCandidates(cwd: string, isNew: (id: string) => 
         kind: 'ui-component',
         payloadPath: materialized.payloadPath,
         installTarget: materialized.installTarget,
-        // Left undefined, matching this codebase's explicit discipline
-        // (see scan.ts's own "leave for reviewer" doc comment) -- there's
-        // no reliable way to guess a description from a component's code.
-        description: undefined,
+        // `doc.description` is `react-docgen-typescript`'s own parse of a
+        // real JSDoc/leading comment directly above the component -- an
+        // author-written fact, not a guess, exactly like
+        // `guessDescriptionFromFrontmatter` for the markdown kinds. Left
+        // undefined (for the reviewer to fill in) only when no such
+        // comment actually exists.
+        description: doc.description.trim().length > 0 ? doc.description.trim() : undefined,
         warnings: warnings.length > 0 ? warnings : undefined,
       });
     });

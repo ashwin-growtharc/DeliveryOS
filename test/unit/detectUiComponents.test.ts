@@ -79,6 +79,26 @@ describe('detectUiComponentCandidates', () => {
     expect(previewSource).toContain('export const Default = () => <Button {...inferredProps} />;');
   });
 
+  it('uses a real JSDoc comment above the component as the candidate description (Phase 10 item 3, extended)', () => {
+    const cwd = project();
+    const BUTTON_SOURCE_WITH_DOC = `export interface ButtonProps {
+  label: string;
+  variant?: 'primary' | 'secondary';
+}
+
+/** A themed button with a primary/secondary variant. */
+export function Button({ label, variant = 'primary' }: ButtonProps) {
+  return <button data-variant={variant}>{label}</button>;
+}
+`;
+    writeFile(cwd, 'src/ui/Button/Button.tsx', BUTTON_SOURCE_WITH_DOC);
+
+    const candidates = detectUiComponentCandidates(cwd, alwaysNew);
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].description).toBe('A themed button with a primary/secondary variant.');
+  });
+
   it('does not scaffold a new preview.tsx when one already exists next to the component', () => {
     const cwd = project();
     writeFile(cwd, 'src/ui/Button/Button.tsx', BUTTON_SOURCE);

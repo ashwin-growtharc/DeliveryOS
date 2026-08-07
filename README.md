@@ -31,9 +31,10 @@ checking DeliveryOS's own health/status instead of generating code) is
 also **complete**, as `deliveryos-status`. Phase 10 (wiring the check→
 pull→wire→test loop directly into the app's own **Pull** button, plus
 code-driven autofill for Add New) is **partially complete**: deterministic
-apply-and-test on Pull and Add New's `install_params` autofill are done;
-an explicit agent-escalation button on build failure remains gated on a
-separate go-ahead. See
+apply-and-test on Pull is done, and Add New's autofill now covers
+`install_params`, `stacks`, `description`, and `owner` for every kind
+(not just backend-plugin); an explicit agent-escalation button on build
+failure remains gated on a separate go-ahead. See
 [CHANGELOG.md](CHANGELOG.md) for what's shipped, [PLAN.md](PLAN.md) for
 what's left, and the [docs index](#docs-index) below for everything else.
 

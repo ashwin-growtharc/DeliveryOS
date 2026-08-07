@@ -1626,27 +1626,40 @@ because that gate has been satisfied.
      log. No AI involved in this half at all — it's exactly the same
      deterministic mechanism Phase 7's wiring agent already proved, just
      triggered by a click instead of a person copying a snippet.
-  2. **Auto-filling Add New's `install_params` from real code analysis** —
-     when proposing a NEW artifact, the app reads the actual payload
-     source for real `process.env.X` (and Prisma's own `env("X")`) usage
-     and proposes a starting `install_params` list — real key names, a
-     sensible secret/required guess, ready to review and correct rather
-     than author from a blank field. Description text is deliberately
-     left blank, not fabricated (same "make the autofill good, don't
-     decorate it" lesson as Scan's old, removed "AI guessed" badge).
+  2. **Auto-filling Add New's `install_params`, `stacks`, `description`,
+     and `owner` from real code analysis — for every kind, not just
+     backend-plugin.** When proposing a NEW artifact, the app reads the
+     actual payload for real, mechanical facts: `process.env.X`/Prisma
+     `env("X")` usage (→ `install_params`), real `import`/`require`
+     specifiers and `package.json` dependencies against a small known-
+     package table (→ `stacks`, e.g. `next`→`nextjs`, `@prisma/client`→
+     `prisma`), a real JSDoc comment already parsed by the docgen step for
+     `ui-component` (previously extracted and then silently discarded — a
+     genuine bug fix, not new detection), real frontmatter for the four
+     markdown kinds, and a leading block comment for anything else — all
+     falling back to blank rather than ever inventing text. `owner`
+     defaults from the local machine's real git identity
+     (`git config user.name`), not a guess. Every field stays freely
+     editable/removable before proposing, same as `install_params` always
+     was. **Deliberately still not attempted**: `componentTypes`
+     (button/badge/effect/...) and `roles`/`teams` — these require a
+     semantic judgment about what something *is* or *who owns it* that no
+     regex or import scan can honestly make; guessing wrong there silently
+     is worse than leaving it blank, the same argument `scan.ts`'s own doc
+     comment already made for `roles`/`teams`.
 - **What's still held back (item 2):** the actual agent-escalation piece
   — shelling out to a real `claude --bare -p ...` process from the app
   itself when a build fails — stays gated on a separate, explicit
   go-ahead, unbuilt. A materially bigger, less-supervised step than
   anything else here, and not something to slide into just because the
   cheaper two-thirds of the phase turned out fine.
-- **A real, honest limitation found while proving item 2 — sorry, item 3 —
-  for real**: running the new detection against the actual, already-shipped
-  `nextauth-credentials` artifact finds *nothing*, because `AUTH_SECRET`/
-  `AUTH_URL` are read implicitly by Auth.js's own library internals and
-  `DATABASE_URL` lives in the consuming project's own schema file, not
-  this payload's source. Pure static analysis can't see either — a real,
-  structural boundary, not a bug to paper over.
+- **A real, honest limitation found while proving item 3 for real**:
+  running the `install_params` detection against the actual, already-
+  shipped `nextauth-credentials` artifact finds *nothing*, because
+  `AUTH_SECRET`/`AUTH_URL` are read implicitly by Auth.js's own library
+  internals and `DATABASE_URL` lives in the consuming project's own
+  schema file, not this payload's source. Pure static analysis can't see
+  either — a real, structural boundary, not a bug to paper over.
 
 **Walking through it, concretely:**
 
@@ -1664,15 +1677,28 @@ because that gate has been satisfied.
    just reports as a failure, same as it always did.
 
 *Proposing a brand-new artifact (a genuinely separate flow, no Pull
-involved):*
-1. Someone's built a new backend module and opens Add New to propose it.
-2. The app scans the actual payload code the moment it's picked. If the
-   code contains real `process.env.X`/Prisma `env("X")` references, it
-   pre-fills a draft `install_params` list from them — real key names, a
-   sensible guess at which ones are secrets, ready to review and correct.
-   If the code has neither (the real `nextauth-credentials` case,
-   confirmed above), the list simply starts empty, same as it always did
-   — a normal, honest outcome, not a failure.
+involved, real for every kind — verified against the real rebuilt
+packaged sidecar exe, not just tests):*
+1. Someone opens Add New, picks a kind, and picks a payload — a
+   ui-component with a real JSDoc comment on it, a skill folder with a
+   real `SKILL.md`, or a freeform backend-shaped payload.
+2. The moment the payload is picked, the app scans it for real signals:
+   a ui-component's JSDoc comment (verified: a component with `/** A
+   small counter widget shown on the dashboard. */` above it produced
+   exactly that as the pre-filled description), a skill's real
+   frontmatter (verified: a real `description:` field in `SKILL.md`
+   came through unchanged), a backend payload's leading comment plus its
+   real `@prisma/client` import and `process.env.AUTH_SECRET` reference
+   (verified: produced `stacks: [prisma, typescript]` and a real
+   `AUTH_SECRET` install_param, both correct). The Owner field defaults
+   from the real local git identity (verified: `ashwin-growtharc`,
+   exactly matching this machine's own `git config user.name`).
+3. Everything stays editable. A payload with none of these signals (no
+   comment, no matching imports, no env vars) leaves those fields blank
+   rather than fabricating anything — verified directly: a plain
+   payload with no signals produced `stacks: [typescript]` (a real fact,
+   the file extension) and no `description` key at all, not an invented
+   one.
 
 - [x] **Deterministic apply-and-test on Pull, no agent involved yet.** Done.
       New `applyDeterministicWiring` (`src/engine/pull/applyWiring.ts`) —
@@ -1741,35 +1767,93 @@ involved):*
       it spawns are killed ~5s after the main task ends — fine for a
       one-shot build/test, would matter if a future version ever needed to
       keep a dev server running for a deeper smoke test.
-- [x] **Auto-fill Scan/Add New's `install_params` from real code
-      analysis.** Done, scoped specifically to `install_params` — the
-      concrete, closable gap this item named (description/tags autofill
-      was not attempted; a plausible-sounding guess at what a field means
-      is exactly the "guess was useful but badging it as AI-generated
-      wasn't" trap this item's own text warns against, worse for prose
-      than for a mechanical key name). New `detectInstallParams`
-      (`src/engine/scan/detectInstallParams.ts`) — walks a payload's real
-      source for actual `process.env.X` **and** Prisma's own `env("X")`
-      schema syntax (a real, distinct convention, added after finding it
-      mattered — see below), proposing key/secret-guess/required for
-      each. Every detected key name is a reliable, mechanical fact (it
-      really is referenced in the code); the **description is
-      deliberately left blank**, never fabricated, for a person to fill
-      in themselves — the same "make the autofill good, don't decorate
-      it" lesson this item's own text names. `required` defaults `true`
-      (a plain regex can't reliably tell whether a call site has its own
-      fallback; wrong-in-the-safe-direction beats silently marking
-      something optional that the code actually needs). New
-      `artifact.detectInstallParams` sidecar command; the Add New
-      wizard gains a new step (`install-params`) that runs detection the
-      moment a payload is picked, pre-fills an editable list (key,
-      description, secret/required checkboxes, add/remove), and includes
-      it in the final `artifact.push` call. `PushOptions` gains
-      `installParams`, written into a new manifest's `install_params`
-      exactly like every other propose-new field.
-      **A real, honest limitation, found by running this against the
-      actual shipped `nextauth-credentials` artifact, not hidden**: it
-      detects **nothing** there. `AUTH_SECRET`/`AUTH_URL` are read
+- [x] **Auto-fill Scan/Add New's own fields from real code analysis.**
+      Shipped in two passes: first scoped specifically to `install_params`
+      (the concrete, closable gap this item originally named), then
+      extended — after direct feedback that autofill should cover more
+      than one field and not read as backend-plugin-only — to `stacks`,
+      `description`, and `owner`, for every kind, not just
+      backend-plugin-shaped payloads. Every signal added is still a real,
+      mechanical fact read straight from the payload/environment, never a
+      generated guess:
+      - `install_params`: New `detectInstallParams`
+        (`src/engine/scan/detectInstallParams.ts`) — walks a payload's
+        real source for actual `process.env.X` **and** Prisma's own
+        `env("X")` schema syntax (a real, distinct convention, added
+        after finding it mattered — see below), proposing
+        key/secret-guess/required for each. `required` defaults `true`
+        (a plain regex can't reliably tell whether a call site has its
+        own fallback; wrong-in-the-safe-direction beats silently marking
+        something optional that the code actually needs); `description`
+        is deliberately left blank, for a person to fill in themselves.
+      - `stacks`: new `detectStacks`
+        (`src/engine/scan/detectStacks.ts`) — real `import`/`require`
+        specifiers and `package.json` dependencies against a small,
+        already-verified-against-the-real-catalog lookup table
+        (`next`→`nextjs`, `react`→`react`, `@prisma/client`/a `.prisma`
+        file→`prisma`, `express`→`express`), plus real file extensions
+        present (`.ts`/`.tsx`→`typescript`, else `.js`/`.jsx`→
+        `javascript`). Never invents a tag string not already in real use.
+      - `description`: for `ui-component`, wires through
+        `ComponentDoc.description` — `react-docgen-typescript`'s own
+        parse of a real JSDoc comment directly above the component, which
+        was already being computed and then silently discarded
+        (`detectUiComponents.ts` previously hardcoded `undefined` with a
+        comment claiming no reliable signal existed — that was stale; the
+        real, author-written text was sitting right there unused, a
+        genuine bug fix as much as new detection). For the four markdown
+        kinds, reuses the existing `guessDescriptionFromFrontmatter`,
+        now also available from Add New's own manual payload-pick path
+        (previously wired into the Scan path only). For everything else,
+        a new `extractLeadingComment`
+        (`src/engine/scan/extractLeadingComment.ts`) reads a real leading
+        block/line comment off a payload's conventional entry file
+        (`index.*`/`main.*`), returning nothing if none exists — never a
+        fallback to some arbitrary file's comment. A new orchestrator,
+        `detectArtifactMetadata` (`src/engine/scan/detectArtifactMetadata.ts`),
+        picks the right source per kind and combines all three signals
+        into one result.
+      - `owner`: defaults from the local machine's real git identity
+        (`git config user.name`, via the already-existing
+        `getCommitIdentity` in `src/engine/git/git.ts`, exposed through a
+        new `git.identity` sidecar command) — confirmed to exactly match
+        the convention already used in every real shipped manifest
+        (`owner: ashwin-growtharc`, not an email or a display name).
+      **Deliberately still not attempted**: `componentTypes`
+      (button/badge/effect/animation/...) and `roles`/`teams`. Checked
+      real catalog values and concluded there's no equally reliable code
+      signal for either — they require a semantic judgment about what a
+      component *is* or who owns it, not a fact a regex or import scan
+      can safely make. Guessing wrong there silently would repeat exactly
+      the failure mode `scan.ts`'s own doc comment already warned against
+      for `roles`/`teams` — left manual, on purpose, not a gap that was
+      missed.
+      The single sidecar command changed from `artifact.detectInstallParams`
+      to `artifact.detectMetadata(payloadPath, kind)`, called from the
+      same `pickPayload` moment as before; the Add New wizard's
+      `install-params` step, stacks tag picker, and description field are
+      all pre-filled together, with description/owner only ever filling
+      an empty field (never clobbering something already typed).
+      **Real, unstaged verification against the actual rebuilt packaged
+      sidecar exe** (not just unit tests): ran `artifact.detectMetadata`
+      against four real fixtures — a ui-component with a real JSDoc
+      comment (`"A small counter widget shown on the dashboard."` came
+      back verbatim), a skill folder with a real `SKILL.md` frontmatter
+      description, a backend-shaped payload with a real leading comment
+      plus a real `@prisma/client` import and `process.env.AUTH_SECRET`
+      reference (`stacks: [prisma, typescript]`, one real install_param,
+      both correct), and a plain payload with none of these signals
+      (`stacks: [typescript]` only, no description key at all — honest,
+      not fabricated). `git.identity` returned this machine's real
+      `ashwin-growtharc` / `ashwin.b@growtharc.com`. 13 new unit tests
+      (`detectStacks.test.ts`, `extractLeadingComment.test.ts`), 7 new
+      unit tests (`detectArtifactMetadata.test.ts`), plus a new
+      `detectUiComponents.test.ts` case proving the `doc.description`
+      wiring.
+      **A real, honest limitation, found by running the original
+      `install_params` detection against the actual shipped
+      `nextauth-credentials` artifact, not hidden**: it detects
+      **nothing** there. `AUTH_SECRET`/`AUTH_URL` are read
       implicitly by Auth.js's own internal library code, never referenced
       in this artifact's own payload source at all; `DATABASE_URL` lives
       in the CONSUMING project's own `prisma/schema.prisma` (Tier 3,

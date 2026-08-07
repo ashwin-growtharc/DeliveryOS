@@ -40,7 +40,8 @@ import { pullAndAutoWire } from './engine/pull/pullAndAutoWire';
 import { pushArtifact, PushOptions } from './engine/push/push';
 import { checkForUpdates, resolvePendingPushes } from './engine/sync/sync';
 import { scanForNewArtifacts } from './engine/scan/scan';
-import { detectInstallParams } from './engine/scan/detectInstallParams';
+import { detectArtifactMetadata } from './engine/scan/detectArtifactMetadata';
+import { getCommitIdentity } from './engine/git/git';
 import {
   listRemotes,
   addRemoteEntry,
@@ -331,13 +332,26 @@ const commands: Record<string, CommandHandler> = {
     return scanForNewArtifacts(cwd, remote, onProgress);
   },
 
-  // Phase 10 item 3: reads a real payload directory's actual source for
-  // process.env.X usage and proposes install_params -- the Add New
-  // wizard calls this once a payload path is picked, pre-filling an
-  // editable list rather than a blank one.
-  'artifact.detectInstallParams': (args) => {
+  // Phase 10 item 3 (extended): reads a real payload's actual source --
+  // process.env.X usage, import/dependency statements, a JSDoc/frontmatter
+  // comment -- and proposes install_params/stacks/description together.
+  // The Add New wizard calls this once a payload path (and its already-
+  // chosen kind) are known, pre-filling editable fields rather than blank
+  // ones, for every kind, not just backend-plugin-shaped payloads.
+  'artifact.detectMetadata': (args) => {
     const payloadPath = requireString(args, 'payloadPath');
-    return detectInstallParams(payloadPath);
+    const kind = requireString(args, 'kind');
+    return detectArtifactMetadata(payloadPath, kind);
+  },
+
+  // Phase 10 item 3 (extended): a real default for Add New's Owner field --
+  // the local machine's own git identity (`git config user.name`, already
+  // resolved the same way a real push commit's author is), not a guess.
+  // Still freely editable before submit, same as every other autofilled
+  // field here.
+  'git.identity': (args) => {
+    const cwd = requireString(args, 'cwd');
+    return getCommitIdentity(cwd);
   },
 
   // Real preview-compile command (Phase 6, Phase B), replacing Phase A's
