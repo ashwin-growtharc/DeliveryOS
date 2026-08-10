@@ -53,9 +53,21 @@ the updater compares against.
 ## 3. Build
 
 ```
+npm run build
+npm run build:sidecar
+npm run build:cli
 cd src-tauri
 npx tauri build
 ```
+
+The first three steps are a real precondition `tauri.conf.json` already
+silently depends on, not optional housekeeping: `bundle.externalBin`
+needs `build/deliveryos-engine-*.exe` (from `build:sidecar`),
+`bundle.resources` needs `build/esbuild.exe` (also `build:sidecar`) and
+`build/deliveryos-cli.exe` (`build:cli`), and both of those build scripts
+assume `npm run build` (tsc) has already produced `dist/`. Skipping any
+of the three leaves `tauri build` either failing outright or — worse —
+succeeding with a stale binary silently baked into the installer.
 
 Because `bundle.createUpdaterArtifacts: true` is set in `tauri.conf.json`,
 this produces not just the installer but a matching detached signature file
@@ -66,8 +78,15 @@ src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi(.sig)
 src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe(.sig)
 ```
 
-Pick one installer format to publish (NSIS `.exe` or `.msi`) — both work with
-the updater, there's no need to publish both every release.
+**Publish the NSIS `.exe`, not the MSI.** Both used to "just work" equally
+with the updater, but that's no longer true now that the `deliveryos` CLI
+gets installed onto PATH automatically (`src-tauri/nsis/path-hook.nsh`,
+via `bundle.windows.nsis.installerHooks`) — that mechanism is NSIS-only.
+Someone who installs via the MSI today gets the app but not the CLI on
+PATH, with no error telling them so. WiX has its own equivalent
+(`bundle.windows.wix.fragmentPaths` + a `<Environment>` element) but
+that's real, separate follow-up work, not built yet — until it is, NSIS
+is the only installer format that sets up the CLI.
 
 ## 4. Hand-write `latest.json`
 
