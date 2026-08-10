@@ -104,6 +104,33 @@ async function generateTailwindCss(resolveDir: string, previewEntryPath: string)
       tailwindcss({
         content: sourceTexts.map((raw) => ({ raw, extension: 'tsx' as const })),
         corePlugins: { preflight: false },
+        // Real bug, found via a real screenshot: with no `darkMode` set,
+        // Tailwind defaults to the `media` strategy -- every `dark:`
+        // class a component writes (many do; it's a normal, correct
+        // thing for a component to support) compiles to
+        // `@media (prefers-color-scheme: dark) {...}`, which resolves
+        // against the VIEWER's own OS/browser setting, not anything
+        // DeliveryOS controls. Two real, observed symptoms from this:
+        // (1) broken contrast -- a component's own `dark:bg-black/30`
+        // translucent modal renders correctly-for-dark-mode, but the
+        // preview frame around it (`.ui-component-preview-frame`,
+        // `--surface-inset`) is a fixed light color that never itself
+        // goes dark to match, so the composited result is neither this
+        // project's real light UI nor a real dark one -- just broken.
+        // (2) the background visibly changing while a preview is open,
+        // with no user action -- `prefers-color-scheme` is a LIVE media
+        // query; if the OS scheme changes (a scheduled light/dark
+        // switch, for instance) while the iframe stays mounted, Tailwind
+        // re-evaluates it automatically. `'class'` makes dark: variants
+        // require an ancestor `.dark` element that this pipeline never
+        // adds anywhere -- so every `dark:` class in every component
+        // simply never activates, deterministically, matching this
+        // project's own real design system (DESIGN_SYSTEM.md), which is
+        // light-only with no dark variant at all. A real, later reason
+        // to revisit this: if DeliveryOS's own app ever ships a dark
+        // theme, previews should follow that explicit choice, not the
+        // viewer's ambient OS setting either way.
+        darkMode: 'class',
       }),
     ]).process('@tailwind base; @tailwind components; @tailwind utilities;', { from: undefined });
     return VENDORED_TAILWIND_PREFLIGHT_CSS + '\n' + result.css;
@@ -614,7 +641,7 @@ async function compileReactPreview(previewEntryPath: string): Promise<CompiledPr
      (read by injectContentHeightReporter below) report the content's real,
      full size regardless of whether overflow is hidden or visible -- only
      whether a scrollbar/clip is shown changes, never what gets measured. */
-  html, body { margin: 0; padding: 0; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  html, body { margin: 0; padding: 0; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color-scheme: light; }
   #root { display: flex; align-items: center; justify-content: center; }
 </style>
 <style>${safeTailwindCss}</style>

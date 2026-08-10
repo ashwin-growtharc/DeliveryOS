@@ -772,6 +772,32 @@ foundation. Tracked here so it doesn't just live in a brainstorm doc.
       by querying GitHub across the org's repos — it just doesn't cover
       pulls, which leave no signal anywhere today.)
 
+**Post-completion fix (found via a real screenshot, well after this
+phase shipped)**: the preview compiler
+(`src/engine/preview/compile.ts`'s `generateTailwindCss`) never pinned a
+`darkMode` strategy, so Tailwind ran its default `media` behavior —
+every `dark:` class a component author writes (a real, normal thing to
+do; several catalog components do) compiled to
+`@media (prefers-color-scheme: dark)`, resolving against the VIEWER's
+own OS/browser setting rather than anything DeliveryOS controls. Real,
+observed symptom: `search`'s own `dark:bg-black/30` translucent modal
+rendered dark-mode-correct, composited over the preview frame's fixed
+light background (`--surface-inset`, never itself dark), producing
+broken, near-invisible text contrast — and if the OS scheme changed
+while a preview stayed open, the background visibly shifted with no
+user action. Fixed by pinning `darkMode: 'class'` (no `dark` class is
+ever added anywhere in this pipeline, so `dark:` variants now
+deterministically never activate — every component always renders its
+light-mode styling, matching this project's own real design system,
+which is light-only with no dark variant at all) plus `color-scheme:
+light` on the iframe's own html/body, so native browser UI (scrollbars,
+form controls) stays consistent too. Verified against the real `search`
+component: recompiling it now shows zero `prefers-color-scheme`
+occurrences and the light-mode text-color classes applying
+unconditionally. 2 new unit tests, using a real fixture component with
+`dark:` classes, proving both the selector shape change and the
+`color-scheme` pin.
+
 ## Phase 7 — Backend plug-and-play artifacts — **Complete**
 
 Goal: a backend building block (starting with one real auth/login module)

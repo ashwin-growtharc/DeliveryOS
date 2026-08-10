@@ -357,6 +357,40 @@ describe('Tailwind CSS generation', () => {
   });
 });
 
+describe('dark-mode strategy (real bug, found via a real screenshot)', () => {
+  const darkModeStyledPreviewPath = path.join(
+    __dirname, '..', 'fixtures', 'preview-spike', 'DarkModeStyled', 'preview.tsx',
+  );
+
+  it('compiles dark: classes as requiring a real ".dark" ancestor selector, never a live prefers-color-scheme media query', async () => {
+    // Real bug: with no darkMode strategy set, Tailwind defaults to
+    // 'media' -- dark: classes compile to
+    // `@media (prefers-color-scheme: dark)`, which resolves against the
+    // VIEWER's own OS setting (broken contrast when composited over
+    // DeliveryOS's own fixed-light preview frame; the background visibly
+    // changing mid-view if the OS scheme flips while a preview stays
+    // open). 'class' makes dark: classes require an ancestor `.dark`
+    // element this pipeline never adds anywhere, so they can never
+    // activate -- confirmed here by asserting the compiled CSS contains
+    // a real `.dark` selector for Card.tsx's own dark:bg-black class,
+    // and does NOT contain a live prefers-color-scheme media query at
+    // all (the actual, previously-real bug this proves is fixed).
+    const { html } = await compilePreviewHtml(darkModeStyledPreviewPath);
+    // Real, confirmed selector shape Tailwind v3 emits for darkMode:
+    // 'class' -- ":is(.dark *)" (matching a .dark ancestor OR the
+    // element itself carrying the class), not a plain ".dark .foo"
+    // descendant selector. Either way, no `.dark` class is ever added
+    // anywhere in this pipeline, so it never matches.
+    expect(html).toMatch(/\.dark\\:bg-black:is\(\.dark \*\)\s*\{[^}]*background-color:\s*rgb\(0 0 0/);
+    expect(html).not.toMatch(/@media\s*\(prefers-color-scheme:\s*dark\)/);
+  });
+
+  it('pins color-scheme: light on the iframe\'s own html/body, so native browser UI (scrollbars, form controls) never follows the OS scheme either', async () => {
+    const { html } = await compilePreviewHtml(darkModeStyledPreviewPath);
+    expect(html).toMatch(/html,\s*body\s*\{[^}]*color-scheme:\s*light/);
+  });
+});
+
 describe('compiler-adapter dispatch (Phase B)', () => {
   it('routes a .tsx preview through the React adapter', async () => {
     const { html } = await compilePreviewHtml(previewPath);

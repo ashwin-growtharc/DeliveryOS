@@ -4,6 +4,38 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- **A real, user-reported preview rendering bug, root-caused to one
+  shared function and fixed there once.** Reported with a real
+  screenshot: the `search` component's preview showed its "Recent
+  search" label and "Clear all" button at near-zero contrast, and a
+  separate report that a preview's background "changes dynamically"
+  while just looking at it. Root cause, confirmed by reading the real
+  `Search.tsx` source and the preview compiler: `generateTailwindCss`
+  (`src/engine/preview/compile.ts`) never pinned a `darkMode` strategy,
+  so Tailwind's default `media` behavior compiled every component's
+  `dark:` classes (a normal, correct thing for a component to have) to
+  a live `@media (prefers-color-scheme: dark)` query -- resolved against
+  the VIEWER's own OS setting, not anything this project controls. That
+  explains both reports at once: a `dark:bg-black/30` translucent modal
+  rendering dark-mode-correct but composited over the preview frame's
+  fixed light background (which never itself goes dark to match) reads
+  as broken contrast; and the OS scheme changing while a preview stays
+  mounted re-evaluates that live media query with no user action at all,
+  which is the "changes dynamically" report. Fixed by pinning
+  `darkMode: 'class'` -- no `.dark` class is ever added anywhere in this
+  pipeline, so `dark:` variants now deterministically never activate,
+  matching this project's own real design system (light-only, no dark
+  variant defined at all) -- plus `color-scheme: light` on the iframe's
+  own html/body so native browser chrome (scrollbars, form controls)
+  stays consistent too. One shared fix, not a per-component patch: every
+  past and future `ui-component` artifact that uses `dark:` classes is
+  fixed by this same change, confirmed by re-running it against the real
+  `search` component and verifying zero `prefers-color-scheme`
+  occurrences remain in its compiled output. 2 new unit tests using a
+  real fixture component with `dark:` classes. Full suite: 347/348, the
+  1 failure pre-existing and unrelated (confirmed already, several times
+  this session).
+
 - **The rest of the same top-to-bottom code review's findings, fixed the
   same day.** Five more, all real:
   - **Sidecar-blocking subprocess calls made async.** `suggestMetadata`
