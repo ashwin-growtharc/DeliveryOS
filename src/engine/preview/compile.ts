@@ -23,7 +23,7 @@ import { extractPropsSchemas, findComponentFiles, PropSchemaEntry } from './docg
  * cached preview across every remote/artifact/version in one move; a
  * short incrementing string is just the simplest thing that works.
  */
-const PREVIEW_COMPILER_VERSION = '1';
+const PREVIEW_COMPILER_VERSION = '3';
 
 /**
  * Real Tailwind CSS, generated at compile time from whatever utility
@@ -640,8 +640,29 @@ async function compileReactPreview(previewEntryPath: string): Promise<CompiledPr
      NOT affect measurement accuracy: document.body.scrollWidth/scrollHeight
      (read by injectContentHeightReporter below) report the content's real,
      full size regardless of whether overflow is hidden or visible -- only
-     whether a scrollbar/clip is shown changes, never what gets measured. */
+     whether a scrollbar/clip is shown changes, never what gets measured.
+
+     body's 4px padding (real bug, found via a real screenshot: a Button
+     variant's own onMouseEnter lifts it with a translateY(-1px) transform
+     on hover, a completely ordinary micro-interaction) -- with ZERO
+     padding, a component whose interactive element sits flush against
+     body's edge (no margin of its own, e.g. a plain flex row with no
+     padding) has nothing above it to absorb that 1px lift: the hover
+     transform pushes the element's border half a pixel past body's own
+     edge, and overflow: hidden above then clips exactly that sliver, off
+     -- a rounded border's flat top edge disappearing while its curved
+     corners (which dip slightly inward before reaching the true top)
+     survive, the exact "top edge of the outline is missing" artifact
+     confirmed by hand against a real screenshot. This padding becomes
+     part of body's own scrollHeight/scrollWidth, so it's included in the
+     REAL measurement the parent sizes the frame to (see
+     injectContentHeightReporter) -- not a runtime fudge factor bolted on
+     after the fact, so there's no drift between what's measured and what
+     gets applied. 4px is enough headroom for an ordinary micro-lift/scale
+     hover effect without meaningfully changing how tightly every preview
+     card still hugs its content. */
   html, body { margin: 0; padding: 0; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color-scheme: light; }
+  body { padding: 4px; }
   #root { display: flex; align-items: center; justify-content: center; }
 </style>
 <style>${safeTailwindCss}</style>

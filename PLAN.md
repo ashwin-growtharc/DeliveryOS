@@ -798,6 +798,60 @@ unconditionally. 2 new unit tests, using a real fixture component with
 `dark:` classes, proving both the selector shape change and the
 `color-scheme` pin.
 
+**Three more real bugs, found chasing the fix above through an actual
+running app (same "prove it for real" session, same screenshots-driven
+bug hunt):**
+
+1. **The dark-mode fix above didn't actually take effect on restart** —
+   a real bug in the fix itself, not a new one. `getOrCompilePreview`
+   caches compiled preview HTML keyed on `PREVIEW_COMPILER_VERSION`
+   specifically so a compiler change is never invisibly masked by a
+   stale cache entry (see that constant's own doc comment) — and the
+   `darkMode: 'class'` fix above shipped without bumping it. Every
+   already-cached preview kept serving its pre-fix, broken HTML no
+   matter how many times the app restarted, since the cache key never
+   changed. Fixed by bumping the version string; the existing test
+   suite already had a test proving stale-version cache entries are
+   never served, which would have caught this had it been re-run
+   against the real bug instead of just the new code.
+2. **The wrapper card behind every live preview
+   (`.ui-component-preview-frame` in `src-tauri/spike-ui/style.css`)
+   filled with a flat beige (`--surface-inset`) and a 1px border.** Fine
+   for an opaque component, but several real catalog components (e.g.
+   `search`) use their own translucent/backdrop-blur surface designed to
+   sit on something visually interesting — compositing that over a flat
+   beige wash read as a muddy, mismatched box behind the component, not
+   a clean frame. First cut kept a hairline border for boundary
+   definition; a follow-up screenshot showed even that read as an
+   unwanted line boxing in the component. Landed on fully transparent,
+   no border at all — every component's own background/shape renders as
+   authored, nothing of the frame itself is visible. Checked against a
+   plain component (`button-showcase`, opaque/inline-styled) to confirm
+   this doesn't regress ordinary previews: its `outline`/`ghost`/`link`
+   variants use `background: transparent` already, so they render
+   against the page's own cream background either way — visually
+   unaffected.
+3. **A real, live-reproduced clipping bug**: `button-showcase`'s Outline
+   variant lifts by `transform: translateY(-1px)` on hover (an ordinary
+   micro-interaction), and with the iframe's own `body` at zero padding,
+   an interactive element with no margin of its own sits flush against
+   body's edge. The 1px hover-lift pushed its border past that edge,
+   where `overflow: hidden` clipped exactly that sliver — visually, the
+   border's flat top edge vanished while its rounded corners (which dip
+   inward before reaching the true top) survived, reading as a broken
+   outline. Reproduced live in a real browser against the real
+   compiled component (a local harness replaying the actual
+   `contentHeight` postMessage/resize protocol `app.js` uses) before and
+   after the fix. Fixed with 4px of padding on `body` in the compiled
+   preview template — real padding, included in the `scrollHeight`
+   measurement `injectContentHeightReporter` reports, so the frame/iframe
+   sizing the parent applies already accounts for it; not a runtime
+   fudge factor layered on top. `PREVIEW_COMPILER_VERSION` bumped again
+   for this change (lesson from bug 1, applied immediately this time).
+
+Together: `PREVIEW_COMPILER_VERSION` went `1` → `2` (dark-mode fix,
+correctly invalidating the cache this time) → `3` (body padding fix).
+
 ## Phase 7 — Backend plug-and-play artifacts — **Complete**
 
 Goal: a backend building block (starting with one real auth/login module)

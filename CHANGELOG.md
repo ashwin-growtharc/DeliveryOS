@@ -36,6 +36,30 @@ design rationale.
   1 failure pre-existing and unrelated (confirmed already, several times
   this session).
 
+- **Three more real bugs, found chasing the fix above through an actual
+  running app.** (1) The dark-mode fix above shipped without bumping
+  `PREVIEW_COMPILER_VERSION`, so the cache that constant exists to
+  invalidate kept serving every already-compiled preview's stale,
+  pre-fix HTML -- restarting the app changed nothing, because the cache
+  key never changed. (2) The wrapper card behind every live preview
+  (`.ui-component-preview-frame`) filled with a flat beige background
+  and a border; real components with their own translucent/glass
+  surfaces (e.g. `search`) read as a muddy mismatched box against it.
+  Removed the fill; a follow-up screenshot showed even a hairline border
+  still read as an unwanted line around the component, so removed that
+  too -- confirmed unaffected against a plain opaque component
+  (`button-showcase`) first. (3) `button-showcase`'s Outline variant
+  lifts 1px on hover, a normal micro-interaction; with the iframe's
+  `body` at zero padding, that 1px lift pushed the button's border past
+  body's own edge, where `overflow: hidden` clipped it -- visible as the
+  border's flat top edge vanishing while its rounded corners survived.
+  Reproduced live in a real browser (replaying the actual
+  `contentHeight` resize protocol against the real compiled component)
+  before and after. Fixed with 4px of real `body` padding, included in
+  the actual `scrollHeight` measurement the parent sizes the frame to --
+  not a bolted-on runtime margin. `PREVIEW_COMPILER_VERSION` bumped
+  again for this one, this time without forgetting.
+
 - **The rest of the same top-to-bottom code review's findings, fixed the
   same day.** Five more, all real:
   - **Sidecar-blocking subprocess calls made async.** `suggestMetadata`
