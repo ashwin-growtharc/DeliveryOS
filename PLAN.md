@@ -831,26 +831,89 @@ bug hunt):**
    variants use `background: transparent` already, so they render
    against the page's own cream background either way — visually
    unaffected.
-3. **A real, live-reproduced clipping bug**: `button-showcase`'s Outline
-   variant lifts by `transform: translateY(-1px)` on hover (an ordinary
-   micro-interaction), and with the iframe's own `body` at zero padding,
-   an interactive element with no margin of its own sits flush against
-   body's edge. The 1px hover-lift pushed its border past that edge,
-   where `overflow: hidden` clipped exactly that sliver — visually, the
-   border's flat top edge vanished while its rounded corners (which dip
-   inward before reaching the true top) survived, reading as a broken
-   outline. Reproduced live in a real browser against the real
-   compiled component (a local harness replaying the actual
-   `contentHeight` postMessage/resize protocol `app.js` uses) before and
-   after the fix. Fixed with 4px of padding on `body` in the compiled
-   preview template — real padding, included in the `scrollHeight`
-   measurement `injectContentHeightReporter` reports, so the frame/iframe
-   sizing the parent applies already accounts for it; not a runtime
-   fudge factor layered on top. `PREVIEW_COMPILER_VERSION` bumped again
-   for this change (lesson from bug 1, applied immediately this time).
+3. **A real, live-reproduced clipping bug, fixed, then reverted once its
+   own fix turned out to cause a worse bug (both parts below)**:
+   `button-showcase`'s Outline variant lifts by `transform:
+   translateY(-1px)` on hover (an ordinary micro-interaction), and with
+   the iframe's own `body` at zero padding, an interactive element with
+   no margin of its own sits flush against body's edge. The 1px
+   hover-lift pushed its border past that edge, where `overflow: hidden`
+   clipped exactly that sliver — visually, the border's flat top edge
+   vanished while its rounded corners (which dip inward before reaching
+   the true top) survived, reading as a broken outline. Reproduced live
+   in a real browser against the real compiled component. Fixed with 4px
+   of padding on `body` in the compiled preview template, included in
+   the `scrollHeight` measurement `injectContentHeightReporter` reports
+   so frame/iframe sizing already accounted for it.
+
+   That fix caused two further real, confirmed regressions, both found
+   the same way (real screenshots) and both traced back to the same 4px:
+
+   - A 6-button row wrapping its last item ("Link") onto its own line
+     despite visibly having room to spare. `app.js`'s
+     `WIDTH_SAFETY_MARGIN` measures the row element itself, inside
+     `#root` — never `document.body` — so it never included body's new
+     padding, which cuts into the SAME outer box's usable interior
+     width. Confirmed by hand: the row measures 596.67px unwrapped;
+     applying the old margin (+4 = 601px outer) left only 593px inside
+     once body's 8px of padding is subtracted — short of what's needed.
+   - Far more seriously: **any pushed component using an ordinary,
+     common CSS pattern — `min-h-screen` / `min-height: 100vh`, e.g. a
+     full-page sign-up mockup like a real one hit this session — grew
+     its own preview to `clampPreviewHeight`'s MAX ceiling (640px)
+     instead of its real size (under 350px), leaving most of the box
+     empty.** Root cause, confirmed by instrumenting the real compiled
+     component's own reporter by hand: `min-height: 100vh` resolves
+     against the IFRAME'S OWN current applied height, which the parent
+     sets from what got measured and reported — a closed loop by
+     design. body's 4px padding sits OUTSIDE the vh-governed element,
+     added on top of it every round; once the applied height first
+     exceeds the component's true content height, `min-height: 100vh`
+     locks the component's own height to that applied value, and body's
+     padding-on-top pushes the NEXT report exactly 8px higher — forever,
+     until the MAX clamp stops it. Logged by hand: reported height
+     climbed 472 → 480 → 488 → 496 → ... in exact +8 steps. This is a
+     structural property of ANY constant added anywhere inside an
+     iframe whose content anchors itself to that same iframe's own
+     applied size — not something a smaller padding value would have
+     avoided, only slowed down. (This is the identical class of
+     circularity `#root`'s own, deliberately-absent `min-height: 100vh`
+     rule was already written to avoid, on the DeliveryOS side — the
+     regression just reintroduced an equivalent circularity via a
+     PUSHED component's own, entirely ordinary CSS instead.)
+
+   Reverted the body padding entirely, and reverted `WIDTH_SAFETY_MARGIN`
+   back to `4` (its root cause — the padding — is gone, so the extra 8px
+   it was compensating for no longer exists either). Confirmed by hand,
+   both ways: the real sign-up component now converges immediately to a
+   stable height (464px, matching its real content) and stays there
+   across every subsequent resize round, no growth; the same 6-button
+   row fits on one line again at the original, unmodified margin. The
+   Button hover-clip this padding fixed is real but narrow — one
+   variant, one micro-interaction, cosmetic — against a regression that
+   broke every full-page-style pushed component; the right trade until a
+   fix exists that doesn't feed anything back into the measurement loop
+   at all.
+
+4. **A real, distinct pre-mount measurement bug, found investigating the
+   above, kept even after reverting the padding that surfaced it**: the
+   `width === 0 || height === 0` check that exists specifically to skip
+   reporting before a React component has actually mounted (see its own
+   long-standing comment) infers "not mounted yet" indirectly, from a
+   raw pixel measurement happening to be exactly zero. That's exactly
+   what briefly broke when body gained non-zero padding (measured (8, 8),
+   not (0, 0), even fully unmounted) — a fragile signal now confirmed to
+   be one accidental future change away from breaking the same way
+   again. Replaced with a precise, direct check: `document.getElementById
+   ('root').children.length === 0` — genuinely "has this mounted," not a
+   pixel value standing in for it, immune to whatever body padding does
+   or doesn't exist. Only applies when `#root` exists at all (the React
+   adapter's own mount target); the zero-build HTML adapter still relies
+   on the original width/height checks alone.
 
 Together: `PREVIEW_COMPILER_VERSION` went `1` → `2` (dark-mode fix,
-correctly invalidating the cache this time) → `3` (body padding fix).
+correctly invalidating the cache) → `3` (body padding, since reverted)
+→ `4` (padding reverted + the precise pre-mount check above).
 
 ## Phase 7 — Backend plug-and-play artifacts — **Complete**
 

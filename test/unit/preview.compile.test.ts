@@ -684,6 +684,33 @@ describe('injectContentHeightReporter (dynamic card sizing)', () => {
     expect(html).toMatch(/if\s*\(\s*width\s*===\s*0\s*\|\|\s*height\s*===\s*0\s*\)\s*\{\s*return;/);
   });
 
+  it('treats an empty #root as not-yet-mounted directly, not by inferring it from a (0, 0) measurement (a real, confirmed bug)', async () => {
+    // Regression guard: body padding, added and then reverted for an
+    // unrelated hover-clipping fix, briefly meant a genuinely-unmounted
+    // #root no longer measured as exactly (0, 0) -- it measured as the
+    // padding alone, a small but nonzero value that slipped straight past
+    // the width===0||height===0 check above and let a premature
+    // measurement through. Checking #root's own child count directly is
+    // immune to whatever body padding does or doesn't exist, so a future
+    // change here can't reintroduce the same failure mode again.
+    const { html } = await compilePreviewHtml(previewPath);
+    expect(html).toMatch(/root\.children\.length\s*===\s*0/);
+  });
+
+  it('re-observes #root\'s own childList directly, so a real mount is caught even without a ResizeObserver-visible size change (a real, confirmed bug)', async () => {
+    // Regression guard: the precise pre-mount check above correctly
+    // skips reportSize()'s two premature calls (immediate + 'load'), but
+    // without this, NOTHING else re-triggers it once React actually
+    // mounts unless that same commit also happens to change some
+    // observed element's SIZE -- true by chance in every real browser
+    // tested by hand, but not guaranteed, and not true at all in a test
+    // environment with no ResizeObserver at all (confirmed: exactly the
+    // failure this MutationObserver fixes). Watching #root's childList
+    // catches the real mount moment directly, independent of size.
+    const { html } = await compilePreviewHtml(previewPath);
+    expect(html).toMatch(/new MutationObserver\(reportSize\)\.observe\(root,\s*\{\s*childList:\s*true\s*\}\)/);
+  });
+
   it('re-observes the real rendered element for width, not just document.body forever (a real, confirmed bug)', async () => {
     // Regression guard: the ResizeObserver was set up with TWO .observe()
     // calls -- document.body, and whatever widthMeasureTarget() returned

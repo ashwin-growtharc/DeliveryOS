@@ -791,6 +791,17 @@
   // font metrics rounding differently between measurement and render can
   // otherwise wrap content one word early even at its own reported
   // "never wraps" width).
+  //
+  // This briefly went to 12 to compensate for a 4px-per-side body padding
+  // compile.ts added for an unrelated hover-clipping fix (the measured
+  // width comes from the row element itself, inside #root, so it never
+  // included body's own padding -- applying it back onto the now-
+  // narrower interior left a many-item flex-wrap row a few px short,
+  // confirmed by hand against the real button-showcase component). That
+  // padding has since been reverted (see compile.ts's html/body rule --
+  // it caused a worse regression, a resonant height-growth loop for any
+  // component anchored to the iframe's own viewport size), so the 8px
+  // it was compensating for no longer exists either. Back to 4.
   const WIDTH_SAFETY_MARGIN = 4;
 
   // Tracks the list's current IntersectionObserver so a re-render (e.g.
