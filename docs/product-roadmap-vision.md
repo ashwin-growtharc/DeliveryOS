@@ -478,6 +478,70 @@ mechanism, aimed specifically at GrowthArc's actual delivery-shop shape
   already exist to solve, this is arguably the single highest
   time-saved-per-engagement lever on this whole page.
 
+### A design-kit bundle — the concrete first version of "a UI kit" above
+
+**Now scoped into [PLAN.md](../PLAN.md)'s Phase 11** — including two real
+corrections research turned up before it got scoped (the real app's own
+frontend is vanilla JS, not a valid source; ship as one `kind: template`
+bundle, not several separately-wired `kind: ui-component` entries) — this
+section is the background that phase turns into real tasks.
+
+The "known-good-stack bundle" line above says "a UI kit" as one ingredient.
+This is that ingredient, scoped for real: a bundle of generic, reusable
+components (Button, TopBar, Card, Feedback, form inputs) plus one portable
+guideline doc (color tokens, type scale, spacing scale, layout grid,
+per-component placement/usage rules — e.g. "Button: one primary per view,
+never two competing for attention"), pulled as a single unit so new
+engagements start from a consistent visual foundation instead of Claude
+Code inventing one per project.
+
+**Why this needs nothing new to build:** every component is just another
+`kind: ui-component` — the exact mechanism Phase 6 already proved (live
+preview, props panel, all of it). The guideline doc isn't a new concept
+either — [DESIGN_SYSTEM.md](../DESIGN_SYSTEM.md) already *is* this, in
+spirit, for DeliveryOS's own app; this just makes that pattern pullable.
+It also sidesteps the one genuinely hard unsolved problem named earlier
+(wiring several *independent* artifacts together without conflicts)
+because it's one cohesive bundle, not multiple separate pulls stitched
+together after the fact.
+
+**A real second half, not just a components list — anti-patterns, not only
+approved patterns.** A guideline that only says "here's what to use" misses
+half the job; it should also say "here's what to actively avoid" the same
+way a real style guide bans specific mistakes. Concrete, well-known
+AI-generated-UI tells worth codifying directly (not borrowed from any one
+source — these are broadly recognized defaults worth naming once so nobody
+re-invents them per project): cards nested inside cards inside cards,
+decorative pulsing status dots that convey nothing real, icon-tile-stacked-
+above-heading repeated identically per feature, hero eyebrow pill chips
+used as decoration, emoji as section markers, everything centered
+regardless of content shape, one border-radius applied uniformly with no
+exceptions.
+
+**The genuinely new idea worth flagging on its own — a design-quality check,
+reusing Phase 10's own mechanism, pointed at a different target.** Phase 10
+already taught the app to apply wiring, run a real build, and offer to fix
+real failures. The identical shape applies here: after Claude Code builds
+something from the kit, mechanically scan for the anti-patterns above (the
+checkable ones are pattern-matching, same as the `install_params`/`stacks`
+autofill already does), and reuse the "Suggest with Claude ✨" pattern —
+explicit button, never automatic — for the subjective ones a regex can't
+catch. Nothing architecturally new: same tiered approach (deterministic
+check first, AI judgment only where mechanical detection can't reach,
+human confirms before anything changes), just pointed at design quality
+instead of build correctness.
+
+Also worth including from day one, easy to forget until it's needed:
+**empty/error/loading states** as first-class components alongside
+Button/Card/etc. (the states real products spend the least design time on
+and it shows), explicit **motion rules** (standard timing/easing, plus the
+`prefers-reduced-motion` rule every artifact built this session already
+follows — codified once instead of re-decided per project), and a **voice/
+tone rule** carried alongside the visual tokens, not just colors — DESIGN_
+SYSTEM.md already states one ("warm, editorial, no hype") for the real app;
+a pulled design-kit should carry the equivalent so generated UI copy
+doesn't default to generic SaaS-speak even when the colors are right.
+
 ## Also worth doing — closing the update/merge gap (§9 risk #3, still open)
 
 Not a Claude Code idea specifically — a real, already-named gap in how

@@ -2214,3 +2214,100 @@ was given for (no tool access, app writes the fix, human confirms, real
 rebuild verification with auto-rollback) is what actually got built —
 not the original unrestricted-`--allowedTools` plan, which this project
 had already found doesn't hold up.
+
+## Phase 11 — A design-kit bundle, plus a design-quality check — **Not started, brainstormed only**
+
+Goal: a real design-kit (five components + a guideline doc covering
+approved patterns, anti-patterns, layout rules, and voice/tone) can be
+pulled as one bundle into a fresh project, and after Claude Code builds UI
+from it, a design-quality check runs — mechanical anti-pattern detection
+first, an explicit AI-judgment ask for the subjective cases, a proposed fix
+a person confirms before it lands — reusing Phase 10's exact
+apply→verify→offer-to-fix shape, pointed at design quality instead of
+build correctness.
+
+Full background in
+[docs/product-roadmap-vision.md](docs/product-roadmap-vision.md) ("A
+design-kit bundle" section) — this phase turns that brainstorm into scoped
+tasks, same discipline every earlier phase here uses.
+
+**Two things corrected by research before this got scoped, not assumed:**
+
+1. **The real app's own frontend can't be the source material.**
+   `src-tauri/spike-ui/app.js` is confirmed vanilla JS — its own header
+   comment says so directly ("vanilla JS, single-page, no framework"), and
+   it's built from 60+ raw `document.createElement()` calls, not JSX. The
+   existing `kind: ui-component` pipeline (`detectUiComponents.ts`,
+   docgen) hard-requires `.tsx`/`.jsx`. On reflection this was pointing at
+   the wrong source anyway — the Tauri shell is desktop-app chrome, not
+   representative of the real Next.js/React stack client engagements
+   actually use (the same stack Phase 7 already confirmed). **The real
+   target instead: five components (Button, TopBar, Card, Feedback,
+   Input) authored fresh as real React/TSX, styled from
+   [DESIGN_SYSTEM.md](../DESIGN_SYSTEM.md)'s actual tokens** — proven
+   through the same unmodified `kind: ui-component` pipeline
+   `expanding-tabs`/`magic-container` already use.
+2. **Ship it as one `kind: template` bundle, not five separate
+   `kind: ui-component` entries.** Five separate artifacts pulled together
+   would quietly reintroduce the exact unsolved problem named elsewhere in
+   the roadmap doc — independent artifacts with no mechanism to resolve
+   conflicts between them. One `kind: template` bundle (the same
+   whole-directory, Pull-only mechanism `arcos-cli`/`launchpad-template`
+   already proved) sidesteps it entirely — one pull, no multi-artifact
+   wiring needed. Individual components stay live-previewable anyway:
+   `compileLocalPreview` (Phase 6, Phase D) already proves preview works
+   straight off a local payload directory, no separate catalog entry
+   required.
+
+- [ ] **Author the real target and pick the guideline doc's real content**
+      — five components, styled from DESIGN_SYSTEM.md's real tokens (both
+      light and dark values, matching every artifact built this session).
+      Guideline doc covers: color tokens, type scale, spacing scale,
+      layout grid, per-component placement/usage rules, an anti-patterns
+      list, and a voice/tone note. Push as one `kind: template` bundle via
+      the existing, unmodified `push --new` path.
+      **Payload folder structure, decided now even though nothing needs it
+      yet:** ship v1 fully flat (`components/Button.tsx`,
+      `components/TopBar.tsx`, etc. — no subfolders at all, since 5
+      components is nothing to group). Both loose, ungrouped components
+      and category subfolders are fine long-term, but the *rule* for which
+      is which needs to be explicit and mechanical, not an aesthetic call
+      made fresh each time — future components here will likely arrive via
+      the check-first/propose-back skill, not just a person. **The rule,
+      written into the guideline doc itself**: a subfolder is created only
+      once 3 or more genuinely related components exist that would
+      otherwise clutter the flat list (e.g. `Input`/`Select`/`Checkbox`
+      becoming `forms/` once all three exist); a single, atomic component
+      never gets a folder just to avoid looking loose.
+- [ ] **The mechanical anti-pattern detector — start with one narrow,
+      real rule, not a vague general one.** Reuses the same
+      TypeScript-compiler/AST infrastructure `detectUiComponents.ts`/
+      `docgen.ts` already use — no new dependency. First real rule,
+      deliberately narrow rather than "detect all nested cards" (legitimate
+      nesting exists — a stat card inside a dashboard card is often fine):
+      flag only the same component nested directly inside itself, two or
+      more levels deep. Widen the rule set later, once this one's false-
+      positive rate is actually known, not assumed.
+- [ ] **"Suggest with Claude" for the subjective anti-patterns a rule
+      can't catch** — reuses Phase 10 item 3's exact proven subprocess
+      shape (stdin-piped prompt, strict JSON out, untrusted-source
+      delimiters). **Explicit button, never automatic** — same rule Phase
+      10 already established for this exact pattern, since it costs a
+      real API call and real latency.
+- [ ] **The fix step reuses Phase 10 item 2's exact approved design** — no
+      tool access, strict JSON in/out, the app applies the fix through its
+      own existing write path, a human confirms before it lands, a real
+      rebuild verifies it, auto-rollback if it doesn't actually work.
+      Nothing new to design here — same mechanism, pointed at a design
+      violation instead of a build error.
+- [ ] **Open scoping question, flag before building, don't default
+      silently**: does empty/error/loading-state coverage belong in this
+      same bundle from day one, or is that its own follow-up once the
+      five base components are proven? Named in the roadmap doc as "easy
+      to forget until it's needed" — worth deciding on purpose either way.
+- [ ] **End-to-end test:** pull the real bundle into a fresh project,
+      confirm all five components render and live-preview correctly via
+      `compileLocalPreview`, deliberately build a component with a planted
+      anti-pattern (same-component-nested-twice), confirm the mechanical
+      check catches it, confirm the fix step corrects it and a real
+      rebuild passes afterward.
