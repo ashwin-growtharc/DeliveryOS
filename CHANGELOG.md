@@ -4,6 +4,23 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- **Phase 11, item 2: the first mechanical anti-pattern detector, for
+  real.** `src/engine/scan/detectSelfNesting.ts` is the first code
+  anywhere in this repo to import `typescript` and walk a real JSX AST
+  directly -- `detectUiComponents.ts`/`docgen.ts` only ever call
+  `react-docgen-typescript` as a black box, which returns prop docs,
+  never a raw tree. Flags a component whose JSX renders itself nested
+  exactly two levels deep (`<A><A/></A>`) -- clarified directly with the
+  user, since PLAN.md's own original phrasing was ambiguous between this
+  and flagging any self-nest at all. A single self-nest (depth 1, e.g. a
+  real tree-node component) is explicitly allowed. Plugs into the
+  existing, already-generic `ScanCandidate.warnings` array, reaching
+  both the CLI's `scan` output and the Add New wizard's Review-step
+  warnings with zero new plumbing. Verified with two real dogfood
+  fixtures through the actual built detector (not just unit tests): a
+  genuinely broken two-level `StatCard` correctly warns; a legitimately
+  recursive single-level `TreeNode` correctly doesn't. 8 new tests.
+
 - **Phase 11, item 1: the design-kit bundle's five real components +
   guideline doc, authored and pushed for real.** `Button`/`Card`/
   `TopBar`/`Feedback`/`Input`, styled from `DESIGN_SYSTEM.md`'s real

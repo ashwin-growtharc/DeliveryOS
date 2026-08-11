@@ -2310,15 +2310,40 @@ tasks, same discipline every earlier phase here uses.
       (props schemas + expected token hex values all present), then each
       one actually rendered and interacted with in a real browser
       (typing into `Input`, switching its variants) before pushing.
-- [ ] **The mechanical anti-pattern detector — start with one narrow,
-      real rule, not a vague general one.** Reuses the same
-      TypeScript-compiler/AST infrastructure `detectUiComponents.ts`/
-      `docgen.ts` already use — no new dependency. First real rule,
-      deliberately narrow rather than "detect all nested cards" (legitimate
-      nesting exists — a stat card inside a dashboard card is often fine):
-      flag only the same component nested directly inside itself, two or
-      more levels deep. Widen the rule set later, once this one's false-
-      positive rate is actually known, not assumed.
+- [x] **The mechanical anti-pattern detector — start with one narrow,
+      real rule, not a vague general one.** `detectUiComponents.ts`/
+      `docgen.ts` only ever call `react-docgen-typescript` as a black
+      box (confirmed by grepping all of `src/engine` for
+      `ts.createSourceFile`/`JsxElement`: zero matches) — it returns
+      prop docs, never a raw AST, so it couldn't be reused for this.
+      `src/engine/scan/detectSelfNesting.ts` is the first code anywhere
+      in this repo to `import * as ts from 'typescript'` directly and
+      walk a real JSX tree. First real rule, deliberately narrow rather
+      than "detect all nested cards" (legitimate nesting exists — a stat
+      card inside a dashboard card is fine, confirmed with a real
+      dogfood fixture that correctly produces no warning): flags a
+      component whose JSX renders itself nested exactly two levels deep
+      (`<A><A/></A>`) — clarified directly with the user, since this
+      task's own original phrasing ("nested directly inside itself, two
+      or more levels deep") was ambiguous between this and flagging any
+      self-nest at all. A single self-nest (one `<A/>` inside A's own
+      render, depth 1 — e.g. a real tree-node/nested-accordion
+      component) is explicitly allowed and never flagged; confirmed with
+      a second real dogfood fixture (`TreeNode`, legitimately recursive)
+      producing no warning while a genuinely broken two-level `StatCard`
+      fixture does, both through the real built detector, not just the
+      isolated unit tests. Plugs into the existing, already-generic
+      `ScanCandidate.warnings` array (`detectUiComponentCandidates`) —
+      reaches both display surfaces (the CLI's `scan` output and the Add
+      New wizard's Review-step `.hint-banner` warnings) with zero new
+      plumbing, confirmed by reading both call sites before writing
+      anything. 8 new tests (7 unit, against `detectSelfNestingWarnings`
+      directly — including the "different component nested" and
+      "multiple separate chains in one file" cases PLAN.md explicitly
+      calls out; 1 integration, through the real
+      `detectUiComponentCandidates` entry point). Widen the rule set
+      later, once this one's false-positive rate is actually known, not
+      assumed.
 - [ ] **"Suggest with Claude" for the subjective anti-patterns a rule
       can't catch** — reuses Phase 10 item 3's exact proven subprocess
       shape (stdin-piped prompt, strict JSON out, untrusted-source
