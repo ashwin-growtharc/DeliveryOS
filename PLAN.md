@@ -2344,12 +2344,39 @@ tasks, same discipline every earlier phase here uses.
       `detectUiComponentCandidates` entry point). Widen the rule set
       later, once this one's false-positive rate is actually known, not
       assumed.
-- [ ] **"Suggest with Claude" for the subjective anti-patterns a rule
+- [x] **"Suggest with Claude" for the subjective anti-patterns a rule
       can't catch** — reuses Phase 10 item 3's exact proven subprocess
       shape (stdin-piped prompt, strict JSON out, untrusted-source
-      delimiters). **Explicit button, never automatic** — same rule Phase
-      10 already established for this exact pattern, since it costs a
-      real API call and real latency.
+      delimiters) via `src/engine/scan/suggestAntiPatterns.ts`; the one
+      shared piece worth factoring out, `readPayloadSource`, was
+      exported from `suggestMetadata.ts` rather than duplicated. Sits on
+      the Add New wizard's Review step, gated identically to the live
+      preview above it. **Explicit button, never automatic** — same rule
+      Phase 10 already established, since it costs a real API call and
+      real latency. **Two real scope decisions confirmed with the user
+      before building**: the button uses the app's reserved AI-accent
+      styling (`.btn-accent`, precedented by the Scan button, per
+      `DESIGN_SYSTEM.md`'s "AI tones for AI-specific elements only" rule
+      — the Description step's own suggest buttons don't follow this,
+      confirmed to be an existing inconsistency, not a pattern to
+      extend); findings render in a new `.hint-banner-ai` variant
+      (`accent-500` border, not item 2's `gold-500`) so an AI judgment
+      call reads visibly differently from a deterministic mechanical
+      warning. The anti-patterns reference is a concise, hardcoded list
+      (in the spirit of `GUIDELINES.md`'s own list, generalized beyond
+      the five design-kit components) applied to any `kind: ui-component`
+      candidate under review, not gated on the design-kit being pulled
+      locally.
+      **Verified with a real `claude -p` call, not mocked**: a planted
+      `ConfirmDialog` fixture (a red "Delete" button next to a
+      barely-visible, low-opacity "cancel") correctly produced two real
+      findings — the intended low-contrast-cancel-next-to-destructive
+      issue, PLUS a genuine, unplanted bonus finding (an 8px/6px
+      border-radius inconsistency actually present in the fixture); a
+      clean `CleanCard` fixture correctly produced `[]`, not an invented
+      issue. 13 new unit tests mirroring `suggestMetadata.test.ts`'s
+      exact shapes (prompt-injection delimiter check, malformed-JSON
+      handling, empty-array-is-valid).
 - [ ] **The fix step reuses Phase 10 item 2's exact approved design** — no
       tool access, strict JSON in/out, the app applies the fix through its
       own existing write path, a human confirms before it lands, a real

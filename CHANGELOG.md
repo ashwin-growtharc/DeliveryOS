@@ -4,6 +4,25 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- **Phase 11, item 3: "Suggest with Claude" for the subjective
+  anti-patterns a mechanical rule can't catch.** Reuses Phase 10 item
+  3's exact proven subprocess shape (`suggestAntiPatterns.ts`, sharing
+  `readPayloadSource` with `suggestMetadata.ts` rather than duplicating
+  it) -- explicit button on the Add New Review step, never automatic,
+  same rule Phase 10 already established. Two real decisions confirmed
+  with the user first: the button uses the app's reserved AI-accent
+  styling (`.btn-accent`, matching the Scan button's own precedent --
+  the Description step's suggest buttons don't follow this, confirmed
+  to be an existing inconsistency, not something to extend), and
+  findings render in a new `.hint-banner-ai` variant so an AI judgment
+  call is visibly distinct from item 2's deterministic warnings.
+  **Verified with a real `claude -p` call**: a planted `ConfirmDialog`
+  fixture (red "Delete" next to a barely-visible "cancel") produced two
+  real findings -- the intended low-contrast-cancel issue, plus a
+  genuine unplanted bonus finding (an 8px/6px border-radius
+  inconsistency actually present in the fixture); a clean fixture
+  correctly produced `[]`. 13 new unit tests.
+
 - **Phase 11, item 2: the first mechanical anti-pattern detector, for
   real.** `src/engine/scan/detectSelfNesting.ts` is the first code
   anywhere in this repo to import `typescript` and walk a real JSX AST

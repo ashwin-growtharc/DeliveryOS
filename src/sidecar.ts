@@ -43,6 +43,7 @@ import { checkForUpdates, resolvePendingPushes } from './engine/sync/sync';
 import { scanForNewArtifacts } from './engine/scan/scan';
 import { detectArtifactMetadata } from './engine/scan/detectArtifactMetadata';
 import { suggestMetadata } from './engine/scan/suggestMetadata';
+import { suggestAntiPatterns } from './engine/scan/suggestAntiPatterns';
 import { getCommitIdentity } from './engine/git/git';
 import {
   listRemotes,
@@ -365,6 +366,15 @@ const commands: Record<string, CommandHandler> = {
     const payloadPath = requireString(args, 'payloadPath');
     const kind = requireString(args, 'kind');
     return suggestMetadata(payloadPath, kind);
+  },
+
+  // Phase 11 item 3: the subjective counterpart to item 2's mechanical
+  // self-nesting detector -- same "explicit button, never automatic"
+  // rule as artifact.suggestMetadata above, same real cost (latency + a
+  // real API call). See suggestAntiPatterns.ts's own doc comments.
+  'artifact.suggestAntiPatterns': (args) => {
+    const payloadPath = requireString(args, 'payloadPath');
+    return suggestAntiPatterns(payloadPath);
   },
 
   // Phase 10 item 2: the "ask" half of "want help fixing this?" -- only

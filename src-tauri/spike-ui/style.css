@@ -378,6 +378,23 @@ input, textarea, select {
   margin-bottom: 16px;
 }
 
+/* Same shape as .hint-banner, but for a genuinely AI-generated finding
+ * (Phase 11 item 3, "Suggest with Claude" on the Review step) rather
+ * than a plain mechanical fact -- accent-500 border instead of gold-500,
+ * the one deliberate exception to .hint-banner's own "stays in the warm
+ * palette" comment above, since DESIGN_SYSTEM.md reserves the AI accent
+ * specifically for AI-specific elements, and this is one. Signals
+ * "probabilistic judgment call, worth double-checking" vs. item 2's
+ * deterministic .hint-banner warnings, not just a copy difference. */
+.hint-banner-ai {
+  background: var(--sky-100);
+  border-left: 3px solid var(--accent-500);
+  border-radius: var(--radius-md);
+  padding: 12px 16px;
+  font-size: 13.5px;
+  margin-bottom: 16px;
+}
+
 /* ---------- browse ---------- */
 
 /* Two distinct rows, not one flat line of 8 mixed controls: search+primary

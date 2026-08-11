@@ -557,6 +557,21 @@
                   <span class="ui-component-preview-loading">Loading preview&hellip;</span>
                 </div>
               </div>
+              <!-- Phase 11 item 3: the subjective counterpart to the
+                   mechanical self-nesting check above (that one lands in
+                   #addnew-review-warnings automatically, at Scan time --
+                   this one is a real API call, so it stays an explicit
+                   button, never automatic, same rule Phase 10's own
+                   "Suggest with Claude" already established). btn-accent
+                   here (not btn-ghost, unlike the Description step's own
+                   suggest buttons) -- DESIGN_SYSTEM.md reserves the AI
+                   accent color for genuinely AI-specific actions, and
+                   this is a real Claude call, not a plain form control. -->
+              <div id="addnew-review-anti-pattern-section" class="field" hidden>
+                <label>Design review</label>
+                <button type="button" id="addnew-review-suggest-anti-patterns-btn" class="btn btn-sm btn-accent">Suggest with Claude &#10024;</button>
+                <div id="addnew-review-anti-pattern-findings"></div>
+              </div>
             </div>
 
             <div id="addnew-wizard-nav" class="wizard-nav" hidden>

@@ -2838,6 +2838,63 @@
     }
   }
 
+  // Phase 11 item 3: the subjective counterpart to
+  // suggestMetadataForCurrentPayload above -- same "cache the in-flight
+  // call per payload, so switching between wizard steps and back doesn't
+  // spend a second real API call" shape, keyed on payloadPath alone
+  // (this prompt has no kind-dependent framing to invalidate on, unlike
+  // the metadata one).
+  let pendingAntiPatternSuggestion = null; // { payloadPath, promise } | null
+
+  function runAntiPatternSuggestion(payloadPath) {
+    if (pendingAntiPatternSuggestion && pendingAntiPatternSuggestion.payloadPath === payloadPath) {
+      return pendingAntiPatternSuggestion.promise;
+    }
+    const promise = call('artifact.suggestAntiPatterns', { payloadPath });
+    pendingAntiPatternSuggestion = { payloadPath, promise };
+    return promise;
+  }
+
+  /** Handler for the Review step's "Suggest with Claude" button --
+   * real design-anti-pattern findings, rendered as `.hint-banner-ai`
+   * entries (never `.hint-banner`, which item 2's mechanical warnings
+   * already own -- see that class's own CSS comment for why the two
+   * stay visually distinct). Never blocks/breaks the form on failure,
+   * same as every other detector here: a toast error and the button
+   * returning to normal is the whole failure mode. */
+  async function suggestAntiPatternsForCurrentPayload(button) {
+    if (!pendingPayloadPath) {
+      toastError(new Error('Pick a payload first.'));
+      return;
+    }
+    const originalLabel = button.textContent;
+    button.disabled = true;
+    button.textContent = 'Suggesting…';
+    const findingsContainer = $('addnew-review-anti-pattern-findings');
+    try {
+      const findings = await runAntiPatternSuggestion(pendingPayloadPath);
+      findingsContainer.innerHTML = '';
+      if (findings.length === 0) {
+        const banner = document.createElement('div');
+        banner.className = 'hint-banner-ai';
+        banner.textContent = 'No design anti-patterns found.';
+        findingsContainer.appendChild(banner);
+      } else {
+        for (const finding of findings) {
+          const banner = document.createElement('div');
+          banner.className = 'hint-banner-ai';
+          banner.textContent = finding;
+          findingsContainer.appendChild(banner);
+        }
+      }
+    } catch (err) {
+      toastError(err);
+    } finally {
+      button.disabled = false;
+      button.textContent = originalLabel;
+    }
+  }
+
   /** Real default for Add New's Owner field -- the local machine's own git
    * identity (`git config user.name`), not a guess. Non-fatal on failure
    * (e.g. `state.projectDir` isn't a git repo yet): the field just stays
@@ -2876,6 +2933,7 @@
     pendingInstallParams = [];
     renderInstallParamsList();
     pendingSuggestion = null;
+    pendingAntiPatternSuggestion = null;
     clearAddNewReviewPreviewListener();
     void prefillOwnerFromGitIdentity();
   }
@@ -2922,14 +2980,21 @@
     const requestId = ++addNewReviewPreviewRequestId;
     const section = $('addnew-review-preview-section');
     const frame = $('addnew-review-preview-frame');
+    // Phase 11 item 3's button lives in its own section, gated the exact
+    // same way as the live preview above (kind: ui-component + a real
+    // payload picked) -- both need real source on disk to do anything.
+    const antiPatternSection = $('addnew-review-anti-pattern-section');
 
     clearAddNewReviewPreviewListener();
 
     if (resolveKindFieldValue() !== 'ui-component' || !pendingPayloadPath) {
       section.hidden = true;
+      antiPatternSection.hidden = true;
       return;
     }
     section.hidden = false;
+    antiPatternSection.hidden = false;
+    $('addnew-review-anti-pattern-findings').innerHTML = '';
     frame.innerHTML = '<span class="ui-component-preview-loading">Loading preview&hellip;</span>';
     frame.style.width = '';
     frame.style.height = '';
@@ -3843,6 +3908,9 @@
     $('suggest-component-types-btn').addEventListener('click', (ev) => void suggestMetadataForCurrentPayload(
       ev.currentTarget,
       { updateDescription: false, updateComponentTypes: true },
+    ));
+    $('addnew-review-suggest-anti-patterns-btn').addEventListener('click', (ev) => void suggestAntiPatternsForCurrentPayload(
+      ev.currentTarget,
     ));
 
     $('wizard-next-btn').addEventListener('click', () => wizardGoNext());
