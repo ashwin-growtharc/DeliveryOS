@@ -30,13 +30,14 @@ on the project's own catalog. Phase 9 (the same principle, applied to
 checking DeliveryOS's own health/status instead of generating code) is
 also **complete**, as `deliveryos-status`. Phase 10 (wiring the check→
 pull→wire→test loop directly into the app's own **Pull** button, plus
-code-driven autofill for Add New) is **partially complete**: deterministic
-apply-and-test on Pull is done, and Add New's autofill now covers
-`install_params`, `stacks`, `description`, and `owner` for every kind
-(not just backend-plugin), plus an explicit "Suggest with Claude ✨"
-button for real judgment on `description`/`componentTypes` when static
-analysis finds nothing; an explicit agent-escalation button on build
-failure remains gated on a separate go-ahead. See
+code-driven autofill for Add New) is now **complete**: deterministic
+apply-and-test on Pull; Add New's autofill covering `install_params`,
+`stacks`, `description`, and `owner` for every kind (not just
+backend-plugin), plus an explicit "Suggest with Claude ✨" button for
+real judgment on `description`/`componentTypes` when static analysis
+finds nothing; and an explicit "want help fixing this?" button on a real
+build failure that writes a reviewed, human-confirmed fix and
+auto-rolls-back if it doesn't actually work. See
 [CHANGELOG.md](CHANGELOG.md) for what's shipped, [PLAN.md](PLAN.md) for
 what's left, and the [docs index](#docs-index) below for everything else.
 

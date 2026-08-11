@@ -1,39 +1,11 @@
-import { execFile } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import { listFilesRecursively } from './listFiles';
+import { runClaudeSubprocess, DISALLOWED_TOOLS } from '../claude/runClaudeSubprocess';
 import { SuggestionError } from '../errors';
 
 const SOURCE_FILE_PATTERN = /\.(ts|tsx|js|jsx|prisma|md)$/;
 const MAX_SOURCE_CHARS = 8000;
-
-// A real, verified-empirically list of every built-in tool name visible in
-// a `claude -p` session (obtained by directly asking a real invocation to
-// list them), used as a best-effort `--disallowedTools` denylist.
-//
-// **Not a hard sandbox -- confirmed by direct testing, not assumed.**
-// `--allowedTools ''` does nothing at all (a real test asking a session
-// with it set to run `echo` via Bash still ran it). `--disallowedTools`
-// naming tools explicitly blocked Bash on two of three real attempts, but
-// on one attempt (this same list) it still ran Bash anyway. This is
-// accepted as a real, known limitation, not silently assumed to work:
-// DeliveryOS's own engine already runs arbitrary trusted shell commands on
-// this same machine under the same user (`verifyBuild.ts`, real `git`
-// pushes), so a suggestion call occasionally retaining more tool access
-// than intended isn't a new class of risk here, just an imperfect one --
-// stated plainly rather than presented as an enforced boundary it isn't.
-// See buildSuggestionPrompt's own doc comment for the companion mitigation
-// (treating the embedded source as inert data, never instructions).
-const DISALLOWED_TOOLS = [
-  'Agent', 'Bash', 'PowerShell', 'Edit', 'Write', 'NotebookEdit',
-  'Glob', 'Grep', 'Read', 'WebFetch', 'WebSearch', 'Artifact',
-  'AskUserQuestion', 'ReportFindings', 'ScheduleWakeup',
-  'ShareOnboardingGuide', 'Skill', 'ToolSearch', 'TaskCreate',
-  'TaskUpdate', 'TaskGet', 'TaskList', 'TaskOutput', 'TaskStop',
-  'EnterPlanMode', 'ExitPlanMode', 'EnterWorktree', 'ExitWorktree',
-  'Monitor', 'PushNotification', 'RemoteTrigger', 'SendMessage',
-  'CronCreate', 'CronDelete', 'CronList', 'DesignSync',
-].join(',');
 
 export interface SuggestedMetadata {
   description?: string;
@@ -163,75 +135,16 @@ export function parseSuggestionResponse(raw: string): SuggestedMetadata {
 }
 
 /**
- * Runs the real `claude` subprocess asynchronously -- NOT `execFileSync`.
- * The sidecar (`src/sidecar.ts`) is a single Node process that reads one
- * JSON-line command at a time but is explicitly designed to handle
- * OVERLAPPING requests concurrently (`handleLine` is fired without being
- * awaited per line): a synchronous, blocking call here would freeze that
- * entire process -- and every other in-flight or new command -- for this
- * call's whole duration, which can realistically be many seconds for a
- * live LLM call over up to 8KB of embedded source. `execFile` (async,
- * libuv-backed) keeps the event loop free for that whole time instead.
- *
- * `execFile`'s async form has no `input` convenience option the way
- * `execFileSync`/`execSync` do (confirmed directly: passing one is
- * silently ignored, and the child never receives it) -- the prompt is
- * written to the child's own `stdin` stream by hand instead, then the
- * stream is explicitly ended so the child sees EOF and actually responds
- * (`claude -p` blocks reading stdin until it closes).
- */
-function runClaudeSubprocess(prompt: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const child = execFile(
-      'claude',
-      ['-p', '--disallowedTools', DISALLOWED_TOOLS, '--output-format', 'json'],
-      { encoding: 'utf-8', timeout: 45_000, shell: true },
-      (err, stdout) => {
-        if (err) {
-          reject(err);
-          return;
-        }
-        resolve(stdout);
-      },
-    );
-    if (!child.stdin) {
-      reject(new Error('claude subprocess has no writable stdin'));
-      return;
-    }
-    child.stdin.end(prompt);
-  });
-}
-
-/**
  * Phase 10 item 3, "Suggest with Claude": the first AI-invoking capability
  * in Add New's autofill -- everything else (`detectArtifactMetadata`) is
  * pure static analysis. Only called on an explicit user click (never
  * automatically on payload pick, unlike the deterministic detectors),
- * since this costs real latency and a real API call.
- *
- * Deliberately does NOT pass `--bare`: it looks like the minimal-mode
- * flag meant for fast/scripted use, but a real test showed it breaks
- * authentication outright in this environment (`--bare` skips keychain
- * reads per `claude --help`, so a nested invocation can't find real
- * credentials -- confirmed via a real failed call: "Not logged in").
- *
- * Two more real, tested findings shaped the exact `execFile` call below,
- * not assumptions:
- * - On Windows, a global npm install of `claude` is a `.cmd` shim, not a
- *   raw `.exe`. `execFile('claude', ...)` without `shell: true` fails
- *   with `ENOENT` (can't resolve `.cmd` without going through a shell);
- *   Node's own Windows `.cmd`/`.bat` handling requires `shell: true` (a
- *   direct attempt at `execFile('claude.cmd', ...)` without it fails too,
- *   with `EINVAL`). So `shell: true` is required here, not optional.
- * - `shell: true` means argv elements get concatenated into a shell
- *   command line, not passed as discrete, safely-separated arguments --
- *   a real command-injection risk if the (arbitrary, payload-derived)
- *   prompt text were one of those elements. The actual fix: the prompt
- *   never appears in argv at all -- it's written to the child's stdin (see
- *   `runClaudeSubprocess`) instead. Only fixed, hardcoded strings this
- *   code controls (`-p`, `--disallowedTools`, `DISALLOWED_TOOLS`,
- *   `--output-format`, `json`) ever go through the shell-concatenated
- *   argv.
+ * since this costs real latency and a real API call. Uses the shared
+ * `runClaudeSubprocess` (`src/engine/claude/runClaudeSubprocess.ts`,
+ * extracted alongside Phase 10 item 2's `fixBuildFailure.ts`, which needs
+ * the exact same subprocess-invocation logic and its own hard-won fixes)
+ * -- see that module's own doc comment for the real, tested reasoning
+ * behind `shell: true`, stdin-piped prompts, no `--bare`, and no `cwd`.
  */
 export async function suggestMetadata(payloadPath: string, kind: string): Promise<SuggestedMetadata> {
   const source = readPayloadSource(payloadPath);
@@ -239,7 +152,7 @@ export async function suggestMetadata(payloadPath: string, kind: string): Promis
 
   let output: string;
   try {
-    output = await runClaudeSubprocess(prompt);
+    output = await runClaudeSubprocess(prompt, DISALLOWED_TOOLS);
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     throw new SuggestionError(`Failed to run "claude" for a suggestion: ${detail}`);

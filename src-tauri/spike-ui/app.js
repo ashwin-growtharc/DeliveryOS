@@ -1016,6 +1016,12 @@
   // async artifact.resolveWiringActions call.
   let wiringRequestId = 0;
 
+  // Same request-token-guard discipline again, for Phase 10 item 2's
+  // "want help fixing this?" rows -- guards against a stale
+  // artifact.requestBuildFix response clobbering a newer render if a row
+  // is reused or Detail is closed/reopened mid-request.
+  let buildFixRequestId = 0;
+
   /** Clears any live Detail-preview iframe/listener -- called both at the
    * top of loadDetailPreview (about to replace it with a new one) and
    * from renderDetail when switching to a NON-ui-component artifact
@@ -1320,6 +1326,145 @@
 
       container.appendChild(card);
     }
+  }
+
+  /** Phase 10 item 2: renders one "want help fixing this?" row per
+   * candidate file after a real build failure following auto-wiring.
+   * Candidates are ALWAYS a subset of `appliedFiles` (item 1's own
+   * AppliedWiringResult.applied) -- `buildErrorText` is used only to
+   * narrow which of those already-known-safe files get a row shown
+   * first, never to expand the candidate set to some other file guessed
+   * from the error text. Falls back to showing every applied file if
+   * none of their paths/basenames are mentioned in the error at all. */
+  function renderBuildFixOffers(appliedFiles, buildErrorText) {
+    const container = $('build-fix-offers');
+    container.innerHTML = '';
+
+    if (!appliedFiles || appliedFiles.length === 0) {
+      container.hidden = true;
+      return;
+    }
+
+    const mentioned = appliedFiles.filter(
+      (f) => buildErrorText.includes(f) || buildErrorText.includes(f.split('/').pop()),
+    );
+    const candidates = mentioned.length > 0 ? mentioned : appliedFiles;
+
+    container.hidden = false;
+    for (const filePath of candidates) {
+      container.appendChild(renderBuildFixRow(filePath, buildErrorText));
+    }
+  }
+
+  /** Builds one row's DOM for a single candidate file: a button that asks
+   * for a fix, then either the model's own honest "can't determine a
+   * fix" reason, or the proposed content plus Apply/Discard. Nothing is
+   * written to disk, and nothing is logged, unless Apply is clicked. */
+  function renderBuildFixRow(filePath, buildErrorText) {
+    const row = document.createElement('div');
+    row.className = 'build-fix-row';
+
+    const askBtn = document.createElement('button');
+    askBtn.type = 'button';
+    askBtn.className = 'btn btn-sm btn-ghost';
+    askBtn.textContent = `Want help fixing "${filePath}"? ✨`;
+    row.appendChild(askBtn);
+
+    const resultEl = document.createElement('div');
+    resultEl.className = 'build-fix-result';
+    resultEl.hidden = true;
+    row.appendChild(resultEl);
+
+    askBtn.addEventListener('click', () => {
+      void withBusy(askBtn, 'Asking…', async () => {
+        const requestId = ++buildFixRequestId;
+        let fix;
+        try {
+          fix = await call('artifact.requestBuildFix', {
+            cwd: state.projectDir,
+            filePath,
+            buildError: buildErrorText,
+          });
+        } catch (err) {
+          if (requestId !== buildFixRequestId) return; // superseded while awaiting
+          resultEl.hidden = false;
+          resultEl.textContent = `Could not get a fix -- ${err instanceof Error ? err.message : String(err)}`;
+          return;
+        }
+        if (requestId !== buildFixRequestId) return; // superseded while awaiting
+
+        resultEl.hidden = false;
+        resultEl.innerHTML = '';
+
+        if (!fix.fixedFile) {
+          const reasonEl = document.createElement('div');
+          reasonEl.textContent = fix.reason || 'Claude could not determine a fix for this file.';
+          resultEl.appendChild(reasonEl);
+          return;
+        }
+
+        const snippetEl = document.createElement('pre');
+        snippetEl.className = 'wiring-action-snippet';
+        snippetEl.textContent = fix.fixedFile;
+        resultEl.appendChild(snippetEl);
+
+        const actionsEl = document.createElement('div');
+        actionsEl.className = 'build-fix-actions';
+        const applyBtn = document.createElement('button');
+        applyBtn.type = 'button';
+        applyBtn.className = 'btn btn-sm';
+        applyBtn.textContent = 'Apply';
+        const discardBtn = document.createElement('button');
+        discardBtn.type = 'button';
+        discardBtn.className = 'btn btn-sm btn-ghost';
+        discardBtn.textContent = 'Discard';
+        actionsEl.appendChild(applyBtn);
+        actionsEl.appendChild(discardBtn);
+        resultEl.appendChild(actionsEl);
+        askBtn.hidden = true;
+
+        discardBtn.addEventListener('click', () => {
+          // Nothing written, nothing logged -- just clears the offer back
+          // to its starting state so it can be asked again if wanted.
+          resultEl.hidden = true;
+          resultEl.innerHTML = '';
+          askBtn.hidden = false;
+        });
+
+        applyBtn.addEventListener('click', () => {
+          void withBusy(applyBtn, 'Applying…', async () => {
+            discardBtn.disabled = true;
+            try {
+              const outcome = await call('artifact.applyBuildFix', {
+                cwd: state.projectDir,
+                filePath,
+                fixedFile: fix.fixedFile,
+                buildError: buildErrorText,
+                costUsd: fix.costUsd,
+                durationMs: fix.durationMs,
+              });
+              const outcomeEl = document.createElement('div');
+              if (outcome.rolledBack) {
+                outcomeEl.textContent = `The fix didn't actually resolve the build -- your original file was restored.${outcome.build.output ? ` (${outcome.build.output})` : ''}`;
+              } else if (outcome.build.ran) {
+                outcomeEl.textContent = 'Fix applied -- the build now passes.';
+              } else {
+                outcomeEl.textContent = 'Fix applied (no build command detected to verify it).';
+              }
+              resultEl.innerHTML = '';
+              resultEl.appendChild(outcomeEl);
+            } catch (err) {
+              const errEl = document.createElement('div');
+              errEl.textContent = `Could not apply the fix -- ${err instanceof Error ? err.message : String(err)}`;
+              resultEl.innerHTML = '';
+              resultEl.appendChild(errEl);
+            }
+          });
+        });
+      });
+    });
+
+    return row;
   }
 
   /** Builds the generated props-controls panel for whichever component is
@@ -1759,6 +1904,9 @@
               // -- reuses the existing progress log rather than inventing
               // a new UI surface for this.
               appendProgressLine('build', build.output || 'Build failed.');
+              // Phase 10 item 2: offer to try fixing one of the files this
+              // same pull just auto-wired -- never any other file.
+              renderBuildFixOffers(wiring.applied, build.output || '');
             }
           } else {
             const result = await call('artifact.pull', {
@@ -2004,6 +2152,8 @@
   async function beginProgress() {
     const panel = $('detail-progress');
     $('progress-log').innerHTML = '';
+    $('build-fix-offers').innerHTML = '';
+    $('build-fix-offers').hidden = true;
     panel.hidden = false;
     panel.classList.remove('done', 'error');
     $('progress-status').textContent = 'Working…';
@@ -2041,6 +2191,8 @@
     panel.hidden = true;
     panel.classList.remove('done', 'error');
     $('progress-log').innerHTML = '';
+    $('build-fix-offers').innerHTML = '';
+    $('build-fix-offers').hidden = true;
     if (progressUnlisten) {
       progressUnlisten();
       progressUnlisten = null;
