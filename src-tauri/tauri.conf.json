@@ -38,7 +38,14 @@
       "../build/deliveryos-engine"
     ],
     "resources": {
-      "../build/esbuild.exe": "esbuild.exe"
+      "../build/esbuild.exe": "esbuild.exe",
+      "../build/deliveryos-cli.exe": "deliveryos.exe"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "installerHooks": "nsis/path-hook.nsh"
+      }
     },
     "android": {
       "debugApplicationIdSuffix": ".debug"
