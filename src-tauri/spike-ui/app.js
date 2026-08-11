@@ -2881,10 +2881,7 @@
         findingsContainer.appendChild(banner);
       } else {
         for (const finding of findings) {
-          const banner = document.createElement('div');
-          banner.className = 'hint-banner-ai';
-          banner.textContent = finding;
-          findingsContainer.appendChild(banner);
+          findingsContainer.appendChild(renderDesignFixRow(finding, pendingPayloadPath));
         }
       }
     } catch (err) {
@@ -2893,6 +2890,123 @@
       button.disabled = false;
       button.textContent = originalLabel;
     }
+  }
+
+  /** Phase 11 item 4, the fix step for one specific finding -- directly
+   * mirrors `renderBuildFixRow`'s exact structure and flow (ask ->
+   * either the model's own honest "can't determine a fix" reason, or
+   * the proposed content plus Apply/Discard). Nothing is written to
+   * disk, and nothing is logged, unless Apply is clicked. Captures
+   * `payloadPath` at render time (not re-read from `pendingPayloadPath`
+   * later) so a fix already in flight stays targeted at the right
+   * candidate even if the wizard moves on before it resolves. */
+  function renderDesignFixRow(finding, payloadPath) {
+    const row = document.createElement('div');
+    row.className = 'design-fix-row';
+
+    const banner = document.createElement('div');
+    banner.className = 'hint-banner-ai';
+    banner.textContent = finding;
+    row.appendChild(banner);
+
+    const askBtn = document.createElement('button');
+    askBtn.type = 'button';
+    askBtn.className = 'btn btn-sm btn-ghost';
+    askBtn.textContent = 'Want help fixing this? ✨';
+    row.appendChild(askBtn);
+
+    const resultEl = document.createElement('div');
+    resultEl.className = 'design-fix-result';
+    resultEl.hidden = true;
+    row.appendChild(resultEl);
+
+    askBtn.addEventListener('click', () => {
+      void withBusy(askBtn, 'Asking…', async () => {
+        let fix;
+        try {
+          fix = await call('artifact.requestAntiPatternFix', { payloadPath, finding });
+        } catch (err) {
+          resultEl.hidden = false;
+          resultEl.textContent = `Could not get a fix -- ${err instanceof Error ? err.message : String(err)}`;
+          return;
+        }
+
+        resultEl.hidden = false;
+        resultEl.innerHTML = '';
+
+        if (!fix.file || !fix.fixedFile) {
+          const reasonEl = document.createElement('div');
+          reasonEl.textContent = fix.reason || 'Claude could not determine a fix for this.';
+          resultEl.appendChild(reasonEl);
+          return;
+        }
+
+        const snippetEl = document.createElement('pre');
+        snippetEl.className = 'wiring-action-snippet';
+        snippetEl.textContent = fix.fixedFile;
+        resultEl.appendChild(snippetEl);
+
+        const actionsEl = document.createElement('div');
+        actionsEl.className = 'design-fix-actions';
+        const applyBtn = document.createElement('button');
+        applyBtn.type = 'button';
+        applyBtn.className = 'btn btn-sm';
+        applyBtn.textContent = 'Apply';
+        const discardBtn = document.createElement('button');
+        discardBtn.type = 'button';
+        discardBtn.className = 'btn btn-sm btn-ghost';
+        discardBtn.textContent = 'Discard';
+        actionsEl.appendChild(applyBtn);
+        actionsEl.appendChild(discardBtn);
+        resultEl.appendChild(actionsEl);
+        askBtn.hidden = true;
+
+        discardBtn.addEventListener('click', () => {
+          // Nothing written, nothing logged -- just clears the offer
+          // back to its starting state so it can be asked again.
+          resultEl.hidden = true;
+          resultEl.innerHTML = '';
+          askBtn.hidden = false;
+        });
+
+        applyBtn.addEventListener('click', () => {
+          void withBusy(applyBtn, 'Applying…', async () => {
+            discardBtn.disabled = true;
+            try {
+              const outcome = await call('artifact.applyAntiPatternFix', {
+                cwd: state.projectDir,
+                payloadPath,
+                file: fix.file,
+                fixedFile: fix.fixedFile,
+                finding,
+                costUsd: fix.costUsd,
+                durationMs: fix.durationMs,
+              });
+              const outcomeEl = document.createElement('div');
+              if (outcome.rolledBack) {
+                outcomeEl.textContent = `The fix broke the component's preview -- your original file was restored.${outcome.verification.error ? ` (${outcome.verification.error})` : ''}`;
+              } else {
+                outcomeEl.textContent = 'Fix applied -- the component still compiles.';
+              }
+              resultEl.innerHTML = '';
+              resultEl.appendChild(outcomeEl);
+              // The live preview above only refreshes on wizard
+              // step-navigation into Review -- nothing re-triggers it on
+              // a file edit on its own, so this needs an explicit call
+              // to reflect whichever file just actually changed on disk.
+              void loadAddNewReviewPreview();
+            } catch (err) {
+              const errEl = document.createElement('div');
+              errEl.textContent = `Could not apply the fix -- ${err instanceof Error ? err.message : String(err)}`;
+              resultEl.innerHTML = '';
+              resultEl.appendChild(errEl);
+            }
+          });
+        });
+      });
+    });
+
+    return row;
   }
 
   /** Real default for Add New's Owner field -- the local machine's own git

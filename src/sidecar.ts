@@ -38,6 +38,7 @@ import { resolveInstallParamValues, applyInstallParams, readExistingEnvValues } 
 import { resolveWiringActions } from './engine/pull/wiring';
 import { pullAndAutoWire } from './engine/pull/pullAndAutoWire';
 import { requestBuildFix, applyBuildFix } from './engine/pull/fixBuildFailure';
+import { requestAntiPatternFix, applyAntiPatternFix } from './engine/scan/fixAntiPattern';
 import { pushArtifact, PushOptions } from './engine/push/push';
 import { checkForUpdates, resolvePendingPushes } from './engine/sync/sync';
 import { scanForNewArtifacts } from './engine/scan/scan';
@@ -402,6 +403,31 @@ const commands: Record<string, CommandHandler> = {
     const costUsd = typeof args.costUsd === 'number' ? args.costUsd : undefined;
     const durationMs = typeof args.durationMs === 'number' ? args.durationMs : undefined;
     return applyBuildFix(cwd, filePath, fixedFile, buildError, { costUsd, durationMs });
+  },
+
+  // Phase 11 item 4: the "ask" half of the fix step for a design
+  // anti-pattern finding (item 2/item 3) -- same "no write, no
+  // audit-log entry" shape as artifact.requestBuildFix above.
+  'artifact.requestAntiPatternFix': (args) => {
+    const payloadPath = requireString(args, 'payloadPath');
+    const finding = requireString(args, 'finding');
+    return requestAntiPatternFix(payloadPath, finding);
+  },
+
+  // Phase 11 item 4: the "apply" half -- writes the fix for real,
+  // re-compiles the candidate's live preview to confirm it still
+  // works, rolls back automatically if it doesn't, and appends exactly
+  // one audit-log entry either way. Only reached after an explicit
+  // human confirmation click; never automatic.
+  'artifact.applyAntiPatternFix': (args) => {
+    const cwd = requireString(args, 'cwd');
+    const payloadPath = requireString(args, 'payloadPath');
+    const file = requireString(args, 'file');
+    const fixedFile = requireString(args, 'fixedFile');
+    const finding = requireString(args, 'finding');
+    const costUsd = typeof args.costUsd === 'number' ? args.costUsd : undefined;
+    const durationMs = typeof args.durationMs === 'number' ? args.durationMs : undefined;
+    return applyAntiPatternFix(cwd, payloadPath, file, fixedFile, finding, { costUsd, durationMs });
   },
 
   // Real preview-compile command (Phase 6, Phase B), replacing Phase A's

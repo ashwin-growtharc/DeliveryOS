@@ -2377,12 +2377,48 @@ tasks, same discipline every earlier phase here uses.
       issue. 13 new unit tests mirroring `suggestMetadata.test.ts`'s
       exact shapes (prompt-injection delimiter check, malformed-JSON
       handling, empty-array-is-valid).
-- [ ] **The fix step reuses Phase 10 item 2's exact approved design** — no
+- [x] **The fix step reuses Phase 10 item 2's exact approved design** — no
       tool access, strict JSON in/out, the app applies the fix through its
-      own existing write path, a human confirms before it lands, a real
-      rebuild verifies it, auto-rollback if it doesn't actually work.
-      Nothing new to design here — same mechanism, pointed at a design
-      violation instead of a build error.
+      own existing write path (`src/engine/scan/fixAntiPattern.ts`,
+      structurally mirroring `fixBuildFailure.ts`), a human confirms
+      before it lands (the same real two-click ask → preview → Apply/
+      Discard flow, per-finding rows on the Review step), a real check
+      verifies it, auto-rollback if it doesn't actually work. **Two real
+      gaps in "nothing new to design here," resolved with the user
+      first**: neither item 2's mechanical warnings nor item 3's AI
+      findings say which FILE a finding is about (confirmed by reading
+      both) — resolved by extending the fix prompt itself to ask which
+      file needs the change, then re-validating that file resolves
+      safely inside the candidate's own payload directory (reusing
+      `resolveContainedTargetFile`, already fully generic, rooted at the
+      payload instead of a real project's `cwd` — zero new
+      path-traversal logic needed) before writing anything, never
+      trusting the model's own answer blindly. And unlike a real
+      project, this candidate has no build command to re-run for
+      verification — `compileLocalPreview` (confirmed to always
+      recompile fresh from disk, never cached, and to genuinely throw on
+      a real syntax/bundle error) stands in for "a real rebuild," with
+      the same honest caveat `runProjectBuild` already has: it verifies
+      "does it still compile," not "is the anti-pattern actually gone."
+      Its own audit log, `.deliveryos/design-fix-log.jsonl` (kept
+      separate from `build-fix-log.jsonl` rather than shared, so neither
+      needs a discriminant field) — a real edit to a real file on disk
+      either way, same standard regardless of whether the target's been
+      pushed yet.
+      **Verified with a real, full request→apply cycle, not mocked**:
+      run against the real `ConfirmDialog` fixture from item 3 (the
+      low-contrast-cancel-next-to-destructive finding) — correctly named
+      `ConfirmDialog.tsx` as the target, and the real fix gave Cancel a
+      visible border, full opacity, matching font-weight, and a readable
+      size, a genuinely sensible secondary-button treatment, not just
+      "didn't crash." Applied for real, verified via a real
+      `compileLocalPreview` call, file on disk confirmed correct
+      afterward. The rollback path (a deliberately broken fixed-file)
+      is covered by a real, non-mocked unit test — a genuine esbuild
+      syntax error, real rollback, file on disk confirmed restored to
+      the original. 17 new unit tests mirroring
+      `fixBuildFailure.test.ts`'s exact shapes, including the
+      path-traversal-refusal trap-directory technique.
 - [ ] **Open scoping question, flag before building, don't default
       silently**: does empty/error/loading-state coverage belong in this
       same bundle from day one, or is that its own follow-up once the

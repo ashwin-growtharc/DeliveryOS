@@ -1521,6 +1521,29 @@ input, textarea, select {
   margin-top: 8px;
 }
 
+/* Phase 11 item 4: structurally identical to .build-fix-row/-result/
+ * -actions above, kept as its own set rather than a shared/renamed
+ * class -- each feature's own styling stays independently editable,
+ * matching how item 3 got its own .hint-banner-ai instead of
+ * overloading .hint-banner. */
+.design-fix-row {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 8px 10px;
+  background: var(--card);
+  margin-bottom: 8px;
+}
+
+.design-fix-result {
+  margin-top: 8px;
+}
+
+.design-fix-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
 .progress-line .msg {
   opacity: .9;
   overflow-wrap: anywhere;

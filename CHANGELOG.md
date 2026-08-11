@@ -4,6 +4,30 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- **Phase 11, item 4: the fix step, turning a design finding into an
+  actual, verified edit.** Reuses Phase 10 item 2's exact approved
+  design (`fixAntiPattern.ts`, mirroring `fixBuildFailure.ts`'s real
+  shape: ask/apply split, real two-click UI, auto-rollback, one audit
+  log entry per apply). Two real gaps in "nothing new to design here,"
+  resolved with the user first: neither existing mechanism (item 2's
+  mechanical warnings, item 3's AI findings) says which file a finding
+  is about, so the fix prompt itself now asks -- re-validated against
+  the payload's own directory (`resolveContainedTargetFile`, already
+  generic, needed zero new path-traversal logic) before writing
+  anything, same defense-in-depth build-fix already applies. And since
+  this candidate hasn't been pushed yet, there's no build command to
+  re-run for verification -- `compileLocalPreview` stands in (confirmed
+  to always recompile fresh, never cached, and to genuinely throw on a
+  real syntax error), with its own separate audit log,
+  `.deliveryos/design-fix-log.jsonl`. **Verified with a real, full
+  request→apply cycle**: run against the real `ConfirmDialog` fixture
+  from item 3 -- correctly named the right file, and the real fix gave
+  the low-contrast Cancel button a visible border, full opacity, and
+  matching weight, a genuinely sensible fix, not just "didn't crash";
+  applied for real, verified via a real compile, file on disk confirmed
+  correct. Rollback path covered by a real (non-mocked) syntax-error
+  test. 17 new unit tests.
+
 - **Phase 11, item 3: "Suggest with Claude" for the subjective
   anti-patterns a mechanical rule can't catch.** Reuses Phase 10 item
   3's exact proven subprocess shape (`suggestAntiPatterns.ts`, sharing
