@@ -23,7 +23,7 @@ import { extractPropsSchemas, findComponentFiles, PropSchemaEntry } from './docg
  * cached preview across every remote/artifact/version in one move; a
  * short incrementing string is just the simplest thing that works.
  */
-const PREVIEW_COMPILER_VERSION = '1';
+const PREVIEW_COMPILER_VERSION = '5';
 
 /**
  * Real Tailwind CSS, generated at compile time from whatever utility
@@ -104,6 +104,33 @@ async function generateTailwindCss(resolveDir: string, previewEntryPath: string)
       tailwindcss({
         content: sourceTexts.map((raw) => ({ raw, extension: 'tsx' as const })),
         corePlugins: { preflight: false },
+        // Real bug, found via a real screenshot: with no `darkMode` set,
+        // Tailwind defaults to the `media` strategy -- every `dark:`
+        // class a component writes (many do; it's a normal, correct
+        // thing for a component to support) compiles to
+        // `@media (prefers-color-scheme: dark) {...}`, which resolves
+        // against the VIEWER's own OS/browser setting, not anything
+        // DeliveryOS controls. Two real, observed symptoms from this:
+        // (1) broken contrast -- a component's own `dark:bg-black/30`
+        // translucent modal renders correctly-for-dark-mode, but the
+        // preview frame around it (`.ui-component-preview-frame`,
+        // `--surface-inset`) is a fixed light color that never itself
+        // goes dark to match, so the composited result is neither this
+        // project's real light UI nor a real dark one -- just broken.
+        // (2) the background visibly changing while a preview is open,
+        // with no user action -- `prefers-color-scheme` is a LIVE media
+        // query; if the OS scheme changes (a scheduled light/dark
+        // switch, for instance) while the iframe stays mounted, Tailwind
+        // re-evaluates it automatically. `'class'` makes dark: variants
+        // require an ancestor `.dark` element that this pipeline never
+        // adds anywhere -- so every `dark:` class in every component
+        // simply never activates, deterministically, matching this
+        // project's own real design system (DESIGN_SYSTEM.md), which is
+        // light-only with no dark variant at all. A real, later reason
+        // to revisit this: if DeliveryOS's own app ever ships a dark
+        // theme, previews should follow that explicit choice, not the
+        // viewer's ambient OS setting either way.
+        darkMode: 'class',
       }),
     ]).process('@tailwind base; @tailwind components; @tailwind utilities;', { from: undefined });
     return VENDORED_TAILWIND_PREFLIGHT_CSS + '\n' + result.css;
@@ -613,8 +640,42 @@ async function compileReactPreview(previewEntryPath: string): Promise<CompiledPr
      NOT affect measurement accuracy: document.body.scrollWidth/scrollHeight
      (read by injectContentHeightReporter below) report the content's real,
      full size regardless of whether overflow is hidden or visible -- only
-     whether a scrollbar/clip is shown changes, never what gets measured. */
-  html, body { margin: 0; padding: 0; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+     whether a scrollbar/clip is shown changes, never what gets measured.
+
+     body padding was tried and reverted here (real bug, found via a real
+     screenshot, then a WORSE real bug found reverting it): a Button
+     variant's onMouseEnter lift (translateY(-1px), an ordinary hover
+     micro-interaction) clipped its own border against body's edge with
+     zero padding, so 4px of real body padding was added to absorb it --
+     included in document.body.scrollHeight on purpose, so the measured
+     size the parent applies back stayed honest (see
+     injectContentHeightReporter). That was the bug. Any component whose
+     own layout is anchored to the iframe's OWN current viewport size
+     (min-h-screen / min-height: 100vh -- an entirely ordinary Tailwind
+     pattern for a full-page mockup, confirmed against a real pushed
+     component) re-reads that viewport size again on the VERY NEXT
+     resize round, once the parent applies whatever height got measured.
+     Padding that's included in the measurement adds a fixed amount ON
+     TOP of that self-reference EVERY round, not once -- confirmed by
+     hand, instrumenting the real reporter: reported height climbed
+     472 -> 480 -> 488 -> 496..., +8 (the padding, both sides) every
+     single round, ratcheting all the way to clampPreviewHeight's MAX
+     ceiling for a component whose real card content is under 350px
+     tall. Without the padding, the exact same component's height
+     converges immediately and stays put, confirmed by hand the same
+     way. There is no padding amount, however small, that's genuinely
+     safe here: ANY constant included in the measurement compounds for
+     ANY component using this ordinary, common pattern -- which is a
+     structural property of the async measure-then-apply protocol
+     itself (see injectContentHeightReporter's own doc comment on why
+     100vh can't be pinned inside DeliveryOS's OWN #root either, for the
+     identical reason), not something a bigger or smaller padding value
+     fixes. Reverted to zero. The Button hover-lift clip this padding
+     fixed is real but narrow (cosmetic, one variant, one micro-
+     interaction) against a regression that broke every full-page-style
+     pushed component -- the correct trade to make until a fix exists
+     that doesn't feed anything back into the measurement loop at all. */
+  html, body { margin: 0; padding: 0; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color-scheme: light; }
   #root { display: flex; align-items: center; justify-content: center; }
 </style>
 <style>${safeTailwindCss}</style>
@@ -972,6 +1033,30 @@ function injectContentHeightReporter(html: string): string {
       // clamps to clampPreviewWidth/Height's floor downstream, so there's
       // no real case where a legitimate measurement needs to be exactly 0
       // on just one axis.
+      // Real bug, found via a real screenshot (a component using
+      // min-h-screen ballooning to the MAX clamp instead of its real
+      // size): body's own 4px-per-side padding (added for the hover-clip
+      // fix above) means an UNMOUNTED #root -- genuinely empty, zero real
+      // content -- no longer measures as exactly (0, 0). It measures as
+      // (8, 8): the padding alone, with nothing inside it yet. The
+      // width === 0 || height === 0 check below exists SPECIFICALLY to
+      // catch this pre-mount moment (see its own comment) and was written
+      // back when zero really was the only signal -- padding quietly
+      // moved the goalposts, and every report from here on now starts
+      // from that premature (8, 8) instead of skipping it, which is
+      // exactly the "squeeze now, corrupt later" failure mode that
+      // comment documents by hand, just arrived at via a small nonzero
+      // measurement instead of a zero one. Checking #root's own child
+      // count directly -- not a pixel measurement at all -- is the
+      // precise version of "has this actually mounted yet," immune to
+      // whatever body padding happens to be. Only applies when #root
+      // exists at all (the React adapter's own mount target); the
+      // zero-build HTML adapter has no #root and no async mount to wait
+      // for, so it only ever needed the width/height checks below.
+      var root = document.getElementById('root');
+      if (root && root.children.length === 0) {
+        return;
+      }
       if (width === 0 || height === 0) {
         return;
       }
@@ -979,6 +1064,22 @@ function injectContentHeightReporter(html: string): string {
     }
     if (observer) {
       observer.observe(document.body);
+    }
+    // The precise pre-mount check above (root.children.length === 0)
+    // correctly skips the two premature calls below (immediate + 'load'
+    // -- both real, both still legitimately too early), but nothing
+    // ELSE re-triggers reportSize() once React actually commits UNLESS
+    // that commit also happens to change document.body's own SIZE --
+    // true in every real browser tested by hand, but not guaranteed in
+    // general, and not true at all in a test environment with no
+    // ResizeObserver (confirmed: the exact reason this needed adding --
+    // without it, a correct "skip until mounted" check has nothing left
+    // to wake it back up). Observing #root's own childList directly
+    // catches the real mount moment itself, immediately, independent of
+    // whether it happens to also change any element's size.
+    var root = document.getElementById('root');
+    if (root && typeof MutationObserver !== 'undefined') {
+      new MutationObserver(reportSize).observe(root, { childList: true });
     }
     window.addEventListener('load', reportSize);
     reportSize();

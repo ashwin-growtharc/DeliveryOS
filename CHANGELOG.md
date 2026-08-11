@@ -4,6 +4,96 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- **A real, user-reported preview rendering bug, root-caused to one
+  shared function and fixed there once.** Reported with a real
+  screenshot: the `search` component's preview showed its "Recent
+  search" label and "Clear all" button at near-zero contrast, and a
+  separate report that a preview's background "changes dynamically"
+  while just looking at it. Root cause, confirmed by reading the real
+  `Search.tsx` source and the preview compiler: `generateTailwindCss`
+  (`src/engine/preview/compile.ts`) never pinned a `darkMode` strategy,
+  so Tailwind's default `media` behavior compiled every component's
+  `dark:` classes (a normal, correct thing for a component to have) to
+  a live `@media (prefers-color-scheme: dark)` query -- resolved against
+  the VIEWER's own OS setting, not anything this project controls. That
+  explains both reports at once: a `dark:bg-black/30` translucent modal
+  rendering dark-mode-correct but composited over the preview frame's
+  fixed light background (which never itself goes dark to match) reads
+  as broken contrast; and the OS scheme changing while a preview stays
+  mounted re-evaluates that live media query with no user action at all,
+  which is the "changes dynamically" report. Fixed by pinning
+  `darkMode: 'class'` -- no `.dark` class is ever added anywhere in this
+  pipeline, so `dark:` variants now deterministically never activate,
+  matching this project's own real design system (light-only, no dark
+  variant defined at all) -- plus `color-scheme: light` on the iframe's
+  own html/body so native browser chrome (scrollbars, form controls)
+  stays consistent too. One shared fix, not a per-component patch: every
+  past and future `ui-component` artifact that uses `dark:` classes is
+  fixed by this same change, confirmed by re-running it against the real
+  `search` component and verifying zero `prefers-color-scheme`
+  occurrences remain in its compiled output. 2 new unit tests using a
+  real fixture component with `dark:` classes. Full suite: 347/348, the
+  1 failure pre-existing and unrelated (confirmed already, several times
+  this session).
+
+- **Three more real bugs, found chasing the fix above through an actual
+  running app.** (1) The dark-mode fix above shipped without bumping
+  `PREVIEW_COMPILER_VERSION`, so the cache that constant exists to
+  invalidate kept serving every already-compiled preview's stale,
+  pre-fix HTML -- restarting the app changed nothing, because the cache
+  key never changed. (2) The wrapper card behind every live preview
+  (`.ui-component-preview-frame`) filled with a flat beige background
+  and a border; real components with their own translucent/glass
+  surfaces (e.g. `search`) read as a muddy mismatched box against it.
+  Removed the fill; a follow-up screenshot showed even a hairline border
+  still read as an unwanted line around the component, so removed that
+  too -- confirmed unaffected against a plain opaque component
+  (`button-showcase`) first. (3) `button-showcase`'s Outline variant
+  lifts 1px on hover, a normal micro-interaction; with the iframe's
+  `body` at zero padding, that 1px lift pushed the button's border past
+  body's own edge, where `overflow: hidden` clipped it -- visible as the
+  border's flat top edge vanishing while its rounded corners survived.
+  Fixed with 4px of real `body` padding, included in the actual
+  `scrollHeight` measurement the parent sizes the frame to.
+
+- **That padding fix (3) above caused two further real regressions,
+  both since reverted.** A 6-button row started wrapping its last button
+  ("Link") onto its own line: `app.js`'s `WIDTH_SAFETY_MARGIN` measures
+  the row element itself, never `document.body`, so it never accounted
+  for body's new padding cutting into the same outer box's usable width
+  (confirmed by hand: row measures 596.67px unwrapped; the old margin,
+  +4 = 601px outer, left only 593px inside once body's 8px of padding is
+  subtracted). Far more serious: **any pushed component using an
+  ordinary `min-h-screen` / `min-height: 100vh` pattern (a real full-page
+  sign-up mockup hit this directly) grew its preview to the 640px MAX
+  ceiling instead of its real ~350px size.** `min-height: 100vh`
+  resolves against the iframe's own currently-applied height, which the
+  parent sets from what got reported -- a closed loop. body's padding
+  sits on top of that loop's own element, so once the applied height
+  first exceeds the component's true size, the component's height locks
+  to that value and the padding adds exactly 8px to every subsequent
+  report, forever, until the MAX clamp stops it (confirmed by hand:
+  472 -> 480 -> 488 -> 496 ..., +8 every round). Not something a smaller
+  padding value would have avoided -- any constant fed back into a loop
+  like this compounds, for any component using this entirely common
+  pattern. **Reverted the body padding entirely and `WIDTH_SAFETY_MARGIN`
+  back to `4`** -- confirmed by hand both ways: the sign-up component now
+  converges immediately to a stable 464px and stays there; the 6-button
+  row fits on one line again. The Button hover-clip this fixed is real
+  but narrow (one variant, cosmetic) against a regression that broke a
+  very common authoring pattern broadly -- the right trade until a fix
+  exists that doesn't feed anything back into the measurement loop.
+
+- **A distinct pre-mount measurement bug, found investigating the above,
+  kept even after reverting the padding that exposed it.** The
+  `width === 0 || height === 0` check that exists to skip reporting
+  before React has mounted infers "not mounted" from a raw pixel
+  measurement happening to be exactly zero -- exactly what broke, briefly,
+  once body had non-zero padding even while genuinely empty. Replaced
+  with a precise, direct check: `#root`'s own child count, immune to
+  whatever body padding does or doesn't exist. `PREVIEW_COMPILER_VERSION`
+  now `4` (padding reverted + this check, together).
+
 - **Phase 10 is complete: item 2, "want help fixing this?", built after
   explicit go-ahead given directly in chat.** The original plan
   (unrestricted `--allowedTools "Bash,Read,Edit"`) is dropped -- this

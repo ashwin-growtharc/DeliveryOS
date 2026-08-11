@@ -772,6 +772,149 @@ foundation. Tracked here so it doesn't just live in a brainstorm doc.
       by querying GitHub across the org's repos — it just doesn't cover
       pulls, which leave no signal anywhere today.)
 
+**Post-completion fix (found via a real screenshot, well after this
+phase shipped)**: the preview compiler
+(`src/engine/preview/compile.ts`'s `generateTailwindCss`) never pinned a
+`darkMode` strategy, so Tailwind ran its default `media` behavior —
+every `dark:` class a component author writes (a real, normal thing to
+do; several catalog components do) compiled to
+`@media (prefers-color-scheme: dark)`, resolving against the VIEWER's
+own OS/browser setting rather than anything DeliveryOS controls. Real,
+observed symptom: `search`'s own `dark:bg-black/30` translucent modal
+rendered dark-mode-correct, composited over the preview frame's fixed
+light background (`--surface-inset`, never itself dark), producing
+broken, near-invisible text contrast — and if the OS scheme changed
+while a preview stayed open, the background visibly shifted with no
+user action. Fixed by pinning `darkMode: 'class'` (no `dark` class is
+ever added anywhere in this pipeline, so `dark:` variants now
+deterministically never activate — every component always renders its
+light-mode styling, matching this project's own real design system,
+which is light-only with no dark variant at all) plus `color-scheme:
+light` on the iframe's own html/body, so native browser UI (scrollbars,
+form controls) stays consistent too. Verified against the real `search`
+component: recompiling it now shows zero `prefers-color-scheme`
+occurrences and the light-mode text-color classes applying
+unconditionally. 2 new unit tests, using a real fixture component with
+`dark:` classes, proving both the selector shape change and the
+`color-scheme` pin.
+
+**Three more real bugs, found chasing the fix above through an actual
+running app (same "prove it for real" session, same screenshots-driven
+bug hunt):**
+
+1. **The dark-mode fix above didn't actually take effect on restart** —
+   a real bug in the fix itself, not a new one. `getOrCompilePreview`
+   caches compiled preview HTML keyed on `PREVIEW_COMPILER_VERSION`
+   specifically so a compiler change is never invisibly masked by a
+   stale cache entry (see that constant's own doc comment) — and the
+   `darkMode: 'class'` fix above shipped without bumping it. Every
+   already-cached preview kept serving its pre-fix, broken HTML no
+   matter how many times the app restarted, since the cache key never
+   changed. Fixed by bumping the version string; the existing test
+   suite already had a test proving stale-version cache entries are
+   never served, which would have caught this had it been re-run
+   against the real bug instead of just the new code.
+2. **The wrapper card behind every live preview
+   (`.ui-component-preview-frame` in `src-tauri/spike-ui/style.css`)
+   filled with a flat beige (`--surface-inset`) and a 1px border.** Fine
+   for an opaque component, but several real catalog components (e.g.
+   `search`) use their own translucent/backdrop-blur surface designed to
+   sit on something visually interesting — compositing that over a flat
+   beige wash read as a muddy, mismatched box behind the component, not
+   a clean frame. First cut kept a hairline border for boundary
+   definition; a follow-up screenshot showed even that read as an
+   unwanted line boxing in the component. Landed on fully transparent,
+   no border at all — every component's own background/shape renders as
+   authored, nothing of the frame itself is visible. Checked against a
+   plain component (`button-showcase`, opaque/inline-styled) to confirm
+   this doesn't regress ordinary previews: its `outline`/`ghost`/`link`
+   variants use `background: transparent` already, so they render
+   against the page's own cream background either way — visually
+   unaffected.
+3. **A real, live-reproduced clipping bug, fixed, then reverted once its
+   own fix turned out to cause a worse bug (both parts below)**:
+   `button-showcase`'s Outline variant lifts by `transform:
+   translateY(-1px)` on hover (an ordinary micro-interaction), and with
+   the iframe's own `body` at zero padding, an interactive element with
+   no margin of its own sits flush against body's edge. The 1px
+   hover-lift pushed its border past that edge, where `overflow: hidden`
+   clipped exactly that sliver — visually, the border's flat top edge
+   vanished while its rounded corners (which dip inward before reaching
+   the true top) survived, reading as a broken outline. Reproduced live
+   in a real browser against the real compiled component. Fixed with 4px
+   of padding on `body` in the compiled preview template, included in
+   the `scrollHeight` measurement `injectContentHeightReporter` reports
+   so frame/iframe sizing already accounted for it.
+
+   That fix caused two further real, confirmed regressions, both found
+   the same way (real screenshots) and both traced back to the same 4px:
+
+   - A 6-button row wrapping its last item ("Link") onto its own line
+     despite visibly having room to spare. `app.js`'s
+     `WIDTH_SAFETY_MARGIN` measures the row element itself, inside
+     `#root` — never `document.body` — so it never included body's new
+     padding, which cuts into the SAME outer box's usable interior
+     width. Confirmed by hand: the row measures 596.67px unwrapped;
+     applying the old margin (+4 = 601px outer) left only 593px inside
+     once body's 8px of padding is subtracted — short of what's needed.
+   - Far more seriously: **any pushed component using an ordinary,
+     common CSS pattern — `min-h-screen` / `min-height: 100vh`, e.g. a
+     full-page sign-up mockup like a real one hit this session — grew
+     its own preview to `clampPreviewHeight`'s MAX ceiling (640px)
+     instead of its real size (under 350px), leaving most of the box
+     empty.** Root cause, confirmed by instrumenting the real compiled
+     component's own reporter by hand: `min-height: 100vh` resolves
+     against the IFRAME'S OWN current applied height, which the parent
+     sets from what got measured and reported — a closed loop by
+     design. body's 4px padding sits OUTSIDE the vh-governed element,
+     added on top of it every round; once the applied height first
+     exceeds the component's true content height, `min-height: 100vh`
+     locks the component's own height to that applied value, and body's
+     padding-on-top pushes the NEXT report exactly 8px higher — forever,
+     until the MAX clamp stops it. Logged by hand: reported height
+     climbed 472 → 480 → 488 → 496 → ... in exact +8 steps. This is a
+     structural property of ANY constant added anywhere inside an
+     iframe whose content anchors itself to that same iframe's own
+     applied size — not something a smaller padding value would have
+     avoided, only slowed down. (This is the identical class of
+     circularity `#root`'s own, deliberately-absent `min-height: 100vh`
+     rule was already written to avoid, on the DeliveryOS side — the
+     regression just reintroduced an equivalent circularity via a
+     PUSHED component's own, entirely ordinary CSS instead.)
+
+   Reverted the body padding entirely, and reverted `WIDTH_SAFETY_MARGIN`
+   back to `4` (its root cause — the padding — is gone, so the extra 8px
+   it was compensating for no longer exists either). Confirmed by hand,
+   both ways: the real sign-up component now converges immediately to a
+   stable height (464px, matching its real content) and stays there
+   across every subsequent resize round, no growth; the same 6-button
+   row fits on one line again at the original, unmodified margin. The
+   Button hover-clip this padding fixed is real but narrow — one
+   variant, one micro-interaction, cosmetic — against a regression that
+   broke every full-page-style pushed component; the right trade until a
+   fix exists that doesn't feed anything back into the measurement loop
+   at all.
+
+4. **A real, distinct pre-mount measurement bug, found investigating the
+   above, kept even after reverting the padding that surfaced it**: the
+   `width === 0 || height === 0` check that exists specifically to skip
+   reporting before a React component has actually mounted (see its own
+   long-standing comment) infers "not mounted yet" indirectly, from a
+   raw pixel measurement happening to be exactly zero. That's exactly
+   what briefly broke when body gained non-zero padding (measured (8, 8),
+   not (0, 0), even fully unmounted) — a fragile signal now confirmed to
+   be one accidental future change away from breaking the same way
+   again. Replaced with a precise, direct check: `document.getElementById
+   ('root').children.length === 0` — genuinely "has this mounted," not a
+   pixel value standing in for it, immune to whatever body padding does
+   or doesn't exist. Only applies when `#root` exists at all (the React
+   adapter's own mount target); the zero-build HTML adapter still relies
+   on the original width/height checks alone.
+
+Together: `PREVIEW_COMPILER_VERSION` went `1` → `2` (dark-mode fix,
+correctly invalidating the cache) → `3` (body padding, since reverted)
+→ `4` (padding reverted + the precise pre-mount check above).
+
 ## Phase 7 — Backend plug-and-play artifacts — **Complete**
 
 Goal: a backend building block (starting with one real auth/login module)

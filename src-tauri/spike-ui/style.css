@@ -742,8 +742,21 @@ input, textarea, select {
    * narrower than that -- not just a one-time offset from the header's
    * own left alignment. */
   margin: 0 auto;
-  background: var(--surface-inset);
-  border: 1px solid var(--border);
+  /* Real bug, found via a real screenshot: this used to fill with
+   * --surface-inset (a flat beige) and carry a 1px border. Fine for a
+   * plain component, but many real components (e.g. the "search"
+   * artifact) use their own translucent/backdrop-blur surfaces designed
+   * to sit on an interesting background -- compositing THAT over a flat
+   * beige wash reads as a muddy, mismatched "box" behind the component.
+   * A follow-up screenshot showed even a hairline border here still read
+   * as an unwanted line boxing in the component -- fully transparent, no
+   * border at all, lets every component's own background/shape render as
+   * authored, with nothing of this frame's own visible. border-radius
+   * stays (paired with overflow: hidden below) purely to clip a
+   * component's own corners/hover effects to a rounded region -- it
+   * draws no visible edge on its own with no border or fill to outline. */
+  background: transparent;
+  border: none;
   border-radius: var(--radius-md);
   position: relative;
   overflow: hidden;

@@ -357,6 +357,40 @@ describe('Tailwind CSS generation', () => {
   });
 });
 
+describe('dark-mode strategy (real bug, found via a real screenshot)', () => {
+  const darkModeStyledPreviewPath = path.join(
+    __dirname, '..', 'fixtures', 'preview-spike', 'DarkModeStyled', 'preview.tsx',
+  );
+
+  it('compiles dark: classes as requiring a real ".dark" ancestor selector, never a live prefers-color-scheme media query', async () => {
+    // Real bug: with no darkMode strategy set, Tailwind defaults to
+    // 'media' -- dark: classes compile to
+    // `@media (prefers-color-scheme: dark)`, which resolves against the
+    // VIEWER's own OS setting (broken contrast when composited over
+    // DeliveryOS's own fixed-light preview frame; the background visibly
+    // changing mid-view if the OS scheme flips while a preview stays
+    // open). 'class' makes dark: classes require an ancestor `.dark`
+    // element this pipeline never adds anywhere, so they can never
+    // activate -- confirmed here by asserting the compiled CSS contains
+    // a real `.dark` selector for Card.tsx's own dark:bg-black class,
+    // and does NOT contain a live prefers-color-scheme media query at
+    // all (the actual, previously-real bug this proves is fixed).
+    const { html } = await compilePreviewHtml(darkModeStyledPreviewPath);
+    // Real, confirmed selector shape Tailwind v3 emits for darkMode:
+    // 'class' -- ":is(.dark *)" (matching a .dark ancestor OR the
+    // element itself carrying the class), not a plain ".dark .foo"
+    // descendant selector. Either way, no `.dark` class is ever added
+    // anywhere in this pipeline, so it never matches.
+    expect(html).toMatch(/\.dark\\:bg-black:is\(\.dark \*\)\s*\{[^}]*background-color:\s*rgb\(0 0 0/);
+    expect(html).not.toMatch(/@media\s*\(prefers-color-scheme:\s*dark\)/);
+  });
+
+  it('pins color-scheme: light on the iframe\'s own html/body, so native browser UI (scrollbars, form controls) never follows the OS scheme either', async () => {
+    const { html } = await compilePreviewHtml(darkModeStyledPreviewPath);
+    expect(html).toMatch(/html,\s*body\s*\{[^}]*color-scheme:\s*light/);
+  });
+});
+
 describe('compiler-adapter dispatch (Phase B)', () => {
   it('routes a .tsx preview through the React adapter', async () => {
     const { html } = await compilePreviewHtml(previewPath);
@@ -648,6 +682,33 @@ describe('injectContentHeightReporter (dynamic card sizing)', () => {
     // same way -- see the OR, not AND, below.
     const { html } = await compilePreviewHtml(previewPath);
     expect(html).toMatch(/if\s*\(\s*width\s*===\s*0\s*\|\|\s*height\s*===\s*0\s*\)\s*\{\s*return;/);
+  });
+
+  it('treats an empty #root as not-yet-mounted directly, not by inferring it from a (0, 0) measurement (a real, confirmed bug)', async () => {
+    // Regression guard: body padding, added and then reverted for an
+    // unrelated hover-clipping fix, briefly meant a genuinely-unmounted
+    // #root no longer measured as exactly (0, 0) -- it measured as the
+    // padding alone, a small but nonzero value that slipped straight past
+    // the width===0||height===0 check above and let a premature
+    // measurement through. Checking #root's own child count directly is
+    // immune to whatever body padding does or doesn't exist, so a future
+    // change here can't reintroduce the same failure mode again.
+    const { html } = await compilePreviewHtml(previewPath);
+    expect(html).toMatch(/root\.children\.length\s*===\s*0/);
+  });
+
+  it('re-observes #root\'s own childList directly, so a real mount is caught even without a ResizeObserver-visible size change (a real, confirmed bug)', async () => {
+    // Regression guard: the precise pre-mount check above correctly
+    // skips reportSize()'s two premature calls (immediate + 'load'), but
+    // without this, NOTHING else re-triggers it once React actually
+    // mounts unless that same commit also happens to change some
+    // observed element's SIZE -- true by chance in every real browser
+    // tested by hand, but not guaranteed, and not true at all in a test
+    // environment with no ResizeObserver at all (confirmed: exactly the
+    // failure this MutationObserver fixes). Watching #root's childList
+    // catches the real mount moment directly, independent of size.
+    const { html } = await compilePreviewHtml(previewPath);
+    expect(html).toMatch(/new MutationObserver\(reportSize\)\.observe\(root,\s*\{\s*childList:\s*true\s*\}\)/);
   });
 
   it('re-observes the real rendered element for width, not just document.body forever (a real, confirmed bug)', async () => {
