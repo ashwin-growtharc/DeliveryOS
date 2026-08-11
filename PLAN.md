@@ -1587,7 +1587,7 @@ and are the docs up to date?":
       own written instructions, then fixed. Re-ran the check afterward to
       confirm zero remaining drift in either file.
 
-## Phase 10 — Claude Code wired directly into the DeliveryOS app UI — **In progress (items 1 and 3 done; item 2's agent escalation still gated)**
+## Phase 10 — Claude Code wired directly into the DeliveryOS app UI — **Complete (items 1, 2, and 3 all done)**
 
 Goal: pressing **Pull** on a `backend-plugin` artifact in the app itself
 triggers check → pull → wire → test automatically, and Scan/Add New
@@ -1730,12 +1730,15 @@ because that gate has been satisfied.
      (4) the suggestion cache was keyed only by payload path, missing a
      kind change made via Review's own Edit links -- now keyed by
      (payload path, kind) together.
-- **What's still held back (item 2):** the actual agent-escalation piece
-  — shelling out to a real `claude --bare -p ...` process from the app
-  itself when a build fails — stays gated on a separate, explicit
-  go-ahead, unbuilt. A materially bigger, less-supervised step than
-  anything else here, and not something to slide into just because the
-  cheaper two-thirds of the phase turned out fine.
+- **Item 2, now built too — "want help fixing this?" on a real build
+  failure.** The original unrestricted-`--allowedTools` plan was dropped
+  once this project proved that flag unreliable; redesigned so the
+  subprocess needs no tool access at all (it gets the failing file's
+  content + the real build error, returns strict JSON, and the app
+  itself does every write) — see the item's own checklist entry below
+  for the full design and real verification. Explicit go-ahead was given
+  directly in chat before any of this was built, same as every other
+  AI-invoking piece this phase.
 - **A real, honest limitation found while proving item 3 for real**:
   running the `install_params` detection against the actual, already-
   shipped `nextauth-credentials` artifact finds *nothing*, because
@@ -1755,9 +1758,15 @@ because that gate has been satisfied.
    fresh-file actions applied correctly, the one file that already
    existed (`layout.tsx`) was correctly left alone, and the real
    `next build` passed.
-3. **Not yet real**: if the build had failed, there's no "want Claude
-   Code to try fixing this?" escalation yet (item 2) — today, a failure
-   just reports as a failure, same as it always did.
+3. If the build fails instead, the app now offers "want help fixing
+   this?" for whichever file(s) the same pull just auto-wired — real,
+   verified: reproduced the exact real bug this project hit before
+   (`export { GET, POST } from '@/auth'`) plus a self-contained typo bug,
+   both through the rebuilt packaged sidecar exe. Reviewing and clicking
+   Apply writes the real fix, re-runs the real build to confirm it
+   actually passes, and logs the attempt; a fix that doesn't actually
+   work gets rolled back automatically, confirmed by forcing that case
+   for real and watching the original file come back byte-for-byte.
 
 *Proposing a brand-new artifact (a genuinely separate flow, no Pull
 involved, real for every kind — verified against the real rebuilt
@@ -1856,39 +1865,89 @@ packaged sidecar exe, not just tests):*
       item 3's own "Suggest with Claude" entry below for the matching fix
       to `suggestMetadata` and the real concurrency proof that covers
       both.
-- [ ] **An explicit escalation step on failure, not an automatic one.** "Want
-      Claude Code to try fixing this?" — only offered after a real failure,
-      never fired unsupervised the instant Pull is clicked. Real reason
-      this matters, not just caution for its own sake: a terminal
-      conversation with Claude Code is inherently watched as it happens; a
-      UI button silently kicking off an agent is a materially less
-      supervised moment, and that's exactly where the Tier 3 boundary
-      ("never touches secrets/migrations") needs to be a real wall, not
-      good behavior.
-      **Settled technical decision, not left open**: shells out to
-      `claude --bare -p "<task>" --allowedTools "Bash,Read,Edit"
-      --output-format json` as a subprocess — the same shape as every
-      other CLI this project already shells out to (`git`, `gh`,
-      `deliveryos` itself) — not the Agent SDK. `--output-format
-      stream-json` can feed the existing progress-log UI later if a live
-      feed is ever wanted. One real limitation to remember: background
-      Bash processes it spawns are killed ~5s after the main task ends —
-      fine for a one-shot build/test, would matter if a future version
-      ever needed to keep a dev server running for a deeper smoke test.
-      **Update, found while building the "Suggest with Claude" bullet
-      below, real testing not assumption**: the `--allowedTools`/`--bare`
-      "real, CLI-enforced tool restriction" claim this paragraph
-      originally made does not hold up. `--bare` breaks authentication
-      outright (skips keychain reads); `--allowedTools ''` didn't stop a
-      real Bash call from running at all; `--disallowedTools` naming
-      every real tool blocked it on 2 of 3 real attempts but not the
-      third. Whenever this item actually gets built, its tool-restriction
-      story needs re-deciding with that in mind — the Tier 3 boundary
-      this item exists to protect can't lean on a flag that isn't
-      reliably enforced. Not a blocker for item 2 specifically staying
-      unbuilt (nothing here changes that it's still gated on a separate
-      go-ahead), just a real correction to what was previously stated as
-      settled.
+- [x] **"Want help fixing this?" — an explicit escalation step on
+      failure, not an automatic one.** Offered only after Pull's own
+      build verification (item 1) actually fails, never fired
+      unsupervised the instant Pull is clicked.
+      **The original plan (unrestricted `--allowedTools "Bash,Read,Edit"`,
+      gated on that flag actually enforcing a boundary) was dropped, not
+      built** — this project already proved that enforcement unreliable
+      (`--allowedTools ''` still let a real Bash call run;
+      `--disallowedTools` blocked it 2 of 3 real attempts, not 3 of 3).
+      **Redesigned to not need that mechanism to be safe at all**, and
+      this is the design that actually got built:
+      - The subprocess gets **no tool access whatsoever** — not
+        restricted, granted none. It receives exactly two things: the
+        failing file's real content and the real build error text, both
+        delimited the same way item 3's `<UNTRUSTED_SOURCE>` wrapping
+        already does (new `<UNTRUSTED_FILE_CONTENT>`/
+        `<UNTRUSTED_BUILD_ERROR>` blocks, `buildFixPrompt` in the new
+        `src/engine/pull/fixBuildFailure.ts`).
+      - It responds with strict JSON only — `{"fixed_file": "<complete
+        corrected file>"}` or `{"fixed_file": null, "reason": "..."}` —
+        never a diff, never prose (`parseFixResponse`).
+      - **The app itself writes the fix**, through a real file write
+        (`applyBuildFix`) re-validated for containment the same way
+        `applyDeterministicWiring` already is — the model never touches
+        disk or runs a command, so there's nothing for a tool-restriction
+        flag to need to hold in the first place.
+      - **Scoped to only the files item 1's own auto-wiring just wrote**
+        (`AppliedWiringResult.applied`) — never an arbitrary file guessed
+        from build-error text, which would require unreliably inferring
+        the guilty file from free-text output, exactly the kind of
+        guessing this project has consistently refused to do elsewhere.
+      - **Re-verifies for real after writing**: re-runs the target
+        project's real build (`runProjectBuild`, already built for item
+        1) to confirm the fix actually worked, not just that a
+        plausible-looking file came back. **If the rebuild still fails,
+        the original file is restored immediately** (auto-rollback) —
+        leaving a broken write in place just because a fix was
+        *attempted* would leave the project worse than the original
+        failure, a real regression, not a neutral outcome.
+      - **A human still confirms before anything is applied** — the
+        proposed content is shown for review (reusing the exact
+        `.wiring-action-snippet` display Tier-2 wiring cards already use,
+        no new "how DeliveryOS shows code" convention) with explicit
+        Apply/Discard buttons; nothing is written on Discard.
+      - **A new audit trail** (`.deliveryos/build-fix-log.jsonl`,
+        `buildFixLogPath` in `paths.ts` — the first append-only log file
+        anywhere in this codebase, confirmed no prior convention existed
+        to extend): one entry per fix actually *applied* (never on a
+        request or a discard, which leave no trace by design), recording
+        the real before/after content, real cost/duration pulled from
+        `claude`'s own `--output-format json` envelope, and whether it
+        was kept or rolled back.
+      - Extracted the shared subprocess-invocation logic
+        (`src/engine/claude/runClaudeSubprocess.ts`) out of item 3's
+        `suggestMetadata.ts` rather than duplicating it a second time —
+        it encodes two hard-won, real Windows-specific fixes (the
+        `.cmd`/`shell:true` `ENOENT`/`EINVAL` issue, and piping the
+        prompt via stdin instead of argv to avoid command injection); two
+        independent copies would be a real drift risk for
+        security-sensitive code. Deliberately still has no `cwd` option —
+        a leaked tool call (it has leaked, empirically) runs wherever the
+        sidecar itself lives, never inside the user's real project.
+      **Real, unstaged verification, not just unit tests**: reproduced
+      the actual historical `auth.ts` bug this project hit before
+      (`export { GET, POST } from '@/auth'` →
+      `Export GET doesn't exist in target module`) in a fresh scratch
+      project through the rebuilt packaged sidecar exe. Genuinely
+      interesting, honest finding along the way: asked twice with only
+      the file+error (no other context), the model correctly said it
+      couldn't determine the fix both times, rather than guess — a real,
+      appropriate "I don't know" outcome, not a shortcoming. Switched to
+      a self-contained bug fully determinable from the file+error alone
+      (a typo'd import, `'react-domm'`) and verified the complete real
+      pipeline end to end: request → correct proposed fix → apply →
+      real `npm run build` passes → audit log has the exact right entry.
+      Then forced a fix that doesn't actually work and confirmed the
+      rollback path for real: the original file was restored byte-for-
+      byte on disk, and the audit log's second entry correctly recorded
+      `rolledBack: true`. 18 new unit tests
+      (`fixBuildFailure.test.ts`), including a real rollback test and a
+      real path-traversal-refusal test (nothing written outside a
+      throwaway trap root, matching the discipline already established
+      when the item 1 traversal bug was fixed).
 - [x] **Auto-fill Scan/Add New's own fields from real code analysis.**
       Shipped in two passes: first scoped specifically to `install_params`
       (the concrete, closable gap this item originally named), then
@@ -2003,12 +2062,12 @@ packaged sidecar exe, not just tests):*
       — copy-pasted near-verbatim across this file, `detectStacks.ts`,
       `detectArtifactMetadata.ts`, and `suggestMetadata.ts` — is now one
       shared `listFilesRecursively` (`src/engine/scan/listFiles.ts`).
-- [ ] **The agent-escalation piece (item 2, above) and the full
-      end-to-end test that depends on it** — still not started, still
-      gated on a separate, explicit go-ahead given its materially
-      different risk (a real Claude Code subprocess invoked from a GUI
-      button, unsupervised, vs. a terminal conversation someone is
-      actively watching). Items 1 and 3 above were each verified for real
-      independently in the meantime — this remaining item is specifically
-      the escalation mechanism plus the deliberately-introduced-break
-      test that exercises it.
+**Phase 10 is now complete.** Item 2 (above) was the one piece that
+genuinely needed a separate, explicit go-ahead beyond items 1/3's own —
+a real Claude Code subprocess invoked from a GUI button is a materially
+different risk than a terminal conversation someone is actively
+watching. That go-ahead was given directly, in chat, and the redesign it
+was given for (no tool access, app writes the fix, human confirms, real
+rebuild verification with auto-rollback) is what actually got built —
+not the original unrestricted-`--allowedTools` plan, which this project
+had already found doesn't hold up.

@@ -78,3 +78,15 @@ export class SignatureVerificationError extends DeliveryOsError {}
  * merely-empty suggestion (a model returning `{}` is a valid, if useless,
  * response) -- only for a genuine failure to get a real answer at all. */
 export class SuggestionError extends DeliveryOsError {}
+
+/** Thrown when Phase 10 item 2's build-fix flow fails outright: the real
+ * `claude` CLI subprocess call fails (not on PATH, not logged in, times
+ * out), returns something that can't be parsed as the requested JSON
+ * shape, or a caller hands `applyBuildFix` a `filePath` that resolves
+ * outside the target project (the same containment check
+ * `applyDeterministicWiring` already relies on). Never thrown for an
+ * honest "I can't determine a fix" response (`fixed_file: null` is a
+ * valid, expected outcome) or for a fix that gets applied but doesn't
+ * actually resolve the build -- that case is a real, reported rollback,
+ * not an error. */
+export class BuildFixError extends DeliveryOsError {}

@@ -4,6 +4,42 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- **Phase 10 is complete: item 2, "want help fixing this?", built after
+  explicit go-ahead given directly in chat.** The original plan
+  (unrestricted `--allowedTools "Bash,Read,Edit"`) is dropped -- this
+  project already proved that flag unreliable. Redesigned so the
+  subprocess needs no tool access at all: it gets the failing file's
+  content and the real build error (both delimited the same
+  "inert data, never instructions" way item 3 already does), returns
+  strict JSON (`{"fixed_file": "..."}` or `{"fixed_file": null,
+  "reason": "..."}`), and the app itself does every write, only after a
+  human explicitly clicks Apply. Scoped to only the files item 1's own
+  auto-wiring just wrote -- never a file guessed from build-error text.
+  After writing, re-runs the real build to actually confirm the fix
+  worked; if it doesn't, the original file is restored automatically
+  (`rolledBack: true`) rather than leaving a broken write in place. New
+  append-only audit log (`.deliveryos/build-fix-log.jsonl`, the first log
+  file anywhere in this codebase) records one entry per fix actually
+  applied -- real before/after content, real cost/duration pulled from
+  `claude`'s own response, and whether it was kept or rolled back.
+  Extracted the shared `claude` subprocess-invocation logic
+  (`src/engine/claude/runClaudeSubprocess.ts`) out of item 3's
+  `suggestMetadata.ts` rather than duplicating its two hard-won Windows
+  fixes a second time.
+  **Real, unstaged verification**: reproduced the actual historical
+  `auth.ts` bug this project hit before
+  (`export { GET, POST } from '@/auth'`) through the rebuilt packaged
+  sidecar exe -- asked twice with only the file+error, the model
+  correctly said it couldn't determine the fix both times rather than
+  guess, a real and appropriate "I don't know," not a shortcoming.
+  Switched to a self-contained typo bug fully determinable from the
+  file+error alone and verified the complete pipeline for real: request
+  -> correct fix -> apply -> real build passes -> exact right audit-log
+  entry. Then forced a fix that doesn't work and confirmed the rollback
+  for real: original file restored byte-for-byte, audit log's second
+  entry correctly marked `rolledBack: true`. 18 new unit tests, including
+  a real rollback test and a real path-traversal-refusal test.
+
 - **The rest of the same top-to-bottom code review's findings, fixed the
   same day.** Five more, all real:
   - **Sidecar-blocking subprocess calls made async.** `suggestMetadata`
