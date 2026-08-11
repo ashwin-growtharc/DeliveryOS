@@ -2259,26 +2259,57 @@ tasks, same discipline every earlier phase here uses.
    straight off a local payload directory, no separate catalog entry
    required.
 
-- [ ] **Author the real target and pick the guideline doc's real content**
-      — five components, styled from DESIGN_SYSTEM.md's real tokens (both
-      light and dark values, matching every artifact built this session).
-      Guideline doc covers: color tokens, type scale, spacing scale,
-      layout grid, per-component placement/usage rules, an anti-patterns
-      list, and a voice/tone note. Push as one `kind: template` bundle via
-      the existing, unmodified `push --new` path.
-      **Payload folder structure, decided now even though nothing needs it
-      yet:** ship v1 fully flat (`components/Button.tsx`,
-      `components/TopBar.tsx`, etc. — no subfolders at all, since 5
-      components is nothing to group). Both loose, ungrouped components
-      and category subfolders are fine long-term, but the *rule* for which
-      is which needs to be explicit and mechanical, not an aesthetic call
-      made fresh each time — future components here will likely arrive via
-      the check-first/propose-back skill, not just a person. **The rule,
-      written into the guideline doc itself**: a subfolder is created only
-      once 3 or more genuinely related components exist that would
-      otherwise clutter the flat list (e.g. `Input`/`Select`/`Checkbox`
-      becoming `forms/` once all three exist); a single, atomic component
-      never gets a folder just to avoid looking loose.
+- [x] **Author the real target and pick the guideline doc's real content**
+      — five components (Button, Card, TopBar, Feedback, Input), styled
+      from DESIGN_SYSTEM.md's real tokens. **Light values only, not "both
+      light and dark" as originally written here** — this repo's own real
+      design system is confirmed light-only (see the dark-mode preview
+      contrast fix earlier in Phase 6); there is no dark palette anywhere
+      to match, so a dark variant would have been invented, not sourced.
+      Guideline doc (`GUIDELINES.md`) covers: color tokens (including
+      status colors and the radius/spacing scale, neither of which
+      DESIGN_SYSTEM.md's own markdown documents — recovered from the app
+      shell's real `style.css` `:root` and written down for reuse for the
+      first time), type scale, a layout-grid note, per-component
+      placement/usage rules, a concrete anti-patterns list, and a
+      voice/tone note. Pushed as one `kind: template` bundle via the
+      existing, unmodified `push --new` path — real PR opened:
+      [growtharc-ai-helpers#57](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/57).
+      **Payload folder structure, corrected from this task's original
+      "fully flat, no subfolders at all" phrasing**: `findPreviewEntryFile`
+      looks for a fixed `preview.tsx` filename in ONE directory, so five
+      components genuinely sharing one flat `components/` directory would
+      collide on that filename — confirmed by direct investigation of
+      `docgen.ts`/`resolveArtifactPreview.ts` before writing anything.
+      Landed on one subdirectory per component
+      (`components/Button/{Button.tsx,preview.tsx}`, etc.) under a shared
+      `components/` parent — still "flat" in the sense this task actually
+      cared about (no premature *category* grouping like `forms/`
+      unifying unrelated components), just not literally flat files. The
+      rule for when a category folder IS warranted is written into
+      `GUIDELINES.md` itself: only once 3+ genuinely related components
+      exist that would otherwise clutter the list (e.g. `Input`/`Select`/
+      `Checkbox` → `forms/`); a single component never gets a folder just
+      to avoid looking loose.
+      **A real bug found and fixed while authoring `Input`'s preview**: a
+      CSF variant function is called directly as a plain JS function, not
+      rendered through React (`docs/ui-components-feature-design.md`'s
+      own Phase C correction) — calling `useState()` inside the variant
+      function itself is a genuine rules-of-hooks violation (no active
+      render pass, no dispatcher active yet), confirmed by hand: it threw
+      `Cannot read properties of null (reading 'useState')` the instant
+      the variant was selected, with an otherwise-blank preview and zero
+      console errors (the harness's own try/catch swallows it into a
+      `postMessage`, not a thrown/visible error) — caught only by
+      actually rendering the compiled output in a real browser, not by
+      the text-based dogfood check alone, which had already passed.
+      Fixed by moving the `useState` call into a real component the
+      variant merely returns an element for (mirroring the proven
+      `Signin1` pattern), never inline in the variant function itself.
+      Verified for real: `compileLocalPreview` against all 5 components
+      (props schemas + expected token hex values all present), then each
+      one actually rendered and interacted with in a real browser
+      (typing into `Input`, switching its variants) before pushing.
 - [ ] **The mechanical anti-pattern detector — start with one narrow,
       real rule, not a vague general one.** Reuses the same
       TypeScript-compiler/AST infrastructure `detectUiComponents.ts`/

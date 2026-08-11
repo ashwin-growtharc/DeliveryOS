@@ -4,6 +4,31 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- **Phase 11, item 1: the design-kit bundle's five real components +
+  guideline doc, authored and pushed for real.** `Button`/`Card`/
+  `TopBar`/`Feedback`/`Input`, styled from `DESIGN_SYSTEM.md`'s real
+  tokens (light only -- this repo's own design system has no dark
+  palette to match), pushed as one `kind: template` bundle:
+  [growtharc-ai-helpers#57](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/57).
+  `GUIDELINES.md` writes down the radius/spacing scale and status colors
+  for the first time anywhere reusable -- `DESIGN_SYSTEM.md`'s own
+  markdown never documented them. Payload structure corrected from the
+  original "fully flat" scoping: `findPreviewEntryFile` needs one
+  `preview.tsx` per directory, so each component got its own subfolder
+  under a shared `components/` parent instead of colliding on a shared
+  flat filename -- confirmed against `docgen.ts` before writing anything.
+  **A real bug found and fixed while authoring `Input`'s preview**: a CSF
+  variant function is called directly as a plain JS function, not
+  rendered through React -- calling `useState()` inside the variant
+  itself is a genuine rules-of-hooks violation, confirmed by hand
+  (`Cannot read properties of null (reading 'useState')`, thrown with a
+  blank preview and zero visible console errors -- caught only by
+  actually rendering the compiled output in a real browser, since the
+  text-based dogfood check had already passed). Fixed by moving the
+  hook into a real component the variant merely returns an element for.
+  Verified: `compileLocalPreview` against all 5 components, then each one
+  actually rendered and interacted with in a real browser before pushing.
+
 - **A real, user-reported preview rendering bug, root-caused to one
   shared function and fixed there once.** Reported with a real
   screenshot: the `search` component's preview showed its "Recent
