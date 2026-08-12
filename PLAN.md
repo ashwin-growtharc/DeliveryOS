@@ -2419,14 +2419,83 @@ tasks, same discipline every earlier phase here uses.
       the original. 17 new unit tests mirroring
       `fixBuildFailure.test.ts`'s exact shapes, including the
       path-traversal-refusal trap-directory technique.
-- [ ] **Open scoping question, flag before building, don't default
-      silently**: does empty/error/loading-state coverage belong in this
-      same bundle from day one, or is that its own follow-up once the
-      five base components are proven? Named in the roadmap doc as "easy
-      to forget until it's needed" — worth deciding on purpose either way.
+- [x] **Open scoping question, resolved: add empty/error/loading-state
+      coverage now, not deferred.** User chose to add it to the
+      already-merged bundle rather than wait for a follow-up. Resolving
+      it surfaced a second real gap: motion rules were named in the same
+      roadmap-doc sentence as empty/error/loading states ("easy to forget
+      until it's needed") but never made it into this file's scoped task
+      list at all — user chose to add both together rather than split
+      them across two passes.
+      **Confirmed the edit path before touching anything**: re-running
+      `push --new` on `design-kit` throws `IdCollisionError` immediately
+      (not viable); `push`'s edit-mode diff logic
+      (`src/engine/push/push.ts`) has zero `kind`-specific branching —
+      it diffs `install_target` against the pristine snapshot
+      regardless of kind, so a `kind: template` artifact can be pushed
+      as a real edit exactly like any other kind. The "templates are
+      Pull-only" note in the `arcos-cli`/`launchpad-template` retros is
+      scoped to those artifacts' own shape (a 75-file whole-repo mirror,
+      where a push-back diff would be unbounded) — not a code-level
+      gate, and not applicable to `design-kit`'s much smaller payload.
+      **Three new components** (`EmptyState`, `ErrorState`, `Skeleton`),
+      same conventions as the original five — inline
+      `React.CSSProperties`, real `DESIGN_SYSTEM.md` hex tokens,
+      `function X(props)` never `React.FC`, own
+      `components/<Name>/{Name.tsx,preview.tsx}` subdirectory each.
+      `ErrorState` reuses `EmptyState`'s exact layout with a
+      danger-toned icon circle (`#FFE5E0`/`#A2341F`) instead of a
+      neutral one, so the two read as visually distinct at a glance, not
+      just by copy. `Skeleton` is the concrete real example the new
+      Motion section points at: a `prefers-reduced-motion` override that
+      disables its pulse entirely (`animation: none`), never just slows
+      it, mirroring `DESIGN_SYSTEM.md`'s own Accessibility rule.
+      **New `## Motion` section in `GUIDELINES.md`**, placed after
+      Layout grid (a similarly foundational, token-like rule): ordinary
+      hover/focus transitions at `.15s ease` (the exact value already
+      live in `Button.tsx`'s hover-opacity transition), up to `.2s
+      ease-out` for a larger reveal, nothing slower — this kit has no
+      large entrance animations by design. New usage-rule bullets for
+      all three components and a new anti-pattern entry (never strip or
+      override `Skeleton`'s reduced-motion behavior "for snappiness").
+      **Verified for real before pushing**: `compileLocalPreview` against
+      each of the three new components confirmed a clean compile, real
+      docgen props (including `Skeleton`'s `variant` default of
+      `"text"`), expected hex tokens present in the compiled output, and
+      for `Skeleton` specifically that the compiled HTML contains a real,
+      functioning `@media (prefers-reduced-motion: reduce)` rule setting
+      `animation: none`.
+      Pushed as a real edit via `deliveryos push design-kit --bump minor`
+      (not `--new`) — real PR opened:
+      [growtharc-ai-helpers#58](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/58),
+      version `1.0.0` → `1.1.0`, exactly the 8 expected file changes
+      (manifest bump, `GUIDELINES.md` edit, 3 new component pairs).
+- [ ] **A real Detail view for the design-kit itself — currently doesn't
+      exist.** Checked directly against `renderDetail` in
+      `src-tauri/spike-ui/app.js`: it has exactly two kind-specific
+      branches (`ui-component`'s live preview iframe, and the
+      backend-plugin section gated on `install_params`/`wiring_actions`
+      presence, deliberately "never a kind check"). Neither applies to
+      `kind: template`, so a design-kit artifact today falls through to
+      the plain generic Detail view — description, kind/version/owner,
+      tags, Pull button. Nothing renders the guideline's tokens, type
+      scale, or a component grid; no theme toggle. Add a new section,
+      gated the same way the backend-plugin section already is (on real
+      field/file presence — e.g. a `GUIDELINES.md` at the payload root —
+      never a `kind` check, matching this codebase's own established
+      convention): render the guideline's color tokens and type scale
+      read straight from `GUIDELINES.md`, a grid of every component in
+      `components/` with a real live preview each via
+      `compileLocalPreview` (already proven, Phase 6 Phase D — no new
+      engine work needed for this part), and a light/dark toggle re-
+      rendering each preview in both themes. Respect the flat-vs-folder
+      rule from item 1 when walking `components/` for the grid — don't
+      assume a fixed directory depth.
 - [ ] **End-to-end test:** pull the real bundle into a fresh project,
       confirm all five components render and live-preview correctly via
       `compileLocalPreview`, deliberately build a component with a planted
       anti-pattern (same-component-nested-twice), confirm the mechanical
       check catches it, confirm the fix step corrects it and a real
-      rebuild passes afterward.
+      rebuild passes afterward, and confirm the new Detail-view section
+      renders the guideline's tokens/type scale and every component's
+      live preview correctly, in both themes.

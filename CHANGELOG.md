@@ -4,6 +4,34 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- **Phase 11: design-kit extended with empty/error/loading-state
+  coverage and a Motion section, resolving the open scoping question in
+  favor of "now" over "later."** Resolving it surfaced a second gap --
+  motion rules never made it into `PLAN.md`'s scoped task list despite
+  being named in the same roadmap-doc note as empty/error/loading states
+  -- user chose to add both together. Confirmed the edit path first:
+  `push --new` on an existing id throws `IdCollisionError`, but `push`'s
+  edit-mode diff logic has zero `kind`-specific branching, so a `kind:
+  template` artifact pushes as a real edit exactly like any other kind
+  -- the "templates are Pull-only" convention in the `arcos-cli`/
+  `launchpad-template` retros is scoped to those artifacts' own
+  unbounded-diff shape, not a code-level gate. Added `EmptyState`,
+  `ErrorState` (same layout, danger-toned icon circle instead of
+  neutral, so the two read as distinct at a glance), and `Skeleton`
+  (the concrete real example the new `GUIDELINES.md` Motion section
+  points at -- its `prefers-reduced-motion` override disables the pulse
+  entirely, mirroring `DESIGN_SYSTEM.md`'s own Accessibility rule).
+  Motion section codifies `.15s ease` for ordinary transitions (already
+  live in `Button.tsx`), up to `.2s ease-out` for a larger reveal,
+  nothing slower. Verified for real before pushing: `compileLocalPreview`
+  against each new component confirmed a clean compile, real docgen
+  props, expected hex tokens present, and for `Skeleton` specifically a
+  genuinely functioning `@media (prefers-reduced-motion: reduce)` rule
+  in the compiled output. Pushed as a real edit via `deliveryos push
+  design-kit --bump minor` (not `--new`) -- real PR:
+  [growtharc-ai-helpers#58](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/58),
+  `1.0.0` -> `1.1.0`, exactly the 8 expected file changes.
+
 - **Phase 11, item 4: the fix step, turning a design finding into an
   actual, verified edit.** Reuses Phase 10 item 2's exact approved
   design (`fixAntiPattern.ts`, mirroring `fixBuildFailure.ts`'s real
