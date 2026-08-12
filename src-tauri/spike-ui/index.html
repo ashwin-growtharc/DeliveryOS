@@ -320,6 +320,27 @@
               </div>
             </div>
 
+            <!-- Phase 11 Detail-view task: design-kit's color tokens, type
+                 scale, and a live component grid, gated on real
+                 GUIDELINES.md presence -- never a `kind: template` check.
+                 See renderDetail/renderTemplateSection in app.js. -->
+            <div id="detail-template-section" hidden>
+              <div class="wiring-section-label">Color tokens</div>
+              <div id="detail-template-tokens" class="token-swatch-grid"></div>
+
+              <div class="wiring-section-label">Type scale</div>
+              <div id="detail-template-type-scale"></div>
+
+              <div class="wiring-section-label">Components</div>
+              <div class="template-theme-toggle-row">
+                <div id="detail-template-theme-toggle" class="chip-picker"></div>
+                <span class="template-theme-toggle-caption">
+                  Today's components have no dark-specific styling, so this won't change how they look yet.
+                </span>
+              </div>
+              <div id="detail-template-grid" class="template-component-grid"></div>
+            </div>
+
             <div class="meta-grid">
               <div><span class="k">Kind</span><br /><span id="meta-kind" class="v"></span></div>
               <div><span class="k">Version</span><br /><span id="meta-version" class="v"></span></div>

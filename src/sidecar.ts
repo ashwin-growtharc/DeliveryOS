@@ -59,6 +59,9 @@ import { RemoteRegistryError } from './engine/errors';
 import { Manifest } from './engine/manifest/schema';
 import { compileArtifactPreview, compileLocalPreview } from './engine/preview/resolveArtifactPreview';
 import { readArtifactPayloadFile } from './engine/payload/readPayloadFile';
+import { resolvePayloadDir, resolveWithinPayloadDir } from './engine/payload/payloadDir';
+import { listArtifactPayloadComponents } from './engine/payload/listPayloadComponents';
+import { parseColorTokens, parseTypeScale } from './engine/guidelines/parseGuidelinesTokens';
 
 interface SidecarRequest {
   id: string;
@@ -293,6 +296,30 @@ const commands: Record<string, CommandHandler> = {
     return { content };
   },
 
+  // Phase 11 Detail-view task: one read + parse of a design-kit-shaped
+  // artifact's GUIDELINES.md, gating the new Detail section on real
+  // content presence -- never a `kind: template` check, matching this
+  // codebase's own backend-plugin-section convention (field/file presence,
+  // not kind). `present: false` (with empty arrays) is the normal case for
+  // any artifact that isn't design-kit-shaped, not an error.
+  'artifact.parseGuidelines': (args) => {
+    const remote = requireString(args, 'remote');
+    const id = requireString(args, 'id');
+    const content = readArtifactPayloadFile(remote, id, 'GUIDELINES.md');
+    if (content === undefined) {
+      return { present: false, colorTokens: [], typeScale: [] };
+    }
+    return { present: true, colorTokens: parseColorTokens(content), typeScale: parseTypeScale(content) };
+  },
+
+  // Lists every real, preview-having component in a design-kit-shaped
+  // payload's components/ directory, for Detail's live component grid.
+  'artifact.listPayloadComponents': (args) => {
+    const remote = requireString(args, 'remote');
+    const id = requireString(args, 'id');
+    return { components: listArtifactPayloadComponents(remote, id) };
+  },
+
   // Tier 2 of the wiring agent (Phase 7 item 6): resolves every
   // wiring_action a manifest declares against the REAL project at `cwd` --
   // purely read-only detection (does the target file already exist?),
@@ -450,6 +477,23 @@ const commands: Record<string, CommandHandler> = {
   'preview.compileLocal': (args) => {
     const payloadPath = requireString(args, 'payloadPath');
     return compileLocalPreview(payloadPath);
+  },
+
+  // Phase 11 Detail-view task: compiles ONE component's live preview out
+  // of a design-kit-shaped payload's components/<Name> subdirectory, for
+  // Detail's grid (one call per component, run in parallel by the app).
+  // Modeled on preview.compileLocal above, NOT a preview.compile variant --
+  // unlike preview.compileLocal (only ever called with the user's OWN
+  // project path during Add New), `relativeDir` here is resolved and
+  // sandboxed against the artifact's real payload dir server-side, since
+  // the caller only supplies a remote/id/relativeDir, never a raw path.
+  'preview.compilePayloadComponent': (args) => {
+    const remote = requireString(args, 'remote');
+    const id = requireString(args, 'id');
+    const relativeDir = requireString(args, 'relativeDir');
+    const payloadDir = resolvePayloadDir(remote, id);
+    const componentDir = resolveWithinPayloadDir(payloadDir, relativeDir);
+    return compileLocalPreview(componentDir);
   },
 };
 

@@ -1016,6 +1016,29 @@
   // async artifact.resolveWiringActions call.
   let wiringRequestId = 0;
 
+  // Phase 11 Detail-view task: same request-token-guard discipline, for
+  // renderTemplateSection's own async artifact.parseGuidelines/
+  // artifact.listPayloadComponents/preview.compilePayloadComponent calls.
+  let detailTemplateRequestId = 0;
+
+  // Same array-based teardown discipline as uiComponentsListMessageHandlers
+  // above, NOT the single-variable detailPreviewMessageHandler discipline --
+  // the template grid hosts one iframe PER component (N at once), so
+  // switching Detail to a different artifact must remove every one of
+  // them, not just one.
+  let detailTemplateMessageHandlers = [];
+  // Parallel to the array above: the grid's own live iframes, so the theme
+  // toggle can broadcast `setTheme` to every currently-mounted one without
+  // needing to re-query the DOM.
+  let detailTemplateIframes = [];
+
+  // The template grid's currently-selected theme ('light' or 'dark') --
+  // read by each card's handler on the harness's own 'ready' message (see
+  // loadTemplateComponentPreview), so a card that finishes loading AFTER
+  // the toggle was already flipped still self-syncs correctly with no
+  // queuing logic needed.
+  let currentTemplateTheme = 'light';
+
   // Same request-token-guard discipline again, for Phase 10 item 2's
   // "want help fixing this?" rows -- guards against a stale
   // artifact.requestBuildFix response clobbering a newer render if a row
@@ -1034,6 +1057,21 @@
       window.removeEventListener('message', detailPreviewMessageHandler);
       detailPreviewMessageHandler = null;
     }
+  }
+
+  /** Array-based counterpart to clearDetailPreviewListener, for the
+   * template grid's N simultaneous iframes -- called both at the top of
+   * renderTemplateSection (about to replace them with a new set) and from
+   * renderDetail when switching to an artifact with no GUIDELINES.md
+   * (which never calls renderTemplateSection's grid-building path at all,
+   * so without this the previous artifact's iframes/listeners would
+   * otherwise just sit there, hidden but still live). */
+  function clearDetailTemplateListeners() {
+    for (const handler of detailTemplateMessageHandlers) {
+      window.removeEventListener('message', handler);
+    }
+    detailTemplateMessageHandlers = [];
+    detailTemplateIframes = [];
   }
 
   /** Detail view's live, INTERACTIVE preview (Phase C): variant tabs +
@@ -1325,6 +1363,172 @@
       }
 
       container.appendChild(card);
+    }
+  }
+
+  /** Phase 11 Detail-view task: renders design-kit's color tokens, type
+   * scale, and a live component grid for a `kind: template` (or any
+   * future kind) artifact that has a real `GUIDELINES.md` at its payload
+   * root -- gated on that presence, never `manifest.kind`. Sets the
+   * section's own visibility once `artifact.parseGuidelines` resolves
+   * (renderDetail hides it up front so a previous artifact's content
+   * doesn't stay visible in the meantime). */
+  async function renderTemplateSection(entry) {
+    const requestId = ++detailTemplateRequestId;
+    const section = $('detail-template-section');
+
+    let guidelines;
+    try {
+      guidelines = await call('artifact.parseGuidelines', { remote: entry.remoteName, id: entry.manifest.id });
+    } catch {
+      if (requestId !== detailTemplateRequestId) return; // superseded while awaiting
+      section.hidden = true;
+      return;
+    }
+    if (requestId !== detailTemplateRequestId) return; // superseded while awaiting
+
+    if (!guidelines.present) {
+      section.hidden = true;
+      return;
+    }
+    section.hidden = false;
+
+    const tokensContainer = $('detail-template-tokens');
+    tokensContainer.innerHTML = '';
+    for (const { token, hex } of guidelines.colorTokens) {
+      const swatch = document.createElement('div');
+      swatch.className = 'token-swatch';
+      const colorEl = document.createElement('span');
+      colorEl.className = 'token-swatch-color';
+      colorEl.style.background = hex;
+      const labelEl = document.createElement('span');
+      labelEl.className = 'token-swatch-label';
+      labelEl.textContent = `${token} ${hex}`;
+      swatch.appendChild(colorEl);
+      swatch.appendChild(labelEl);
+      tokensContainer.appendChild(swatch);
+    }
+
+    const typeScaleContainer = $('detail-template-type-scale');
+    typeScaleContainer.innerHTML = '';
+    if (guidelines.typeScale.length > 0) {
+      const table = document.createElement('table');
+      table.className = 'template-type-scale-table';
+      const headerRow = document.createElement('tr');
+      for (const header of Object.keys(guidelines.typeScale[0])) {
+        const th = document.createElement('th');
+        th.textContent = header;
+        headerRow.appendChild(th);
+      }
+      table.appendChild(headerRow);
+      for (const row of guidelines.typeScale) {
+        const tr = document.createElement('tr');
+        for (const value of Object.values(row)) {
+          const td = document.createElement('td');
+          td.textContent = value;
+          tr.appendChild(td);
+        }
+        table.appendChild(tr);
+      }
+      typeScaleContainer.appendChild(table);
+    }
+
+    const grid = $('detail-template-grid');
+    grid.innerHTML = '';
+    let components;
+    try {
+      ({ components } = await call('artifact.listPayloadComponents', {
+        remote: entry.remoteName,
+        id: entry.manifest.id,
+      }));
+    } catch {
+      components = [];
+    }
+    if (requestId !== detailTemplateRequestId) return; // superseded while awaiting
+
+    await Promise.all(
+      components.map((component) => loadTemplateComponentPreview(grid, entry, component, requestId)),
+    );
+  }
+
+  /** Compiles and mounts ONE component's live preview inside the template
+   * grid -- clones loadUiComponentPreview's own per-card iframe pattern
+   * (own contentHeight resize handler scoped via event.source, no
+   * innerHTML for artifact-controlled text) rather than a single shared
+   * listener, since the grid hosts N of these at once. Also applies the
+   * template section's currently-active theme on the harness's own
+   * 'ready' message (see compile.ts's setTheme handling) -- this is what
+   * makes a card that finishes loading AFTER the toggle was already
+   * flipped self-sync correctly. */
+  async function loadTemplateComponentPreview(grid, entry, component, requestId) {
+    const card = document.createElement('div');
+    card.className = 'wiring-action-card template-component-card';
+
+    const header = document.createElement('div');
+    header.className = 'wiring-action-header';
+    const nameEl = document.createElement('code');
+    nameEl.textContent = component.name;
+    header.appendChild(nameEl);
+    card.appendChild(header);
+
+    const frame = document.createElement('div');
+    frame.className = 'ui-component-preview-frame';
+    frame.innerHTML = '<span class="ui-component-preview-loading">Loading preview&hellip;</span>';
+    card.appendChild(frame);
+
+    if (requestId !== detailTemplateRequestId) return; // superseded before attaching
+    grid.appendChild(card);
+
+    try {
+      const result = await call('preview.compilePayloadComponent', {
+        remote: entry.remoteName,
+        id: entry.manifest.id,
+        relativeDir: component.relativeDir,
+      });
+      if (requestId !== detailTemplateRequestId) return; // superseded while awaiting
+
+      const iframe = document.createElement('iframe');
+      iframe.sandbox = 'allow-scripts';
+      iframe.srcdoc = result.html;
+      frame.innerHTML = '';
+      frame.appendChild(iframe);
+      detailTemplateIframes.push(iframe);
+
+      let pendingRawWidth = null;
+      let pendingRawHeight = null;
+      let resizeScheduled = false;
+
+      const handler = (event) => {
+        if (event.source !== iframe.contentWindow) return;
+        const data = event.data;
+        if (!data || typeof data !== 'object') return;
+        if (data.type === 'ready') {
+          iframe.contentWindow.postMessage({ type: 'setTheme', theme: currentTemplateTheme }, '*');
+          return;
+        }
+        if (data.type !== 'contentHeight') return;
+        pendingRawWidth = data.width;
+        pendingRawHeight = data.height;
+        if (resizeScheduled) return;
+        resizeScheduled = true;
+        requestAnimationFrame(() => {
+          resizeScheduled = false;
+          const clampedWidth = clampPreviewWidth(pendingRawWidth + WIDTH_SAFETY_MARGIN);
+          const clampedHeight = clampPreviewHeight(pendingRawHeight);
+          frame.style.width = `${clampedWidth}px`;
+          frame.style.height = `${clampedHeight}px`;
+          iframe.style.width = `${Math.min(pendingRawWidth + WIDTH_SAFETY_MARGIN, clampedWidth)}px`;
+          iframe.style.height = `${Math.min(pendingRawHeight, clampedHeight)}px`;
+        });
+      };
+      detailTemplateMessageHandlers.push(handler);
+      window.addEventListener('message', handler);
+    } catch (err) {
+      frame.innerHTML = '';
+      const placeholder = document.createElement('span');
+      placeholder.className = 'ui-component-preview-loading';
+      placeholder.textContent = `Preview unavailable -- ${err instanceof Error ? err.message : String(err)}`;
+      frame.appendChild(placeholder);
     }
   }
 
@@ -2301,6 +2505,19 @@
       backendPluginSection.hidden = true;
     }
 
+    // Phase 11 Detail-view task (design-kit): gated on real content
+    // presence -- whether GUIDELINES.md actually exists at the payload
+    // root -- never a `manifest.kind === 'template'` check, same
+    // "field/file presence, not kind" convention as the backend-plugin
+    // gate above. That check itself requires an RPC round-trip (unlike
+    // install_params/wiring_actions, which are already on the manifest in
+    // hand), so renderTemplateSection decides visibility itself once it
+    // resolves -- hidden here first so a previous artifact's tokens/grid
+    // don't stay visible while this one's presence check is in flight.
+    $('detail-template-section').hidden = true;
+    clearDetailTemplateListeners();
+    void renderTemplateSection(entry);
+
     $('detail-install-path').textContent = entry.installTarget;
 
     const openFolderBtn = $('detail-open-folder-btn');
@@ -2578,6 +2795,23 @@
       }
     });
     addNewRemotePicker = createSingleChipPicker($('f-remote-picker'));
+
+    // Phase 11 Detail-view task: one Light/Dark pair per template section
+    // (section-level, not per-card) -- deliberately real infrastructure
+    // even though every current design-kit component is visually inert to
+    // it (see the caption next to this toggle in index.html and
+    // compile.ts's own setTheme doc comment for why).
+    templateThemePicker = createSingleChipPicker($('detail-template-theme-toggle'));
+    templateThemePicker.setOptions(
+      [{ value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }],
+      'light',
+    );
+    templateThemePicker.onChange((theme) => {
+      currentTemplateTheme = theme;
+      for (const iframe of detailTemplateIframes) {
+        iframe.contentWindow.postMessage({ type: 'setTheme', theme }, '*');
+      }
+    });
   }
 
   /** Refreshes every tag picker's suggestion list from the current catalog
@@ -2657,7 +2891,7 @@
 
   const NEW_KIND_OPTION = '__new_kind__';
 
-  let addNewKindPicker, addNewRemotePicker;
+  let addNewKindPicker, addNewRemotePicker, templateThemePicker;
 
   /** (Re)populates Add New's Kind chip-picker from every distinct kind
    * already in the catalog, plus a trailing "+ New kind..." chip -- kind is

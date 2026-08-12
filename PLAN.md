@@ -2470,27 +2470,69 @@ tasks, same discipline every earlier phase here uses.
       [growtharc-ai-helpers#58](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/58),
       version `1.0.0` → `1.1.0`, exactly the 8 expected file changes
       (manifest bump, `GUIDELINES.md` edit, 3 new component pairs).
-- [ ] **A real Detail view for the design-kit itself — currently doesn't
-      exist.** Checked directly against `renderDetail` in
-      `src-tauri/spike-ui/app.js`: it has exactly two kind-specific
-      branches (`ui-component`'s live preview iframe, and the
-      backend-plugin section gated on `install_params`/`wiring_actions`
-      presence, deliberately "never a kind check"). Neither applies to
-      `kind: template`, so a design-kit artifact today falls through to
-      the plain generic Detail view — description, kind/version/owner,
-      tags, Pull button. Nothing renders the guideline's tokens, type
-      scale, or a component grid; no theme toggle. Add a new section,
-      gated the same way the backend-plugin section already is (on real
-      field/file presence — e.g. a `GUIDELINES.md` at the payload root —
-      never a `kind` check, matching this codebase's own established
-      convention): render the guideline's color tokens and type scale
-      read straight from `GUIDELINES.md`, a grid of every component in
-      `components/` with a real live preview each via
-      `compileLocalPreview` (already proven, Phase 6 Phase D — no new
-      engine work needed for this part), and a light/dark toggle re-
-      rendering each preview in both themes. Respect the flat-vs-folder
-      rule from item 1 when walking `components/` for the grid — don't
-      assume a fixed directory depth.
+- [x] **A real Detail view for the design-kit itself — built.** Gated
+      exactly like the backend-plugin section (real file presence — a
+      `GUIDELINES.md` at the payload root — never a `kind` check): a new
+      `artifact.parseGuidelines` RPC reads it via the existing
+      `readArtifactPayloadFile` and returns `{present, colorTokens,
+      typeScale}`, letting `renderDetail` show/hide the new
+      `#detail-template-section` without ever branching on
+      `manifest.kind`.
+      **Color tokens/type scale**: `src/engine/guidelines/parseGuidelinesTokens.ts`,
+      a lenient regex extractor (no markdown library exists in this repo —
+      matches this codebase's own source-text-regex convention), not a
+      real parser — tolerates `GUIDELINES.md`'s real mixed shape (small
+      tables plus comma-separated inline-code shorthand for Sage/Sand/
+      AI-accent). Dogfooded against the real, live `design-kit` catalog
+      entry: 24 real hex tokens extracted (including both background AND
+      text hex from the Status-colors table's two-hex rows) and all 4
+      type-scale rows, byte-for-byte matching `GUIDELINES.md`'s own
+      content.
+      **Component grid**: reuses `compileLocalPreview` unchanged (a Plan
+      sub-agent's review caught that my first draft would have
+      unnecessarily extended `compileArtifactPreview`'s cache-key shape —
+      dropped that entirely). New `listArtifactPayloadComponents`
+      (`src/engine/payload/listPayloadComponents.ts`) walks `components/`
+      respecting item 1's flat-vs-folder rule (recurses exactly one
+      bounded extra level for a category folder), and a new
+      `preview.compilePayloadComponent` RPC compiles each one, sandboxed
+      server-side via a newly-extracted `resolvePayloadDir`/
+      `resolveWithinPayloadDir` (`src/engine/payload/payloadDir.ts` — the
+      3rd+ duplicate of this exact resolution logic once this task
+      existed, so it was finally factored out of `readPayloadFile.ts`/
+      `resolveArtifactPreview.ts`). Dogfooded against the real design-kit
+      catalog entry: all 5 real components (`Button`/`Card`/`Feedback`/
+      `Input`/`TopBar`) listed and compiled successfully.
+      **Theme toggle, built despite being visually inert today** — a real
+      scope decision confirmed with the user first: design-kit's
+      components use only inline `React.CSSProperties` (no `dark:`
+      classes at all, since `DESIGN_SYSTEM.md` is light-only by design,
+      item 1's own finding), so flipping it changes nothing visually for
+      any current component — chosen anyway as real, forward-looking
+      infrastructure, with an honest caption saying so in the UI.
+      `compile.ts`'s React-adapter harness gained a `setTheme` message
+      case (toggles a real `.dark` class plus `colorScheme` on both
+      `html` and `body`, since the existing hardcoded rule targets them
+      together with no `!important`). The grid's N simultaneous iframes
+      get array-based teardown (`detailTemplateMessageHandlers`/
+      `clearDetailTemplateListeners`), matching this file's own existing
+      `uiComponentsListMessageHandlers` precedent exactly rather than the
+      single-iframe pattern the one-at-a-time Detail preview uses.
+      **Verified for real in a headless browser, not just by reading the
+      compiled output**: loaded a real compiled `Button` preview into
+      Playwright, posted a real `setTheme` message, and confirmed
+      `document.documentElement`/`body` both actually flip to
+      `classList.contains('dark') === true` and `colorScheme === 'dark'`
+      — then back to light. A strict byte-equality screenshot check
+      across the round trip found an 8-byte difference in a ~10.8KB PNG
+      (~0.07%); a control pair of screenshots with zero state change in
+      between was byte-identical, confirming headless rendering is
+      normally fully deterministic — the tiny diff is consistent with
+      benign antialiasing/scrollbar-rendering variance tied to
+      `color-scheme`, not any real `dark:`-styling change (there is none
+      to trigger). 21 new unit tests (`parseGuidelinesTokens.test.ts`,
+      `listPayloadComponents.test.ts`, `payloadDir.test.ts`, including a
+      path-traversal-refusal trap-directory test).
 - [ ] **End-to-end test:** pull the real bundle into a fresh project,
       confirm all five components render and live-preview correctly via
       `compileLocalPreview`, deliberately build a component with a planted

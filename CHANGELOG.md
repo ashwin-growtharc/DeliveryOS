@@ -4,6 +4,35 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- **Phase 11: a real Detail view for design-kit (`kind: template`)
+  artifacts.** Gated on real `GUIDELINES.md` presence at the payload root,
+  never `manifest.kind`, matching the backend-plugin section's own
+  established convention -- a new `artifact.parseGuidelines` RPC returns
+  `{present, colorTokens, typeScale}`. Color tokens/type scale come from a
+  new, deliberately lenient regex extractor
+  (`parseGuidelinesTokens.ts` -- no markdown library exists in this repo),
+  dogfooded against the real live `design-kit` catalog entry: 24 real hex
+  tokens (including the Status-colors table's two-hexes-per-row case) and
+  4 type-scale rows extracted correctly. The component grid reuses
+  `compileLocalPreview` unchanged -- a Plan sub-agent's review caught that
+  extending `compileArtifactPreview`'s cache-key shape was unnecessary,
+  so that idea was dropped before writing any code. New
+  `listArtifactPayloadComponents` walks `components/` respecting item 1's
+  flat-vs-folder rule; a new `preview.compilePayloadComponent` RPC
+  compiles each one, sandboxed server-side via a newly-extracted
+  `resolvePayloadDir`/`resolveWithinPayloadDir` (the 3rd+ duplicate of
+  that resolution logic, finally factored out of `readPayloadFile.ts`/
+  `resolveArtifactPreview.ts`). A real light/dark theme toggle was built
+  despite being visually inert today (confirmed with the user first:
+  design-kit's components use only inline styles, no `dark:` classes,
+  since `DESIGN_SYSTEM.md` is light-only by design) -- `compile.ts`'s
+  React-adapter harness gained a `setTheme` message case, verified for
+  real in a headless browser (Playwright): a compiled `Button` preview's
+  `.dark` class and `colorScheme` both genuinely flip on `setTheme`,
+  confirmed via a control screenshot pair proving headless rendering is
+  otherwise fully deterministic. 21 new unit tests, including a
+  path-traversal-refusal trap-directory test.
+
 - **Phase 11: design-kit extended with empty/error/loading-state
   coverage and a Motion section, resolving the open scoping question in
   favor of "now" over "later."** Resolving it surfaced a second gap --

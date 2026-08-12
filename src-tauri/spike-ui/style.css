@@ -1399,6 +1399,84 @@ input, textarea, select {
   overflow-x: auto;
 }
 
+/* Phase 11 Detail-view task: design-kit's color tokens/type scale/
+   component grid. Reuses .wiring-action-card/.chip-picker verbatim for
+   everything structural -- only the swatch/table/grid layout pieces below
+   are genuinely new. */
+.token-swatch-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.token-swatch {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 4px 10px 4px 6px;
+  background: var(--surface-tertiary);
+}
+
+.token-swatch-color {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.token-swatch-label {
+  font-size: 12px;
+  font-family: var(--font-mono, monospace);
+}
+
+.template-type-scale-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+  margin-bottom: 4px;
+}
+
+.template-type-scale-table th,
+.template-type-scale-table td {
+  text-align: left;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.template-type-scale-table th {
+  font-weight: 600;
+  opacity: .65;
+  text-transform: uppercase;
+  font-size: 10.5px;
+  letter-spacing: .2px;
+}
+
+.template-theme-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.template-theme-toggle-caption {
+  font-size: 12px;
+  opacity: .65;
+}
+
+.template-component-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.template-component-card .ui-component-preview-frame {
+  margin-top: 8px;
+}
+
 /* ---------- progress panel (live Pull/Push stage feed) ----------
  * Deliberately not a numeric `<progress>` percentage bar: there is no
  * honest way to know "80% done" for an arbitrary post_install shell command
