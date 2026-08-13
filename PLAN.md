@@ -2726,3 +2726,51 @@ via real `readArtifactPayloadFile` calls against the live catalog:
 (the latter correctly still renders through the *existing*
 backend-plugin section, not the new one); `badge-showcase`/`design-kit`
 (no README, only `GUIDELINES.md`) correctly show nothing extra.
+
+## A dedicated per-component detail view for design-kit's grid
+
+The grid's own compact previews (one static variant, no controls) fetch
+`variantNames`/`propsSchemas` from `preview.compilePayloadComponent` but
+never use them — the exact same `CompiledPreview` shape a standalone
+`kind: ui-component` artifact's own Detail preview already turns into
+real variant tabs and a live props-controls panel
+(`loadDetailPreview`/`renderControlsPanel`). This exposes that same
+interactivity for one component clicked out of the grid, not new
+capability.
+
+- [x] **Built as a new view following this app's own existing
+      navigation convention, not a new modal.** Confirmed first: zero
+      "modal"/"dialog"/"overlay" patterns exist anywhere in this app
+      outside Tauri's native file picker — every navigation already uses
+      the same `<section id="view-X" class="view" hidden>` show/hide
+      convention (`showView`/`showViewRaw`), with `openDetail`'s own
+      "remember where to come back to" pattern as the direct precedent.
+      New `#view-component-detail` follows the same shape exactly:
+      a contextual "← Back" button returning to the SAME design-kit
+      artifact's own Detail view (`state.componentDetailReturnEntry`,
+      not just Browse), full (untruncated) usage-rule text, variant tabs,
+      the live preview, and a props-controls panel.
+      **`renderControlsPanel` generalized, not duplicated**: it hardcoded
+      its one existing DOM target (`#detail-preview-controls`) — given an
+      optional `containerId` parameter (defaulting to that same id, so
+      its one existing caller needed zero changes) rather than copy-pasting
+      the whole function for a second container.
+      **A genuinely new, third "single active interactive iframe"
+      context**: `openComponentDetail` gets its own
+      `componentDetailMessageHandler`/`clearComponentDetailListener`,
+      deliberately not reusing `detailPreviewMessageHandler` (a whole
+      standalone artifact) or `detailTemplateMessageHandlers` (the grid's
+      own array of N at once) — this view shows exactly one component at
+      a time, a third, distinct shape neither existing teardown discipline
+      matches.
+      **Verified for real, not by running the full GUI**: real
+      `lint`/`typecheck`/full test suite clean (435 passed, 1 known
+      baseline failure); a static cross-check confirming every new DOM id
+      referenced in `app.js` has exactly one matching element in
+      `index.html` and vice versa; and — the one genuinely new interaction
+      this adds — a real headless-browser check (Playwright) sending the
+      EXACT `{type:'selectVariant', ...}` message the new tabs send into
+      a real compiled `Input` preview, confirming the rendered content
+      actually changes to the target variant's real content ("Full name"
+      → "Email"/"Please enter a valid email"), not just that a message
+      was sent.

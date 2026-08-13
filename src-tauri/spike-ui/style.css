@@ -1489,6 +1489,10 @@ input, textarea, select {
   margin-top: 8px;
 }
 
+.template-component-card .wiring-action-header {
+  justify-content: space-between;
+}
+
 .template-component-caption {
   font-size: 12px;
   opacity: .75;
@@ -1535,6 +1539,14 @@ input, textarea, select {
   opacity: .75;
   line-height: 1.5;
   margin: 0 0 8px;
+}
+
+.component-detail-usage-rule {
+  font-size: 13.5px;
+  opacity: .8;
+  line-height: 1.6;
+  margin: 4px 0 20px;
+  max-width: 640px;
 }
 
 /* ---------- progress panel (live Pull/Push stage feed) ----------

@@ -419,6 +419,27 @@
           </div>
         </section>
 
+        <!-- Component detail: one component from a design-kit-shaped
+             artifact's grid, shown properly -- every real CSF variant as
+             tabs, a live props-controls panel, full usage-rule text. See
+             openComponentDetail in app.js. -->
+        <section id="view-component-detail" class="view" hidden>
+          <button id="back-to-component-grid-btn" class="btn back-btn">&larr; Back</button>
+          <div class="card detail-card">
+            <div class="detail-header">
+              <div class="detail-title">
+                <span id="component-detail-name" class="name"></span>
+              </div>
+            </div>
+            <p id="component-detail-usage-rule" class="component-detail-usage-rule"></p>
+            <div id="component-detail-tabs" class="tab-row"></div>
+            <div id="component-detail-frame" class="ui-component-preview-frame detail-preview-frame">
+              <span class="ui-component-preview-loading">Loading preview&hellip;</span>
+            </div>
+            <div id="component-detail-controls" class="controls-panel"></div>
+          </div>
+        </section>
+
         <!-- Add new: one shared form, two modes (see addNewWizardMode in
              app.js). Entered directly (sidebar "Add New", Browse's "+ Add
              new") it's a flat form -- every .wizard-step visible at once,
