@@ -1021,6 +1021,10 @@
   // artifact.listPayloadComponents/preview.compilePayloadComponent calls.
   let detailTemplateRequestId = 0;
 
+  // Same request-token-guard discipline, for renderGenericReadmeSection's
+  // own async artifact.readPayloadFile call.
+  let genericReadmeRequestId = 0;
+
   // Same array-based teardown discipline as uiComponentsListMessageHandlers
   // above, NOT the single-variable detailPreviewMessageHandler discipline --
   // the template grid hosts one iframe PER component (N at once), so
@@ -1252,6 +1256,39 @@
       ev.preventDefault();
       void handleApplyInstallParams(entry);
     };
+  }
+
+  /** Generic fallback for any artifact with a real payload-root
+   * README.md that isn't a `kind: backend-plugin` (that case renders its
+   * README inside its own section, see renderInstallParamsSection above)
+   * -- gated on real file presence, never a `kind` check, same
+   * convention as every other Detail section. Most artifacts have no
+   * README at all; that's the normal case, not a failure, so this fails
+   * quietly and just keeps the section hidden. */
+  async function renderGenericReadmeSection(entry) {
+    const requestId = ++genericReadmeRequestId;
+    const section = $('detail-generic-readme-section');
+    const readmeEl = $('detail-generic-readme');
+
+    let content;
+    try {
+      ({ content } = await call('artifact.readPayloadFile', {
+        remote: entry.remoteName,
+        id: entry.manifest.id,
+        path: 'README.md',
+      }));
+    } catch {
+      content = undefined;
+    }
+    if (requestId !== genericReadmeRequestId) return; // superseded while awaiting
+
+    if (content) {
+      readmeEl.textContent = content;
+      section.hidden = false;
+    } else {
+      readmeEl.textContent = '';
+      section.hidden = true;
+    }
   }
 
   /** Collects whatever was actually typed into the required-config
@@ -2583,8 +2620,13 @@
       backendPluginSection.hidden = false;
       void renderInstallParamsSection(entry);
       void renderWiringSection(entry);
+      $('detail-generic-readme-section').hidden = true;
     } else {
       backendPluginSection.hidden = true;
+      // Only this artifact's OWN README (never the backend-plugin
+      // section's), and only when that section didn't already claim it --
+      // avoids ever rendering the same README twice.
+      void renderGenericReadmeSection(entry);
     }
 
     // Phase 11 Detail-view task (design-kit): gated on real content

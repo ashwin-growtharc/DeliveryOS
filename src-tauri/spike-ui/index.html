@@ -320,6 +320,18 @@
               </div>
             </div>
 
+            <!-- Generic fallback for any artifact with a real payload-root
+                 README.md that doesn't already get a richer section --
+                 gated on real file presence, never a `kind` check, same
+                 convention as the backend-plugin/template sections above.
+                 Shown only when neither of those two claimed the README
+                 already (a `kind: backend-plugin` artifact's README is
+                 shown inside its own section instead). See
+                 renderDetail/renderGenericReadmeSection in app.js. -->
+            <div id="detail-generic-readme-section" hidden>
+              <div id="detail-generic-readme" class="detail-readme"></div>
+            </div>
+
             <!-- Phase 11 Detail-view task: design-kit's color tokens, type
                  scale, and a live component grid, gated on real
                  GUIDELINES.md presence -- never a `kind: template` check.

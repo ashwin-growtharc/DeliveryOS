@@ -4,6 +4,19 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- **Detail view: a generic README fallback for artifacts with neither
+  `GUIDELINES.md` nor `install_params`/`wiring_actions`.** Found by
+  actually opening `react-vite-lint-scaffold`'s real Detail view after
+  merge -- a config-only artifact correctly has nothing to preview, but
+  its real README (setup steps, required devDependencies) wasn't shown
+  anywhere either, unlike `kind: backend-plugin`'s own README section.
+  New `renderGenericReadmeSection`, gated on real file presence and only
+  when the backend-plugin section didn't already claim the README (no
+  double render) -- confirmed against the real catalog: `react-vite-lint-scaffold`/
+  `azure-msal-sso` both have one (the latter still renders through its
+  existing section), `badge-showcase`/`design-kit` correctly show
+  nothing extra.
+
 - **Catalog growth: three real artifacts pulled from a real GrowthArc
   project template (`GA_Global_Template_ReactTS`).** Surveyed its
   checked-out `main` (mostly stock Vite boilerplate) and two unmerged
