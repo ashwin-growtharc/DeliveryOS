@@ -1412,47 +1412,59 @@ input, textarea, select {
 
 .token-swatch {
   display: flex;
+  flex-direction: column;
   align-items: center;
   gap: 6px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 4px 10px 4px 6px;
-  background: var(--surface-tertiary);
+  width: 76px;
 }
 
 .token-swatch-color {
-  width: 16px;
-  height: 16px;
-  border-radius: 4px;
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
   border: 1px solid var(--border);
   flex-shrink: 0;
 }
 
 .token-swatch-label {
-  font-size: 12px;
+  font-size: 10.5px;
   font-family: var(--font-mono, monospace);
+  text-align: center;
+  line-height: 1.3;
+  word-break: break-word;
 }
 
-.template-type-scale-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 12.5px;
+/* Type scale as real applied type samples, not a data table -- each row
+   is rendered in its own real Font/Weight/Size (see fontFamilyStack in
+   app.js), so this shows what the type actually looks like. */
+.type-sample-list {
+  display: flex;
+  flex-direction: column;
   margin-bottom: 4px;
 }
 
-.template-type-scale-table th,
-.template-type-scale-table td {
-  text-align: left;
-  padding: 6px 10px;
-  border-bottom: 1px solid var(--border);
+.type-sample-row {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  padding: 8px 0;
+  border-bottom: 1px dashed var(--border);
 }
 
-.template-type-scale-table th {
-  font-weight: 600;
-  opacity: .65;
-  text-transform: uppercase;
+.type-sample-row:last-child {
+  border-bottom: none;
+}
+
+.type-sample-label {
+  font-family: var(--font-mono, monospace);
   font-size: 10.5px;
-  letter-spacing: .2px;
+  opacity: .65;
+  width: 130px;
+  flex-shrink: 0;
+}
+
+.type-sample-text {
+  color: var(--ink, inherit);
 }
 
 .template-theme-toggle-row {
@@ -1475,6 +1487,54 @@ input, textarea, select {
 
 .template-component-card .ui-component-preview-frame {
   margin-top: 8px;
+}
+
+.template-component-caption {
+  font-size: 12px;
+  opacity: .75;
+  margin: 6px 0 0;
+  line-height: 1.5;
+}
+
+/* Layout-rules summary strip: real radius tokens as chips, plus
+   GUIDELINES.md's own Layout grid/Spacing prose -- never the mockup's
+   fictional "Max width/Section rhythm" labels, since those were invented
+   for its own made-up demo kit, not something this real doc states. */
+.layout-rules-strip {
+  margin-top: 4px;
+}
+
+.radius-token-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.radius-token-chip {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 6px 10px;
+  background: var(--surface-tertiary);
+  font-size: 11px;
+}
+
+.radius-token-chip code {
+  font-size: 11.5px;
+}
+
+.radius-token-chip span {
+  opacity: .65;
+}
+
+.layout-rules-note {
+  font-size: 12.5px;
+  opacity: .75;
+  line-height: 1.5;
+  margin: 0 0 8px;
 }
 
 /* ---------- progress panel (live Pull/Push stage feed) ----------

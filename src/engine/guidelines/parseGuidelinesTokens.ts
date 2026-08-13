@@ -134,3 +134,109 @@ export function parseTypeScale(markdown: string): Record<string, string>[] {
     return record;
   });
 }
+
+const USAGE_BULLET_START = /^-\s+\*\*([^*]+)\*\*:\s*(.*)$/;
+
+/**
+ * `## Per-component usage rules` is a bulleted list, one multi-line bullet
+ * per component (`- **Name**: rule text, wrapped across several indented
+ * lines`) -- not a table, so this needs its own line-scanner rather than
+ * `parseMarkdownTable`. Keyed by the bullet's own bold component name,
+ * lowercased -- matches `component.name` from `listArtifactPayloadComponents`
+ * case-insensitively (the same real join key confirmed against this kit's
+ * own `components/` folder names, not docgen's adapter-specific
+ * `displayName`). A component with no matching bullet simply has no entry
+ * -- the caller renders no caption for it, the same graceful-degrade this
+ * feature already uses everywhere else.
+ */
+export function parseUsageRules(markdown: string): Record<string, string> {
+  const section = extractSection(markdown, 'Per-component usage rules');
+  if (!section) return {};
+
+  const rules: Record<string, string> = {};
+  let currentKey: string | null = null;
+  let currentLines: string[] = [];
+
+  const flush = () => {
+    if (currentKey) {
+      rules[currentKey] = currentLines.join(' ').replace(/\s+/g, ' ').trim();
+    }
+    currentKey = null;
+    currentLines = [];
+  };
+
+  for (const rawLine of section.split('\n')) {
+    const bulletStart = USAGE_BULLET_START.exec(rawLine);
+    if (bulletStart) {
+      flush();
+      currentKey = bulletStart[1].trim().toLowerCase();
+      currentLines = [bulletStart[2].trim()];
+      continue;
+    }
+    const trimmed = rawLine.trim();
+    if (currentKey && trimmed.length > 0) {
+      currentLines.push(trimmed);
+    }
+  }
+  flush();
+
+  return rules;
+}
+
+export interface RadiusToken {
+  token: string;
+  value: string;
+  usage: string;
+}
+
+export interface LayoutRules {
+  layoutNote: string;
+  spacingNote: string;
+  radiusTokens: RadiusToken[];
+}
+
+/** Collapses whatever non-table prose sits in a section into a single
+ * flowing note -- joins non-empty, non-table-row lines with a space. */
+function collapseProse(sectionText: string): string {
+  return sectionText
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith('|'))
+    .join(' ')
+    .trim();
+}
+
+/**
+ * Combines `## Layout grid` (pure prose in this kit's real content, no
+ * table) and `## Spacing & radius scale` (an intro sentence, a real
+ * radius-token table, then a trailing spacing-multiples sentence) into
+ * one small summary. `spacingNote` is deliberately the LAST prose block in
+ * that section (the actionable "use multiples of 4px..." sentence), not
+ * the section's own meta-commentary intro about where the values were
+ * recovered from -- that context belongs in the doc itself, not a UI
+ * summary strip.
+ */
+export function parseLayoutRules(markdown: string): LayoutRules {
+  const layoutSection = extractSection(markdown, 'Layout grid');
+  const spacingSection = extractSection(markdown, 'Spacing & radius scale');
+
+  const [radiusTable] = parseMarkdownTable(spacingSection);
+  const radiusTokens: RadiusToken[] = radiusTable
+    ? radiusTable.rows.map((row) => ({
+        token: stripMarkup(row[0] ?? ''),
+        value: stripMarkup(row[1] ?? ''),
+        usage: stripMarkup(row[2] ?? ''),
+      }))
+    : [];
+
+  const proseBlocks = spacingSection
+    .split(/\n\s*\n/)
+    .map((block) => collapseProse(block))
+    .filter((block) => block.length > 0);
+
+  return {
+    layoutNote: collapseProse(layoutSection),
+    spacingNote: proseBlocks.length > 0 ? proseBlocks[proseBlocks.length - 1] : '',
+    radiusTokens,
+  };
+}

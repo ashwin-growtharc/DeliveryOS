@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { extractSection, parseMarkdownTable, parseColorTokens, parseTypeScale } from '../../src/engine/guidelines/parseGuidelinesTokens';
+import {
+  extractSection,
+  parseMarkdownTable,
+  parseColorTokens,
+  parseTypeScale,
+  parseUsageRules,
+  parseLayoutRules,
+} from '../../src/engine/guidelines/parseGuidelinesTokens';
 
 // Mirrors the real design-kit GUIDELINES.md's own authoring convention:
 // several small tables plus comma-separated inline-code shorthand under
@@ -32,6 +39,33 @@ Some intro prose.
 |---|---|---|---|
 | Headings | EB Garamond | 18-24px | 400 |
 | Body | IBM Plex Sans | 13-14px | 400 |
+
+## Spacing & radius scale
+
+Not documented anywhere before this -- recovered from the app shell's own
+real values, given a name here so future components have a real scale to
+reach for instead of ad-hoc px values per component:
+
+| Token | Value | Usage |
+|---|---|---|
+| \`radius-md\` | \`.5rem\` (8px) | Buttons, inputs, nav items -- the default |
+| \`radius-lg\` | \`1rem\` (16px) | Cards, larger containers |
+
+Spacing: use multiples of 4px (4/8/12/16/20/24/32). Component internal
+padding sits at 8-12px.
+
+## Layout grid
+
+No fixed column-grid system in this kit -- components sit in a normal
+flex/block layout, not a 12-column grid.
+
+## Per-component usage rules
+
+- **Button**: one primary (\`default\`) per view -- never two competing for
+  attention. \`destructive\` is for the one action that actually deletes
+  something.
+- **Card**: \`title\` uses EB Garamond automatically -- never override its
+  font inline.
 
 ## Anti-patterns
 
@@ -128,5 +162,63 @@ describe('parseTypeScale', () => {
 
   it('returns [] when the Type scale section has no table', () => {
     expect(parseTypeScale('## Type scale\n\nJust plain prose, no table at all.\n')).toEqual([]);
+  });
+});
+
+describe('parseUsageRules', () => {
+  it('keys each multi-line bullet by its bold component name, lowercased', () => {
+    const rules = parseUsageRules(SAMPLE_GUIDELINES);
+    expect(Object.keys(rules).sort()).toEqual(['button', 'card']);
+  });
+
+  it('joins a wrapped, multi-line bullet into one flowing sentence', () => {
+    const rules = parseUsageRules(SAMPLE_GUIDELINES);
+    expect(rules.button).toBe(
+      "one primary (`default`) per view -- never two competing for attention. `destructive` is for the one action that actually deletes something.",
+    );
+  });
+
+  it('matches component.name case-insensitively (e.g. "Button" vs "button")', () => {
+    const rules = parseUsageRules(SAMPLE_GUIDELINES);
+    const componentName = 'Button';
+    expect(rules[componentName.toLowerCase()]).toBeDefined();
+  });
+
+  it('returns {} when there is no Per-component usage rules section at all, never throws', () => {
+    expect(parseUsageRules('# Just a title\n\nSome unrelated prose.\n')).toEqual({});
+  });
+
+  it('has no entry for a component that was never documented -- graceful degrade, not a throw', () => {
+    const rules = parseUsageRules(SAMPLE_GUIDELINES);
+    expect(rules.skeleton).toBeUndefined();
+  });
+});
+
+describe('parseLayoutRules', () => {
+  it('extracts the real radius-token table, keyed by token/value/usage', () => {
+    const { radiusTokens } = parseLayoutRules(SAMPLE_GUIDELINES);
+    expect(radiusTokens).toEqual([
+      { token: 'radius-md', value: '.5rem (8px)', usage: 'Buttons, inputs, nav items -- the default' },
+      { token: 'radius-lg', value: '1rem (16px)', usage: 'Cards, larger containers' },
+    ]);
+  });
+
+  it('extracts Layout grid\'s prose as layoutNote', () => {
+    const { layoutNote } = parseLayoutRules(SAMPLE_GUIDELINES);
+    expect(layoutNote).toContain('No fixed column-grid system');
+  });
+
+  it('extracts the trailing spacing-multiples sentence as spacingNote, not the leading recovered-from sentence', () => {
+    const { spacingNote } = parseLayoutRules(SAMPLE_GUIDELINES);
+    expect(spacingNote).toContain('use multiples of 4px');
+    expect(spacingNote).not.toContain('recovered from');
+  });
+
+  it('returns empty notes and [] radiusTokens when neither section exists, never throws', () => {
+    expect(parseLayoutRules('# Just a title\n\nSome unrelated prose.\n')).toEqual({
+      layoutNote: '',
+      spacingNote: '',
+      radiusTokens: [],
+    });
   });
 });

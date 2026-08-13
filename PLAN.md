@@ -2533,6 +2533,74 @@ tasks, same discipline every earlier phase here uses.
       to trigger). 21 new unit tests (`parseGuidelinesTokens.test.ts`,
       `listPayloadComponents.test.ts`, `payloadDir.test.ts`, including a
       path-traversal-refusal trap-directory test).
+- [x] **Detail view redesigned to match a published pitch mockup's visual
+      polish, plus real verification of the two other things that
+      mockup depicted — done as three separately-scoped pieces of work,
+      not one build.** Prompted by comparing the running app against
+      ["DeliveryOS — Design-Kit Bundle, End to End"](https://claude.ai/code/artifact/782d3c35-a40c-4de7-810e-fc3379661d73)
+      (an illustrative pitch Artifact, footer: *"Not built yet... status:
+      draft"*) — its three scenes turned out to need three genuinely
+      different kinds of work, confirmed by research before building
+      anything:
+      1. **Scene 1 (Detail view) — real new code.** Bigger, real color
+         swatches (all 24 real tokens, not the mockup's illustrative 4);
+         the type scale rendered as real applied type samples (each
+         row's own `Element` text, actually set in its real
+         `Font`/`Weight`/`Size` via new `fontFamilyStack`/
+         `parseLeadingNumber` helpers in `app.js`, reusing this app's own
+         already-established `EB Garamond`/`IBM Plex Sans`/`JetBrains
+         Mono` stacks) instead of a plain data table; a real usage-rule
+         caption under each live component preview (new
+         `parseUsageRules` in `parseGuidelinesTokens.ts`, a multi-line
+         bullet-list scanner keyed by component name, matched
+         case-insensitively against `listArtifactPayloadComponents`'s
+         real folder names — confirmed the right join key, not docgen's
+         adapter-specific `displayName`); and a real layout-rules summary
+         strip (new `parseLayoutRules`, combining `## Layout grid`'s real
+         prose with `## Spacing & radius scale`'s real radius-token table
+         and its own trailing spacing-multiples sentence — never the
+         mockup's fictional "Max width/Section rhythm" labels, which were
+         invented for its own made-up demo kit). `artifact.parseGuidelines`
+         (sidecar.ts) gained `usageRules`/`layoutRules` fields. Dogfooded
+         against the real, live `design-kit` catalog entry: all 5
+         components' real captions matched correctly, all 4 real type-scale
+         rows render with valid font/size/weight, all 4 real radius tokens
+         and both real prose notes extracted correctly. 22 new unit tests.
+      2. **Scene 2 (Claude Code checks first) — verification, not
+         construction.** Research found this already exists: `PLAN.md`
+         Phase 8's `deliveryos-check-first` (`kind: skill`,
+         [growtharc-ai-helpers#54](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/54),
+         merged) — the mockup's Scene 2 is a re-description of an
+         already-shipped feature, not something to build fresh.
+         **Verified for real, not assumed clean, and found a genuine
+         gap**: `deliveryos` wasn't linked onto this machine's `PATH` at
+         all — the skill's own documented Prerequisite step
+         ("If `deliveryos` isn't found on `PATH`, say so plainly and
+         stop") would have silently blocked the skill for any real Claude
+         Code session here, not just a test. Fixed via `npm link`. Then
+         confirmed `deliveryos list --json` correctly surfaces
+         `design-kit`'s real, descriptive entry — the skill's own
+         "read through the results yourself and judge relevance"
+         instruction (not a fixed kind-matching list) already handles a
+         `kind: template` match correctly even though the skill's text
+         only names `ui-component`/`skill` as explicit examples.
+      3. **Scene 3 (the demo) — a real, unscripted subprocess run, not a
+         fake terminal simulation.** A genuinely fresh `claude -p`
+         session (`--allowedTools "Bash Write Edit Read Glob Grep"`, no
+         shared context with this conversation) in an empty scratch
+         directory, prompted with the mockup's own "build a simple
+         employee directory page." **Real, honest result, reported as-is
+         rather than reshaped to match the mockup**: the skill
+         auto-triggered correctly (no coaching), ran `deliveryos list
+         --json` for real (222 real catalog entries), found `design-kit`
+         — then, following the skill's own Step 3 ("is it the RIGHT
+         thing, not just A thing?"), correctly declined to force-fit
+         `design-kit`'s five React/TSX components into a directory with
+         no framework or build tooling at all, and built a clean vanilla
+         HTML/CSS/JS page instead. This is the check-first mechanism
+         demonstrating real judgment rather than a scripted "always
+         pulls something" demo — confirmed sufficient real evidence
+         without a second, differently-scaffolded run.
 - [ ] **End-to-end test:** pull the real bundle into a fresh project,
       confirm all five components render and live-preview correctly via
       `compileLocalPreview`, deliberately build a component with a planted

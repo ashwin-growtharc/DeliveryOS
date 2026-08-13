@@ -61,7 +61,12 @@ import { compileArtifactPreview, compileLocalPreview } from './engine/preview/re
 import { readArtifactPayloadFile } from './engine/payload/readPayloadFile';
 import { resolvePayloadDir, resolveWithinPayloadDir } from './engine/payload/payloadDir';
 import { listArtifactPayloadComponents } from './engine/payload/listPayloadComponents';
-import { parseColorTokens, parseTypeScale } from './engine/guidelines/parseGuidelinesTokens';
+import {
+  parseColorTokens,
+  parseTypeScale,
+  parseUsageRules,
+  parseLayoutRules,
+} from './engine/guidelines/parseGuidelinesTokens';
 
 interface SidecarRequest {
   id: string;
@@ -307,9 +312,15 @@ const commands: Record<string, CommandHandler> = {
     const id = requireString(args, 'id');
     const content = readArtifactPayloadFile(remote, id, 'GUIDELINES.md');
     if (content === undefined) {
-      return { present: false, colorTokens: [], typeScale: [] };
+      return { present: false, colorTokens: [], typeScale: [], usageRules: {}, layoutRules: null };
     }
-    return { present: true, colorTokens: parseColorTokens(content), typeScale: parseTypeScale(content) };
+    return {
+      present: true,
+      colorTokens: parseColorTokens(content),
+      typeScale: parseTypeScale(content),
+      usageRules: parseUsageRules(content),
+      layoutRules: parseLayoutRules(content),
+    };
   },
 
   // Lists every real, preview-having component in a design-kit-shaped

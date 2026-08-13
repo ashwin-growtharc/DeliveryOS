@@ -4,6 +4,32 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- **Phase 11: Detail view matched to a published pitch mockup's visual
+  polish, plus real verification of the mockup's other two scenes.**
+  Comparing the running app against an earlier illustrative Artifact
+  (footer: *"Not built yet... status: draft"*) surfaced that its three
+  scenes needed three different kinds of work. **Scene 1** (Detail view):
+  bigger real color swatches (all 24 real tokens), the type scale
+  rendered as real applied type samples (actual font/weight/size per row,
+  not a data table), real per-component usage-rule captions under each
+  live preview (new `parseUsageRules`, matched by component folder name),
+  and a real layout-rules strip (new `parseLayoutRules` -- real radius
+  tokens + real Layout grid/Spacing prose, never the mockup's invented
+  "Max width/Section rhythm" labels). Dogfooded against the live
+  `design-kit` catalog entry; 22 new unit tests. **Scene 2** (Claude Code
+  checks first): turned out to already exist (Phase 8's
+  `deliveryos-check-first`, merged) -- verified it for real rather than
+  assuming, and found a genuine gap: `deliveryos` wasn't linked onto this
+  machine's `PATH`, which would have silently blocked the skill's own
+  documented prerequisite check. Fixed via `npm link`. **Scene 3** (the
+  demo): a real, unscripted `claude -p` subprocess in an empty scratch
+  directory -- the skill auto-triggered correctly, checked the real
+  catalog (222 entries), found `design-kit`, then honestly declined to
+  force-fit its React components into a directory with no framework or
+  build tooling, building a clean vanilla page instead. Reported as real,
+  honest evidence of correct judgment rather than reshaped to match the
+  mockup's fictional always-succeeds narrative.
+
 - **Phase 11: a real Detail view for design-kit (`kind: template`)
   artifacts.** Gated on real `GUIDELINES.md` presence at the payload root,
   never `manifest.kind`, matching the backend-plugin section's own

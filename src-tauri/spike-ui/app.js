@@ -1411,26 +1411,27 @@
 
     const typeScaleContainer = $('detail-template-type-scale');
     typeScaleContainer.innerHTML = '';
-    if (guidelines.typeScale.length > 0) {
-      const table = document.createElement('table');
-      table.className = 'template-type-scale-table';
-      const headerRow = document.createElement('tr');
-      for (const header of Object.keys(guidelines.typeScale[0])) {
-        const th = document.createElement('th');
-        th.textContent = header;
-        headerRow.appendChild(th);
-      }
-      table.appendChild(headerRow);
-      for (const row of guidelines.typeScale) {
-        const tr = document.createElement('tr');
-        for (const value of Object.values(row)) {
-          const td = document.createElement('td');
-          td.textContent = value;
-          tr.appendChild(td);
-        }
-        table.appendChild(tr);
-      }
-      typeScaleContainer.appendChild(table);
+    for (const row of guidelines.typeScale) {
+      const sampleRow = document.createElement('div');
+      sampleRow.className = 'type-sample-row';
+
+      const labelEl = document.createElement('span');
+      labelEl.className = 'type-sample-label';
+      labelEl.textContent = row.Element || '';
+
+      const textEl = document.createElement('span');
+      textEl.className = 'type-sample-text';
+      // A REAL applied sample, not a data table -- the row's own Element
+      // text, rendered in its own real Font/Weight/Size, so this shows
+      // what the type actually looks like rather than just naming it.
+      textEl.textContent = row.Element || '';
+      textEl.style.fontFamily = fontFamilyStack(row.Font || '');
+      textEl.style.fontWeight = String(parseLeadingNumber(row.Weight, 400));
+      textEl.style.fontSize = `${clamp(parseLeadingNumber(row.Size, 14), 12, 28)}px`;
+
+      sampleRow.appendChild(labelEl);
+      sampleRow.appendChild(textEl);
+      typeScaleContainer.appendChild(sampleRow);
     }
 
     const grid = $('detail-template-grid');
@@ -1447,8 +1448,77 @@
     if (requestId !== detailTemplateRequestId) return; // superseded while awaiting
 
     await Promise.all(
-      components.map((component) => loadTemplateComponentPreview(grid, entry, component, requestId)),
+      components.map((component) =>
+        loadTemplateComponentPreview(grid, entry, component, requestId, guidelines.usageRules || {}),
+      ),
     );
+    if (requestId !== detailTemplateRequestId) return; // superseded while awaiting
+
+    renderTemplateLayoutRules(guidelines.layoutRules);
+  }
+
+  /** Extracts the first integer in a string (e.g. "18–24px" -> 18, "500"
+   * -> 500), falling back to `fallback` when nothing parses -- GUIDELINES.md's
+   * Size/Weight columns are free-text prose ("400 (never bold)", "18-24px"),
+   * not structured data. */
+  function parseLeadingNumber(text, fallback) {
+    const match = /\d+/.exec(String(text ?? ''));
+    return match ? Number(match[0]) : fallback;
+  }
+
+  function clamp(value, min, max) {
+    return Math.min(Math.max(value, min), max);
+  }
+
+  /** Maps a GUIDELINES.md Font-column value to a real font-family stack --
+   * reuses this app's own already-established stacks (style.css's own
+   * heading/mono rules) rather than inventing new fallbacks, so a type
+   * sample renders in the SAME real fonts the rest of the app already
+   * uses, not a generic system default. */
+  function fontFamilyStack(fontName) {
+    const lower = fontName.toLowerCase();
+    if (lower.includes('garamond')) return `'EB Garamond', Georgia, serif`;
+    if (lower.includes('mono')) return `'JetBrains Mono', ui-monospace, Consolas, monospace`;
+    if (lower.includes('plex')) return `'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif`;
+    return fontName ? `'${fontName}', system-ui, sans-serif` : 'system-ui, sans-serif';
+  }
+
+  /** Renders the layout-rules summary strip below the component grid --
+   * real radius tokens (a table GUIDELINES.md already documents) plus the
+   * Layout grid/Spacing sections' own real prose, never the mockup's
+   * fictional "Max width/Section rhythm" labels (those were invented for
+   * ITS OWN made-up demo kit, not something this real GUIDELINES.md
+   * states). `layoutRules` is `null` when the artifact has no
+   * GUIDELINES.md at all (see artifact.parseGuidelines). */
+  function renderTemplateLayoutRules(layoutRules) {
+    const container = $('detail-template-layout');
+    container.innerHTML = '';
+    if (!layoutRules) return;
+
+    if (layoutRules.radiusTokens.length > 0) {
+      const tokenRow = document.createElement('div');
+      tokenRow.className = 'radius-token-row';
+      for (const { token, value, usage } of layoutRules.radiusTokens) {
+        const chip = document.createElement('div');
+        chip.className = 'radius-token-chip';
+        const nameEl = document.createElement('code');
+        nameEl.textContent = `${token}: ${value}`;
+        const usageEl = document.createElement('span');
+        usageEl.textContent = usage;
+        chip.appendChild(nameEl);
+        chip.appendChild(usageEl);
+        tokenRow.appendChild(chip);
+      }
+      container.appendChild(tokenRow);
+    }
+
+    for (const note of [layoutRules.layoutNote, layoutRules.spacingNote]) {
+      if (!note) continue;
+      const noteEl = document.createElement('p');
+      noteEl.className = 'layout-rules-note';
+      noteEl.textContent = note;
+      container.appendChild(noteEl);
+    }
   }
 
   /** Compiles and mounts ONE component's live preview inside the template
@@ -1460,7 +1530,7 @@
    * 'ready' message (see compile.ts's setTheme handling) -- this is what
    * makes a card that finishes loading AFTER the toggle was already
    * flipped self-sync correctly. */
-  async function loadTemplateComponentPreview(grid, entry, component, requestId) {
+  async function loadTemplateComponentPreview(grid, entry, component, requestId, usageRules) {
     const card = document.createElement('div');
     card.className = 'wiring-action-card template-component-card';
 
@@ -1475,6 +1545,18 @@
     frame.className = 'ui-component-preview-frame';
     frame.innerHTML = '<span class="ui-component-preview-loading">Loading preview&hellip;</span>';
     card.appendChild(frame);
+
+    // Real usage-rule text from GUIDELINES.md's own "Per-component usage
+    // rules" section, matched case-insensitively by component.name -- a
+    // component with no matching bullet (e.g. one not yet documented)
+    // simply gets no caption, never a placeholder/invented one.
+    const usageRule = usageRules[component.name.toLowerCase()];
+    if (usageRule) {
+      const captionEl = document.createElement('p');
+      captionEl.className = 'template-component-caption';
+      captionEl.textContent = usageRule;
+      card.appendChild(captionEl);
+    }
 
     if (requestId !== detailTemplateRequestId) return; // superseded before attaching
     grid.appendChild(card);
