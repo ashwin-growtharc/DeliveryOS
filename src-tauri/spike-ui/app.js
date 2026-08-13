@@ -1025,6 +1025,22 @@
   // own async artifact.readPayloadFile call.
   let genericReadmeRequestId = 0;
 
+  // openComponentDetail's own single-iframe listener + request-id guard --
+  // a THIRD independent "one active interactive iframe" context, alongside
+  // detailPreviewMessageHandler (a whole standalone artifact) and
+  // detailTemplateMessageHandlers (the grid's own array of N at once).
+  // Needs its own teardown, not reuse of either -- this view shows exactly
+  // one component from a design-kit-shaped bundle at a time.
+  let componentDetailMessageHandler = null;
+  let componentDetailRequestId = 0;
+
+  function clearComponentDetailListener() {
+    if (componentDetailMessageHandler) {
+      window.removeEventListener('message', componentDetailMessageHandler);
+      componentDetailMessageHandler = null;
+    }
+  }
+
   // Same array-based teardown discipline as uiComponentsListMessageHandlers
   // above, NOT the single-variable detailPreviewMessageHandler discipline --
   // the template grid hosts one iframe PER component (N at once), so
@@ -1558,6 +1574,104 @@
     }
   }
 
+  /** Opens a dedicated, full view of ONE component from a design-kit-shaped
+   * grid -- every real CSF variant as tabs, a live props-controls panel,
+   * and the complete (untruncated) usage-rule text. Clones
+   * loadDetailPreview's own tabs/message-handler/controls-panel logic,
+   * parameterized for a design-kit sub-component instead of a whole
+   * artifact -- kept as its own function rather than forced through a
+   * shared helper with loadDetailPreview, since the two contexts differ
+   * enough (different DOM ids, this one also needs setTheme support) that
+   * merging them would add more indirection than it would save. Reuses
+   * the exact same `preview.compilePayloadComponent` RPC the grid card
+   * already calls -- no new engine/sidecar work. */
+  async function openComponentDetail(entry, component, usageRule) {
+    const requestId = ++componentDetailRequestId;
+
+    state.componentDetailReturnEntry = entry;
+    $('component-detail-name').textContent = component.name;
+    $('component-detail-usage-rule').textContent = usageRule || '';
+
+    const tabsContainer = $('component-detail-tabs');
+    const controlsContainer = $('component-detail-controls');
+    const frame = $('component-detail-frame');
+
+    tabsContainer.innerHTML = '';
+    controlsContainer.innerHTML = '';
+    frame.innerHTML = '<span class="ui-component-preview-loading">Loading preview&hellip;</span>';
+    clearComponentDetailListener();
+    showViewRaw('component-detail');
+
+    let result;
+    try {
+      result = await call('preview.compilePayloadComponent', {
+        remote: entry.remoteName,
+        id: entry.manifest.id,
+        relativeDir: component.relativeDir,
+      });
+    } catch (err) {
+      if (requestId !== componentDetailRequestId) return; // superseded while awaiting
+      frame.innerHTML = '';
+      const placeholder = document.createElement('span');
+      placeholder.className = 'ui-component-preview-loading';
+      placeholder.textContent = `Preview unavailable -- ${err instanceof Error ? err.message : String(err)}`;
+      frame.appendChild(placeholder);
+      return;
+    }
+    if (requestId !== componentDetailRequestId) return; // superseded while awaiting
+
+    const iframe = document.createElement('iframe');
+    iframe.sandbox = 'allow-scripts';
+    iframe.srcdoc = result.html;
+    frame.innerHTML = '';
+    frame.appendChild(iframe);
+
+    const tabsByVariant = new Map();
+    result.variantNames.forEach((variantName) => {
+      const tab = document.createElement('button');
+      tab.className = 'tab';
+      tab.textContent = variantName;
+      tab.addEventListener('click', () => {
+        iframe.contentWindow.postMessage({ type: 'selectVariant', variant: variantName }, '*');
+      });
+      tabsContainer.appendChild(tab);
+      tabsByVariant.set(variantName, tab);
+    });
+
+    componentDetailMessageHandler = (event) => {
+      if (event.source !== iframe.contentWindow) return;
+      const data = event.data;
+      if (!data || typeof data !== 'object') return;
+      if (data.type === 'ready') {
+        // Same theme the grid this component came from is currently
+        // showing, so switching between the grid and this view never
+        // looks like it silently reset the toggle.
+        iframe.contentWindow.postMessage({ type: 'setTheme', theme: currentTemplateTheme }, '*');
+        return;
+      }
+      if (data.type === 'contentHeight') {
+        const clampedHeight = clampPreviewHeight(data.height);
+        frame.style.height = `${clampedHeight}px`;
+        iframe.style.height = `${Math.min(data.height, clampedHeight)}px`;
+        return;
+      }
+      if (data.type !== 'variantChanged') return;
+      for (const [variantName, tab] of tabsByVariant) {
+        tab.classList.toggle('active', variantName === data.variant);
+      }
+      renderControlsPanel(
+        result.propsSchemas,
+        data.componentName,
+        data.initialProps,
+        (changedProps) => {
+          iframe.contentWindow.postMessage({ type: 'setProps', props: changedProps }, '*');
+        },
+        'component-detail-controls',
+      );
+    };
+    window.addEventListener('message', componentDetailMessageHandler);
+  }
+
   /** Compiles and mounts ONE component's live preview inside the template
    * grid -- clones loadUiComponentPreview's own per-card iframe pattern
    * (own contentHeight resize handler scoped via event.source, no
@@ -1576,6 +1690,14 @@
     const nameEl = document.createElement('code');
     nameEl.textContent = component.name;
     header.appendChild(nameEl);
+    const detailBtn = document.createElement('button');
+    detailBtn.type = 'button';
+    detailBtn.className = 'btn btn-ghost btn-sm';
+    detailBtn.textContent = 'View details';
+    detailBtn.addEventListener('click', () => {
+      void openComponentDetail(entry, component, usageRules[component.name.toLowerCase()]);
+    });
+    header.appendChild(detailBtn);
     card.appendChild(header);
 
     const frame = document.createElement('div');
@@ -1827,8 +1949,8 @@
     return prop.defaultValue;
   }
 
-  function renderControlsPanel(propsSchemas, componentName, initialProps, onChange) {
-    const container = $('detail-preview-controls');
+  function renderControlsPanel(propsSchemas, componentName, initialProps, onChange, containerId = 'detail-preview-controls') {
+    const container = $(containerId);
     container.innerHTML = '';
 
     const schema = propsSchemas[componentName] || [];
@@ -4323,6 +4445,13 @@
       } else {
         showView(state.detailReturnView ?? 'browse');
       }
+    });
+    // Returns to the SAME design-kit-shaped artifact's own Detail view
+    // (never just Browse) -- openComponentDetail always sets
+    // state.componentDetailReturnEntry right before navigating here.
+    $('back-to-component-grid-btn').addEventListener('click', () => {
+      clearComponentDetailListener();
+      openDetail(state.componentDetailReturnEntry);
     });
     // Individually wired (not the generic `[data-view]` loop above) since
     // its destination depends on how Add New was entered -- Scan's own

@@ -17,6 +17,21 @@ design rationale.
   existing section), `badge-showcase`/`design-kit` correctly show
   nothing extra.
 
+- **A dedicated per-component detail view for design-kit's grid.**
+  Clicking a component out of the grid now opens a real view of it alone
+  -- every CSF variant as tabs, a live props-controls panel, full
+  usage-rule text -- reusing `loadDetailPreview`'s own proven tabs/
+  controls-panel logic (`renderControlsPanel` generalized with an
+  optional container id, not duplicated) rather than inventing a new
+  interaction. Follows this app's existing view-navigation convention
+  (no modal pattern exists anywhere in the app); gets its own independent
+  message-listener teardown as a genuinely new third "single active
+  iframe" context, distinct from the standalone-artifact preview and the
+  grid's own array-based one. Verified via lint/typecheck/full suite
+  (435 passed, 1 known baseline failure) plus a real headless-browser
+  check confirming the exact `selectVariant` message the new tabs send
+  actually re-renders the target variant's real content.
+
 - **Catalog growth: three real artifacts pulled from a real GrowthArc
   project template (`GA_Global_Template_ReactTS`).** Surveyed its
   checked-out `main` (mostly stock Vite boilerplate) and two unmerged
