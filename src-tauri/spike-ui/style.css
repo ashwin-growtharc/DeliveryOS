@@ -378,6 +378,23 @@ input, textarea, select {
   margin-bottom: 16px;
 }
 
+/* Same shape as .hint-banner, but for a genuinely AI-generated finding
+ * (Phase 11 item 3, "Suggest with Claude" on the Review step) rather
+ * than a plain mechanical fact -- accent-500 border instead of gold-500,
+ * the one deliberate exception to .hint-banner's own "stays in the warm
+ * palette" comment above, since DESIGN_SYSTEM.md reserves the AI accent
+ * specifically for AI-specific elements, and this is one. Signals
+ * "probabilistic judgment call, worth double-checking" vs. item 2's
+ * deterministic .hint-banner warnings, not just a copy difference. */
+.hint-banner-ai {
+  background: var(--sky-100);
+  border-left: 3px solid var(--accent-500);
+  border-radius: var(--radius-md);
+  padding: 12px 16px;
+  font-size: 13.5px;
+  margin-bottom: 16px;
+}
+
 /* ---------- browse ---------- */
 
 /* Two distinct rows, not one flat line of 8 mixed controls: search+primary
@@ -1382,6 +1399,144 @@ input, textarea, select {
   overflow-x: auto;
 }
 
+/* Phase 11 Detail-view task: design-kit's color tokens/type scale/
+   component grid. Reuses .wiring-action-card/.chip-picker verbatim for
+   everything structural -- only the swatch/table/grid layout pieces below
+   are genuinely new. */
+.token-swatch-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.token-swatch {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 76px;
+}
+
+.token-swatch-color {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.token-swatch-label {
+  font-size: 10.5px;
+  font-family: var(--font-mono, monospace);
+  text-align: center;
+  line-height: 1.3;
+  word-break: break-word;
+}
+
+/* Type scale as real applied type samples, not a data table -- each row
+   is rendered in its own real Font/Weight/Size (see fontFamilyStack in
+   app.js), so this shows what the type actually looks like. */
+.type-sample-list {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 4px;
+}
+
+.type-sample-row {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  padding: 8px 0;
+  border-bottom: 1px dashed var(--border);
+}
+
+.type-sample-row:last-child {
+  border-bottom: none;
+}
+
+.type-sample-label {
+  font-family: var(--font-mono, monospace);
+  font-size: 10.5px;
+  opacity: .65;
+  width: 130px;
+  flex-shrink: 0;
+}
+
+.type-sample-text {
+  color: var(--ink, inherit);
+}
+
+.template-theme-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.template-theme-toggle-caption {
+  font-size: 12px;
+  opacity: .65;
+}
+
+.template-component-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.template-component-card .ui-component-preview-frame {
+  margin-top: 8px;
+}
+
+.template-component-caption {
+  font-size: 12px;
+  opacity: .75;
+  margin: 6px 0 0;
+  line-height: 1.5;
+}
+
+/* Layout-rules summary strip: real radius tokens as chips, plus
+   GUIDELINES.md's own Layout grid/Spacing prose -- never the mockup's
+   fictional "Max width/Section rhythm" labels, since those were invented
+   for its own made-up demo kit, not something this real doc states. */
+.layout-rules-strip {
+  margin-top: 4px;
+}
+
+.radius-token-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.radius-token-chip {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 6px 10px;
+  background: var(--surface-tertiary);
+  font-size: 11px;
+}
+
+.radius-token-chip code {
+  font-size: 11.5px;
+}
+
+.radius-token-chip span {
+  opacity: .65;
+}
+
+.layout-rules-note {
+  font-size: 12.5px;
+  opacity: .75;
+  line-height: 1.5;
+  margin: 0 0 8px;
+}
+
 /* ---------- progress panel (live Pull/Push stage feed) ----------
  * Deliberately not a numeric `<progress>` percentage bar: there is no
  * honest way to know "80% done" for an arbitrary post_install shell command
@@ -1499,6 +1654,29 @@ input, textarea, select {
 }
 
 .build-fix-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* Phase 11 item 4: structurally identical to .build-fix-row/-result/
+ * -actions above, kept as its own set rather than a shared/renamed
+ * class -- each feature's own styling stays independently editable,
+ * matching how item 3 got its own .hint-banner-ai instead of
+ * overloading .hint-banner. */
+.design-fix-row {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 8px 10px;
+  background: var(--card);
+  margin-bottom: 8px;
+}
+
+.design-fix-result {
+  margin-top: 8px;
+}
+
+.design-fix-actions {
   display: flex;
   gap: 8px;
   margin-top: 8px;

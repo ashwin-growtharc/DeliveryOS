@@ -526,6 +526,18 @@ async function compileReactPreview(previewEntryPath: string): Promise<CompiledPr
         selectVariant(data.variant);
       } else if (data.type === 'setProps' && currentType) {
         renderElement(currentType, data.props);
+      } else if (data.type === 'setTheme') {
+        // Real toggle mechanism (Phase 11 Detail-view task), currently
+        // inert for every design-kit component: darkMode:'class' already
+        // compiles real dark: utilities against a .dark ancestor, but no
+        // current component uses dark: classes at all (DESIGN_SYSTEM.md is
+        // light-only by design). Sets colorScheme on BOTH html and body --
+        // the hardcoded "color-scheme: light" rule below targets them
+        // together with no !important, so an override on html alone
+        // wouldn't beat body's own explicit rule.
+        document.documentElement.classList.toggle('dark', data.theme === 'dark');
+        document.documentElement.style.colorScheme = data.theme;
+        document.body.style.colorScheme = data.theme;
       }
     });
 

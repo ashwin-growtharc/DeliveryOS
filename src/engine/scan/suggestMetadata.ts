@@ -14,8 +14,11 @@ export interface SuggestedMetadata {
 
 /** Reads a payload's real source, concatenated file-by-file up to
  * `MAX_SOURCE_CHARS` total -- capped so a large payload doesn't blow up
- * the prompt, not because any individual file is untrusted. */
-function readPayloadSource(payloadPath: string): string {
+ * the prompt, not because any individual file is untrusted. Exported so
+ * `suggestAntiPatterns.ts` (Phase 11 item 3) shares this one
+ * implementation instead of a second copy -- same subprocess shape,
+ * same real payload-reading logic. */
+export function readPayloadSource(payloadPath: string): string {
   const stat = fs.statSync(payloadPath);
   const files = stat.isFile() ? [payloadPath] : listFilesRecursively(payloadPath, SOURCE_FILE_PATTERN);
 

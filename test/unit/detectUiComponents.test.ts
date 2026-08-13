@@ -159,6 +159,36 @@ export function Button({ label, variant = 'primary' }: ButtonProps) {
     expect(candidates).toEqual([]);
   });
 
+  it('surfaces a real two-level self-nesting mistake as a warning (Phase 11 item 2, the first mechanical anti-pattern rule)', () => {
+    const cwd = project();
+    writeFile(
+      cwd,
+      'src/ui/Card/Card.tsx',
+      `export interface CardProps {
+        title: string;
+        children: React.ReactNode;
+      }
+
+      export function Card({ title, children }: CardProps) {
+        return (
+          <div>
+            <Card title={title}>
+              <Card title={title}>{children}</Card>
+            </Card>
+          </div>
+        );
+      }
+      `,
+    );
+
+    const candidates = detectUiComponentCandidates(cwd, alwaysNew);
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].warnings).toBeDefined();
+    expect(candidates[0].warnings!.some((w) => w.includes('"Card" renders itself nested two levels deep'))).toBe(
+      true,
+    );
+  });
+
   describe('flat convention (no dedicated folder)', () => {
     it('stages a copy of the component + a generated preview.tsx, leaving the original untouched', () => {
       const cwd = project();

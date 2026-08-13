@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { resolveArtifact } from '../pull/pull';
-import { cachePath } from '../remote/remoteCache';
+import { resolvePayloadDir } from '../payload/payloadDir';
 import { getOrCompilePreview, compilePreviewHtml, CompiledPreview } from './compile';
 
 /** Conventional preview entry filenames, checked in this priority order
@@ -37,17 +37,8 @@ export function findPreviewEntryFile(payloadDir: string): string {
  * docs/ui-components-feature-design.md §1.
  */
 export async function compileArtifactPreview(remoteName: string, id: string): Promise<CompiledPreview> {
-  const entry = resolveArtifact(id, remoteName);
-  const { manifest } = entry;
-
-  const remoteDir = cachePath(remoteName);
-  // Same payload_path escape-hatch convention pullArtifact/pushArtifact
-  // already use -- see src/engine/manifest/schema.ts's own doc comment on
-  // that field.
-  const payloadDir = manifest.payload_path
-    ? path.join(remoteDir, manifest.payload_path)
-    : path.join(remoteDir, 'artifacts', manifest.id, 'payload');
-
+  const { manifest } = resolveArtifact(id, remoteName);
+  const payloadDir = resolvePayloadDir(remoteName, id);
   const previewEntryPath = findPreviewEntryFile(payloadDir);
   return getOrCompilePreview(remoteName, id, manifest.version, previewEntryPath);
 }

@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { ComponentDoc, PropItem } from 'react-docgen-typescript';
 import { parseComponentFile, parseEnumValues } from '../preview/docgen';
+import { detectSelfNestingWarnings } from './detectSelfNesting';
 import { scanStagingDir } from '../paths';
 import { ScanCandidate } from './types';
 
@@ -151,6 +152,11 @@ export function detectUiComponentCandidates(cwd: string, isNew: (id: string) => 
         : materializeFlatCandidate(file.absPath, cwd, id, doc, source);
 
       warnings.push(...materialized.importWarnings);
+      // First mechanical anti-pattern rule (PLAN.md Phase 11 item 2) --
+      // see detectSelfNesting.ts's own doc comment for why this needs a
+      // real AST walk (react-docgen-typescript returns no raw tree) and
+      // why the threshold is two levels of self-nesting, not one.
+      warnings.push(...detectSelfNestingWarnings(source, doc.displayName, file.absPath));
 
       candidates.push({
         id,

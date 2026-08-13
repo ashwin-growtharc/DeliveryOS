@@ -2214,3 +2214,497 @@ was given for (no tool access, app writes the fix, human confirms, real
 rebuild verification with auto-rollback) is what actually got built —
 not the original unrestricted-`--allowedTools` plan, which this project
 had already found doesn't hold up.
+
+## Phase 11 — A design-kit bundle, plus a design-quality check — **Not started, brainstormed only**
+
+Goal: a real design-kit (five components + a guideline doc covering
+approved patterns, anti-patterns, layout rules, and voice/tone) can be
+pulled as one bundle into a fresh project, and after Claude Code builds UI
+from it, a design-quality check runs — mechanical anti-pattern detection
+first, an explicit AI-judgment ask for the subjective cases, a proposed fix
+a person confirms before it lands — reusing Phase 10's exact
+apply→verify→offer-to-fix shape, pointed at design quality instead of
+build correctness.
+
+Full background in
+[docs/product-roadmap-vision.md](docs/product-roadmap-vision.md) ("A
+design-kit bundle" section) — this phase turns that brainstorm into scoped
+tasks, same discipline every earlier phase here uses.
+
+**Two things corrected by research before this got scoped, not assumed:**
+
+1. **The real app's own frontend can't be the source material.**
+   `src-tauri/spike-ui/app.js` is confirmed vanilla JS — its own header
+   comment says so directly ("vanilla JS, single-page, no framework"), and
+   it's built from 60+ raw `document.createElement()` calls, not JSX. The
+   existing `kind: ui-component` pipeline (`detectUiComponents.ts`,
+   docgen) hard-requires `.tsx`/`.jsx`. On reflection this was pointing at
+   the wrong source anyway — the Tauri shell is desktop-app chrome, not
+   representative of the real Next.js/React stack client engagements
+   actually use (the same stack Phase 7 already confirmed). **The real
+   target instead: five components (Button, TopBar, Card, Feedback,
+   Input) authored fresh as real React/TSX, styled from
+   [DESIGN_SYSTEM.md](../DESIGN_SYSTEM.md)'s actual tokens** — proven
+   through the same unmodified `kind: ui-component` pipeline
+   `expanding-tabs`/`magic-container` already use.
+2. **Ship it as one `kind: template` bundle, not five separate
+   `kind: ui-component` entries.** Five separate artifacts pulled together
+   would quietly reintroduce the exact unsolved problem named elsewhere in
+   the roadmap doc — independent artifacts with no mechanism to resolve
+   conflicts between them. One `kind: template` bundle (the same
+   whole-directory, Pull-only mechanism `arcos-cli`/`launchpad-template`
+   already proved) sidesteps it entirely — one pull, no multi-artifact
+   wiring needed. Individual components stay live-previewable anyway:
+   `compileLocalPreview` (Phase 6, Phase D) already proves preview works
+   straight off a local payload directory, no separate catalog entry
+   required.
+
+- [x] **Author the real target and pick the guideline doc's real content**
+      — five components (Button, Card, TopBar, Feedback, Input), styled
+      from DESIGN_SYSTEM.md's real tokens. **Light values only, not "both
+      light and dark" as originally written here** — this repo's own real
+      design system is confirmed light-only (see the dark-mode preview
+      contrast fix earlier in Phase 6); there is no dark palette anywhere
+      to match, so a dark variant would have been invented, not sourced.
+      Guideline doc (`GUIDELINES.md`) covers: color tokens (including
+      status colors and the radius/spacing scale, neither of which
+      DESIGN_SYSTEM.md's own markdown documents — recovered from the app
+      shell's real `style.css` `:root` and written down for reuse for the
+      first time), type scale, a layout-grid note, per-component
+      placement/usage rules, a concrete anti-patterns list, and a
+      voice/tone note. Pushed as one `kind: template` bundle via the
+      existing, unmodified `push --new` path — real PR opened:
+      [growtharc-ai-helpers#57](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/57).
+      **Payload folder structure, corrected from this task's original
+      "fully flat, no subfolders at all" phrasing**: `findPreviewEntryFile`
+      looks for a fixed `preview.tsx` filename in ONE directory, so five
+      components genuinely sharing one flat `components/` directory would
+      collide on that filename — confirmed by direct investigation of
+      `docgen.ts`/`resolveArtifactPreview.ts` before writing anything.
+      Landed on one subdirectory per component
+      (`components/Button/{Button.tsx,preview.tsx}`, etc.) under a shared
+      `components/` parent — still "flat" in the sense this task actually
+      cared about (no premature *category* grouping like `forms/`
+      unifying unrelated components), just not literally flat files. The
+      rule for when a category folder IS warranted is written into
+      `GUIDELINES.md` itself: only once 3+ genuinely related components
+      exist that would otherwise clutter the list (e.g. `Input`/`Select`/
+      `Checkbox` → `forms/`); a single component never gets a folder just
+      to avoid looking loose.
+      **A real bug found and fixed while authoring `Input`'s preview**: a
+      CSF variant function is called directly as a plain JS function, not
+      rendered through React (`docs/ui-components-feature-design.md`'s
+      own Phase C correction) — calling `useState()` inside the variant
+      function itself is a genuine rules-of-hooks violation (no active
+      render pass, no dispatcher active yet), confirmed by hand: it threw
+      `Cannot read properties of null (reading 'useState')` the instant
+      the variant was selected, with an otherwise-blank preview and zero
+      console errors (the harness's own try/catch swallows it into a
+      `postMessage`, not a thrown/visible error) — caught only by
+      actually rendering the compiled output in a real browser, not by
+      the text-based dogfood check alone, which had already passed.
+      Fixed by moving the `useState` call into a real component the
+      variant merely returns an element for (mirroring the proven
+      `Signin1` pattern), never inline in the variant function itself.
+      Verified for real: `compileLocalPreview` against all 5 components
+      (props schemas + expected token hex values all present), then each
+      one actually rendered and interacted with in a real browser
+      (typing into `Input`, switching its variants) before pushing.
+- [x] **The mechanical anti-pattern detector — start with one narrow,
+      real rule, not a vague general one.** `detectUiComponents.ts`/
+      `docgen.ts` only ever call `react-docgen-typescript` as a black
+      box (confirmed by grepping all of `src/engine` for
+      `ts.createSourceFile`/`JsxElement`: zero matches) — it returns
+      prop docs, never a raw AST, so it couldn't be reused for this.
+      `src/engine/scan/detectSelfNesting.ts` is the first code anywhere
+      in this repo to `import * as ts from 'typescript'` directly and
+      walk a real JSX tree. First real rule, deliberately narrow rather
+      than "detect all nested cards" (legitimate nesting exists — a stat
+      card inside a dashboard card is fine, confirmed with a real
+      dogfood fixture that correctly produces no warning): flags a
+      component whose JSX renders itself nested exactly two levels deep
+      (`<A><A/></A>`) — clarified directly with the user, since this
+      task's own original phrasing ("nested directly inside itself, two
+      or more levels deep") was ambiguous between this and flagging any
+      self-nest at all. A single self-nest (one `<A/>` inside A's own
+      render, depth 1 — e.g. a real tree-node/nested-accordion
+      component) is explicitly allowed and never flagged; confirmed with
+      a second real dogfood fixture (`TreeNode`, legitimately recursive)
+      producing no warning while a genuinely broken two-level `StatCard`
+      fixture does, both through the real built detector, not just the
+      isolated unit tests. Plugs into the existing, already-generic
+      `ScanCandidate.warnings` array (`detectUiComponentCandidates`) —
+      reaches both display surfaces (the CLI's `scan` output and the Add
+      New wizard's Review-step `.hint-banner` warnings) with zero new
+      plumbing, confirmed by reading both call sites before writing
+      anything. 8 new tests (7 unit, against `detectSelfNestingWarnings`
+      directly — including the "different component nested" and
+      "multiple separate chains in one file" cases PLAN.md explicitly
+      calls out; 1 integration, through the real
+      `detectUiComponentCandidates` entry point). Widen the rule set
+      later, once this one's false-positive rate is actually known, not
+      assumed.
+- [x] **"Suggest with Claude" for the subjective anti-patterns a rule
+      can't catch** — reuses Phase 10 item 3's exact proven subprocess
+      shape (stdin-piped prompt, strict JSON out, untrusted-source
+      delimiters) via `src/engine/scan/suggestAntiPatterns.ts`; the one
+      shared piece worth factoring out, `readPayloadSource`, was
+      exported from `suggestMetadata.ts` rather than duplicated. Sits on
+      the Add New wizard's Review step, gated identically to the live
+      preview above it. **Explicit button, never automatic** — same rule
+      Phase 10 already established, since it costs a real API call and
+      real latency. **Two real scope decisions confirmed with the user
+      before building**: the button uses the app's reserved AI-accent
+      styling (`.btn-accent`, precedented by the Scan button, per
+      `DESIGN_SYSTEM.md`'s "AI tones for AI-specific elements only" rule
+      — the Description step's own suggest buttons don't follow this,
+      confirmed to be an existing inconsistency, not a pattern to
+      extend); findings render in a new `.hint-banner-ai` variant
+      (`accent-500` border, not item 2's `gold-500`) so an AI judgment
+      call reads visibly differently from a deterministic mechanical
+      warning. The anti-patterns reference is a concise, hardcoded list
+      (in the spirit of `GUIDELINES.md`'s own list, generalized beyond
+      the five design-kit components) applied to any `kind: ui-component`
+      candidate under review, not gated on the design-kit being pulled
+      locally.
+      **Verified with a real `claude -p` call, not mocked**: a planted
+      `ConfirmDialog` fixture (a red "Delete" button next to a
+      barely-visible, low-opacity "cancel") correctly produced two real
+      findings — the intended low-contrast-cancel-next-to-destructive
+      issue, PLUS a genuine, unplanted bonus finding (an 8px/6px
+      border-radius inconsistency actually present in the fixture); a
+      clean `CleanCard` fixture correctly produced `[]`, not an invented
+      issue. 13 new unit tests mirroring `suggestMetadata.test.ts`'s
+      exact shapes (prompt-injection delimiter check, malformed-JSON
+      handling, empty-array-is-valid).
+- [x] **The fix step reuses Phase 10 item 2's exact approved design** — no
+      tool access, strict JSON in/out, the app applies the fix through its
+      own existing write path (`src/engine/scan/fixAntiPattern.ts`,
+      structurally mirroring `fixBuildFailure.ts`), a human confirms
+      before it lands (the same real two-click ask → preview → Apply/
+      Discard flow, per-finding rows on the Review step), a real check
+      verifies it, auto-rollback if it doesn't actually work. **Two real
+      gaps in "nothing new to design here," resolved with the user
+      first**: neither item 2's mechanical warnings nor item 3's AI
+      findings say which FILE a finding is about (confirmed by reading
+      both) — resolved by extending the fix prompt itself to ask which
+      file needs the change, then re-validating that file resolves
+      safely inside the candidate's own payload directory (reusing
+      `resolveContainedTargetFile`, already fully generic, rooted at the
+      payload instead of a real project's `cwd` — zero new
+      path-traversal logic needed) before writing anything, never
+      trusting the model's own answer blindly. And unlike a real
+      project, this candidate has no build command to re-run for
+      verification — `compileLocalPreview` (confirmed to always
+      recompile fresh from disk, never cached, and to genuinely throw on
+      a real syntax/bundle error) stands in for "a real rebuild," with
+      the same honest caveat `runProjectBuild` already has: it verifies
+      "does it still compile," not "is the anti-pattern actually gone."
+      Its own audit log, `.deliveryos/design-fix-log.jsonl` (kept
+      separate from `build-fix-log.jsonl` rather than shared, so neither
+      needs a discriminant field) — a real edit to a real file on disk
+      either way, same standard regardless of whether the target's been
+      pushed yet.
+      **Verified with a real, full request→apply cycle, not mocked**:
+      run against the real `ConfirmDialog` fixture from item 3 (the
+      low-contrast-cancel-next-to-destructive finding) — correctly named
+      `ConfirmDialog.tsx` as the target, and the real fix gave Cancel a
+      visible border, full opacity, matching font-weight, and a readable
+      size, a genuinely sensible secondary-button treatment, not just
+      "didn't crash." Applied for real, verified via a real
+      `compileLocalPreview` call, file on disk confirmed correct
+      afterward. The rollback path (a deliberately broken fixed-file)
+      is covered by a real, non-mocked unit test — a genuine esbuild
+      syntax error, real rollback, file on disk confirmed restored to
+      the original. 17 new unit tests mirroring
+      `fixBuildFailure.test.ts`'s exact shapes, including the
+      path-traversal-refusal trap-directory technique.
+- [x] **Open scoping question, resolved: add empty/error/loading-state
+      coverage now, not deferred.** User chose to add it to the
+      already-merged bundle rather than wait for a follow-up. Resolving
+      it surfaced a second real gap: motion rules were named in the same
+      roadmap-doc sentence as empty/error/loading states ("easy to forget
+      until it's needed") but never made it into this file's scoped task
+      list at all — user chose to add both together rather than split
+      them across two passes.
+      **Confirmed the edit path before touching anything**: re-running
+      `push --new` on `design-kit` throws `IdCollisionError` immediately
+      (not viable); `push`'s edit-mode diff logic
+      (`src/engine/push/push.ts`) has zero `kind`-specific branching —
+      it diffs `install_target` against the pristine snapshot
+      regardless of kind, so a `kind: template` artifact can be pushed
+      as a real edit exactly like any other kind. The "templates are
+      Pull-only" note in the `arcos-cli`/`launchpad-template` retros is
+      scoped to those artifacts' own shape (a 75-file whole-repo mirror,
+      where a push-back diff would be unbounded) — not a code-level
+      gate, and not applicable to `design-kit`'s much smaller payload.
+      **Three new components** (`EmptyState`, `ErrorState`, `Skeleton`),
+      same conventions as the original five — inline
+      `React.CSSProperties`, real `DESIGN_SYSTEM.md` hex tokens,
+      `function X(props)` never `React.FC`, own
+      `components/<Name>/{Name.tsx,preview.tsx}` subdirectory each.
+      `ErrorState` reuses `EmptyState`'s exact layout with a
+      danger-toned icon circle (`#FFE5E0`/`#A2341F`) instead of a
+      neutral one, so the two read as visually distinct at a glance, not
+      just by copy. `Skeleton` is the concrete real example the new
+      Motion section points at: a `prefers-reduced-motion` override that
+      disables its pulse entirely (`animation: none`), never just slows
+      it, mirroring `DESIGN_SYSTEM.md`'s own Accessibility rule.
+      **New `## Motion` section in `GUIDELINES.md`**, placed after
+      Layout grid (a similarly foundational, token-like rule): ordinary
+      hover/focus transitions at `.15s ease` (the exact value already
+      live in `Button.tsx`'s hover-opacity transition), up to `.2s
+      ease-out` for a larger reveal, nothing slower — this kit has no
+      large entrance animations by design. New usage-rule bullets for
+      all three components and a new anti-pattern entry (never strip or
+      override `Skeleton`'s reduced-motion behavior "for snappiness").
+      **Verified for real before pushing**: `compileLocalPreview` against
+      each of the three new components confirmed a clean compile, real
+      docgen props (including `Skeleton`'s `variant` default of
+      `"text"`), expected hex tokens present in the compiled output, and
+      for `Skeleton` specifically that the compiled HTML contains a real,
+      functioning `@media (prefers-reduced-motion: reduce)` rule setting
+      `animation: none`.
+      Pushed as a real edit via `deliveryos push design-kit --bump minor`
+      (not `--new`) — real PR opened:
+      [growtharc-ai-helpers#58](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/58),
+      version `1.0.0` → `1.1.0`, exactly the 8 expected file changes
+      (manifest bump, `GUIDELINES.md` edit, 3 new component pairs).
+- [x] **A real Detail view for the design-kit itself — built.** Gated
+      exactly like the backend-plugin section (real file presence — a
+      `GUIDELINES.md` at the payload root — never a `kind` check): a new
+      `artifact.parseGuidelines` RPC reads it via the existing
+      `readArtifactPayloadFile` and returns `{present, colorTokens,
+      typeScale}`, letting `renderDetail` show/hide the new
+      `#detail-template-section` without ever branching on
+      `manifest.kind`.
+      **Color tokens/type scale**: `src/engine/guidelines/parseGuidelinesTokens.ts`,
+      a lenient regex extractor (no markdown library exists in this repo —
+      matches this codebase's own source-text-regex convention), not a
+      real parser — tolerates `GUIDELINES.md`'s real mixed shape (small
+      tables plus comma-separated inline-code shorthand for Sage/Sand/
+      AI-accent). Dogfooded against the real, live `design-kit` catalog
+      entry: 24 real hex tokens extracted (including both background AND
+      text hex from the Status-colors table's two-hex rows) and all 4
+      type-scale rows, byte-for-byte matching `GUIDELINES.md`'s own
+      content.
+      **Component grid**: reuses `compileLocalPreview` unchanged (a Plan
+      sub-agent's review caught that my first draft would have
+      unnecessarily extended `compileArtifactPreview`'s cache-key shape —
+      dropped that entirely). New `listArtifactPayloadComponents`
+      (`src/engine/payload/listPayloadComponents.ts`) walks `components/`
+      respecting item 1's flat-vs-folder rule (recurses exactly one
+      bounded extra level for a category folder), and a new
+      `preview.compilePayloadComponent` RPC compiles each one, sandboxed
+      server-side via a newly-extracted `resolvePayloadDir`/
+      `resolveWithinPayloadDir` (`src/engine/payload/payloadDir.ts` — the
+      3rd+ duplicate of this exact resolution logic once this task
+      existed, so it was finally factored out of `readPayloadFile.ts`/
+      `resolveArtifactPreview.ts`). Dogfooded against the real design-kit
+      catalog entry: all 5 real components (`Button`/`Card`/`Feedback`/
+      `Input`/`TopBar`) listed and compiled successfully.
+      **Theme toggle, built despite being visually inert today** — a real
+      scope decision confirmed with the user first: design-kit's
+      components use only inline `React.CSSProperties` (no `dark:`
+      classes at all, since `DESIGN_SYSTEM.md` is light-only by design,
+      item 1's own finding), so flipping it changes nothing visually for
+      any current component — chosen anyway as real, forward-looking
+      infrastructure, with an honest caption saying so in the UI.
+      `compile.ts`'s React-adapter harness gained a `setTheme` message
+      case (toggles a real `.dark` class plus `colorScheme` on both
+      `html` and `body`, since the existing hardcoded rule targets them
+      together with no `!important`). The grid's N simultaneous iframes
+      get array-based teardown (`detailTemplateMessageHandlers`/
+      `clearDetailTemplateListeners`), matching this file's own existing
+      `uiComponentsListMessageHandlers` precedent exactly rather than the
+      single-iframe pattern the one-at-a-time Detail preview uses.
+      **Verified for real in a headless browser, not just by reading the
+      compiled output**: loaded a real compiled `Button` preview into
+      Playwright, posted a real `setTheme` message, and confirmed
+      `document.documentElement`/`body` both actually flip to
+      `classList.contains('dark') === true` and `colorScheme === 'dark'`
+      — then back to light. A strict byte-equality screenshot check
+      across the round trip found an 8-byte difference in a ~10.8KB PNG
+      (~0.07%); a control pair of screenshots with zero state change in
+      between was byte-identical, confirming headless rendering is
+      normally fully deterministic — the tiny diff is consistent with
+      benign antialiasing/scrollbar-rendering variance tied to
+      `color-scheme`, not any real `dark:`-styling change (there is none
+      to trigger). 21 new unit tests (`parseGuidelinesTokens.test.ts`,
+      `listPayloadComponents.test.ts`, `payloadDir.test.ts`, including a
+      path-traversal-refusal trap-directory test).
+- [x] **Detail view redesigned to match a published pitch mockup's visual
+      polish, plus real verification of the two other things that
+      mockup depicted — done as three separately-scoped pieces of work,
+      not one build.** Prompted by comparing the running app against
+      ["DeliveryOS — Design-Kit Bundle, End to End"](https://claude.ai/code/artifact/782d3c35-a40c-4de7-810e-fc3379661d73)
+      (an illustrative pitch Artifact, footer: *"Not built yet... status:
+      draft"*) — its three scenes turned out to need three genuinely
+      different kinds of work, confirmed by research before building
+      anything:
+      1. **Scene 1 (Detail view) — real new code.** Bigger, real color
+         swatches (all 24 real tokens, not the mockup's illustrative 4);
+         the type scale rendered as real applied type samples (each
+         row's own `Element` text, actually set in its real
+         `Font`/`Weight`/`Size` via new `fontFamilyStack`/
+         `parseLeadingNumber` helpers in `app.js`, reusing this app's own
+         already-established `EB Garamond`/`IBM Plex Sans`/`JetBrains
+         Mono` stacks) instead of a plain data table; a real usage-rule
+         caption under each live component preview (new
+         `parseUsageRules` in `parseGuidelinesTokens.ts`, a multi-line
+         bullet-list scanner keyed by component name, matched
+         case-insensitively against `listArtifactPayloadComponents`'s
+         real folder names — confirmed the right join key, not docgen's
+         adapter-specific `displayName`); and a real layout-rules summary
+         strip (new `parseLayoutRules`, combining `## Layout grid`'s real
+         prose with `## Spacing & radius scale`'s real radius-token table
+         and its own trailing spacing-multiples sentence — never the
+         mockup's fictional "Max width/Section rhythm" labels, which were
+         invented for its own made-up demo kit). `artifact.parseGuidelines`
+         (sidecar.ts) gained `usageRules`/`layoutRules` fields. Dogfooded
+         against the real, live `design-kit` catalog entry: all 5
+         components' real captions matched correctly, all 4 real type-scale
+         rows render with valid font/size/weight, all 4 real radius tokens
+         and both real prose notes extracted correctly. 22 new unit tests.
+      2. **Scene 2 (Claude Code checks first) — verification, not
+         construction.** Research found this already exists: `PLAN.md`
+         Phase 8's `deliveryos-check-first` (`kind: skill`,
+         [growtharc-ai-helpers#54](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/54),
+         merged) — the mockup's Scene 2 is a re-description of an
+         already-shipped feature, not something to build fresh.
+         **Verified for real, not assumed clean, and found a genuine
+         gap**: `deliveryos` wasn't linked onto this machine's `PATH` at
+         all — the skill's own documented Prerequisite step
+         ("If `deliveryos` isn't found on `PATH`, say so plainly and
+         stop") would have silently blocked the skill for any real Claude
+         Code session here, not just a test. Fixed via `npm link`. Then
+         confirmed `deliveryos list --json` correctly surfaces
+         `design-kit`'s real, descriptive entry — the skill's own
+         "read through the results yourself and judge relevance"
+         instruction (not a fixed kind-matching list) already handles a
+         `kind: template` match correctly even though the skill's text
+         only names `ui-component`/`skill` as explicit examples.
+      3. **Scene 3 (the demo) — a real, unscripted subprocess run, not a
+         fake terminal simulation.** A genuinely fresh `claude -p`
+         session (`--allowedTools "Bash Write Edit Read Glob Grep"`, no
+         shared context with this conversation) in an empty scratch
+         directory, prompted with the mockup's own "build a simple
+         employee directory page." **Real, honest result, reported as-is
+         rather than reshaped to match the mockup**: the skill
+         auto-triggered correctly (no coaching), ran `deliveryos list
+         --json` for real (222 real catalog entries), found `design-kit`
+         — then, following the skill's own Step 3 ("is it the RIGHT
+         thing, not just A thing?"), correctly declined to force-fit
+         `design-kit`'s five React/TSX components into a directory with
+         no framework or build tooling at all, and built a clean vanilla
+         HTML/CSS/JS page instead. This is the check-first mechanism
+         demonstrating real judgment rather than a scripted "always
+         pulls something" demo — confirmed sufficient real evidence
+         without a second, differently-scaffolded run.
+- [ ] **End-to-end test:** pull the real bundle into a fresh project,
+      confirm all five components render and live-preview correctly via
+      `compileLocalPreview`, deliberately build a component with a planted
+      anti-pattern (same-component-nested-twice), confirm the mechanical
+      check catches it, confirm the fix step corrects it and a real
+      rebuild passes afterward, and confirm the new Detail-view section
+      renders the guideline's tokens/type scale and every component's
+      live preview correctly, in both themes.
+
+## Catalog growth — real content pulled from `GA_Global_Template_ReactTS`
+
+Surveyed a real GrowthArc project template
+(`github.com/growtharc/GA_Global_Template_ReactTS`) for anything worth
+adding to the catalog. Its checked-out `main` branch is mostly stock Vite
+boilerplate; the real substance sat in two **unmerged** remote branches
+(`feature/sso`, `feature/route`) never pulled down locally. Confirmed via
+research before building anything, then pushed three separate real
+artifacts:
+
+- [x] **`azure-msal-sso`, a new `kind: backend-plugin`** — Azure AD/Entra
+      ID SSO via MSAL, modeled directly on the already-shipped
+      `nextauth-credentials` manifest shape (same `payload/` +
+      `wiring_actions` + `README.md` pattern, pointed at this project's
+      real root files instead of Next.js's). **Real bugs found in the
+      source and fixed before shipping, not carried over**:
+      `ProtectedRoute`'s group-based redirect was dead code (`return
+      <Outlet/>` unconditionally either way) — now actually redirects;
+      two duplicate MSAL entry points existed (a context-based `useAuth`
+      and a separate context-bypassing hook with a leftover typo-looking
+      name) — only the context-based one ships; draft "` copy`" files
+      and a confirmed-empty Redux store stub were dropped entirely.
+      **Real manifest-authoring mistake, caught and fixed**: `deliveryos
+      push --new` has no CLI flags for `install_params`/`wiring_actions`
+      at all, and putting a hand-written `manifest.yaml` inside the
+      `--path` payload directory gets it treated as just another payload
+      file to copy — the tool generates its own minimal manifest instead
+      (wrong default `install_target`, empty `install_params`/
+      `wiring_actions`). Caught via reading the real resulting PR, fixed
+      by checking out the pushed branch directly and replacing the
+      generated manifest with the real, schema-validated one (confirmed
+      via `ManifestSchema.safeParse`), removing the erroneous duplicate
+      that had landed in `payload/`.
+      **Verified for real**: a real scratch Vite+React+TS project (not a
+      mock), payload copied in, the two `wiring_actions` snippets applied
+      by hand exactly as written, `tsc -b` and `vite build` both clean.
+      3 real Vitest+RTL tests confirm the fixed `ProtectedRoute` redirect
+      actually works both ways (redirects on a non-matching/null
+      `groups` value, renders real content on a match).
+      Real PR: [growtharc-ai-helpers#59](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/59).
+- [x] **Four new components extending `design-kit`** (not a new
+      artifact) — `feature/route`'s real color/radius tokens turned out
+      to be byte-identical to design-kit's own (`--color-brand-300
+      #1e3c53` = `primary-700`, radius scale matches down to the
+      distinctive `31.25rem` pill value) — same underlying GrowthArc
+      brand system, reimplemented twice, not two conflicting ones.
+      **A real "Header" component was dropped from scope** once
+      building it revealed it would just duplicate the kit's own
+      existing `TopBar` — instead `TopBarNavItem` gained optional
+      `href`/`onClick` (previously purely decorative, no real
+      navigation at all) as a small, non-breaking enhancement. Shipped:
+      `Footer`, `Layout` (generic header/footer `ReactNode` slots, not a
+      hardcoded import of `TopBar`/`Footer`, so it stays composable),
+      `RootErrorBoundary` (this kit's first class component — error
+      boundaries have no hook equivalent). `Content.tsx`'s 7-breakpoint
+      media-query ladder was confirmed not portable to static inline
+      styles and not ported; `feature/route`'s own `ProtectedRoute`/
+      `AdminRoute` stubs (`const isAuth = true`) were confirmed
+      non-functional placeholders with zero value to port. **Real
+      mistake caught before pushing**: `Layout`'s first preview.tsx
+      cross-imported the real `TopBar`/`Footer` from sibling component
+      folders — the compile sandbox correctly refused it (imports can't
+      resolve outside a component's own directory); fixed with plain
+      placeholder markup instead, matching this kit's own established
+      self-contained-preview convention. Pushed from a **fresh** pull
+      (not the scratch project still holding PR #58's unmerged edits),
+      specifically to avoid bundling two unrelated diffs into one PR.
+      Dogfooded via `compileLocalPreview` against all 4; real PR shows
+      exactly the expected file changes.
+      Real PR: [growtharc-ai-helpers#60](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/60)
+      — **note: both this PR and the still-open #58 independently bump
+      `design-kit` 1.0.0→1.1.0; whichever merges second will need a
+      rebase.**
+- [x] **`react-vite-lint-scaffold`, a new `kind: template`** — a real,
+      working ESLint 9 (flat) + Prettier + Stylelint + Husky +
+      lint-staged + commitlint + Knip stack, cleaned up rather than
+      lifted verbatim: dropped `.eslintrc.js` (legacy format extending
+      Next.js-specific presets in a Vite project with no Next.js
+      dependency at all), dropped `.eslintignore` entirely (ESLint 9's
+      flat config doesn't read it — `eslint.config.js`'s own `ignores`
+      key is the real mechanism), dropped `.huskyrc`/`.commitlintrc.json`
+      (dead/redundant duplicates), dropped `.husky/pre-push`'s pointless
+      re-run of `lint-staged`. **Two real, previously-unknown bugs found
+      by actually running the tools, not assumed clean from reading the
+      source**: `knip.json`'s `ignoreDevDependencies` key doesn't exist
+      in the installed Knip version's schema at all (`unrecognized_keys`
+      error) — merged into the current single `ignoreDependencies` key;
+      `commitlint.config.js` used CommonJS (`module.exports`), which
+      genuinely crashes under any Vite project's default `"type":
+      "module"` — rewritten as `export default`, matching
+      `eslint.config.js`'s own ESM style. **Verified for real**: a fresh
+      scratch Vite project, real dependencies installed, `lint`/
+      `stylelint`/`format`/`knip` scripts all actually run; a real `git
+      commit` with a Conventional-Commits-violating message is
+      genuinely rejected by the real `commit-msg` hook (checked via
+      `git log` showing no commit landed), then a real conforming
+      message succeeds.
+      Real PR: [growtharc-ai-helpers#61](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/61).

@@ -38,11 +38,13 @@ import { resolveInstallParamValues, applyInstallParams, readExistingEnvValues } 
 import { resolveWiringActions } from './engine/pull/wiring';
 import { pullAndAutoWire } from './engine/pull/pullAndAutoWire';
 import { requestBuildFix, applyBuildFix } from './engine/pull/fixBuildFailure';
+import { requestAntiPatternFix, applyAntiPatternFix } from './engine/scan/fixAntiPattern';
 import { pushArtifact, PushOptions } from './engine/push/push';
 import { checkForUpdates, resolvePendingPushes } from './engine/sync/sync';
 import { scanForNewArtifacts } from './engine/scan/scan';
 import { detectArtifactMetadata } from './engine/scan/detectArtifactMetadata';
 import { suggestMetadata } from './engine/scan/suggestMetadata';
+import { suggestAntiPatterns } from './engine/scan/suggestAntiPatterns';
 import { getCommitIdentity } from './engine/git/git';
 import {
   listRemotes,
@@ -57,6 +59,14 @@ import { RemoteRegistryError } from './engine/errors';
 import { Manifest } from './engine/manifest/schema';
 import { compileArtifactPreview, compileLocalPreview } from './engine/preview/resolveArtifactPreview';
 import { readArtifactPayloadFile } from './engine/payload/readPayloadFile';
+import { resolvePayloadDir, resolveWithinPayloadDir } from './engine/payload/payloadDir';
+import { listArtifactPayloadComponents } from './engine/payload/listPayloadComponents';
+import {
+  parseColorTokens,
+  parseTypeScale,
+  parseUsageRules,
+  parseLayoutRules,
+} from './engine/guidelines/parseGuidelinesTokens';
 
 interface SidecarRequest {
   id: string;
@@ -291,6 +301,36 @@ const commands: Record<string, CommandHandler> = {
     return { content };
   },
 
+  // Phase 11 Detail-view task: one read + parse of a design-kit-shaped
+  // artifact's GUIDELINES.md, gating the new Detail section on real
+  // content presence -- never a `kind: template` check, matching this
+  // codebase's own backend-plugin-section convention (field/file presence,
+  // not kind). `present: false` (with empty arrays) is the normal case for
+  // any artifact that isn't design-kit-shaped, not an error.
+  'artifact.parseGuidelines': (args) => {
+    const remote = requireString(args, 'remote');
+    const id = requireString(args, 'id');
+    const content = readArtifactPayloadFile(remote, id, 'GUIDELINES.md');
+    if (content === undefined) {
+      return { present: false, colorTokens: [], typeScale: [], usageRules: {}, layoutRules: null };
+    }
+    return {
+      present: true,
+      colorTokens: parseColorTokens(content),
+      typeScale: parseTypeScale(content),
+      usageRules: parseUsageRules(content),
+      layoutRules: parseLayoutRules(content),
+    };
+  },
+
+  // Lists every real, preview-having component in a design-kit-shaped
+  // payload's components/ directory, for Detail's live component grid.
+  'artifact.listPayloadComponents': (args) => {
+    const remote = requireString(args, 'remote');
+    const id = requireString(args, 'id');
+    return { components: listArtifactPayloadComponents(remote, id) };
+  },
+
   // Tier 2 of the wiring agent (Phase 7 item 6): resolves every
   // wiring_action a manifest declares against the REAL project at `cwd` --
   // purely read-only detection (does the target file already exist?),
@@ -367,6 +407,15 @@ const commands: Record<string, CommandHandler> = {
     return suggestMetadata(payloadPath, kind);
   },
 
+  // Phase 11 item 3: the subjective counterpart to item 2's mechanical
+  // self-nesting detector -- same "explicit button, never automatic"
+  // rule as artifact.suggestMetadata above, same real cost (latency + a
+  // real API call). See suggestAntiPatterns.ts's own doc comments.
+  'artifact.suggestAntiPatterns': (args) => {
+    const payloadPath = requireString(args, 'payloadPath');
+    return suggestAntiPatterns(payloadPath);
+  },
+
   // Phase 10 item 2: the "ask" half of "want help fixing this?" -- only
   // ever offered by the UI for a file item 1's own auto-wiring just
   // wrote (AppliedWiringResult.applied), never an arbitrary file guessed
@@ -394,6 +443,31 @@ const commands: Record<string, CommandHandler> = {
     return applyBuildFix(cwd, filePath, fixedFile, buildError, { costUsd, durationMs });
   },
 
+  // Phase 11 item 4: the "ask" half of the fix step for a design
+  // anti-pattern finding (item 2/item 3) -- same "no write, no
+  // audit-log entry" shape as artifact.requestBuildFix above.
+  'artifact.requestAntiPatternFix': (args) => {
+    const payloadPath = requireString(args, 'payloadPath');
+    const finding = requireString(args, 'finding');
+    return requestAntiPatternFix(payloadPath, finding);
+  },
+
+  // Phase 11 item 4: the "apply" half -- writes the fix for real,
+  // re-compiles the candidate's live preview to confirm it still
+  // works, rolls back automatically if it doesn't, and appends exactly
+  // one audit-log entry either way. Only reached after an explicit
+  // human confirmation click; never automatic.
+  'artifact.applyAntiPatternFix': (args) => {
+    const cwd = requireString(args, 'cwd');
+    const payloadPath = requireString(args, 'payloadPath');
+    const file = requireString(args, 'file');
+    const fixedFile = requireString(args, 'fixedFile');
+    const finding = requireString(args, 'finding');
+    const costUsd = typeof args.costUsd === 'number' ? args.costUsd : undefined;
+    const durationMs = typeof args.durationMs === 'number' ? args.durationMs : undefined;
+    return applyAntiPatternFix(cwd, payloadPath, file, fixedFile, finding, { costUsd, durationMs });
+  },
+
   // Real preview-compile command (Phase 6, Phase B), replacing Phase A's
   // temporary `preview.compileDebug`. Reads directly from the named
   // remote's own cloned cache (no pull required) -- the UI Components
@@ -414,6 +488,23 @@ const commands: Record<string, CommandHandler> = {
   'preview.compileLocal': (args) => {
     const payloadPath = requireString(args, 'payloadPath');
     return compileLocalPreview(payloadPath);
+  },
+
+  // Phase 11 Detail-view task: compiles ONE component's live preview out
+  // of a design-kit-shaped payload's components/<Name> subdirectory, for
+  // Detail's grid (one call per component, run in parallel by the app).
+  // Modeled on preview.compileLocal above, NOT a preview.compile variant --
+  // unlike preview.compileLocal (only ever called with the user's OWN
+  // project path during Add New), `relativeDir` here is resolved and
+  // sandboxed against the artifact's real payload dir server-side, since
+  // the caller only supplies a remote/id/relativeDir, never a raw path.
+  'preview.compilePayloadComponent': (args) => {
+    const remote = requireString(args, 'remote');
+    const id = requireString(args, 'id');
+    const relativeDir = requireString(args, 'relativeDir');
+    const payloadDir = resolvePayloadDir(remote, id);
+    const componentDir = resolveWithinPayloadDir(payloadDir, relativeDir);
+    return compileLocalPreview(componentDir);
   },
 };
 

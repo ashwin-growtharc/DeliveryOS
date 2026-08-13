@@ -90,3 +90,14 @@ export class SuggestionError extends DeliveryOsError {}
  * actually resolve the build -- that case is a real, reported rollback,
  * not an error. */
 export class BuildFixError extends DeliveryOsError {}
+
+/** Thrown when Phase 11 item 4's design-fix flow fails outright: the real
+ * `claude` CLI subprocess call fails, returns something that can't be
+ * parsed as the requested JSON shape, or a caller hands `applyAntiPatternFix`
+ * a `file` that resolves outside the candidate's own payload directory --
+ * same containment check `applyBuildFix` already relies on, just rooted at
+ * the payload instead of a real project's `cwd`. Never thrown for an honest
+ * "I can't determine a fix" response, or for a fix that gets applied but
+ * doesn't actually keep the payload compiling -- that's a real, reported
+ * rollback, not an error. */
+export class DesignFixError extends DeliveryOsError {}

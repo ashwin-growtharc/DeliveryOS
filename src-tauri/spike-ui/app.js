@@ -1016,6 +1016,29 @@
   // async artifact.resolveWiringActions call.
   let wiringRequestId = 0;
 
+  // Phase 11 Detail-view task: same request-token-guard discipline, for
+  // renderTemplateSection's own async artifact.parseGuidelines/
+  // artifact.listPayloadComponents/preview.compilePayloadComponent calls.
+  let detailTemplateRequestId = 0;
+
+  // Same array-based teardown discipline as uiComponentsListMessageHandlers
+  // above, NOT the single-variable detailPreviewMessageHandler discipline --
+  // the template grid hosts one iframe PER component (N at once), so
+  // switching Detail to a different artifact must remove every one of
+  // them, not just one.
+  let detailTemplateMessageHandlers = [];
+  // Parallel to the array above: the grid's own live iframes, so the theme
+  // toggle can broadcast `setTheme` to every currently-mounted one without
+  // needing to re-query the DOM.
+  let detailTemplateIframes = [];
+
+  // The template grid's currently-selected theme ('light' or 'dark') --
+  // read by each card's handler on the harness's own 'ready' message (see
+  // loadTemplateComponentPreview), so a card that finishes loading AFTER
+  // the toggle was already flipped still self-syncs correctly with no
+  // queuing logic needed.
+  let currentTemplateTheme = 'light';
+
   // Same request-token-guard discipline again, for Phase 10 item 2's
   // "want help fixing this?" rows -- guards against a stale
   // artifact.requestBuildFix response clobbering a newer render if a row
@@ -1034,6 +1057,21 @@
       window.removeEventListener('message', detailPreviewMessageHandler);
       detailPreviewMessageHandler = null;
     }
+  }
+
+  /** Array-based counterpart to clearDetailPreviewListener, for the
+   * template grid's N simultaneous iframes -- called both at the top of
+   * renderTemplateSection (about to replace them with a new set) and from
+   * renderDetail when switching to an artifact with no GUIDELINES.md
+   * (which never calls renderTemplateSection's grid-building path at all,
+   * so without this the previous artifact's iframes/listeners would
+   * otherwise just sit there, hidden but still live). */
+  function clearDetailTemplateListeners() {
+    for (const handler of detailTemplateMessageHandlers) {
+      window.removeEventListener('message', handler);
+    }
+    detailTemplateMessageHandlers = [];
+    detailTemplateIframes = [];
   }
 
   /** Detail view's live, INTERACTIVE preview (Phase C): variant tabs +
@@ -1325,6 +1363,254 @@
       }
 
       container.appendChild(card);
+    }
+  }
+
+  /** Phase 11 Detail-view task: renders design-kit's color tokens, type
+   * scale, and a live component grid for a `kind: template` (or any
+   * future kind) artifact that has a real `GUIDELINES.md` at its payload
+   * root -- gated on that presence, never `manifest.kind`. Sets the
+   * section's own visibility once `artifact.parseGuidelines` resolves
+   * (renderDetail hides it up front so a previous artifact's content
+   * doesn't stay visible in the meantime). */
+  async function renderTemplateSection(entry) {
+    const requestId = ++detailTemplateRequestId;
+    const section = $('detail-template-section');
+
+    let guidelines;
+    try {
+      guidelines = await call('artifact.parseGuidelines', { remote: entry.remoteName, id: entry.manifest.id });
+    } catch {
+      if (requestId !== detailTemplateRequestId) return; // superseded while awaiting
+      section.hidden = true;
+      return;
+    }
+    if (requestId !== detailTemplateRequestId) return; // superseded while awaiting
+
+    if (!guidelines.present) {
+      section.hidden = true;
+      return;
+    }
+    section.hidden = false;
+
+    const tokensContainer = $('detail-template-tokens');
+    tokensContainer.innerHTML = '';
+    for (const { token, hex } of guidelines.colorTokens) {
+      const swatch = document.createElement('div');
+      swatch.className = 'token-swatch';
+      const colorEl = document.createElement('span');
+      colorEl.className = 'token-swatch-color';
+      colorEl.style.background = hex;
+      const labelEl = document.createElement('span');
+      labelEl.className = 'token-swatch-label';
+      labelEl.textContent = `${token} ${hex}`;
+      swatch.appendChild(colorEl);
+      swatch.appendChild(labelEl);
+      tokensContainer.appendChild(swatch);
+    }
+
+    const typeScaleContainer = $('detail-template-type-scale');
+    typeScaleContainer.innerHTML = '';
+    for (const row of guidelines.typeScale) {
+      const sampleRow = document.createElement('div');
+      sampleRow.className = 'type-sample-row';
+
+      const labelEl = document.createElement('span');
+      labelEl.className = 'type-sample-label';
+      labelEl.textContent = row.Element || '';
+
+      const textEl = document.createElement('span');
+      textEl.className = 'type-sample-text';
+      // A REAL applied sample, not a data table -- the row's own Element
+      // text, rendered in its own real Font/Weight/Size, so this shows
+      // what the type actually looks like rather than just naming it.
+      textEl.textContent = row.Element || '';
+      textEl.style.fontFamily = fontFamilyStack(row.Font || '');
+      textEl.style.fontWeight = String(parseLeadingNumber(row.Weight, 400));
+      textEl.style.fontSize = `${clamp(parseLeadingNumber(row.Size, 14), 12, 28)}px`;
+
+      sampleRow.appendChild(labelEl);
+      sampleRow.appendChild(textEl);
+      typeScaleContainer.appendChild(sampleRow);
+    }
+
+    const grid = $('detail-template-grid');
+    grid.innerHTML = '';
+    let components;
+    try {
+      ({ components } = await call('artifact.listPayloadComponents', {
+        remote: entry.remoteName,
+        id: entry.manifest.id,
+      }));
+    } catch {
+      components = [];
+    }
+    if (requestId !== detailTemplateRequestId) return; // superseded while awaiting
+
+    await Promise.all(
+      components.map((component) =>
+        loadTemplateComponentPreview(grid, entry, component, requestId, guidelines.usageRules || {}),
+      ),
+    );
+    if (requestId !== detailTemplateRequestId) return; // superseded while awaiting
+
+    renderTemplateLayoutRules(guidelines.layoutRules);
+  }
+
+  /** Extracts the first integer in a string (e.g. "18–24px" -> 18, "500"
+   * -> 500), falling back to `fallback` when nothing parses -- GUIDELINES.md's
+   * Size/Weight columns are free-text prose ("400 (never bold)", "18-24px"),
+   * not structured data. */
+  function parseLeadingNumber(text, fallback) {
+    const match = /\d+/.exec(String(text ?? ''));
+    return match ? Number(match[0]) : fallback;
+  }
+
+  function clamp(value, min, max) {
+    return Math.min(Math.max(value, min), max);
+  }
+
+  /** Maps a GUIDELINES.md Font-column value to a real font-family stack --
+   * reuses this app's own already-established stacks (style.css's own
+   * heading/mono rules) rather than inventing new fallbacks, so a type
+   * sample renders in the SAME real fonts the rest of the app already
+   * uses, not a generic system default. */
+  function fontFamilyStack(fontName) {
+    const lower = fontName.toLowerCase();
+    if (lower.includes('garamond')) return `'EB Garamond', Georgia, serif`;
+    if (lower.includes('mono')) return `'JetBrains Mono', ui-monospace, Consolas, monospace`;
+    if (lower.includes('plex')) return `'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif`;
+    return fontName ? `'${fontName}', system-ui, sans-serif` : 'system-ui, sans-serif';
+  }
+
+  /** Renders the layout-rules summary strip below the component grid --
+   * real radius tokens (a table GUIDELINES.md already documents) plus the
+   * Layout grid/Spacing sections' own real prose, never the mockup's
+   * fictional "Max width/Section rhythm" labels (those were invented for
+   * ITS OWN made-up demo kit, not something this real GUIDELINES.md
+   * states). `layoutRules` is `null` when the artifact has no
+   * GUIDELINES.md at all (see artifact.parseGuidelines). */
+  function renderTemplateLayoutRules(layoutRules) {
+    const container = $('detail-template-layout');
+    container.innerHTML = '';
+    if (!layoutRules) return;
+
+    if (layoutRules.radiusTokens.length > 0) {
+      const tokenRow = document.createElement('div');
+      tokenRow.className = 'radius-token-row';
+      for (const { token, value, usage } of layoutRules.radiusTokens) {
+        const chip = document.createElement('div');
+        chip.className = 'radius-token-chip';
+        const nameEl = document.createElement('code');
+        nameEl.textContent = `${token}: ${value}`;
+        const usageEl = document.createElement('span');
+        usageEl.textContent = usage;
+        chip.appendChild(nameEl);
+        chip.appendChild(usageEl);
+        tokenRow.appendChild(chip);
+      }
+      container.appendChild(tokenRow);
+    }
+
+    for (const note of [layoutRules.layoutNote, layoutRules.spacingNote]) {
+      if (!note) continue;
+      const noteEl = document.createElement('p');
+      noteEl.className = 'layout-rules-note';
+      noteEl.textContent = note;
+      container.appendChild(noteEl);
+    }
+  }
+
+  /** Compiles and mounts ONE component's live preview inside the template
+   * grid -- clones loadUiComponentPreview's own per-card iframe pattern
+   * (own contentHeight resize handler scoped via event.source, no
+   * innerHTML for artifact-controlled text) rather than a single shared
+   * listener, since the grid hosts N of these at once. Also applies the
+   * template section's currently-active theme on the harness's own
+   * 'ready' message (see compile.ts's setTheme handling) -- this is what
+   * makes a card that finishes loading AFTER the toggle was already
+   * flipped self-sync correctly. */
+  async function loadTemplateComponentPreview(grid, entry, component, requestId, usageRules) {
+    const card = document.createElement('div');
+    card.className = 'wiring-action-card template-component-card';
+
+    const header = document.createElement('div');
+    header.className = 'wiring-action-header';
+    const nameEl = document.createElement('code');
+    nameEl.textContent = component.name;
+    header.appendChild(nameEl);
+    card.appendChild(header);
+
+    const frame = document.createElement('div');
+    frame.className = 'ui-component-preview-frame';
+    frame.innerHTML = '<span class="ui-component-preview-loading">Loading preview&hellip;</span>';
+    card.appendChild(frame);
+
+    // Real usage-rule text from GUIDELINES.md's own "Per-component usage
+    // rules" section, matched case-insensitively by component.name -- a
+    // component with no matching bullet (e.g. one not yet documented)
+    // simply gets no caption, never a placeholder/invented one.
+    const usageRule = usageRules[component.name.toLowerCase()];
+    if (usageRule) {
+      const captionEl = document.createElement('p');
+      captionEl.className = 'template-component-caption';
+      captionEl.textContent = usageRule;
+      card.appendChild(captionEl);
+    }
+
+    if (requestId !== detailTemplateRequestId) return; // superseded before attaching
+    grid.appendChild(card);
+
+    try {
+      const result = await call('preview.compilePayloadComponent', {
+        remote: entry.remoteName,
+        id: entry.manifest.id,
+        relativeDir: component.relativeDir,
+      });
+      if (requestId !== detailTemplateRequestId) return; // superseded while awaiting
+
+      const iframe = document.createElement('iframe');
+      iframe.sandbox = 'allow-scripts';
+      iframe.srcdoc = result.html;
+      frame.innerHTML = '';
+      frame.appendChild(iframe);
+      detailTemplateIframes.push(iframe);
+
+      let pendingRawWidth = null;
+      let pendingRawHeight = null;
+      let resizeScheduled = false;
+
+      const handler = (event) => {
+        if (event.source !== iframe.contentWindow) return;
+        const data = event.data;
+        if (!data || typeof data !== 'object') return;
+        if (data.type === 'ready') {
+          iframe.contentWindow.postMessage({ type: 'setTheme', theme: currentTemplateTheme }, '*');
+          return;
+        }
+        if (data.type !== 'contentHeight') return;
+        pendingRawWidth = data.width;
+        pendingRawHeight = data.height;
+        if (resizeScheduled) return;
+        resizeScheduled = true;
+        requestAnimationFrame(() => {
+          resizeScheduled = false;
+          const clampedWidth = clampPreviewWidth(pendingRawWidth + WIDTH_SAFETY_MARGIN);
+          const clampedHeight = clampPreviewHeight(pendingRawHeight);
+          frame.style.width = `${clampedWidth}px`;
+          frame.style.height = `${clampedHeight}px`;
+          iframe.style.width = `${Math.min(pendingRawWidth + WIDTH_SAFETY_MARGIN, clampedWidth)}px`;
+          iframe.style.height = `${Math.min(pendingRawHeight, clampedHeight)}px`;
+        });
+      };
+      detailTemplateMessageHandlers.push(handler);
+      window.addEventListener('message', handler);
+    } catch (err) {
+      frame.innerHTML = '';
+      const placeholder = document.createElement('span');
+      placeholder.className = 'ui-component-preview-loading';
+      placeholder.textContent = `Preview unavailable -- ${err instanceof Error ? err.message : String(err)}`;
+      frame.appendChild(placeholder);
     }
   }
 
@@ -2301,6 +2587,19 @@
       backendPluginSection.hidden = true;
     }
 
+    // Phase 11 Detail-view task (design-kit): gated on real content
+    // presence -- whether GUIDELINES.md actually exists at the payload
+    // root -- never a `manifest.kind === 'template'` check, same
+    // "field/file presence, not kind" convention as the backend-plugin
+    // gate above. That check itself requires an RPC round-trip (unlike
+    // install_params/wiring_actions, which are already on the manifest in
+    // hand), so renderTemplateSection decides visibility itself once it
+    // resolves -- hidden here first so a previous artifact's tokens/grid
+    // don't stay visible while this one's presence check is in flight.
+    $('detail-template-section').hidden = true;
+    clearDetailTemplateListeners();
+    void renderTemplateSection(entry);
+
     $('detail-install-path').textContent = entry.installTarget;
 
     const openFolderBtn = $('detail-open-folder-btn');
@@ -2578,6 +2877,23 @@
       }
     });
     addNewRemotePicker = createSingleChipPicker($('f-remote-picker'));
+
+    // Phase 11 Detail-view task: one Light/Dark pair per template section
+    // (section-level, not per-card) -- deliberately real infrastructure
+    // even though every current design-kit component is visually inert to
+    // it (see the caption next to this toggle in index.html and
+    // compile.ts's own setTheme doc comment for why).
+    templateThemePicker = createSingleChipPicker($('detail-template-theme-toggle'));
+    templateThemePicker.setOptions(
+      [{ value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }],
+      'light',
+    );
+    templateThemePicker.onChange((theme) => {
+      currentTemplateTheme = theme;
+      for (const iframe of detailTemplateIframes) {
+        iframe.contentWindow.postMessage({ type: 'setTheme', theme }, '*');
+      }
+    });
   }
 
   /** Refreshes every tag picker's suggestion list from the current catalog
@@ -2657,7 +2973,7 @@
 
   const NEW_KIND_OPTION = '__new_kind__';
 
-  let addNewKindPicker, addNewRemotePicker;
+  let addNewKindPicker, addNewRemotePicker, templateThemePicker;
 
   /** (Re)populates Add New's Kind chip-picker from every distinct kind
    * already in the catalog, plus a trailing "+ New kind..." chip -- kind is
@@ -2838,6 +3154,177 @@
     }
   }
 
+  // Phase 11 item 3: the subjective counterpart to
+  // suggestMetadataForCurrentPayload above -- same "cache the in-flight
+  // call per payload, so switching between wizard steps and back doesn't
+  // spend a second real API call" shape, keyed on payloadPath alone
+  // (this prompt has no kind-dependent framing to invalidate on, unlike
+  // the metadata one).
+  let pendingAntiPatternSuggestion = null; // { payloadPath, promise } | null
+
+  function runAntiPatternSuggestion(payloadPath) {
+    if (pendingAntiPatternSuggestion && pendingAntiPatternSuggestion.payloadPath === payloadPath) {
+      return pendingAntiPatternSuggestion.promise;
+    }
+    const promise = call('artifact.suggestAntiPatterns', { payloadPath });
+    pendingAntiPatternSuggestion = { payloadPath, promise };
+    return promise;
+  }
+
+  /** Handler for the Review step's "Suggest with Claude" button --
+   * real design-anti-pattern findings, rendered as `.hint-banner-ai`
+   * entries (never `.hint-banner`, which item 2's mechanical warnings
+   * already own -- see that class's own CSS comment for why the two
+   * stay visually distinct). Never blocks/breaks the form on failure,
+   * same as every other detector here: a toast error and the button
+   * returning to normal is the whole failure mode. */
+  async function suggestAntiPatternsForCurrentPayload(button) {
+    if (!pendingPayloadPath) {
+      toastError(new Error('Pick a payload first.'));
+      return;
+    }
+    const originalLabel = button.textContent;
+    button.disabled = true;
+    button.textContent = 'Suggesting…';
+    const findingsContainer = $('addnew-review-anti-pattern-findings');
+    try {
+      const findings = await runAntiPatternSuggestion(pendingPayloadPath);
+      findingsContainer.innerHTML = '';
+      if (findings.length === 0) {
+        const banner = document.createElement('div');
+        banner.className = 'hint-banner-ai';
+        banner.textContent = 'No design anti-patterns found.';
+        findingsContainer.appendChild(banner);
+      } else {
+        for (const finding of findings) {
+          findingsContainer.appendChild(renderDesignFixRow(finding, pendingPayloadPath));
+        }
+      }
+    } catch (err) {
+      toastError(err);
+    } finally {
+      button.disabled = false;
+      button.textContent = originalLabel;
+    }
+  }
+
+  /** Phase 11 item 4, the fix step for one specific finding -- directly
+   * mirrors `renderBuildFixRow`'s exact structure and flow (ask ->
+   * either the model's own honest "can't determine a fix" reason, or
+   * the proposed content plus Apply/Discard). Nothing is written to
+   * disk, and nothing is logged, unless Apply is clicked. Captures
+   * `payloadPath` at render time (not re-read from `pendingPayloadPath`
+   * later) so a fix already in flight stays targeted at the right
+   * candidate even if the wizard moves on before it resolves. */
+  function renderDesignFixRow(finding, payloadPath) {
+    const row = document.createElement('div');
+    row.className = 'design-fix-row';
+
+    const banner = document.createElement('div');
+    banner.className = 'hint-banner-ai';
+    banner.textContent = finding;
+    row.appendChild(banner);
+
+    const askBtn = document.createElement('button');
+    askBtn.type = 'button';
+    askBtn.className = 'btn btn-sm btn-ghost';
+    askBtn.textContent = 'Want help fixing this? ✨';
+    row.appendChild(askBtn);
+
+    const resultEl = document.createElement('div');
+    resultEl.className = 'design-fix-result';
+    resultEl.hidden = true;
+    row.appendChild(resultEl);
+
+    askBtn.addEventListener('click', () => {
+      void withBusy(askBtn, 'Asking…', async () => {
+        let fix;
+        try {
+          fix = await call('artifact.requestAntiPatternFix', { payloadPath, finding });
+        } catch (err) {
+          resultEl.hidden = false;
+          resultEl.textContent = `Could not get a fix -- ${err instanceof Error ? err.message : String(err)}`;
+          return;
+        }
+
+        resultEl.hidden = false;
+        resultEl.innerHTML = '';
+
+        if (!fix.file || !fix.fixedFile) {
+          const reasonEl = document.createElement('div');
+          reasonEl.textContent = fix.reason || 'Claude could not determine a fix for this.';
+          resultEl.appendChild(reasonEl);
+          return;
+        }
+
+        const snippetEl = document.createElement('pre');
+        snippetEl.className = 'wiring-action-snippet';
+        snippetEl.textContent = fix.fixedFile;
+        resultEl.appendChild(snippetEl);
+
+        const actionsEl = document.createElement('div');
+        actionsEl.className = 'design-fix-actions';
+        const applyBtn = document.createElement('button');
+        applyBtn.type = 'button';
+        applyBtn.className = 'btn btn-sm';
+        applyBtn.textContent = 'Apply';
+        const discardBtn = document.createElement('button');
+        discardBtn.type = 'button';
+        discardBtn.className = 'btn btn-sm btn-ghost';
+        discardBtn.textContent = 'Discard';
+        actionsEl.appendChild(applyBtn);
+        actionsEl.appendChild(discardBtn);
+        resultEl.appendChild(actionsEl);
+        askBtn.hidden = true;
+
+        discardBtn.addEventListener('click', () => {
+          // Nothing written, nothing logged -- just clears the offer
+          // back to its starting state so it can be asked again.
+          resultEl.hidden = true;
+          resultEl.innerHTML = '';
+          askBtn.hidden = false;
+        });
+
+        applyBtn.addEventListener('click', () => {
+          void withBusy(applyBtn, 'Applying…', async () => {
+            discardBtn.disabled = true;
+            try {
+              const outcome = await call('artifact.applyAntiPatternFix', {
+                cwd: state.projectDir,
+                payloadPath,
+                file: fix.file,
+                fixedFile: fix.fixedFile,
+                finding,
+                costUsd: fix.costUsd,
+                durationMs: fix.durationMs,
+              });
+              const outcomeEl = document.createElement('div');
+              if (outcome.rolledBack) {
+                outcomeEl.textContent = `The fix broke the component's preview -- your original file was restored.${outcome.verification.error ? ` (${outcome.verification.error})` : ''}`;
+              } else {
+                outcomeEl.textContent = 'Fix applied -- the component still compiles.';
+              }
+              resultEl.innerHTML = '';
+              resultEl.appendChild(outcomeEl);
+              // The live preview above only refreshes on wizard
+              // step-navigation into Review -- nothing re-triggers it on
+              // a file edit on its own, so this needs an explicit call
+              // to reflect whichever file just actually changed on disk.
+              void loadAddNewReviewPreview();
+            } catch (err) {
+              const errEl = document.createElement('div');
+              errEl.textContent = `Could not apply the fix -- ${err instanceof Error ? err.message : String(err)}`;
+              resultEl.innerHTML = '';
+              resultEl.appendChild(errEl);
+            }
+          });
+        });
+      });
+    });
+
+    return row;
+  }
+
   /** Real default for Add New's Owner field -- the local machine's own git
    * identity (`git config user.name`), not a guess. Non-fatal on failure
    * (e.g. `state.projectDir` isn't a git repo yet): the field just stays
@@ -2876,6 +3363,7 @@
     pendingInstallParams = [];
     renderInstallParamsList();
     pendingSuggestion = null;
+    pendingAntiPatternSuggestion = null;
     clearAddNewReviewPreviewListener();
     void prefillOwnerFromGitIdentity();
   }
@@ -2922,14 +3410,21 @@
     const requestId = ++addNewReviewPreviewRequestId;
     const section = $('addnew-review-preview-section');
     const frame = $('addnew-review-preview-frame');
+    // Phase 11 item 3's button lives in its own section, gated the exact
+    // same way as the live preview above (kind: ui-component + a real
+    // payload picked) -- both need real source on disk to do anything.
+    const antiPatternSection = $('addnew-review-anti-pattern-section');
 
     clearAddNewReviewPreviewListener();
 
     if (resolveKindFieldValue() !== 'ui-component' || !pendingPayloadPath) {
       section.hidden = true;
+      antiPatternSection.hidden = true;
       return;
     }
     section.hidden = false;
+    antiPatternSection.hidden = false;
+    $('addnew-review-anti-pattern-findings').innerHTML = '';
     frame.innerHTML = '<span class="ui-component-preview-loading">Loading preview&hellip;</span>';
     frame.style.width = '';
     frame.style.height = '';
@@ -3843,6 +4338,9 @@
     $('suggest-component-types-btn').addEventListener('click', (ev) => void suggestMetadataForCurrentPayload(
       ev.currentTarget,
       { updateDescription: false, updateComponentTypes: true },
+    ));
+    $('addnew-review-suggest-anti-patterns-btn').addEventListener('click', (ev) => void suggestAntiPatternsForCurrentPayload(
+      ev.currentTarget,
     ));
 
     $('wizard-next-btn').addEventListener('click', () => wizardGoNext());

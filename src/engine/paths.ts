@@ -56,6 +56,16 @@ export function buildFixLogPath(cwd: string): string {
   return path.join(projectDeliveryOsDir(cwd), 'build-fix-log.jsonl');
 }
 
+/** Project-local (cwd-scoped) audit log for Phase 11 item 4's design-fix
+ * flow -- same append-only, apply-only-not-request-or-discard shape as
+ * `buildFixLogPath` above, in its own file rather than a shared one: the
+ * target here is a not-yet-pushed candidate's payload, not a real
+ * project file, and keeping the two logs separate means neither one's
+ * entries need a discriminant field to tell them apart later. */
+export function designFixLogPath(cwd: string): string {
+  return path.join(projectDeliveryOsDir(cwd), 'design-fix-log.jsonl');
+}
+
 /** Project-local (cwd-scoped) directory holding pristine (as-pulled)
  * snapshots of every pulled artifact's payload, keyed by id. Used by
  * `push` to diff a local edit against what was actually pulled. */
