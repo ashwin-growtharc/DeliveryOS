@@ -4,6 +4,32 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- **Catalog growth: three real artifacts pulled from a real GrowthArc
+  project template (`GA_Global_Template_ReactTS`).** Surveyed its
+  checked-out `main` (mostly stock Vite boilerplate) and two unmerged
+  remote branches (`feature/sso`, `feature/route`, never pulled locally)
+  for anything genuinely worth adding. `azure-msal-sso` (new
+  `kind: backend-plugin`) ships Azure AD/Entra SSO via MSAL, modeled on
+  `nextauth-credentials`'s manifest shape -- fixed two real bugs found in
+  the source (a dead-code route-guard redirect, a duplicate MSAL entry
+  point) before shipping, and caught+fixed a real manifest-authoring
+  mistake (`push --new` has no CLI flags for `install_params`/
+  `wiring_actions`, and a `manifest.yaml` placed inside `--path` gets
+  copied as a payload file instead of used) by editing the pushed branch
+  directly. Four new components extend `design-kit` (`Footer`, `Layout`,
+  `RootErrorBoundary`, plus a non-breaking `TopBar` nav-link upgrade) --
+  a planned "Header" component was dropped once it turned out to just
+  duplicate `TopBar`. A new `kind: template`, `react-vite-lint-scaffold`,
+  ships a real ESLint 9/Prettier/Stylelint/Husky/lint-staged/commitlint/
+  Knip stack, cleaned of Next.js-specific cruft and two real bugs found
+  by actually running the tools (a Knip config key that no longer exists
+  in the installed version's schema, a commitlint config that crashes
+  under any Vite project's default ESM `"type": "module"`). All three
+  verified against real scratch projects, not mocked -- real PRs:
+  [growtharc-ai-helpers#59](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/59),
+  [#60](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/60),
+  [#61](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/61).
+
 - **Phase 11: Detail view matched to a published pitch mockup's visual
   polish, plus real verification of the mockup's other two scenes.**
   Comparing the running app against an earlier illustrative Artifact

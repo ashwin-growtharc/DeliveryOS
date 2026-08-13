@@ -2609,3 +2609,102 @@ tasks, same discipline every earlier phase here uses.
       rebuild passes afterward, and confirm the new Detail-view section
       renders the guideline's tokens/type scale and every component's
       live preview correctly, in both themes.
+
+## Catalog growth — real content pulled from `GA_Global_Template_ReactTS`
+
+Surveyed a real GrowthArc project template
+(`github.com/growtharc/GA_Global_Template_ReactTS`) for anything worth
+adding to the catalog. Its checked-out `main` branch is mostly stock Vite
+boilerplate; the real substance sat in two **unmerged** remote branches
+(`feature/sso`, `feature/route`) never pulled down locally. Confirmed via
+research before building anything, then pushed three separate real
+artifacts:
+
+- [x] **`azure-msal-sso`, a new `kind: backend-plugin`** — Azure AD/Entra
+      ID SSO via MSAL, modeled directly on the already-shipped
+      `nextauth-credentials` manifest shape (same `payload/` +
+      `wiring_actions` + `README.md` pattern, pointed at this project's
+      real root files instead of Next.js's). **Real bugs found in the
+      source and fixed before shipping, not carried over**:
+      `ProtectedRoute`'s group-based redirect was dead code (`return
+      <Outlet/>` unconditionally either way) — now actually redirects;
+      two duplicate MSAL entry points existed (a context-based `useAuth`
+      and a separate context-bypassing hook with a leftover typo-looking
+      name) — only the context-based one ships; draft "` copy`" files
+      and a confirmed-empty Redux store stub were dropped entirely.
+      **Real manifest-authoring mistake, caught and fixed**: `deliveryos
+      push --new` has no CLI flags for `install_params`/`wiring_actions`
+      at all, and putting a hand-written `manifest.yaml` inside the
+      `--path` payload directory gets it treated as just another payload
+      file to copy — the tool generates its own minimal manifest instead
+      (wrong default `install_target`, empty `install_params`/
+      `wiring_actions`). Caught via reading the real resulting PR, fixed
+      by checking out the pushed branch directly and replacing the
+      generated manifest with the real, schema-validated one (confirmed
+      via `ManifestSchema.safeParse`), removing the erroneous duplicate
+      that had landed in `payload/`.
+      **Verified for real**: a real scratch Vite+React+TS project (not a
+      mock), payload copied in, the two `wiring_actions` snippets applied
+      by hand exactly as written, `tsc -b` and `vite build` both clean.
+      3 real Vitest+RTL tests confirm the fixed `ProtectedRoute` redirect
+      actually works both ways (redirects on a non-matching/null
+      `groups` value, renders real content on a match).
+      Real PR: [growtharc-ai-helpers#59](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/59).
+- [x] **Four new components extending `design-kit`** (not a new
+      artifact) — `feature/route`'s real color/radius tokens turned out
+      to be byte-identical to design-kit's own (`--color-brand-300
+      #1e3c53` = `primary-700`, radius scale matches down to the
+      distinctive `31.25rem` pill value) — same underlying GrowthArc
+      brand system, reimplemented twice, not two conflicting ones.
+      **A real "Header" component was dropped from scope** once
+      building it revealed it would just duplicate the kit's own
+      existing `TopBar` — instead `TopBarNavItem` gained optional
+      `href`/`onClick` (previously purely decorative, no real
+      navigation at all) as a small, non-breaking enhancement. Shipped:
+      `Footer`, `Layout` (generic header/footer `ReactNode` slots, not a
+      hardcoded import of `TopBar`/`Footer`, so it stays composable),
+      `RootErrorBoundary` (this kit's first class component — error
+      boundaries have no hook equivalent). `Content.tsx`'s 7-breakpoint
+      media-query ladder was confirmed not portable to static inline
+      styles and not ported; `feature/route`'s own `ProtectedRoute`/
+      `AdminRoute` stubs (`const isAuth = true`) were confirmed
+      non-functional placeholders with zero value to port. **Real
+      mistake caught before pushing**: `Layout`'s first preview.tsx
+      cross-imported the real `TopBar`/`Footer` from sibling component
+      folders — the compile sandbox correctly refused it (imports can't
+      resolve outside a component's own directory); fixed with plain
+      placeholder markup instead, matching this kit's own established
+      self-contained-preview convention. Pushed from a **fresh** pull
+      (not the scratch project still holding PR #58's unmerged edits),
+      specifically to avoid bundling two unrelated diffs into one PR.
+      Dogfooded via `compileLocalPreview` against all 4; real PR shows
+      exactly the expected file changes.
+      Real PR: [growtharc-ai-helpers#60](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/60)
+      — **note: both this PR and the still-open #58 independently bump
+      `design-kit` 1.0.0→1.1.0; whichever merges second will need a
+      rebase.**
+- [x] **`react-vite-lint-scaffold`, a new `kind: template`** — a real,
+      working ESLint 9 (flat) + Prettier + Stylelint + Husky +
+      lint-staged + commitlint + Knip stack, cleaned up rather than
+      lifted verbatim: dropped `.eslintrc.js` (legacy format extending
+      Next.js-specific presets in a Vite project with no Next.js
+      dependency at all), dropped `.eslintignore` entirely (ESLint 9's
+      flat config doesn't read it — `eslint.config.js`'s own `ignores`
+      key is the real mechanism), dropped `.huskyrc`/`.commitlintrc.json`
+      (dead/redundant duplicates), dropped `.husky/pre-push`'s pointless
+      re-run of `lint-staged`. **Two real, previously-unknown bugs found
+      by actually running the tools, not assumed clean from reading the
+      source**: `knip.json`'s `ignoreDevDependencies` key doesn't exist
+      in the installed Knip version's schema at all (`unrecognized_keys`
+      error) — merged into the current single `ignoreDependencies` key;
+      `commitlint.config.js` used CommonJS (`module.exports`), which
+      genuinely crashes under any Vite project's default `"type":
+      "module"` — rewritten as `export default`, matching
+      `eslint.config.js`'s own ESM style. **Verified for real**: a fresh
+      scratch Vite project, real dependencies installed, `lint`/
+      `stylelint`/`format`/`knip` scripts all actually run; a real `git
+      commit` with a Conventional-Commits-violating message is
+      genuinely rejected by the real `commit-msg` hook (checked via
+      `git log` showing no commit landed), then a real conforming
+      message succeeds.
+      Real PR: [growtharc-ai-helpers#61](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/61).
