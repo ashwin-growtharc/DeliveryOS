@@ -2775,6 +2775,79 @@ capability.
       → "Email"/"Please enter a valid email"), not just that a message
       was sent.
 
+## A real, whole-repo template for the company starter kit
+
+`GA_Global_Template_ReactTS` made pullable as-is — not the three
+individual pieces already extracted (`azure-msal-sso`, 4 design-kit
+components, `react-vite-lint-scaffold`), but the whole working kit:
+Vite+React+TS scaffold, real routing/layout, and real Azure AD SSO,
+merged and cleaned into one cohesive bundle (confirmed with the user
+first — not just a cleaned bare `main`).
+
+- [x] **`growtharc-react-vite-starter`, a new `kind: template`, modeled
+      on the real, already-established `arcos-cli`/`launchpad-template`
+      whole-repo-mirror precedent** (`install_target: <artifact-id>`,
+      `review_required: false`, `post_install: npm install`) —
+      confirmed via their actual cached manifests, not guessed.
+      Confirmed `payload_path` cannot cross repositories (`pull.ts`/
+      `push.ts` always resolve it relative to the owning remote's own
+      clone), so the source's content was physically copied into
+      `growtharc-ai-helpers`'s own tree, not referenced in place.
+      **Reused verbatim**: all of `azure-msal-sso`'s already-fixed
+      payload, and `react-vite-lint-scaffold`'s already-cleaned tooling
+      configs — not re-derived.
+      **Real bugs found while assembling the rest, fixed before
+      shipping (a much larger surface than the three earlier pieces,
+      since this is the first time the whole thing was actually run
+      together)**:
+      - `Header`/`Footer` imported `./header.scss`/`./footer.scss`
+        (lowercase) when the real files are `Header.scss`/`Footer.scss`
+        — only worked by accident on a case-insensitive filesystem.
+      - `Header.scss`'s dead `.dropdown-menu`/`.user-profile-wrap` CSS
+        (no matching JSX anywhere) — dropped.
+      - `ErrorBoundary.scss` referenced `--font-weight-normal`, never
+        defined anywhere in `theme-global.css` — fixed to
+        `--font-weight-regular`, the token that's actually defined.
+      - `AccessErrorBoundary.tsx` confirmed orphaned (never referenced
+        by `routes.tsx`) and near-duplicate of the real, wired-in
+        `RootErrorBoundary` — dropped, not ported.
+      - The router had no route for `/` itself (visiting the bare root
+        showed nothing) and never registered `/unauthorized` at all,
+        even though `ProtectedRoute`/`AdminRoute` both redirect there —
+        a real dead-end, not a hypothetical one. Both fixed.
+      - `main.tsx` rendered the stock Vite demo counter wrapped in an
+        unused `React.Suspense` (nothing here ever suspends) — replaced
+        with the real app: `msalInstance.initialize()` → `MsalProvider`
+        → `AuthProvider` → `RouterProvider`.
+      - **Two genuinely new bugs, found only once real SCSS features
+        and the tooling stack ran together for the first time** (neither
+        surfaced in the three earlier, smaller pieces): `stylelint-config-standard`
+        cannot parse SCSS-specific syntax (`@use`, `@mixin`) at all —
+        confirmed by actually running it, not assumed — fixed by
+        switching to `stylelint-config-standard-scss`. Separately,
+        `_reset.scss`'s `background-color: none !important` is not
+        valid CSS at all (`none` isn't a legal value for that property,
+        `transparent` is) — a real, silent no-op in the source, caught
+        by the same real stylelint run once it could actually parse the
+        file. Dropped `@testing-library/user-event` (genuinely unused —
+        no test uses it) rather than carry it as unused weight.
+      **Verified for real, in this order**: `npm install` (470 real
+      packages), `tsc -b` clean, `vite build` clean (214 modules,
+      confirming SCSS actually compiles), `lint`/`stylelint`/`knip` all
+      clean (knip's remaining "unused" flags are expected library-code-
+      for-consumers cases, same class already accepted for the other
+      two artifacts). A real headless-browser check (fake-but-valid
+      MSAL env vars, a real `vite preview` server): loading `/`
+      unauthenticated correctly redirects to `/unauthorized` (via the
+      already-fixed `ProtectedRoute` guard) and the real Unauthorized
+      page renders its real content — confirming the whole assembled
+      routing+auth+guard chain actually works end-to-end, not just that
+      each piece compiles in isolation.
+      Real PR: [growtharc-ai-helpers#63](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/63)
+      (manifest fixed the same way as `azure-msal-sso`'s own — `push
+      --new` has no CLI flags for `install_params`, fixed directly on
+      the pushed branch, schema-validated).
+
 ## A real route/page map in Detail, for whole-app templates like the starter kit
 
 Prompted by real user confusion comparing `growtharc-react-vite-starter`'s
