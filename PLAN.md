@@ -2708,3 +2708,21 @@ artifacts:
       `git log` showing no commit landed), then a real conforming
       message succeeds.
       Real PR: [growtharc-ai-helpers#61](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/61).
+
+**A real gap this surfaced, fixed separately**: opening `react-vite-lint-scaffold`'s
+real Detail view (after merge) showed nothing but the generic
+description/kind/version/tags fallback — expected, since it's a config
+bundle with no `GUIDELINES.md` and no visual component to preview, but
+its real `README.md` (setup instructions, required devDependencies, the
+`npx husky init` step) wasn't rendered anywhere either. `kind:
+backend-plugin` artifacts already show their README inside their own
+section; anything without `install_params`/`wiring_actions` AND without
+`GUIDELINES.md` got nothing. New `renderGenericReadmeSection` (`app.js`)
+— gated on real `README.md` presence, never a `kind` check, and only
+when the backend-plugin section didn't already claim it (no double
+render) — fixes this for any artifact shaped like this one. Confirmed
+via real `readArtifactPayloadFile` calls against the live catalog:
+`react-vite-lint-scaffold`/`azure-msal-sso` both have a real README
+(the latter correctly still renders through the *existing*
+backend-plugin section, not the new one); `badge-showcase`/`design-kit`
+(no README, only `GUIDELINES.md`) correctly show nothing extra.
