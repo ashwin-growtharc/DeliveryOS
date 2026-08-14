@@ -4,6 +4,33 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- **Detail view: a real route/page map for whole-app templates like
+  `growtharc-react-vite-starter`.** Prompted by real user confusion
+  comparing that artifact's Detail view against `design-kit`'s rich
+  tokens/component-grid view -- a structurally different, and correctly
+  different, artifact shape (a whole running app, not a component
+  library), but the README's prose description of routing was still
+  less useful than showing the REAL route tree the artifact ships,
+  parsed straight from its own `src/routes.tsx` rather than a
+  hand-maintained duplicate that could drift. New
+  `src/engine/routes/parseRoutesTree.ts` -- the second piece of code in
+  this repo (after `detectSelfNesting.ts`) to import `typescript`
+  directly and walk a real AST, same conventions (best-effort,
+  non-throwing, `.getText()` JSX tag-name extraction) -- finds the
+  first `createBrowserRouter([...])` call and walks its route tree,
+  reading each route's `path` (or `(index)`), `element`/`errorElement`,
+  and nested `children`. New `artifact.parseRoutes` sidecar RPC (same
+  `{present, ...}` shape as `artifact.parseGuidelines`) and a new Detail
+  section, gated on real `src/routes.tsx` presence -- never a `kind`
+  check -- rendered as an indented tree reusing the existing
+  `.tag-pill`/mono-text conventions. Coexists with, doesn't replace, the
+  generic README section. Verified with unit tests against the real
+  `growtharc-react-vite-starter` `routes.tsx` shape (nested children, an
+  index route, `errorElement`, plus malformed-input degrade-to-`[]`
+  cases) and a real dogfood run against that artifact's actual, already-
+  pushed `src/routes.tsx` — confirmed absent for `design-kit`/
+  `azure-msal-sso` (neither ships a `routes.tsx`).
+
 - **Detail view: a generic README fallback for artifacts with neither
   `GUIDELINES.md` nor `install_params`/`wiring_actions`.** Found by
   actually opening `react-vite-lint-scaffold`'s real Detail view after

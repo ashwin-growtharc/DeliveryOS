@@ -1322,6 +1322,44 @@ input, textarea, select {
   background: var(--card);
 }
 
+/* ---------- Route/page map (whole-app template Detail section) ----------
+ * A simple indented tree, one <div> per level of nesting -- no new grid or
+ * card framework, just .tag-pill (already used for the meta-grid's Tags
+ * row) and the shared mono text convention. */
+
+.route-tree {
+  font-size: 12.5px;
+}
+
+.route-node {
+  padding: 3px 0;
+}
+
+.route-node-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.route-node-path {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: var(--primary-700);
+}
+
+.route-node-error-note {
+  font-size: 11px;
+  opacity: .6;
+  font-style: italic;
+}
+
+.route-node-children {
+  margin-left: 18px;
+  border-left: 1px solid var(--border);
+  padding-left: 12px;
+}
+
 /* ---------- Tier 2 wiring suggestions (Phase 7 item 6) ---------- */
 
 .wiring-section-label {
