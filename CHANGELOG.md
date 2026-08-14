@@ -4,6 +4,23 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- **Components tab: pull a single component, not just the whole
+  artifact.** A component in a design-kit-shaped bundle only ever had
+  "View details" -- no way to actually get its file into a real
+  project without pulling the WHOLE artifact first. New "Pull" button
+  per component card opens a real native folder dialog (same as every
+  other destination-picking action in this app -- Add New's payload
+  picker, Settings' Change folder -- never a fixed convention path
+  guessed on the person's behalf) and copies just that component's own
+  source file(s) there. New `pullPayloadComponent` (`src/engine/payload/`)
+  + `artifact.pullPayloadComponent` sidecar RPC -- deliberately
+  untracked (no lockfile entry, no pristine snapshot: a component isn't
+  its own artifact), and excludes `preview.tsx`/`preview.jsx`/
+  `preview.html` (dev/preview-only scaffolding, never meant to ship into
+  a consuming project). 3 new unit tests plus a real, in-browser
+  Playwright check confirming the folder dialog, the RPC call, and the
+  success toast all fire correctly end-to-end.
+
 - **Detail view: real markdown rendering, and a tabbed layout instead of
   one long scroll.** Every previous README/GUIDELINES.md render was
   `textContent = content` with `white-space: pre-wrap` -- headers, bold,

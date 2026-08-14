@@ -2994,3 +2994,38 @@ the user after seeing `growtharc-react-vite-starter`'s real Detail view.
       tags, not raw text). `lint`/`typecheck`/full test suite clean, plus
       a static DOM id cross-check (every `$('...')` reference in `app.js`
       has exactly one matching id in `index.html` and vice versa).
+
+## Pull a single component out of a design-kit-shaped bundle
+
+The Components tab only ever offered "View details" -- no way to
+actually get one component's file into a real project short of pulling
+the whole artifact first. Prompted directly by the user after using the
+new Components tab.
+
+- [x] **`pullPayloadComponent(remoteName, id, relativeDir, destDir)`**
+      (`src/engine/payload/pullPayloadComponent.ts`) -- deliberately
+      untracked, unlike `pullArtifact`: no lockfile entry, no pristine
+      snapshot, since a component isn't its own artifact and has no
+      `install_target` of its own. Copies the component directory's real
+      files into `destDir` (created recursively if needed), excluding
+      `preview.tsx`/`preview.jsx`/`preview.html` -- dev/preview-only
+      scaffolding for this app's own compiler, never meant to ship into
+      a consuming project (same convention `findPreviewEntryFile`'s
+      `PREVIEW_FILENAMES` already establishes). Reuses
+      `resolvePayloadDir`/`resolveWithinPayloadDir` (already
+      directory-sandboxed against a `relativeDir` that tries to escape
+      the payload root). New `artifact.pullPayloadComponent` sidecar RPC,
+      3 new unit tests (real copy, recursive destDir creation, a
+      directory-escape attempt correctly throws).
+- [x] **New "Pull" button per component card**, next to "View details" --
+      opens a real native folder dialog (`window.__TAURI__.dialog.open`,
+      same as every other destination-picking action in this app: Add
+      New's payload picker, Settings' Change folder) rather than
+      guessing a fixed convention path, then calls the new RPC and shows
+      a success/error toast. Reuses the existing `withBusy` convention
+      (button disables + "Pulling..." label for the duration).
+- [x] Verified with a real, in-browser Playwright check: clicking Pull
+      opens the dialog with the component's own name in the title,
+      calls the RPC with the correct `(remote, id, relativeDir, destDir)`
+      args, and shows the real success toast (file list + destination).
+      `lint`/`typecheck`/full test suite clean.

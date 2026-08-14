@@ -1910,6 +1910,42 @@ ${bodyHtml}
       void openComponentDetail(entry, component, usageRules[component.name.toLowerCase()]);
     });
     header.appendChild(detailBtn);
+
+    // Pulls just THIS component -- not tracked like a whole artifact
+    // (no lockfile entry, no pristine snapshot; a component isn't its
+    // own artifact, there's no install_target for "just Header"). The
+    // person picks the destination via a real native folder dialog,
+    // same as every other destination-picking action in this app
+    // (Add New's payload picker, Settings' Change folder) -- never a
+    // fixed convention path guessed on their behalf.
+    const pullBtn = document.createElement('button');
+    pullBtn.type = 'button';
+    pullBtn.className = 'btn btn-ghost btn-sm';
+    pullBtn.textContent = 'Pull';
+    pullBtn.addEventListener('click', () => {
+      void withBusy(pullBtn, 'Pulling...', async () => {
+        let destDir;
+        try {
+          destDir = await openDialog({ directory: true, title: `Choose a folder for ${component.name}` });
+        } catch (err) {
+          toastError(err);
+          return;
+        }
+        if (!destDir) return; // user cancelled
+        try {
+          const result = await call('artifact.pullPayloadComponent', {
+            remote: entry.remoteName,
+            id: entry.manifest.id,
+            relativeDir: component.relativeDir,
+            destDir,
+          });
+          toastSuccess(`Pulled ${component.name} (${result.copiedFiles.join(', ')}) to ${result.destDir}`);
+        } catch (err) {
+          toastError(err);
+        }
+      });
+    });
+    header.appendChild(pullBtn);
     card.appendChild(header);
 
     const frame = document.createElement('div');
