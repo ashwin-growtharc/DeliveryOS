@@ -466,6 +466,13 @@
               <div class="detail-title">
                 <span id="component-detail-name" class="name"></span>
               </div>
+              <!-- Same untracked single-component pull as the grid card's
+                   own "Pull" button (see loadTemplateComponentPreview in
+                   app.js) -- available here too, since this IS "inside
+                   details" for this one component, not just from the
+                   grid it was opened from. See
+                   openComponentDetail/wireEvents in app.js. -->
+              <button id="component-detail-pull-btn" class="btn btn-primary btn-sm">Pull</button>
             </div>
             <p id="component-detail-usage-rule" class="component-detail-usage-rule"></p>
             <div id="component-detail-tabs" class="tab-row"></div>

@@ -3029,3 +3029,36 @@ new Components tab.
       calls the RPC with the correct `(remote, id, relativeDir, destDir)`
       args, and shows the real success toast (file list + destination).
       `lint`/`typecheck`/full test suite clean.
+
+## Fixed: "Back to Browse" infinite loop after visiting a component's detail view
+
+Reported directly by the user. Root cause: `openDetail`'s
+`state.detailReturnView` capture guarded against being called while
+`state.view === 'detail'` (a stale self-loop), but NOT while
+`state.view === 'component-detail'` -- and `back-to-component-grid-btn`
+calls `openDetail(...)` to return to the same artifact's Detail view
+while `state.view` is still `'component-detail'` at that exact moment.
+That overwrote `detailReturnView` to the string `'component-detail'` --
+not a real `DETAIL_RETURN_LABELS` key, and not a `showView` destination
+with any real reload logic either -- so the NEXT "Back to Browse" click
+called `showView('component-detail')`, which silently just re-displayed
+the same (now stale) component-detail view instead of Browse, forever.
+
+- [x] Extended the same guard in `openDetail` to also exclude
+      `'component-detail'` -- `detailReturnView` now stays untouched
+      (correctly still `'browse'`/`'tag-folder'`/`'ui-components'`, the
+      view Detail was ACTUALLY opened from originally) across a
+      component-detail round trip.
+- [x] Added a "Pull" button to the component-detail view's own header
+      too (previously only on the Components-tab grid card it was
+      opened from) -- same untracked single-component pull, now
+      reachable from both places via a shared `pullComponentToFolder`
+      helper (extracted from the grid card's own click handler, not
+      duplicated).
+- [x] Verified with a real, in-browser reproduction of the exact
+      reported flow: Browse → Detail → Components tab → View details →
+      Back → Back to Browse. Before the fix this lands back on the
+      stale component-detail view; after, it correctly reaches Browse.
+      Also confirmed the new component-detail Pull button itself opens
+      the dialog, calls the RPC, and shows the success toast.
+      `lint`/`typecheck`/full test suite clean.

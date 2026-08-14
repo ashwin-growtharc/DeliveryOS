@@ -1801,6 +1801,7 @@ ${bodyHtml}
     const requestId = ++componentDetailRequestId;
 
     state.componentDetailReturnEntry = entry;
+    state.componentDetailComponent = component;
     $('component-detail-name').textContent = component.name;
     $('component-detail-usage-rule').textContent = usageRule || '';
 
@@ -1884,6 +1885,39 @@ ${bodyHtml}
     window.addEventListener('message', componentDetailMessageHandler);
   }
 
+  /** Pulls just ONE component -- not tracked like a whole artifact (no
+   * lockfile entry, no pristine snapshot; a component isn't its own
+   * artifact, there's no install_target for "just Header"). Shared by
+   * the Components-tab grid card's own "Pull" button and the component-
+   * detail view's header button -- same action, two entry points. The
+   * person picks the destination via a real native folder dialog, same
+   * as every other destination-picking action in this app (Add New's
+   * payload picker, Settings' Change folder) -- never a fixed convention
+   * path guessed on their behalf. */
+  async function pullComponentToFolder(button, entry, component) {
+    await withBusy(button, 'Pulling...', async () => {
+      let destDir;
+      try {
+        destDir = await openDialog({ directory: true, title: `Choose a folder for ${component.name}` });
+      } catch (err) {
+        toastError(err);
+        return;
+      }
+      if (!destDir) return; // user cancelled
+      try {
+        const result = await call('artifact.pullPayloadComponent', {
+          remote: entry.remoteName,
+          id: entry.manifest.id,
+          relativeDir: component.relativeDir,
+          destDir,
+        });
+        toastSuccess(`Pulled ${component.name} (${result.copiedFiles.join(', ')}) to ${result.destDir}`);
+      } catch (err) {
+        toastError(err);
+      }
+    });
+  }
+
   /** Compiles and mounts ONE component's live preview inside the template
    * grid -- clones loadUiComponentPreview's own per-card iframe pattern
    * (own contentHeight resize handler scoped via event.source, no
@@ -1911,40 +1945,11 @@ ${bodyHtml}
     });
     header.appendChild(detailBtn);
 
-    // Pulls just THIS component -- not tracked like a whole artifact
-    // (no lockfile entry, no pristine snapshot; a component isn't its
-    // own artifact, there's no install_target for "just Header"). The
-    // person picks the destination via a real native folder dialog,
-    // same as every other destination-picking action in this app
-    // (Add New's payload picker, Settings' Change folder) -- never a
-    // fixed convention path guessed on their behalf.
     const pullBtn = document.createElement('button');
     pullBtn.type = 'button';
     pullBtn.className = 'btn btn-ghost btn-sm';
     pullBtn.textContent = 'Pull';
-    pullBtn.addEventListener('click', () => {
-      void withBusy(pullBtn, 'Pulling...', async () => {
-        let destDir;
-        try {
-          destDir = await openDialog({ directory: true, title: `Choose a folder for ${component.name}` });
-        } catch (err) {
-          toastError(err);
-          return;
-        }
-        if (!destDir) return; // user cancelled
-        try {
-          const result = await call('artifact.pullPayloadComponent', {
-            remote: entry.remoteName,
-            id: entry.manifest.id,
-            relativeDir: component.relativeDir,
-            destDir,
-          });
-          toastSuccess(`Pulled ${component.name} (${result.copiedFiles.join(', ')}) to ${result.destDir}`);
-        } catch (err) {
-          toastError(err);
-        }
-      });
-    });
+    pullBtn.addEventListener('click', () => void pullComponentToFolder(pullBtn, entry, component));
     header.appendChild(pullBtn);
     card.appendChild(header);
 
@@ -2905,10 +2910,17 @@ ${bodyHtml}
     state.selectedKey = entryKey(entry);
     // Captured BEFORE switching to Detail, while state.view still reflects
     // wherever the user actually is right now -- guarded against
-    // overwriting with 'detail' itself in case this is ever called while
-    // already on Detail (nothing in this app does that today, but a stale
-    // 'detail' here would make the Back button loop back to itself).
-    if (state.view !== 'detail') {
+    // overwriting with 'detail' OR 'component-detail'. 'detail' guards
+    // against a stale self-loop if this is ever called while already on
+    // Detail. 'component-detail' guards a REAL, confirmed loop:
+    // back-to-component-grid-btn calls openDetail(...) to return to the
+    // SAME artifact's Detail view while state.view is still
+    // 'component-detail' at that moment -- without this guard,
+    // detailReturnView got overwritten to 'component-detail' (not a real
+    // DETAIL_RETURN_LABELS key, and not a valid showView destination
+    // either), so the NEXT "Back to Browse" click bounced back into
+    // component-detail instead of Browse, forever.
+    if (state.view !== 'detail' && state.view !== 'component-detail') {
       state.detailReturnView = state.view;
     }
     $('back-to-browse-btn').textContent =
@@ -4788,6 +4800,13 @@ ${bodyHtml}
     $('back-to-component-grid-btn').addEventListener('click', () => {
       clearComponentDetailListener();
       openDetail(state.componentDetailReturnEntry);
+    });
+    $('component-detail-pull-btn').addEventListener('click', () => {
+      void pullComponentToFolder(
+        $('component-detail-pull-btn'),
+        state.componentDetailReturnEntry,
+        state.componentDetailComponent,
+      );
     });
     // Individually wired (not the generic `[data-view]` loop above) since
     // its destination depends on how Add New was entered -- Scan's own

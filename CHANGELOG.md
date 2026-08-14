@@ -4,6 +4,22 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- **Fixed a real "Back to Browse" infinite loop**: `openDetail`'s
+  `state.detailReturnView` capture only guarded against being called
+  while already on Detail itself -- not while on the component-detail
+  view. Opening a component's own detail view from Detail's Components
+  tab, then clicking "← Back" (which re-calls `openDetail` to return to
+  the same artifact) overwrote `detailReturnView` to `'component-detail'`
+  -- not a real destination -- so the next "Back to Browse" click bounced
+  back into the stale component-detail view forever instead of reaching
+  Browse. Fixed by extending the same guard to `'component-detail'` too.
+  Also added a "Pull" button to the component-detail view itself (previously
+  only on the Components-tab grid card) -- same untracked single-component
+  pull, now available from both places via a shared `pullComponentToFolder`
+  helper. Verified with a real, in-browser reproduction of the exact
+  reported flow (Browse → Detail → Components → View details → Back →
+  Back to Browse), confirming it now lands on Browse, not the loop.
+
 - **Components tab: pull a single component, not just the whole
   artifact.** A component in a design-kit-shaped bundle only ever had
   "View details" -- no way to actually get its file into a real
