@@ -1324,7 +1324,12 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:;">
 <style>
   * { box-sizing: border-box; }
-  html, body { margin: 0; padding: 0; }
+  /* No inner scrollbar, ever -- the whole point of auto-sizing the
+     iframe to its real content height is that content never needs its
+     OWN scroll container; #main (the outer app view) already scrolls
+     normally. Same convention compile.ts's injectContentHeightReporter
+     already established for component previews. */
+  html, body { margin: 0; padding: 0; overflow: hidden; }
   body {
     font-family: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
     font-size: 14px;
