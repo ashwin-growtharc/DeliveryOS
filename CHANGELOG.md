@@ -31,6 +31,25 @@ design rationale.
   pushed `src/routes.tsx` — confirmed absent for `design-kit`/
   `azure-msal-sso` (neither ships a `routes.tsx`).
 
+- **`growtharc-react-vite-starter`: the whole company starter kit, made
+  pullable as one real, working `kind: template`** -- not the three
+  individual pieces already extracted, but Vite+React+TS + real
+  routing/layout + real Azure AD SSO, merged and cleaned into one
+  cohesive bundle. Modeled on the real `arcos-cli`/`launchpad-template`
+  whole-repo-mirror precedent. Reuses `azure-msal-sso`'s and
+  `react-vite-lint-scaffold`'s already-fixed payloads verbatim. Real
+  bugs found and fixed while assembling the rest: `Header`/`Footer`
+  import-casing, dead CSS, an undefined `--font-weight-normal` token, an
+  orphaned error boundary, a missing `/` and `/unauthorized` route, and
+  -- found only once real SCSS features and the tooling stack ran
+  together for the first time -- `stylelint-config-standard` can't parse
+  SCSS syntax at all (switched to `stylelint-config-standard-scss`) and
+  an actually-invalid `background-color: none` CSS value. Verified for
+  real: full install/build/lint/stylelint/knip clean, plus a real
+  headless-browser check confirming the assembled routing+auth+guard
+  chain works end-to-end (unauthenticated access correctly redirects to
+  a real, rendered `/unauthorized` page).
+
 - **Detail view: a generic README fallback for artifacts with neither
   `GUIDELINES.md` nor `install_params`/`wiring_actions`.** Found by
   actually opening `react-vite-lint-scaffold`'s real Detail view after
