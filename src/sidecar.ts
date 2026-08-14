@@ -67,6 +67,7 @@ import {
   parseUsageRules,
   parseLayoutRules,
 } from './engine/guidelines/parseGuidelinesTokens';
+import { parseRoutesTree } from './engine/routes/parseRoutesTree';
 
 interface SidecarRequest {
   id: string;
@@ -321,6 +322,22 @@ const commands: Record<string, CommandHandler> = {
       usageRules: parseUsageRules(content),
       layoutRules: parseLayoutRules(content),
     };
+  },
+
+  // Route/page map Detail section: one read + parse of a whole-app
+  // template's src/routes.tsx, gating the new Detail section on real
+  // file presence -- never a `kind: template` check, matching this
+  // codebase's own backend-plugin/guidelines-section convention.
+  // `present: false` (with an empty routes array) is the normal case for
+  // any artifact that doesn't ship a routes.tsx, not an error.
+  'artifact.parseRoutes': (args) => {
+    const remote = requireString(args, 'remote');
+    const id = requireString(args, 'id');
+    const content = readArtifactPayloadFile(remote, id, 'src/routes.tsx');
+    if (content === undefined) {
+      return { present: false, routes: [] };
+    }
+    return { present: true, routes: parseRoutesTree(content, 'routes.tsx') };
   },
 
   // Lists every real, preview-having component in a design-kit-shaped

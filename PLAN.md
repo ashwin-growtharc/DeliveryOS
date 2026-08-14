@@ -2774,3 +2774,68 @@ capability.
       actually changes to the target variant's real content ("Full name"
       → "Email"/"Please enter a valid email"), not just that a message
       was sent.
+
+## A real route/page map in Detail, for whole-app templates like the starter kit
+
+Prompted by real user confusion comparing `growtharc-react-vite-starter`'s
+Detail view against `design-kit`'s rich tokens/component-grid view — a
+correctly different artifact shape (a whole running app, not a
+component library, so there's nothing to independently compile/preview),
+but its README's prose description of routing was still less useful
+than showing the REAL route tree the artifact ships.
+
+- [x] **New parser, `src/engine/routes/parseRoutesTree.ts`** — the
+      second piece of code in this repo (after
+      `src/engine/scan/detectSelfNesting.ts`) to `import * as ts from
+      'typescript'` directly and walk a real AST. Same conventions:
+      `ts.createSourceFile(filePath, source, ts.ScriptTarget.Latest,
+      true, ts.ScriptKind.TSX)`, a hand-rolled recursive walk (no
+      visitor library), best-effort and non-throwing — a `routes.tsx`
+      shaped differently than expected just yields `[]`, never an
+      error, same posture `parseGuidelinesTokens.ts`'s own JSDoc already
+      states for its regex-based extraction. Finds the first
+      `createBrowserRouter([...])` call (matched by callee identifier
+      text, the same "don't type-check, just look at the syntax"
+      precedent `detectSelfNesting.ts` already uses), then walks its
+      array-literal argument recursively, reading each route object's
+      `path` (string literal; `(index)` when `index: true` instead),
+      `element`/`errorElement` (a JSX tag name via `.getText()`, same
+      extraction `detectSelfNesting.ts` uses for JSX tag names), and
+      `children` (recursed the same way).
+      5 new unit tests (`test/unit/parseRoutesTree.test.ts`) against a
+      fixture matching `growtharc-react-vite-starter`'s real
+      `routes.tsx` shape exactly (nested `children` two levels deep, an
+      `index: true` route at each level, `errorElement`, a standalone
+      second top-level route), plus malformed/absent-`createBrowserRouter`/
+      non-object-literal-element inputs all degrading to `[]` rather
+      than throwing.
+- [x] **New sidecar RPC, `artifact.parseRoutes`** (`src/sidecar.ts`) —
+      same shape as `artifact.parseGuidelines`: reads `src/routes.tsx`
+      via the already-generic `readArtifactPayloadFile`, returns
+      `{present: false, routes: []}` if absent, else `{present: true,
+      routes: parseRoutesTree(content)}`.
+- [x] **New Detail-view section, gated on `routes.present`, never a
+      `kind` check** — same convention as every other Detail section.
+      Renders as a simple indented tree (`#detail-routes-tree` in
+      `index.html`, `renderRoutesSection`/`buildRouteNodeEl` in
+      `app.js`, own `routesRequestId` request-token guard matching the
+      established async-render convention): path in mono, the
+      element's component name as a `.tag-pill`, `errorElement` noted
+      inline where present, children indented one level via a new
+      `.route-node-children` left-border rule — no new CSS framework.
+      **Coexists with, doesn't replace, the generic README section** —
+      wired into `renderDetail` right alongside the existing
+      `renderTemplateSection`/`renderGenericReadmeSection` calls, each
+      independently gated.
+
+  **Verified for real**: `lint`/`typecheck`/full test suite clean (440
+  passed, 1 known baseline failure, `sidecar.e2e.test.ts`'s GitHub-auth
+  boundary case — unrelated to this change). A real dogfood run against
+  the actual, already-pushed `growtharc-react-vite-starter` catalog
+  entry's real `src/routes.tsx` (fetched straight from
+  `growtharc-ai-helpers`'s own remote cache, comments and all) confirms
+  `parseRoutesTree` reconstructs the exact same route tree the unit
+  test fixture predicted. Confirmed via the remote cache's real tree
+  listing that neither `design-kit` nor `azure-msal-sso` ships a
+  `src/routes.tsx` at all, so the new section stays correctly absent
+  for both.

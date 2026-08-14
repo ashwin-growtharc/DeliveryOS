@@ -356,6 +356,18 @@
               <div id="detail-template-layout" class="layout-rules-strip"></div>
             </div>
 
+            <!-- Real route/page map for whole-app templates like the
+                 starter kit, parsed straight from the artifact's own
+                 src/routes.tsx -- gated on real file presence, never a
+                 `kind: template` check. Coexists with (doesn't replace)
+                 the generic README section above -- an artifact can
+                 legitimately have both. See
+                 renderDetail/renderRoutesSection in app.js. -->
+            <div id="detail-routes-section" hidden>
+              <div class="wiring-section-label">Routes</div>
+              <div id="detail-routes-tree" class="route-tree"></div>
+            </div>
+
             <div class="meta-grid">
               <div><span class="k">Kind</span><br /><span id="meta-kind" class="v"></span></div>
               <div><span class="k">Version</span><br /><span id="meta-version" class="v"></span></div>

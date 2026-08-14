@@ -1025,6 +1025,10 @@
   // own async artifact.readPayloadFile call.
   let genericReadmeRequestId = 0;
 
+  // Same request-token-guard discipline, for renderRoutesSection's own
+  // async artifact.parseRoutes call.
+  let routesRequestId = 0;
+
   // openComponentDetail's own single-iframe listener + request-id guard --
   // a THIRD independent "one active interactive iframe" context, alongside
   // detailPreviewMessageHandler (a whole standalone artifact) and
@@ -1305,6 +1309,79 @@
       readmeEl.textContent = '';
       section.hidden = true;
     }
+  }
+
+  /** Real route/page map for whole-app templates (like the starter kit),
+   * parsed straight from the artifact's own src/routes.tsx via
+   * artifact.parseRoutes -- gated on real file presence, never a
+   * `kind: template` check, same convention as every other Detail
+   * section. Coexists with renderGenericReadmeSection's README, doesn't
+   * replace it -- an artifact can legitimately have both. */
+  async function renderRoutesSection(entry) {
+    const requestId = ++routesRequestId;
+    const section = $('detail-routes-section');
+    const treeEl = $('detail-routes-tree');
+
+    let result;
+    try {
+      result = await call('artifact.parseRoutes', {
+        remote: entry.remoteName,
+        id: entry.manifest.id,
+      });
+    } catch {
+      result = { present: false, routes: [] };
+    }
+    if (requestId !== routesRequestId) return; // superseded while awaiting
+
+    treeEl.innerHTML = '';
+    if (result.present && result.routes.length > 0) {
+      for (const route of result.routes) {
+        treeEl.appendChild(buildRouteNodeEl(route));
+      }
+      section.hidden = false;
+    } else {
+      section.hidden = true;
+    }
+  }
+
+  function buildRouteNodeEl(route) {
+    const nodeEl = document.createElement('div');
+    nodeEl.className = 'route-node';
+
+    const row = document.createElement('div');
+    row.className = 'route-node-row';
+
+    const pathEl = document.createElement('span');
+    pathEl.className = 'route-node-path';
+    pathEl.textContent = route.path;
+    row.appendChild(pathEl);
+
+    if (route.element) {
+      const pill = document.createElement('span');
+      pill.className = 'tag-pill';
+      pill.textContent = route.element;
+      row.appendChild(pill);
+    }
+
+    if (route.errorElement) {
+      const note = document.createElement('span');
+      note.className = 'route-node-error-note';
+      note.textContent = `errorElement: ${route.errorElement}`;
+      row.appendChild(note);
+    }
+
+    nodeEl.appendChild(row);
+
+    if (route.children && route.children.length > 0) {
+      const childrenEl = document.createElement('div');
+      childrenEl.className = 'route-node-children';
+      for (const child of route.children) {
+        childrenEl.appendChild(buildRouteNodeEl(child));
+      }
+      nodeEl.appendChild(childrenEl);
+    }
+
+    return nodeEl;
   }
 
   /** Collects whatever was actually typed into the required-config
@@ -2763,6 +2840,13 @@
     $('detail-template-section').hidden = true;
     clearDetailTemplateListeners();
     void renderTemplateSection(entry);
+
+    // Real route/page map for whole-app templates like the starter kit --
+    // same "resolve via RPC, decide visibility once it resolves" posture
+    // as renderTemplateSection above, and independently gated: an artifact
+    // can have a routes.tsx, a README, GUIDELINES.md, all three, or none.
+    $('detail-routes-section').hidden = true;
+    void renderRoutesSection(entry);
 
     $('detail-install-path').textContent = entry.installTarget;
 
