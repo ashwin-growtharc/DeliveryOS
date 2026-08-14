@@ -1262,7 +1262,11 @@
    * say so) -- a README's raw `<script>`/`<img onerror>` would otherwise
    * reach the DOM verbatim, so the renderer below is overridden to ESCAPE
    * raw HTML rather than pass it through, using the same `escapeHtml`
-   * helper already used for tag pills. The iframe sandbox is real
+   * helper already used for tag pills, and link/image URLs are checked
+   * against an allowlist of schemes that can't execute script (see
+   * isSafeMarkdownUrl) -- marked's own link/image renderers otherwise
+   * pass a `javascript:` href straight through unmodified. The iframe
+   * sandbox is real
    * defense in depth on top of that (a strict CSP with no `img-src`
    * beyond `data:` blocks a malicious README from embedding a remote
    * tracking-pixel image, even for a Detail view someone is just
@@ -1270,6 +1274,24 @@
    * plain preformatted text if `marked` throws for any reason --
    * best-effort, never a hard failure, matching
    * parseRoutesTree/parseGuidelinesTokens's own established posture. */
+  /** Allows only URL schemes that can't execute script when clicked/loaded
+   * -- http(s)/mailto for links, plus data:image/* for images (needed for
+   * inline base64 screenshots a real README might embed), and any
+   * relative/anchor/query-only path. `javascript:`/`vbscript:`/etc. are
+   * rejected. Found by review: `marked`'s own link/image renderers pass
+   * href/src through untouched (verified directly against the vendored
+   * build -- a `[text](javascript:...)` link rendered as a live,
+   * clickable `javascript:` URL), so escaping raw HTML tokens alone (the
+   * original fix) left this one path still able to run script on click,
+   * contradicting this function's own stated security model. */
+  function isSafeMarkdownUrl(href, allowDataImage) {
+    const trimmed = String(href ?? '').trim();
+    if (/^(https?:|mailto:)/i.test(trimmed)) return true;
+    if (allowDataImage && /^data:image\//i.test(trimmed)) return true;
+    if (/^[#/?]/.test(trimmed)) return true;
+    return false;
+  }
+
   function renderMarkdownToSandboxedIframe(container, markdownText) {
     container.innerHTML = '';
 
@@ -1277,6 +1299,11 @@
     try {
       const renderer = new marked.Renderer();
       renderer.html = (token) => escapeHtml(token.text ?? '');
+      const defaultLink = renderer.link.bind(renderer);
+      const defaultImage = renderer.image.bind(renderer);
+      renderer.link = (token) =>
+        isSafeMarkdownUrl(token.href, false) ? defaultLink(token) : escapeHtml(token.text ?? token.href ?? '');
+      renderer.image = (token) => (isSafeMarkdownUrl(token.href, true) ? defaultImage(token) : '');
       html = marked.parse(markdownText, { renderer, gfm: true });
     } catch {
       const pre = document.createElement('pre');
@@ -1337,6 +1364,12 @@
     color: #1E3C53;
     padding: 4px 2px 20px;
     max-width: 760px;
+    /* Found by review: a long unbroken token (a URL, hash, or path with
+       no spaces) wider than max-width used to just get silently clipped
+       -- overflow:hidden above hides it rather than showing a scrollbar,
+       so the clipped tail was genuinely unreadable, not just ugly. */
+    overflow-wrap: break-word;
+    word-break: break-word;
   }
   h1, h2, h3, h4, h5, h6 {
     font-family: 'EB Garamond', Georgia, serif;
@@ -1801,7 +1834,12 @@ ${bodyHtml}
     const requestId = ++componentDetailRequestId;
 
     state.componentDetailReturnEntry = entry;
-    state.componentDetailComponent = component;
+    // Contextual, not a fixed "← Back" label -- names the specific
+    // artifact this component grid belongs to, the same way Detail's own
+    // back button names its specific return destination
+    // (DETAIL_RETURN_LABELS) rather than a single generic label
+    // regardless of context.
+    $('back-to-component-grid-btn').textContent = `← Back to ${entry.manifest.id}`;
     $('component-detail-name').textContent = component.name;
     $('component-detail-usage-rule').textContent = usageRule || '';
 
@@ -2964,10 +3002,23 @@ ${bodyHtml}
 
   let detailTabState = {};
   let detailActiveTabKey = null;
+  // Tracks WHICH artifact detailActiveTabKey belongs to -- found by
+  // review: renderDetail runs again for the SAME artifact after any
+  // successful Pull/Push/Overwrite (via refreshDetailIfShown), and used
+  // to unconditionally null out detailActiveTabKey every time, silently
+  // kicking the user back to the first tab even though they were still
+  // looking at (say) Routes. Only reset the ACTIVE tab when the artifact
+  // actually changes; detailTabState itself still gets recomputed fresh
+  // every render regardless (content may have genuinely changed).
+  let detailShownEntryKey = null;
 
-  function resetDetailTabState() {
+  function resetDetailTabState(entry) {
     detailTabState = {};
-    detailActiveTabKey = null;
+    const key = entryKey(entry);
+    if (key !== detailShownEntryKey) {
+      detailActiveTabKey = null;
+    }
+    detailShownEntryKey = key;
   }
 
   function refreshDetailTabs() {
@@ -2986,18 +3037,42 @@ ${bodyHtml}
       return;
     }
 
-    if (!applicable.some((def) => def.key === detailActiveTabKey)) {
+    // Reassign the active tab only once we KNOW the current one is
+    // genuinely not applicable (detailTabState[key] === false) or nothing
+    // was ever selected (null) -- NEVER merely because it hasn't resolved
+    // YET (detailTabState[key] === undefined, still awaiting its own RPC).
+    // Found by review/testing: sections resolve independently and at
+    // different times (Documentation/Design/Components/Routes are each
+    // separate round-trips) -- checking `applicable.some(...)` alone
+    // treated "not yet known" identically to "confirmed absent," so the
+    // FIRST tab to resolve before whichever one was actually active stole
+    // focus away from it every time, defeating the whole point of
+    // preserving the active tab across a same-artifact refresh.
+    const activeKeyState = detailActiveTabKey === null ? undefined : detailTabState[detailActiveTabKey];
+    if (detailActiveTabKey === null || activeKeyState === false) {
       detailActiveTabKey = applicable[0].key;
     }
+
+    // What's actually SHOWN right now, as distinct from the preference
+    // above: if the preferred tab hasn't resolved yet, temporarily fall
+    // back to display the first tab that HAS -- without touching
+    // detailActiveTabKey itself -- so a same-artifact refresh doesn't
+    // blank the whole panel area while specifically the previously-active
+    // tab's own section is still mid-flight; once it resolves, display
+    // catches up to the real preference on the next refreshDetailTabs()
+    // call automatically.
+    const displayKey = applicable.some((def) => def.key === detailActiveTabKey)
+      ? detailActiveTabKey
+      : applicable[0].key;
 
     tabsRow.hidden = false;
     tabsRow.innerHTML = '';
     for (const def of DETAIL_TAB_DEFS) {
-      $(def.panelId).hidden = def.key !== detailActiveTabKey;
+      $(def.panelId).hidden = def.key !== displayKey;
     }
     for (const def of applicable) {
       const tab = document.createElement('button');
-      tab.className = `tab${def.key === detailActiveTabKey ? ' active' : ''}`;
+      tab.className = `tab${def.key === displayKey ? ' active' : ''}`;
       tab.textContent = def.label;
       tab.addEventListener('click', () => {
         detailActiveTabKey = def.key;
@@ -3059,9 +3134,16 @@ ${bodyHtml}
     // refreshDetailTabs() itself. The two synchronous ones (already known
     // from the manifest in hand, no RPC needed) are set immediately below;
     // the rest resolve asynchronously.
-    resetDetailTabState();
+    resetDetailTabState(entry);
     clearMarkdownIframeListeners();
     clearDetailTemplateListeners();
+    // Found by review: this was the one live-iframe listener renderDetail
+    // never tore down for a NEW artifact (its only two call sites were
+    // openComponentDetail itself and the "back to component grid"
+    // button) -- leaving Artifact A's component-detail iframe/listener
+    // alive if the user left via the sidebar instead of its own back
+    // button, then opened Artifact B directly.
+    clearComponentDetailListener();
 
     detailTabState.preview = manifest.kind === 'ui-component';
     if (detailTabState.preview) {
@@ -4797,16 +4879,20 @@ ${bodyHtml}
     // Returns to the SAME design-kit-shaped artifact's own Detail view
     // (never just Browse) -- openComponentDetail always sets
     // state.componentDetailReturnEntry right before navigating here.
+    // Looks up a FRESH copy from state.catalog by key first (same lookup
+    // refreshDetailIfShown already does), falling back to the captured
+    // entry only if it's no longer in the catalog -- found by review: an
+    // in-flight Pull/Push/Overwrite started from Detail, then a detour
+    // into a component's own detail view before it resolved, made
+    // refreshDetailIfShown's own refresh silently no-op (state.view was
+    // 'component-detail', not 'detail'); reusing the stale captured
+    // object here would then show outdated status/badge/version
+    // indefinitely instead of picking up the completed action's result.
     $('back-to-component-grid-btn').addEventListener('click', () => {
       clearComponentDetailListener();
-      openDetail(state.componentDetailReturnEntry);
-    });
-    $('component-detail-pull-btn').addEventListener('click', () => {
-      void pullComponentToFolder(
-        $('component-detail-pull-btn'),
-        state.componentDetailReturnEntry,
-        state.componentDetailComponent,
-      );
+      const returnEntry = state.componentDetailReturnEntry;
+      const fresh = state.catalog.find((e) => entryKey(e) === entryKey(returnEntry));
+      openDetail(fresh ?? returnEntry);
     });
     // Individually wired (not the generic `[data-view]` loop above) since
     // its destination depends on how Add New was entered -- Scan's own

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { pullPayloadComponent } from '../../src/engine/payload/pullPayloadComponent';
+import { pullPayloadComponent, PullPayloadComponentConflictError } from '../../src/engine/payload/pullPayloadComponent';
 import { remotesRegistryPath, remoteCachePath } from '../../src/engine/paths';
 
 let deliveryOsHome: string;
@@ -108,5 +108,42 @@ describe('pullPayloadComponent', () => {
     expect(() =>
       pullPayloadComponent('test-remote', 'design-kit', '../../../etc', path.join(destParent, 'evil')),
     ).toThrow();
+  });
+
+  it('recursively copies a nested subdirectory, excluding preview files at any depth (never silently drops them)', () => {
+    writeRegistry(['test-remote']);
+    writeManifest(remoteCachePath('test-remote'), 'design-kit');
+    const payloadDir = path.join(remoteCachePath('test-remote'), 'artifacts', 'design-kit', 'payload');
+    const componentDir = path.join(payloadDir, 'components', 'IconButton');
+    writeComponent(componentDir);
+    fs.mkdirSync(path.join(componentDir, 'icons'), { recursive: true });
+    fs.writeFileSync(path.join(componentDir, 'icons', 'plus.svg'), '<svg></svg>', 'utf-8');
+    fs.writeFileSync(path.join(componentDir, 'icons', 'preview.tsx'), 'nested preview scaffold, must be excluded', 'utf-8');
+
+    const destDir = path.join(destParent, 'IconButton');
+    const result = pullPayloadComponent('test-remote', 'design-kit', 'components/IconButton', destDir);
+
+    expect(result.copiedFiles.sort()).toEqual(['IconButton.tsx', path.join('icons', 'plus.svg')].sort());
+    expect(fs.existsSync(path.join(destDir, 'icons', 'plus.svg'))).toBe(true);
+    expect(fs.existsSync(path.join(destDir, 'icons', 'preview.tsx'))).toBe(false);
+  });
+
+  it('throws a clear conflict error instead of silently overwriting an existing file at the destination', () => {
+    writeRegistry(['test-remote']);
+    writeManifest(remoteCachePath('test-remote'), 'design-kit');
+    const payloadDir = path.join(remoteCachePath('test-remote'), 'artifacts', 'design-kit', 'payload');
+    writeComponent(path.join(payloadDir, 'components', 'Header'));
+
+    const destDir = path.join(destParent, 'Header');
+    fs.mkdirSync(destDir, { recursive: true });
+    fs.writeFileSync(path.join(destDir, 'Header.tsx'), 'a real, pre-existing file the user already has', 'utf-8');
+
+    expect(() => pullPayloadComponent('test-remote', 'design-kit', 'components/Header', destDir)).toThrow(
+      PullPayloadComponentConflictError,
+    );
+    // Never partially written -- the pre-existing file is untouched.
+    expect(fs.readFileSync(path.join(destDir, 'Header.tsx'), 'utf-8')).toBe(
+      'a real, pre-existing file the user already has',
+    );
   });
 });

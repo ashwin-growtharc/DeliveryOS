@@ -3062,3 +3062,112 @@ the same (now stale) component-detail view instead of Browse, forever.
       Also confirmed the new component-detail Pull button itself opens
       the dialog, calls the RPC, and shows the success toast.
       `lint`/`typecheck`/full test suite clean.
+- [x] **Removed** the component-detail Pull button per direct user
+      feedback ("dont want pull here") -- Pull stays only on the
+      Components-tab grid card. `pullComponentToFolder` (the shared
+      helper) keeps its one remaining call site unchanged.
+
+## Full review pass on the Detail tabs/markdown/pull-component work
+
+Requested directly by the user after two real bugs surfaced from
+hands-on use ("buttons are broken", "back button loop", "back button is
+generic"). Ran two independent review agents in parallel -- a full
+code-review pass over the whole branch diff, and a from-scratch
+Playwright simulation sweep across many scenarios (rapid artifact
+switching, deep navigation loops, edge-case markdown, a console-error
+sweep) -- then personally verified every real finding with its own
+targeted reproduction before fixing it, rather than trusting either
+report at face value.
+
+- [x] **Real security gap, found by the code-review agent, personally
+      reproduced**: `renderMarkdownToSandboxedIframe`'s renderer
+      escaped raw HTML tokens but never validated link/image URL
+      schemes -- `marked`'s own `link`/`image` renderers pass an href
+      straight through untouched. Verified directly against the
+      vendored build: `[click me](javascript:alert(document.domain))`
+      rendered as a live, clickable `javascript:` link before the fix.
+      New `isSafeMarkdownUrl` (http(s)/mailto for links, `data:image/*`
+      for images, relative/anchor/query paths otherwise) neutralizes
+      anything else -- a rejected link renders as its own plain text,
+      a rejected image is simply dropped. Re-verified in a real
+      sandboxed iframe: the malicious link/image no longer execute,
+      the legitimate `https://` link and `data:image/png` still work.
+- [x] **A second, deeper bug in the tab controller, found only once the
+      first fix below was tested for real, not by code-reading alone**:
+      `refreshDetailTabs` treated "this tab hasn't resolved yet"
+      (`detailTabState[key] === undefined`) identically to "confirmed
+      not applicable" (`=== false`) when deciding whether to steer away
+      from the active tab -- so the first section to resolve after a
+      same-artifact refresh stole the active tab the instant it
+      resolved before whichever tab the user was actually on. Fixed in
+      two parts: only reassign `detailActiveTabKey` itself once a tab's
+      state is definitively `false` (or nothing was ever chosen), and
+      separately compute a `displayKey` (falls back to the first
+      *resolved* tab for what's shown right now, without touching the
+      real preference) so a still-pending preferred tab doesn't blank
+      the panel while waiting.
+- [x] **`resetDetailTabState` unconditionally wiped the active tab
+      selection on every `renderDetail` call**, including a
+      same-artifact re-render after a successful Pull/Push/Overwrite
+      (via `refreshDetailIfShown`) -- silently kicking the user back to
+      the first tab even if they were on Routes. Fixed: tracks
+      `detailShownEntryKey` and only resets `detailActiveTabKey` when
+      the artifact actually changes; `detailTabState` itself still
+      recomputes fresh every render regardless.
+- [x] **Stale entry reused after a Component-Detail detour during an
+      in-flight action, found by the code-review agent, personally
+      reproduced with a real click-triggered race**: starting a Pull
+      from Detail, then navigating into a component's own detail view
+      before it resolves, made `refreshDetailIfShown`'s own refresh
+      silently no-op (`state.view` wasn't `'detail'` at that moment).
+      `back-to-component-grid-btn`'s handler reused the stale captured
+      `entry` object instead. Fixed: looks up the current entry from
+      `state.catalog` by key first (the same lookup
+      `refreshDetailIfShown` already does), falling back to the
+      captured one only if it's no longer in the catalog.
+- [x] **`clearComponentDetailListener()` was never called from
+      `renderDetail`**, asymmetric with its three siblings
+      (`clearMarkdownIframeListeners`/`clearDetailTemplateListeners`/
+      `clearDetailPreviewListener`) -- could leak a stale
+      component-detail iframe/listener if the user left via the
+      sidebar instead of that view's own back button. Added to the
+      same cleanup block.
+- [x] **`pullPayloadComponent` rewritten** to fix two real gaps found
+      by the code-review agent: it silently dropped any file inside a
+      nested subdirectory of a component (only top-level files were
+      copied, no error), and silently overwrote existing files at the
+      destination on a re-pull. Now recursively lists every real file
+      at any depth (excluding preview files at any depth, not just
+      top-level) and checks for destination conflicts BEFORE writing
+      anything, throwing a clear `PullPayloadComponentConflictError`
+      listing the conflicting file(s) instead of a partial, silent
+      overwrite. 2 new unit tests (nested-directory copy, conflict
+      detection) alongside the existing 3.
+- [x] **Inconsistent "present" semantics for the same file, found by
+      the simulation agent**: a 0-byte/whitespace-only `GUIDELINES.md`
+      made `artifact.parseGuidelines`'s `present: true` check (file
+      exists at all) disagree with the Documentation tab's own
+      truthiness check on the same file's content -- Design/Components
+      tabs would show (empty) while Documentation stayed hidden.
+      `artifact.parseGuidelines` now treats empty content the same as
+      absent, matching the other check.
+- [x] **Long unbroken content silently clipped, found by the
+      simulation agent**: a single very long token (a URL, hash, or
+      path with no spaces) in a README exceeded the markdown frame's
+      width and was invisibly cut off rather than wrapping or
+      scrolling, since the iframe's own `overflow: hidden` (added to
+      fix the earlier visible-scrollbar bug) hid the overflow instead
+      of preventing it. Fixed with `overflow-wrap`/`word-break` on the
+      rendered document's body.
+- [x] **Verified with real, in-browser Playwright reproductions for
+      every fix above**, not just re-reading the code: the XSS payload
+      check (a `<script>`, a `javascript:` link, and a `javascript:`
+      image all neutralized in one document, alongside a real
+      `https://` link and `data:` image still rendering correctly), the
+      tab-preservation race (clicking the real action button, waiting
+      for it to resolve, confirming the previously-active Routes tab is
+      still active afterward), and the stale-entry race (clicking the
+      real action button then immediately navigating into a component's
+      detail view before it resolves, confirming the version shown
+      after returning reflects the completed action, not the stale
+      pre-action value). `lint`/`typecheck`/full test suite clean.

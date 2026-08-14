@@ -4,6 +4,77 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- **Full review pass on the new Detail tabs/markdown/pull-component work**,
+  requested directly by the user after two real bugs surfaced from hands-on
+  use. Ran two independent review agents in parallel (a full code-review
+  pass over the whole branch diff, and a from-scratch Playwright
+  simulation sweep across many scenarios) and personally verified every
+  finding before fixing it:
+  - **A real security gap**: the markdown renderer escaped raw HTML but
+    never validated link/image URL schemes -- `marked`'s own link/image
+    renderers pass an href straight through untouched, so a README
+    containing `[click me](javascript:...)` rendered as a live, clickable
+    `javascript:` link, contradicting this feature's own documented
+    security model. Fixed with an explicit scheme allowlist
+    (`isSafeMarkdownUrl`: http(s)/mailto for links, plus `data:image/*`
+    for images, relative/anchor paths otherwise) -- confirmed directly
+    against the vendored `marked` build both before (exploitable) and
+    after (neutralized) the fix.
+  - **A real, deeper bug in the tab controller once the earlier
+    "preserve the active tab across a same-artifact refresh" fix (below)
+    was tested for real**: `refreshDetailTabs` treated "this tab hasn't
+    resolved yet" identically to "this tab is confirmed absent," so the
+    FIRST section to resolve after a same-artifact refresh (Pull/Push/
+    Overwrite) stole the active tab away from whichever one the user was
+    actually still on, the instant it happened to resolve before that
+    one did. Fixed by only reassigning once a tab's own state is
+    definitively `false` (or nothing was ever chosen), and separating
+    "the user's real preference" from "what's shown right now" so a
+    still-pending preferred tab doesn't blank the panel while waiting.
+  - Detail's own re-render (`resetDetailTabState`) unconditionally wiped
+    the active tab selection on every call, including a same-artifact
+    refresh after a successful Pull/Push/Overwrite -- silently kicking
+    the user back to the first tab even if they were looking at Routes.
+    Fixed: only resets when the artifact actually changes.
+  - Returning from a component's own detail view via "← Back to `<id>`"
+    reused a stale captured `entry` object instead of looking up fresh
+    data from `state.catalog` -- if a Pull/Push/Overwrite completed while
+    the user had detoured into a component's detail view (a real race,
+    since `refreshDetailIfShown` silently no-ops once the view isn't
+    'detail'), Detail would show outdated status/version indefinitely
+    once they returned. Fixed with the same fresh-lookup-by-key
+    `refreshDetailIfShown` already does.
+  - `clearComponentDetailListener()` was the one live-iframe listener
+    `renderDetail` never tore down for a new artifact (asymmetric with
+    its three siblings) -- could leak a stale component-detail
+    iframe/listener if the user left via the sidebar instead of the
+    view's own back button.
+  - `pullPayloadComponent` silently dropped any file inside a nested
+    subdirectory of a component (only top-level files were copied, no
+    error/warning) and silently overwrote existing files at the
+    destination on a re-pull. Rewritten to recursively copy (excluding
+    preview files at any depth) and to check for destination conflicts
+    BEFORE writing anything, throwing a clear `PullPayloadComponentConflictError`
+    instead. 2 new unit tests (nested-directory copy, conflict
+    detection) alongside the existing 3.
+  - A 0-byte/whitespace-only `GUIDELINES.md` used to show the Design/
+    Components tabs (empty) while the Documentation tab stayed hidden
+    for that same file -- `artifact.parseGuidelines`'s "present" check
+    now treats empty content the same as absent, matching the
+    Documentation tab's own truthiness check.
+  - A single very long, unbroken token in a README (a URL, hash, or path
+    with no spaces) used to be silently clipped off the edge of the
+    markdown frame rather than wrapping -- `overflow-wrap`/`word-break`
+    added to the rendered document's body styling.
+  - Also gave the component-detail view's "← Back" button a contextual
+    label (`← Back to <artifact-id>`) instead of a fixed generic "←
+    Back" -- the one other real UI issue directly reported.
+  Every fix re-verified with a real, in-browser Playwright reproduction
+  (not just re-reading the code): the XSS payload check, the tab-
+  preservation race across a real click-triggered same-artifact refresh,
+  and the stale-entry race across a real component-detail detour mid-pull.
+  `lint`/`typecheck`/full test suite clean throughout.
+
 - **Fixed a real "Back to Browse" infinite loop**: `openDetail`'s
   `state.detailReturnView` capture only guarded against being called
   while already on Detail itself -- not while on the component-detail

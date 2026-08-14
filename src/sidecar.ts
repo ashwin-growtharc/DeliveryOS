@@ -313,7 +313,13 @@ const commands: Record<string, CommandHandler> = {
     const remote = requireString(args, 'remote');
     const id = requireString(args, 'id');
     const content = readArtifactPayloadFile(remote, id, 'GUIDELINES.md');
-    if (content === undefined) {
+    // A 0-byte/whitespace-only GUIDELINES.md is treated the same as absent
+    // -- matches the truthiness check the Documentation tab's own
+    // renderDocumentationTab already uses on this same file (app.js);
+    // without this, an empty file used to show the Design/Components tabs
+    // with nothing in them while Documentation stayed hidden for the same
+    // file, a real inconsistency (found via review).
+    if (content === undefined || content.trim().length === 0) {
       return { present: false, colorTokens: [], typeScale: [], usageRules: {}, layoutRules: null };
     }
     return {
