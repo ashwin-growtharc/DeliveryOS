@@ -466,6 +466,17 @@
               <div class="detail-title">
                 <span id="component-detail-name" class="name"></span>
               </div>
+              <!-- Same untracked single-component pull the Components-tab
+                   grid card used to offer -- moved here exclusively per
+                   direct user feedback (the grid card is a compact browse
+                   surface where "View details" is the one real action;
+                   Pull belongs in the fuller view once you're already
+                   looking at just one component). btn-ghost, not
+                   btn-primary -- this component's own real usage rule
+                   (shown right below) is literally "one primary per view,
+                   never two competing for attention." See
+                   openComponentDetail/wireEvents in app.js. -->
+              <button id="component-detail-pull-btn" class="btn btn-ghost btn-sm">Pull</button>
             </div>
             <p id="component-detail-usage-rule" class="component-detail-usage-rule"></p>
             <div id="component-detail-tabs" class="tab-row"></div>

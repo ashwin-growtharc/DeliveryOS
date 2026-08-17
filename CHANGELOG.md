@@ -4,6 +4,16 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- **Two more Detail-view UX tweaks per direct user feedback**: moved the
+  per-component "Pull" button off the Components-tab grid card (where
+  "View details" is the one real action for a compact browse surface)
+  into the component-detail view itself (`btn-ghost`, not `btn-primary`
+  -- deliberately not competing with anything, matching this component's
+  own real usage-rule text about never having two primary actions on a
+  view). Also reordered Detail's tabs so Design/Components/Documentation
+  lead (the concrete, visual "what does this look like" content), with
+  Preview/Configuration/Routes following.
+
 - **Full review pass on the new Detail tabs/markdown/pull-component work**,
   requested directly by the user after two real bugs surfaced from hands-on
   use. Ran two independent review agents in parallel (a full code-review

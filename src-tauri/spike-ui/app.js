@@ -1834,6 +1834,7 @@ ${bodyHtml}
     const requestId = ++componentDetailRequestId;
 
     state.componentDetailReturnEntry = entry;
+    state.componentDetailComponent = component;
     // Contextual, not a fixed "← Back" label -- names the specific
     // artifact this component grid belongs to, the same way Detail's own
     // back button names its specific return destination
@@ -1982,13 +1983,6 @@ ${bodyHtml}
       void openComponentDetail(entry, component, usageRules[component.name.toLowerCase()]);
     });
     header.appendChild(detailBtn);
-
-    const pullBtn = document.createElement('button');
-    pullBtn.type = 'button';
-    pullBtn.className = 'btn btn-ghost btn-sm';
-    pullBtn.textContent = 'Pull';
-    pullBtn.addEventListener('click', () => void pullComponentToFolder(pullBtn, entry, component));
-    header.appendChild(pullBtn);
     card.appendChild(header);
 
     const frame = document.createElement('div');
@@ -2991,12 +2985,16 @@ ${bodyHtml}
    * "decide visibility once it resolves" posture those sections already
    * had; this just adds a shared tab UI on top instead of each section
    * showing/hiding independently in a fixed vertical order. */
+  // Order here is display order, left to right -- Design/Components/
+  // Documentation lead (per direct user feedback: the concrete, visual
+  // "what does this look like" content first), Preview/Configuration/
+  // Routes follow.
   const DETAIL_TAB_DEFS = [
-    { key: 'preview', label: 'Preview', panelId: 'detail-preview-section' },
-    { key: 'configuration', label: 'Configuration', panelId: 'detail-configuration-section' },
-    { key: 'documentation', label: 'Documentation', panelId: 'detail-documentation-section' },
     { key: 'design', label: 'Design', panelId: 'detail-design-section' },
     { key: 'components', label: 'Components', panelId: 'detail-components-section' },
+    { key: 'documentation', label: 'Documentation', panelId: 'detail-documentation-section' },
+    { key: 'preview', label: 'Preview', panelId: 'detail-preview-section' },
+    { key: 'configuration', label: 'Configuration', panelId: 'detail-configuration-section' },
     { key: 'routes', label: 'Routes', panelId: 'detail-routes-section' },
   ];
 
@@ -4893,6 +4891,13 @@ ${bodyHtml}
       const returnEntry = state.componentDetailReturnEntry;
       const fresh = state.catalog.find((e) => entryKey(e) === entryKey(returnEntry));
       openDetail(fresh ?? returnEntry);
+    });
+    $('component-detail-pull-btn').addEventListener('click', () => {
+      void pullComponentToFolder(
+        $('component-detail-pull-btn'),
+        state.componentDetailReturnEntry,
+        state.componentDetailComponent,
+      );
     });
     // Individually wired (not the generic `[data-view]` loop above) since
     // its destination depends on how Add New was entered -- Scan's own
