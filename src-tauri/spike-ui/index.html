@@ -295,6 +295,14 @@
                  at all) when at most one section applies -- the common
                  case, e.g. a plain artifact with just a README. -->
             <div id="detail-tabs-row" class="tab-row" hidden></div>
+            <!-- Documentation/Design/Components/Routes each resolve via
+                 their own RPC round-trip -- shown while any of them is
+                 still pending, so a section that ends up applicable
+                 doesn't just silently pop in with no warning it was
+                 coming. See refreshDetailTabs in app.js. -->
+            <div id="detail-tabs-loading" class="detail-tabs-loading" hidden>
+              <span class="spinner" aria-hidden="true"></span> Loading&hellip;
+            </div>
 
             <div id="detail-tab-panels">
               <!-- Live preview + variant tabs + generated props controls

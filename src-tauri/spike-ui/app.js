@@ -356,6 +356,14 @@
     for (const btn of document.querySelectorAll('.sidebar-item')) {
       btn.classList.toggle('active', btn.dataset.view === view);
     }
+    // Neither this nor showViewRaw ever reset scroll position -- found
+    // by direct user report: if the previous view was scrolled down,
+    // whatever's just been switched to opens still scrolled to that same
+    // position instead of at its own top (most visible on Detail, whose
+    // content is now much shorter per-tab than the old one-long-scroll
+    // layout, so landing mid-page reads as genuinely broken rather than
+    // just "a bit off").
+    window.scrollTo(0, 0);
     if (view === 'browse') {
       void loadCatalog();
     } else if (view === 'tags') {
@@ -2973,6 +2981,9 @@ ${bodyHtml}
     for (const btn of document.querySelectorAll('.sidebar-item')) {
       btn.classList.toggle('active', btn.dataset.view === view);
     }
+    // Same scroll-reset showView already does -- openDetail/
+    // openComponentDetail both navigate via THIS function, not showView.
+    window.scrollTo(0, 0);
   }
 
   /** Detail's top-level content tabs -- reuses the exact `.tab-row`/`.tab`/
@@ -2998,8 +3009,26 @@ ${bodyHtml}
     { key: 'routes', label: 'Routes', panelId: 'detail-routes-section' },
   ];
 
+  // The only keys that resolve via an RPC round-trip -- preview/
+  // configuration are always known synchronously from the manifest
+  // already in hand. Used to show a real loading indicator while any of
+  // these is still pending, so a tab that ends up applicable doesn't
+  // just silently pop in with no warning it was coming.
+  const DETAIL_ASYNC_TAB_KEYS = ['documentation', 'design', 'components', 'routes'];
+
   let detailTabState = {};
   let detailActiveTabKey = null;
+  // Whether detailActiveTabKey is a REAL preference (the person actually
+  // clicked a tab) vs. still just an automatic default. This distinction
+  // is the whole point: until the person clicks something, the active
+  // tab should always track DETAIL_TAB_DEFS's own display order (Design
+  // first, once it's known to apply) -- not just "whichever section
+  // happened to resolve first in time," which is all Configuration
+  // (always synchronous) winning by default, artifact after artifact.
+  // Once they DO click a tab, that becomes sticky (see the reassignment
+  // rule below) and is never silently overridden again, including across
+  // a same-artifact refresh after a Pull/Push/Overwrite.
+  let detailActiveTabIsUserChosen = false;
   // Tracks WHICH artifact detailActiveTabKey belongs to -- found by
   // review: renderDetail runs again for the SAME artifact after any
   // successful Pull/Push/Overwrite (via refreshDetailIfShown), and used
@@ -3015,6 +3044,7 @@ ${bodyHtml}
     const key = entryKey(entry);
     if (key !== detailShownEntryKey) {
       detailActiveTabKey = null;
+      detailActiveTabIsUserChosen = false;
     }
     detailShownEntryKey = key;
   }
@@ -3023,31 +3053,46 @@ ${bodyHtml}
     const applicable = DETAIL_TAB_DEFS.filter((def) => detailTabState[def.key]);
     const tabsRow = $('detail-tabs-row');
 
+    $('detail-tabs-loading').hidden = DETAIL_ASYNC_TAB_KEYS.every((key) => detailTabState[key] !== undefined);
+
     // At most one section applies -- the common case (most artifacts
     // just have a README) -- so skip the tab-row chrome entirely and show
-    // that one section (or nothing) directly, un-tabbed.
+    // that one section (or nothing) directly, un-tabbed. Still recorded
+    // as the (non-user-chosen) active tab so there's continuity if a
+    // second tab shows up moments later.
     if (applicable.length <= 1) {
       tabsRow.hidden = true;
       tabsRow.innerHTML = '';
       for (const def of DETAIL_TAB_DEFS) {
         $(def.panelId).hidden = !(applicable.length === 1 && applicable[0].key === def.key);
       }
+      if (applicable.length === 1 && !detailActiveTabIsUserChosen) {
+        detailActiveTabKey = applicable[0].key;
+      }
       return;
     }
 
-    // Reassign the active tab only once we KNOW the current one is
-    // genuinely not applicable (detailTabState[key] === false) or nothing
-    // was ever selected (null) -- NEVER merely because it hasn't resolved
-    // YET (detailTabState[key] === undefined, still awaiting its own RPC).
-    // Found by review/testing: sections resolve independently and at
-    // different times (Documentation/Design/Components/Routes are each
-    // separate round-trips) -- checking `applicable.some(...)` alone
-    // treated "not yet known" identically to "confirmed absent," so the
-    // FIRST tab to resolve before whichever one was actually active stole
-    // focus away from it every time, defeating the whole point of
-    // preserving the active tab across a same-artifact refresh.
-    const activeKeyState = detailActiveTabKey === null ? undefined : detailTabState[detailActiveTabKey];
-    if (detailActiveTabKey === null || activeKeyState === false) {
+    if (detailActiveTabIsUserChosen) {
+      // A real preference -- only abandon it once we KNOW it's genuinely
+      // not applicable (detailTabState[key] === false), never merely
+      // because it hasn't resolved YET (undefined, still awaiting its
+      // own RPC) -- sections resolve independently and at different
+      // times, so treating "not yet known" the same as "confirmed
+      // absent" would silently steal focus the instant ANY other tab
+      // happened to resolve first.
+      if (detailTabState[detailActiveTabKey] === false) {
+        detailActiveTabKey = applicable[0].key;
+        detailActiveTabIsUserChosen = false;
+      }
+    } else {
+      // No real preference yet -- always track DETAIL_TAB_DEFS's own
+      // display order, recomputed fresh on every call. Direct user
+      // feedback: Configuration (always synchronous) used to "win" by
+      // simply being known before Design/Components (which need a real
+      // RPC round-trip) -- once Design/Components resolve and turn out
+      // applicable, THIS is what makes the view correctly switch to
+      // Design (the intended first tab) instead of getting stuck on
+      // whichever tab merely happened to resolve first.
       detailActiveTabKey = applicable[0].key;
     }
 
@@ -3058,7 +3103,8 @@ ${bodyHtml}
     // blank the whole panel area while specifically the previously-active
     // tab's own section is still mid-flight; once it resolves, display
     // catches up to the real preference on the next refreshDetailTabs()
-    // call automatically.
+    // call automatically. (A no-op in the non-user-chosen branch above,
+    // since detailActiveTabKey is always freshly in `applicable` there.)
     const displayKey = applicable.some((def) => def.key === detailActiveTabKey)
       ? detailActiveTabKey
       : applicable[0].key;
@@ -3074,6 +3120,7 @@ ${bodyHtml}
       tab.textContent = def.label;
       tab.addEventListener('click', () => {
         detailActiveTabKey = def.key;
+        detailActiveTabIsUserChosen = true;
         refreshDetailTabs();
       });
       tabsRow.appendChild(tab);

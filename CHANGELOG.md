@@ -4,6 +4,43 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- **Two more real Detail-view bugs found via direct hands-on use**:
+  - Neither `showView`/`showViewRaw` ever reset scroll position when
+    switching views -- if the previous view was scrolled down, whatever
+    was navigated to next opened still scrolled to that same position
+    (most visible on Detail, whose per-tab content is now much shorter
+    than the old one-long-scroll layout, so landing mid-page read as
+    genuinely broken). Both now call `window.scrollTo(0, 0)`.
+  - A brand-new artifact's tabs resolve one section at a time --
+    Configuration/Preview are always known synchronously; Documentation/
+    Design/Components/Routes each need a real RPC round-trip. Since
+    Configuration is known first purely by NOT needing a round-trip, it
+    used to "win" the initial tab regardless of `DETAIL_TAB_DEFS`'s own
+    intended display order (Design/Components/Documentation first) --
+    once Design/Components/etc. resolved moments later and turned out
+    applicable, the view stayed stuck on Configuration instead of moving
+    to the tab that was actually supposed to lead. New
+    `detailActiveTabIsUserChosen` flag distinguishes a real preference
+    (the person clicked a tab) from an automatic default: until a tab is
+    actually clicked, the active tab always tracks `DETAIL_TAB_DEFS`'s
+    display order fresh on every resolution, correctly moving from
+    Configuration to Design once Design is known to apply. Once a tab IS
+    explicitly clicked, it becomes sticky and is never silently
+    overridden again (including across a same-artifact refresh after a
+    Pull/Push/Overwrite, or navigating away and back to the SAME
+    artifact) -- only a genuinely different artifact resets it. Verified
+    with a stress test across 7 different resolution-timing scenarios
+    (simultaneous, reversed, all-delayed, all-instant) confirming the
+    default always ends up on the right tab regardless of arrival order,
+    plus a real click-through confirming an explicit choice survives
+    both a same-artifact reopen and continued background resolution,
+    while a genuinely different artifact still defaults fresh.
+  - Added a "Loading…" indicator (reusing the existing `.spinner`
+    convention from the progress panel) shown while any of
+    Documentation/Design/Components/Routes is still resolving, so a tab
+    that ends up applicable doesn't just silently pop in with no warning
+    it was coming.
+
 - **Two more Detail-view UX tweaks per direct user feedback**: moved the
   per-component "Pull" button off the Components-tab grid card (where
   "View details" is the one real action for a compact browse surface)
