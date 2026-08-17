@@ -356,6 +356,14 @@
     for (const btn of document.querySelectorAll('.sidebar-item')) {
       btn.classList.toggle('active', btn.dataset.view === view);
     }
+    // Neither this nor showViewRaw ever reset scroll position -- found
+    // by direct user report: if the previous view was scrolled down,
+    // whatever's just been switched to opens still scrolled to that same
+    // position instead of at its own top (most visible on Detail, whose
+    // content is now much shorter per-tab than the old one-long-scroll
+    // layout, so landing mid-page reads as genuinely broken rather than
+    // just "a bit off").
+    window.scrollTo(0, 0);
     if (view === 'browse') {
       void loadCatalog();
     } else if (view === 'tags') {
@@ -1004,30 +1012,36 @@
   // stops before touching the DOM.
   let detailPreviewRequestId = 0;
 
-  // Same request-token-guard discipline as detailPreviewRequestId, above,
-  // for renderInstallParamsSection's own async README fetch -- switching
-  // Detail to a different artifact before an in-flight
-  // artifact.readPayloadFile call resolves must never let that stale
-  // call overwrite the NOW-current artifact's README with the PREVIOUS
-  // one's content.
-  let installParamsRequestId = 0;
-
   // Same request-token-guard discipline, for renderWiringSection's own
   // async artifact.resolveWiringActions call.
   let wiringRequestId = 0;
 
   // Phase 11 Detail-view task: same request-token-guard discipline, for
-  // renderTemplateSection's own async artifact.parseGuidelines/
+  // renderDesignAndComponentsSections's own async artifact.parseGuidelines/
   // artifact.listPayloadComponents/preview.compilePayloadComponent calls.
   let detailTemplateRequestId = 0;
 
-  // Same request-token-guard discipline, for renderGenericReadmeSection's
-  // own async artifact.readPayloadFile call.
-  let genericReadmeRequestId = 0;
+  // Same request-token-guard discipline, for renderDocumentationTab's own
+  // async artifact.readPayloadFile calls (README.md and GUIDELINES.md).
+  let documentationRequestId = 0;
 
   // Same request-token-guard discipline, for renderRoutesSection's own
   // async artifact.parseRoutes call.
   let routesRequestId = 0;
+
+  // Array-based counterpart to detailPreviewMessageHandler, for
+  // renderMarkdownToSandboxedIframe's own iframes -- a single Documentation
+  // tab can hold more than one (README.md AND GUIDELINES.md's own prose,
+  // each in its own iframe), same "one listener per live iframe, torn down
+  // before the next render" discipline as clearDetailTemplateListeners.
+  let markdownIframeMessageHandlers = [];
+
+  function clearMarkdownIframeListeners() {
+    for (const handler of markdownIframeMessageHandlers) {
+      window.removeEventListener('message', handler);
+    }
+    markdownIframeMessageHandlers = [];
+  }
 
   // openComponentDetail's own single-iframe listener + request-id guard --
   // a THIRD independent "one active interactive iframe" context, alongside
@@ -1085,11 +1099,11 @@
 
   /** Array-based counterpart to clearDetailPreviewListener, for the
    * template grid's N simultaneous iframes -- called both at the top of
-   * renderTemplateSection (about to replace them with a new set) and from
-   * renderDetail when switching to an artifact with no GUIDELINES.md
-   * (which never calls renderTemplateSection's grid-building path at all,
-   * so without this the previous artifact's iframes/listeners would
-   * otherwise just sit there, hidden but still live). */
+   * renderDesignAndComponentsSections (about to replace them with a new
+   * set) and from renderDetail when switching to an artifact with no
+   * GUIDELINES.md (which never calls that function's grid-building path
+   * at all, so without this the previous artifact's iframes/listeners
+   * would otherwise just sit there, hidden but still live). */
   function clearDetailTemplateListeners() {
     for (const handler of detailTemplateMessageHandlers) {
       window.removeEventListener('message', handler);
@@ -1197,54 +1211,18 @@
   }
 
   /** Detail view's non-visual counterpart to loadDetailPreview (Phase 7,
-   * kind: backend-plugin): a signed/provenance badge, the artifact's
-   * rendered README (if it has one), and a required-config checklist for
-   * every declared install_param, collecting the PROJECT's own values --
-   * never the artifact's own defaults, which only ever seed the form as a
-   * starting point, exactly like Add New's own auto-scaffold placeholders
-   * are a starting point, not a finished value. Shown only when
-   * `manifest.install_params` is non-empty -- see renderDetail. */
-  async function renderInstallParamsSection(entry) {
-    const requestId = ++installParamsRequestId;
+   * kind: backend-plugin): a required-config checklist for every declared
+   * install_param, collecting the PROJECT's own values -- never the
+   * artifact's own defaults, which only ever seed the form as a starting
+   * point, exactly like Add New's own auto-scaffold placeholders are a
+   * starting point, not a finished value. Shown only when
+   * `manifest.install_params` is non-empty -- see renderDetail. (The
+   * provenance badge and README used to render here too -- the former is
+   * now always-visible regardless of kind, the latter lives in the
+   * Documentation tab alongside every other kind's README, see
+   * renderDetail/renderDocumentationTab.) */
+  function renderInstallParamsSection(entry) {
     const { manifest } = entry;
-
-    // Provenance badge: honest about what's actually been verified. No
-    // artifact has a real signature yet (Phase 7's item 3, the actual
-    // signing pipeline, isn't built) -- this already renders the "Signed"
-    // state correctly for whenever one does, without needing to come back
-    // and wire this up again later.
-    const badge = $('detail-provenance-badge');
-    if (manifest.signature) {
-      badge.textContent = `✓ Signed (${manifest.signature.algorithm})`;
-      badge.className = 'provenance-badge signed';
-    } else {
-      badge.textContent = 'Unverified -- no provenance signature yet';
-      badge.className = 'provenance-badge unsigned';
-    }
-
-    const readmeEl = $('detail-readme');
-    readmeEl.hidden = true;
-    readmeEl.textContent = '';
-    try {
-      const { content } = await call('artifact.readPayloadFile', {
-        remote: entry.remoteName,
-        id: manifest.id,
-        path: 'README.md',
-      });
-      if (requestId !== installParamsRequestId) return; // superseded while awaiting
-      if (content) {
-        // Shown as plain preformatted text, not rendered HTML -- no
-        // markdown renderer is vendored anywhere in this app, and adding
-        // one is a bigger scope increase than this item calls for; a
-        // real, readable README beats no README, even unstyled.
-        readmeEl.textContent = content;
-        readmeEl.hidden = false;
-      }
-    } catch {
-      // No README is a normal, common case (most artifacts don't have
-      // one) -- fail silent here, the checklist below is the actually
-      // required part of this section.
-    }
 
     const fieldsContainer = $('detail-install-params-fields');
     fieldsContainer.innerHTML = '';
@@ -1278,48 +1256,257 @@
     };
   }
 
-  /** Generic fallback for any artifact with a real payload-root
-   * README.md that isn't a `kind: backend-plugin` (that case renders its
-   * README inside its own section, see renderInstallParamsSection above)
-   * -- gated on real file presence, never a `kind` check, same
-   * convention as every other Detail section. Most artifacts have no
-   * README at all; that's the normal case, not a failure, so this fails
-   * quietly and just keeps the section hidden. */
-  async function renderGenericReadmeSection(entry) {
-    const requestId = ++genericReadmeRequestId;
-    const section = $('detail-generic-readme-section');
-    const readmeEl = $('detail-generic-readme');
+  /** Real markdown rendering (vendored `marked`, loaded as a plain global
+   * via vendor/marked.min.js -- spike-ui has no build step, so this is a
+   * classic <script> tag, not an import) for README.md/GUIDELINES.md
+   * content -- replaces the old `textContent` raw-text dump (headers/
+   * bold/tables/links/code-fences used to show up as literal `#`/`**`/`|`
+   * characters). Rendered inside a SANDBOXED iframe, never injected into
+   * the host page's own DOM directly: a pushed artifact's README is real
+   * but still less-trusted content, matching this codebase's existing
+   * "sandbox anything less-trusted" discipline (loadDetailPreview's
+   * component-preview iframes, compile.ts's directory-sandboxed esbuild
+   * import plugin). `marked` does NOT sanitize by design (its own docs
+   * say so) -- a README's raw `<script>`/`<img onerror>` would otherwise
+   * reach the DOM verbatim, so the renderer below is overridden to ESCAPE
+   * raw HTML rather than pass it through, using the same `escapeHtml`
+   * helper already used for tag pills, and link/image URLs are checked
+   * against an allowlist of schemes that can't execute script (see
+   * isSafeMarkdownUrl) -- marked's own link/image renderers otherwise
+   * pass a `javascript:` href straight through unmodified. The iframe
+   * sandbox is real
+   * defense in depth on top of that (a strict CSP with no `img-src`
+   * beyond `data:` blocks a malicious README from embedding a remote
+   * tracking-pixel image, even for a Detail view someone is just
+   * browsing before deciding whether to pull anything). Falls back to
+   * plain preformatted text if `marked` throws for any reason --
+   * best-effort, never a hard failure, matching
+   * parseRoutesTree/parseGuidelinesTokens's own established posture. */
+  /** Allows only URL schemes that can't execute script when clicked/loaded
+   * -- http(s)/mailto for links, plus data:image/* for images (needed for
+   * inline base64 screenshots a real README might embed), and any
+   * relative/anchor/query-only path. `javascript:`/`vbscript:`/etc. are
+   * rejected. Found by review: `marked`'s own link/image renderers pass
+   * href/src through untouched (verified directly against the vendored
+   * build -- a `[text](javascript:...)` link rendered as a live,
+   * clickable `javascript:` URL), so escaping raw HTML tokens alone (the
+   * original fix) left this one path still able to run script on click,
+   * contradicting this function's own stated security model.
+   *
+   * The relative-path check deliberately excludes a leading `//` --
+   * `//evil.com/phish` starts with `/` (so a naive `/^[#/?]/` test wrongly
+   * treats it as a same-site relative path) but is actually a
+   * protocol-relative URL that navigates cross-origin, resolving to
+   * whatever scheme the iframe currently has (e.g. `https://evil.com/
+   * phish`). A crafted README link in that shape would otherwise be
+   * clickable and swap the iframe's own displayed content for an
+   * attacker-controlled page -- not script execution (no
+   * allow-same-origin/allow-top-navigation on this iframe), but a real
+   * phishing vector inside what reads as trusted DeliveryOS chrome. */
+  function isSafeMarkdownUrl(href, allowDataImage) {
+    const trimmed = String(href ?? '').trim();
+    if (/^(https?:|mailto:)/i.test(trimmed)) return true;
+    if (allowDataImage && /^data:image\//i.test(trimmed)) return true;
+    if (/^[#?]/.test(trimmed)) return true;
+    if (/^\/(?!\/)/.test(trimmed)) return true;
+    return false;
+  }
 
-    let content;
+  function renderMarkdownToSandboxedIframe(container, markdownText) {
+    container.innerHTML = '';
+
+    let html;
     try {
-      ({ content } = await call('artifact.readPayloadFile', {
-        remote: entry.remoteName,
-        id: entry.manifest.id,
-        path: 'README.md',
-      }));
+      const renderer = new marked.Renderer();
+      renderer.html = (token) => escapeHtml(token.text ?? '');
+      const defaultLink = renderer.link.bind(renderer);
+      const defaultImage = renderer.image.bind(renderer);
+      renderer.link = (token) =>
+        isSafeMarkdownUrl(token.href, false) ? defaultLink(token) : escapeHtml(token.text ?? token.href ?? '');
+      renderer.image = (token) => (isSafeMarkdownUrl(token.href, true) ? defaultImage(token) : '');
+      html = marked.parse(markdownText, { renderer, gfm: true });
     } catch {
-      content = undefined;
+      const pre = document.createElement('pre');
+      pre.className = 'markdown-fallback';
+      pre.textContent = markdownText;
+      container.appendChild(pre);
+      return;
     }
-    if (requestId !== genericReadmeRequestId) return; // superseded while awaiting
 
-    if (content) {
-      readmeEl.textContent = content;
-      section.hidden = false;
-    } else {
-      readmeEl.textContent = '';
-      section.hidden = true;
+    const iframe = document.createElement('iframe');
+    iframe.sandbox = 'allow-scripts';
+    iframe.className = 'markdown-frame';
+    iframe.srcdoc = buildMarkdownDocument(html);
+    container.appendChild(iframe);
+
+    const handler = (event) => {
+      if (event.source !== iframe.contentWindow) return;
+      const data = event.data;
+      if (!data || typeof data !== 'object' || data.type !== 'contentHeight') return;
+      // No upper clamp (unlike clampPreviewHeight) -- documentation is
+      // legitimately much longer than a component preview, and the
+      // whole point of this feature is no nested inner scrollbar; #main
+      // already scrolls the outer page normally.
+      iframe.style.height = `${Math.max(data.height, 40)}px`;
+    };
+    window.addEventListener('message', handler);
+    markdownIframeMessageHandlers.push(handler);
+  }
+
+  /** Wraps already-rendered (HTML-escaped-raw-HTML) markdown output into
+   * a small, self-contained document -- same CSP-meta-tag convention as
+   * compile.ts's injectPreviewCsp (`img-src data:` only), real
+   * typographic styling matching this app's own heading/body/code font
+   * conventions (soft font-family preferences only, same as every other
+   * component preview in this app -- no @import/<link> Google Fonts
+   * fetch, which the CSP below would block anyway and which this
+   * codebase already avoids for less-trusted content), and a small
+   * inline content-height-reporter script -- simpler than compile.ts's
+   * injectContentHeightReporter (that one tracks a React #root's mount/
+   * remount lifecycle; a static markdown document has no such lifecycle,
+   * just a plain ResizeObserver on <body>). */
+  function buildMarkdownDocument(bodyHtml) {
+    return `<!doctype html>
+<html><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:;">
+<style>
+  * { box-sizing: border-box; }
+  /* No inner scrollbar, ever -- the whole point of auto-sizing the
+     iframe to its real content height is that content never needs its
+     OWN scroll container; #main (the outer app view) already scrolls
+     normally. Same convention compile.ts's injectContentHeightReporter
+     already established for component previews. */
+  html, body { margin: 0; padding: 0; overflow: hidden; }
+  body {
+    font-family: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+    font-size: 14px;
+    line-height: 1.65;
+    color: #1E3C53;
+    padding: 4px 2px 20px;
+    max-width: 760px;
+    /* Found by review: a long unbroken token (a URL, hash, or path with
+       no spaces) wider than max-width used to just get silently clipped
+       -- overflow:hidden above hides it rather than showing a scrollbar,
+       so the clipped tail was genuinely unreadable, not just ugly. */
+    overflow-wrap: break-word;
+    word-break: break-word;
+  }
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'EB Garamond', Georgia, serif;
+    font-weight: 400;
+    line-height: 1.25;
+    margin: 1.4em 0 .5em;
+  }
+  h1 { font-size: 26px; margin-top: 0; }
+  h2 { font-size: 21px; border-bottom: 1px solid #E0D9CE; padding-bottom: .3em; }
+  h3 { font-size: 17px; }
+  p, ul, ol { margin: 0 0 1em; }
+  ul, ol { padding-left: 1.4em; }
+  li { margin-bottom: .3em; }
+  a { color: #1E3C53; text-decoration: underline; text-decoration-color: #C9BFAF; }
+  a:hover { text-decoration-color: #1E3C53; }
+  code {
+    font-family: 'JetBrains Mono', ui-monospace, Consolas, monospace;
+    font-size: 12.5px;
+    background: #F6F1E9;
+    border: 1px solid #E0D9CE;
+    border-radius: 4px;
+    padding: 1px 5px;
+  }
+  pre {
+    background: #F6F1E9;
+    border: 1px solid #E0D9CE;
+    border-radius: 8px;
+    padding: 12px 14px;
+    overflow-x: auto;
+  }
+  pre code { background: none; border: none; padding: 0; }
+  blockquote {
+    margin: 0 0 1em;
+    padding: .2em 1em;
+    border-left: 3px solid #ACC384;
+    color: #1E3C53;
+    opacity: .85;
+  }
+  table { border-collapse: collapse; margin: 0 0 1em; width: 100%; }
+  th, td { border: 1px solid #E0D9CE; padding: 6px 10px; text-align: left; font-size: 13px; }
+  th { background: #F6F1E9; font-weight: 600; }
+  tr:nth-child(even) td { background: #FFFCF2; }
+  hr { border: none; border-top: 1px solid #E0D9CE; margin: 1.5em 0; }
+  img { max-width: 100%; }
+</style>
+</head><body>
+${bodyHtml}
+<script>
+  (function () {
+    function report() {
+      var height = document.body.scrollHeight;
+      if (window.parent) window.parent.postMessage({ type: 'contentHeight', height: height }, '*');
     }
+    new ResizeObserver(report).observe(document.body);
+    report();
+  })();
+</script>
+</body></html>`;
+  }
+
+  /** Documentation tab: real rendered markdown for README.md and/or
+   * GUIDELINES.md's own full prose -- gated on real file presence, never
+   * a `kind` check, one shared render regardless of artifact kind (a
+   * `kind: backend-plugin` artifact's README used to render in a
+   * separate section from every other kind's; there's no real reason for
+   * that split once every kind's README lands in the same tab). Most
+   * artifacts have no README at all, or a README but no GUIDELINES.md;
+   * both are normal, not failures -- each block independently hides
+   * itself when its own file is absent, and the whole tab drops out of
+   * detailTabState.documentation only if BOTH are absent. GUIDELINES.md's
+   * own structured tokens/usage-rules are rendered separately (see
+   * renderDesignAndComponentsSections) -- this only shows its raw prose,
+   * which today is never shown anywhere else in the app at all. */
+  async function renderDocumentationTab(entry) {
+    const requestId = ++documentationRequestId;
+    const readmeBlock = $('detail-readme-block');
+    const readmeEl = $('detail-readme');
+    const guidelinesBlock = $('detail-guidelines-doc-block');
+    const guidelinesEl = $('detail-guidelines-doc');
+
+    const [readmeResult, guidelinesResult] = await Promise.allSettled([
+      call('artifact.readPayloadFile', { remote: entry.remoteName, id: entry.manifest.id, path: 'README.md' }),
+      call('artifact.readPayloadFile', { remote: entry.remoteName, id: entry.manifest.id, path: 'GUIDELINES.md' }),
+    ]);
+    if (requestId !== documentationRequestId) return; // superseded while awaiting
+
+    const readmeContent = readmeResult.status === 'fulfilled' ? readmeResult.value.content : undefined;
+    const guidelinesContent = guidelinesResult.status === 'fulfilled' ? guidelinesResult.value.content : undefined;
+
+    if (readmeContent) {
+      renderMarkdownToSandboxedIframe(readmeEl, readmeContent);
+      readmeBlock.hidden = false;
+    } else {
+      readmeEl.innerHTML = '';
+      readmeBlock.hidden = true;
+    }
+
+    if (guidelinesContent) {
+      renderMarkdownToSandboxedIframe(guidelinesEl, guidelinesContent);
+      guidelinesBlock.hidden = false;
+    } else {
+      guidelinesEl.innerHTML = '';
+      guidelinesBlock.hidden = true;
+    }
+
+    detailTabState.documentation = Boolean(readmeContent) || Boolean(guidelinesContent);
+    refreshDetailTabs();
   }
 
   /** Real route/page map for whole-app templates (like the starter kit),
    * parsed straight from the artifact's own src/routes.tsx via
    * artifact.parseRoutes -- gated on real file presence, never a
    * `kind: template` check, same convention as every other Detail
-   * section. Coexists with renderGenericReadmeSection's README, doesn't
-   * replace it -- an artifact can legitimately have both. */
+   * tab. Coexists with the Documentation tab's README, doesn't replace
+   * it -- an artifact can legitimately have both. */
   async function renderRoutesSection(entry) {
     const requestId = ++routesRequestId;
-    const section = $('detail-routes-section');
     const treeEl = $('detail-routes-tree');
 
     let result;
@@ -1334,14 +1521,14 @@
     if (requestId !== routesRequestId) return; // superseded while awaiting
 
     treeEl.innerHTML = '';
-    if (result.present && result.routes.length > 0) {
+    const hasRoutes = result.present && result.routes.length > 0;
+    if (hasRoutes) {
       for (const route of result.routes) {
         treeEl.appendChild(buildRouteNodeEl(route));
       }
-      section.hidden = false;
-    } else {
-      section.hidden = true;
     }
+    detailTabState.routes = hasRoutes;
+    refreshDetailTabs();
   }
 
   function buildRouteNodeEl(route) {
@@ -1496,32 +1683,33 @@
     }
   }
 
-  /** Phase 11 Detail-view task: renders design-kit's color tokens, type
-   * scale, and a live component grid for a `kind: template` (or any
-   * future kind) artifact that has a real `GUIDELINES.md` at its payload
-   * root -- gated on that presence, never `manifest.kind`. Sets the
-   * section's own visibility once `artifact.parseGuidelines` resolves
-   * (renderDetail hides it up front so a previous artifact's content
-   * doesn't stay visible in the meantime). */
-  async function renderTemplateSection(entry) {
+  /** Phase 11 Detail-view task: renders design-kit's color tokens/type
+   * scale/layout-rules (Design tab) and a live component grid (Components
+   * tab) for any artifact with a real `GUIDELINES.md` at its payload root
+   * -- gated on that presence, never `manifest.kind`. Both tabs share this
+   * one `artifact.parseGuidelines` fetch (split into two DOM targets, not
+   * two RPC round-trips) and both flip their `detailTabState` key together
+   * once it resolves -- an artifact with GUIDELINES.md always gets both,
+   * same behavior as the single combined section this replaces. */
+  async function renderDesignAndComponentsSections(entry) {
     const requestId = ++detailTemplateRequestId;
-    const section = $('detail-template-section');
 
     let guidelines;
     try {
       guidelines = await call('artifact.parseGuidelines', { remote: entry.remoteName, id: entry.manifest.id });
     } catch {
       if (requestId !== detailTemplateRequestId) return; // superseded while awaiting
-      section.hidden = true;
+      detailTabState.design = false;
+      detailTabState.components = false;
+      refreshDetailTabs();
       return;
     }
     if (requestId !== detailTemplateRequestId) return; // superseded while awaiting
 
-    if (!guidelines.present) {
-      section.hidden = true;
-      return;
-    }
-    section.hidden = false;
+    detailTabState.design = guidelines.present;
+    detailTabState.components = guidelines.present;
+    refreshDetailTabs();
+    if (!guidelines.present) return;
 
     const tokensContainer = $('detail-template-tokens');
     tokensContainer.innerHTML = '';
@@ -1666,6 +1854,13 @@
     const requestId = ++componentDetailRequestId;
 
     state.componentDetailReturnEntry = entry;
+    state.componentDetailComponent = component;
+    // Contextual, not a fixed "← Back" label -- names the specific
+    // artifact this component grid belongs to, the same way Detail's own
+    // back button names its specific return destination
+    // (DETAIL_RETURN_LABELS) rather than a single generic label
+    // regardless of context.
+    $('back-to-component-grid-btn').textContent = `← Back to ${entry.manifest.id}`;
     $('component-detail-name').textContent = component.name;
     $('component-detail-usage-rule').textContent = usageRule || '';
 
@@ -1747,6 +1942,39 @@
       );
     };
     window.addEventListener('message', componentDetailMessageHandler);
+  }
+
+  /** Pulls just ONE component -- not tracked like a whole artifact (no
+   * lockfile entry, no pristine snapshot; a component isn't its own
+   * artifact, there's no install_target for "just Header"). Shared by
+   * the Components-tab grid card's own "Pull" button and the component-
+   * detail view's header button -- same action, two entry points. The
+   * person picks the destination via a real native folder dialog, same
+   * as every other destination-picking action in this app (Add New's
+   * payload picker, Settings' Change folder) -- never a fixed convention
+   * path guessed on their behalf. */
+  async function pullComponentToFolder(button, entry, component) {
+    await withBusy(button, 'Pulling...', async () => {
+      let destDir;
+      try {
+        destDir = await openDialog({ directory: true, title: `Choose a folder for ${component.name}` });
+      } catch (err) {
+        toastError(err);
+        return;
+      }
+      if (!destDir) return; // user cancelled
+      try {
+        const result = await call('artifact.pullPayloadComponent', {
+          remote: entry.remoteName,
+          id: entry.manifest.id,
+          relativeDir: component.relativeDir,
+          destDir,
+        });
+        toastSuccess(`Pulled ${component.name} (${result.copiedFiles.join(', ')}) to ${result.destDir}`);
+      } catch (err) {
+        toastError(err);
+      }
+    });
   }
 
   /** Compiles and mounts ONE component's live preview inside the template
@@ -2734,10 +2962,17 @@
     state.selectedKey = entryKey(entry);
     // Captured BEFORE switching to Detail, while state.view still reflects
     // wherever the user actually is right now -- guarded against
-    // overwriting with 'detail' itself in case this is ever called while
-    // already on Detail (nothing in this app does that today, but a stale
-    // 'detail' here would make the Back button loop back to itself).
-    if (state.view !== 'detail') {
+    // overwriting with 'detail' OR 'component-detail'. 'detail' guards
+    // against a stale self-loop if this is ever called while already on
+    // Detail. 'component-detail' guards a REAL, confirmed loop:
+    // back-to-component-grid-btn calls openDetail(...) to return to the
+    // SAME artifact's Detail view while state.view is still
+    // 'component-detail' at that moment -- without this guard,
+    // detailReturnView got overwritten to 'component-detail' (not a real
+    // DETAIL_RETURN_LABELS key, and not a valid showView destination
+    // either), so the NEXT "Back to Browse" click bounced back into
+    // component-detail instead of Browse, forever.
+    if (state.view !== 'detail' && state.view !== 'component-detail') {
       state.detailReturnView = state.view;
     }
     $('back-to-browse-btn').textContent =
@@ -2757,6 +2992,150 @@
     }
     for (const btn of document.querySelectorAll('.sidebar-item')) {
       btn.classList.toggle('active', btn.dataset.view === view);
+    }
+    // Same scroll-reset showView already does -- openDetail/
+    // openComponentDetail both navigate via THIS function, not showView.
+    window.scrollTo(0, 0);
+  }
+
+  /** Detail's top-level content tabs -- reuses the exact `.tab-row`/`.tab`/
+   * `.tab.active` convention already established for switching preview
+   * variants (loadDetailPreview), generalized into top-level sections.
+   * Two of these (`preview`/`configuration`) are known synchronously, the
+   * rest only resolve after an RPC round-trip -- each section's own
+   * render function flips its flag in `detailTabState` and calls
+   * `refreshDetailTabs()` once it knows whether it applies, same
+   * "decide visibility once it resolves" posture those sections already
+   * had; this just adds a shared tab UI on top instead of each section
+   * showing/hiding independently in a fixed vertical order. */
+  // Order here is display order, left to right -- Design/Components/
+  // Documentation lead (per direct user feedback: the concrete, visual
+  // "what does this look like" content first), Preview/Configuration/
+  // Routes follow.
+  const DETAIL_TAB_DEFS = [
+    { key: 'design', label: 'Design', panelId: 'detail-design-section' },
+    { key: 'components', label: 'Components', panelId: 'detail-components-section' },
+    { key: 'documentation', label: 'Documentation', panelId: 'detail-documentation-section' },
+    { key: 'preview', label: 'Preview', panelId: 'detail-preview-section' },
+    { key: 'configuration', label: 'Configuration', panelId: 'detail-configuration-section' },
+    { key: 'routes', label: 'Routes', panelId: 'detail-routes-section' },
+  ];
+
+  // The only keys that resolve via an RPC round-trip -- preview/
+  // configuration are always known synchronously from the manifest
+  // already in hand. Used to show a real loading indicator while any of
+  // these is still pending, so a tab that ends up applicable doesn't
+  // just silently pop in with no warning it was coming.
+  const DETAIL_ASYNC_TAB_KEYS = ['documentation', 'design', 'components', 'routes'];
+
+  let detailTabState = {};
+  let detailActiveTabKey = null;
+  // Whether detailActiveTabKey is a REAL preference (the person actually
+  // clicked a tab) vs. still just an automatic default. This distinction
+  // is the whole point: until the person clicks something, the active
+  // tab should always track DETAIL_TAB_DEFS's own display order (Design
+  // first, once it's known to apply) -- not just "whichever section
+  // happened to resolve first in time," which is all Configuration
+  // (always synchronous) winning by default, artifact after artifact.
+  // Once they DO click a tab, that becomes sticky (see the reassignment
+  // rule below) and is never silently overridden again, including across
+  // a same-artifact refresh after a Pull/Push/Overwrite.
+  let detailActiveTabIsUserChosen = false;
+  // Tracks WHICH artifact detailActiveTabKey belongs to -- found by
+  // review: renderDetail runs again for the SAME artifact after any
+  // successful Pull/Push/Overwrite (via refreshDetailIfShown), and used
+  // to unconditionally null out detailActiveTabKey every time, silently
+  // kicking the user back to the first tab even though they were still
+  // looking at (say) Routes. Only reset the ACTIVE tab when the artifact
+  // actually changes; detailTabState itself still gets recomputed fresh
+  // every render regardless (content may have genuinely changed).
+  let detailShownEntryKey = null;
+
+  function resetDetailTabState(entry) {
+    detailTabState = {};
+    const key = entryKey(entry);
+    if (key !== detailShownEntryKey) {
+      detailActiveTabKey = null;
+      detailActiveTabIsUserChosen = false;
+    }
+    detailShownEntryKey = key;
+  }
+
+  function refreshDetailTabs() {
+    const applicable = DETAIL_TAB_DEFS.filter((def) => detailTabState[def.key]);
+    const tabsRow = $('detail-tabs-row');
+
+    $('detail-tabs-loading').hidden = DETAIL_ASYNC_TAB_KEYS.every((key) => detailTabState[key] !== undefined);
+
+    // At most one section applies -- the common case (most artifacts
+    // just have a README) -- so skip the tab-row chrome entirely and show
+    // that one section (or nothing) directly, un-tabbed. Still recorded
+    // as the (non-user-chosen) active tab so there's continuity if a
+    // second tab shows up moments later.
+    if (applicable.length <= 1) {
+      tabsRow.hidden = true;
+      tabsRow.innerHTML = '';
+      for (const def of DETAIL_TAB_DEFS) {
+        $(def.panelId).hidden = !(applicable.length === 1 && applicable[0].key === def.key);
+      }
+      if (applicable.length === 1 && !detailActiveTabIsUserChosen) {
+        detailActiveTabKey = applicable[0].key;
+      }
+      return;
+    }
+
+    if (detailActiveTabIsUserChosen) {
+      // A real preference -- only abandon it once we KNOW it's genuinely
+      // not applicable (detailTabState[key] === false), never merely
+      // because it hasn't resolved YET (undefined, still awaiting its
+      // own RPC) -- sections resolve independently and at different
+      // times, so treating "not yet known" the same as "confirmed
+      // absent" would silently steal focus the instant ANY other tab
+      // happened to resolve first.
+      if (detailTabState[detailActiveTabKey] === false) {
+        detailActiveTabKey = applicable[0].key;
+        detailActiveTabIsUserChosen = false;
+      }
+    } else {
+      // No real preference yet -- always track DETAIL_TAB_DEFS's own
+      // display order, recomputed fresh on every call. Direct user
+      // feedback: Configuration (always synchronous) used to "win" by
+      // simply being known before Design/Components (which need a real
+      // RPC round-trip) -- once Design/Components resolve and turn out
+      // applicable, THIS is what makes the view correctly switch to
+      // Design (the intended first tab) instead of getting stuck on
+      // whichever tab merely happened to resolve first.
+      detailActiveTabKey = applicable[0].key;
+    }
+
+    // What's actually SHOWN right now, as distinct from the preference
+    // above: if the preferred tab hasn't resolved yet, temporarily fall
+    // back to display the first tab that HAS -- without touching
+    // detailActiveTabKey itself -- so a same-artifact refresh doesn't
+    // blank the whole panel area while specifically the previously-active
+    // tab's own section is still mid-flight; once it resolves, display
+    // catches up to the real preference on the next refreshDetailTabs()
+    // call automatically. (A no-op in the non-user-chosen branch above,
+    // since detailActiveTabKey is always freshly in `applicable` there.)
+    const displayKey = applicable.some((def) => def.key === detailActiveTabKey)
+      ? detailActiveTabKey
+      : applicable[0].key;
+
+    tabsRow.hidden = false;
+    tabsRow.innerHTML = '';
+    for (const def of DETAIL_TAB_DEFS) {
+      $(def.panelId).hidden = def.key !== displayKey;
+    }
+    for (const def of applicable) {
+      const tab = document.createElement('button');
+      tab.className = `tab${def.key === displayKey ? ' active' : ''}`;
+      tab.textContent = def.label;
+      tab.addEventListener('click', () => {
+        detailActiveTabKey = def.key;
+        detailActiveTabIsUserChosen = true;
+        refreshDetailTabs();
+      });
+      tabsRow.appendChild(tab);
     }
   }
 
@@ -2789,12 +3168,44 @@
       ? pills.map((p) => `<span class="tag-pill">${escapeHtml(p)}</span>`).join('')
       : '<span class="tag-pill">none</span>';
 
-    const previewSection = $('detail-preview-section');
-    if (manifest.kind === 'ui-component') {
-      previewSection.hidden = false;
+    // Provenance badge: honest about what's actually been verified. No
+    // artifact has a real signature yet (Phase 7's item 3, the actual
+    // signing pipeline, isn't built) -- this already renders the "Signed"
+    // state correctly for whenever one does, without needing to come back
+    // and wire this up again later. Always visible regardless of kind
+    // (used to render only inside the backend-plugin section) -- whether
+    // an artifact is verified is identity/status info, same category as
+    // the meta grid below, not documentation.
+    const provenanceBadge = $('detail-provenance-badge');
+    if (manifest.signature) {
+      provenanceBadge.textContent = `✓ Signed (${manifest.signature.algorithm})`;
+      provenanceBadge.className = 'provenance-badge signed';
+    } else {
+      provenanceBadge.textContent = 'Unverified -- no provenance signature yet';
+      provenanceBadge.className = 'provenance-badge unsigned';
+    }
+
+    // Resets the tab controller for whichever NEW artifact this is --
+    // detailTabState starts empty (every key falsy) and each section below
+    // flips its own key once it knows whether it applies, calling
+    // refreshDetailTabs() itself. The two synchronous ones (already known
+    // from the manifest in hand, no RPC needed) are set immediately below;
+    // the rest resolve asynchronously.
+    resetDetailTabState(entry);
+    clearMarkdownIframeListeners();
+    clearDetailTemplateListeners();
+    // Found by review: this was the one live-iframe listener renderDetail
+    // never tore down for a NEW artifact (its only two call sites were
+    // openComponentDetail itself and the "back to component grid"
+    // button) -- leaving Artifact A's component-detail iframe/listener
+    // alive if the user left via the sidebar instead of its own back
+    // button, then opened Artifact B directly.
+    clearComponentDetailListener();
+
+    detailTabState.preview = manifest.kind === 'ui-component';
+    if (detailTabState.preview) {
       void loadDetailPreview(entry);
     } else {
-      previewSection.hidden = true;
       // loadDetailPreview is never called for a non-ui-component entry,
       // so without this a previous ui-component Detail's still-live
       // iframe/listener (just hidden, not removed) would otherwise sit
@@ -2809,43 +3220,35 @@
     // (preview.png's own gating in push.ts is the precedent this
     // follows). Gated on EITHER, not just install_params: a hypothetical
     // future artifact with wiring_actions but no install_params should
-    // still show the outer section (renderInstallParamsSection/
-    // renderWiringSection each independently no-op on their own empty
-    // list, via the same convention).
-    const backendPluginSection = $('detail-backend-plugin-section');
+    // still show the tab (renderInstallParamsSection/renderWiringSection
+    // each independently no-op on their own empty list).
     const hasInstallParams = manifest.install_params && manifest.install_params.length > 0;
     const hasWiringActions = manifest.wiring_actions && manifest.wiring_actions.length > 0;
-    if (hasInstallParams || hasWiringActions) {
-      backendPluginSection.hidden = false;
+    detailTabState.configuration = hasInstallParams || hasWiringActions;
+    if (detailTabState.configuration) {
       void renderInstallParamsSection(entry);
       void renderWiringSection(entry);
-      $('detail-generic-readme-section').hidden = true;
-    } else {
-      backendPluginSection.hidden = true;
-      // Only this artifact's OWN README (never the backend-plugin
-      // section's), and only when that section didn't already claim it --
-      // avoids ever rendering the same README twice.
-      void renderGenericReadmeSection(entry);
     }
 
-    // Phase 11 Detail-view task (design-kit): gated on real content
-    // presence -- whether GUIDELINES.md actually exists at the payload
-    // root -- never a `manifest.kind === 'template'` check, same
-    // "field/file presence, not kind" convention as the backend-plugin
-    // gate above. That check itself requires an RPC round-trip (unlike
-    // install_params/wiring_actions, which are already on the manifest in
-    // hand), so renderTemplateSection decides visibility itself once it
-    // resolves -- hidden here first so a previous artifact's tokens/grid
-    // don't stay visible while this one's presence check is in flight.
-    $('detail-template-section').hidden = true;
-    clearDetailTemplateListeners();
-    void renderTemplateSection(entry);
+    refreshDetailTabs();
+
+    // Documentation: README.md and/or GUIDELINES.md's own prose, gated on
+    // real file presence -- resolves via RPC, so decides Documentation's
+    // own tab membership once it knows (see renderDocumentationTab).
+    void renderDocumentationTab(entry);
+
+    // Design/Components (design-kit's tokens/type-scale/layout-rules, and
+    // its live component grid): gated on real content presence -- whether
+    // GUIDELINES.md actually exists at the payload root -- never a
+    // `manifest.kind === 'template'` check. Resolves via RPC, so both tabs
+    // decide their own membership once it knows (see
+    // renderDesignAndComponentsSections).
+    void renderDesignAndComponentsSections(entry);
 
     // Real route/page map for whole-app templates like the starter kit --
-    // same "resolve via RPC, decide visibility once it resolves" posture
-    // as renderTemplateSection above, and independently gated: an artifact
-    // can have a routes.tsx, a README, GUIDELINES.md, all three, or none.
-    $('detail-routes-section').hidden = true;
+    // same "resolve via RPC, decide tab membership once it resolves"
+    // posture, independently gated: an artifact can have a routes.tsx, a
+    // README, GUIDELINES.md, all three, or none.
     void renderRoutesSection(entry);
 
     $('detail-install-path').textContent = entry.installTarget;
@@ -4533,9 +4936,27 @@
     // Returns to the SAME design-kit-shaped artifact's own Detail view
     // (never just Browse) -- openComponentDetail always sets
     // state.componentDetailReturnEntry right before navigating here.
+    // Looks up a FRESH copy from state.catalog by key first (same lookup
+    // refreshDetailIfShown already does), falling back to the captured
+    // entry only if it's no longer in the catalog -- found by review: an
+    // in-flight Pull/Push/Overwrite started from Detail, then a detour
+    // into a component's own detail view before it resolved, made
+    // refreshDetailIfShown's own refresh silently no-op (state.view was
+    // 'component-detail', not 'detail'); reusing the stale captured
+    // object here would then show outdated status/badge/version
+    // indefinitely instead of picking up the completed action's result.
     $('back-to-component-grid-btn').addEventListener('click', () => {
       clearComponentDetailListener();
-      openDetail(state.componentDetailReturnEntry);
+      const returnEntry = state.componentDetailReturnEntry;
+      const fresh = state.catalog.find((e) => entryKey(e) === entryKey(returnEntry));
+      openDetail(fresh ?? returnEntry);
+    });
+    $('component-detail-pull-btn').addEventListener('click', () => {
+      void pullComponentToFolder(
+        $('component-detail-pull-btn'),
+        state.componentDetailReturnEntry,
+        state.componentDetailComponent,
+      );
     });
     // Individually wired (not the generic `[data-view]` loop above) since
     // its destination depends on how Add New was entered -- Scan's own
