@@ -3265,3 +3265,43 @@ report at face value.
       detail view before it resolves, confirming the version shown
       after returning reflects the completed action, not the stale
       pre-action value). `lint`/`typecheck`/full test suite clean.
+
+## Fixed: Detail's Type Scale section rendered blank for a design kit using a different GUIDELINES.md table convention
+
+Reported directly by the user via a real screenshot of `kortix-design-kit`'s
+Detail view -- the Color tokens and Layout rules sections rendered
+correctly, but Type Scale showed 8 empty rows (no text, just blank lines).
+
+- [x] Root cause: the renderer (`renderTemplateSection` in
+      `src-tauri/spike-ui/app.js`) hardcoded `row.Element`/`row.Weight` to
+      read a Type-scale table row -- the ORIGINAL `design-kit` artifact's
+      own GUIDELINES.md convention (`Element | Font | Size | Weight`).
+      `kortix-design-kit`'s real, Suna-derived GUIDELINES.md uses a
+      different (also legitimate) convention: `Role | Font | Token | Size
+      | Line height` -- no `Element` column at all, so `row.Element` was
+      always `undefined`, rendering both the label and the live sample
+      text as empty strings. This directly contradicted
+      `parseTypeScale`'s own doc comment ("a header rename doesn't
+      require a matching code change") -- the parser already keys rows
+      generically by whatever headers a table has; only the renderer
+      assumed one specific artifact's header names.
+- [x] Fixed by falling back through `row.Element || row.Role ||
+      Object.values(row)[0]` for the label, so a Type-scale table using
+      either known convention -- or an entirely new one -- always shows
+      SOME real label rather than silently rendering blank.
+- [x] A second, related bug in the same code path: `Size` values in
+      `rem` (`"0.875rem"`) were parsed via `parseLeadingNumber`'s plain
+      `\d+` regex, which stops at the decimal point -- every rem-based
+      row silently parsed to a meaningless `0` or `1` and clamped to the
+      same 12px floor regardless of its real size. New `parseSizeInPx`
+      handles both a plain px value (`design-kit`'s own convention,
+      unchanged) and a real `rem * 16` conversion (both kits' own
+      GUIDELINES.md keep the root font-size at 100%/16px by convention,
+      so this is a documented conversion, not a guess).
+- [x] **Verified for real** against both real GUIDELINES.md files on
+      disk (`design-kit`'s real payload in the `ai-helpers` remote cache,
+      and `kortix-design-kit`'s real sandbox copy): `design-kit`'s 4 rows
+      render identically to before the fix (zero regression); `kortix-
+      design-kit`'s 8 rows now show correct labels (`Body / UI default`,
+      `Display`, etc.) and correctly-converted pixel sizes (13-28px)
+      instead of 8 blank rows. `lint`/`typecheck` clean.
