@@ -156,6 +156,36 @@ finished article). Write a real one:
   (step 1), that's usually your best source for realistic data — carry it
   into `preview.tsx` rather than inventing something new.
 
+This applies to EVERY component whose rendering actually depends on its
+props, not just option-list-shaped ones like the Dropdown below — a
+component with no real data to render is empty or visibly broken in the
+live preview, whatever shape its props take:
+
+- A **table/data-grid** needs real rows (genuine column values, not
+  `"Row 1"`/`"Cell"`), or it renders as an empty header with nothing
+  underneath.
+- A **chart** needs a real-looking series (plausible values across a
+  believable range/time axis), or it renders as a blank plot area.
+- An **avatar/image-based** component needs a working image source — a
+  real `https://` URL the sandbox's `img-src data:`-only CSP will
+  actually block, so use a real inline `data:image/...;base64,...` (or
+  the component's own documented fallback-initials path or hosted image), never a URL that
+  silently fails to load.
+- A **list/carousel/feed** needs enough real items to show the
+  interaction it's actually for (a carousel with one slide never
+  demonstrates paging).
+- A **form field** needs a real label and a real placeholder/value, never
+  `"Label"`/`"Enter text"` left over from the auto-scaffold.
+- An **empty/error-state** component (the one kind that's SUPPOSED to
+  show minimal content) still needs real, specific copy ("No projects
+  yet — create your first one to get started", not "No data") and a
+  real action label if it takes one, not a placeholder.
+
+The test is always the same: would a person looking at this preview see
+something that reads as a real product screen, or would they see
+placeholder text/an empty shell and have to imagine what it's for? If
+it's the latter, the data isn't realistic enough yet.
+
 ### 5. Verify
 
 From the project root:

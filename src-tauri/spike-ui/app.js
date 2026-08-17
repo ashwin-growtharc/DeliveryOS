@@ -3727,15 +3727,26 @@ ${bodyHtml}
     try {
       const kind = resolveKindFieldValue();
       const detected = await call('artifact.detectMetadata', { payloadPath, kind });
-      pendingInstallParams = detected.installParams;
+      // Defensive fallback to [] -- the real sidecar handler
+      // (detectArtifactMetadata) always returns both arrays populated
+      // today, but this assignment happening to succeed with `undefined`
+      // followed immediately by `renderInstallParamsList()`/`setValues()`
+      // throwing on it would leave `pendingInstallParams` corrupted even
+      // after this function's own catch below swallows that error --
+      // goToWizardStep('review') reads `pendingInstallParams.length`
+      // completely separately afterward, with no try/catch of its own, so
+      // a still-`undefined` value there would crash uncaught later, past
+      // where this function could still do anything about it.
+      pendingInstallParams = detected.installParams ?? [];
       renderInstallParamsList();
-      addNewStacksPicker.setValues(detected.stacks);
+      addNewStacksPicker.setValues(detected.stacks ?? []);
       if (detected.description && !$('f-description').value.trim()) {
         $('f-description').value = detected.description;
       }
     } catch (err) {
       // Non-fatal -- the step just starts with empty, fully-manual fields
       // instead of pre-filled ones.
+      pendingInstallParams = [];
       console.warn('artifact metadata detection failed', err);
     }
   }

@@ -240,4 +240,59 @@ describe('scan e2e', () => {
     },
     30_000,
   );
+
+  it(
+    'finds a genuine standalone project as a template candidate, alongside the existing agent kind, and excludes one whose id is already tracked (Phase D)',
+    async () => {
+      // Real, end-to-end confirmation that detectStarterKitCandidates
+      // (unit-tested on its own in test/unit/detectStarterKitCandidates.test.ts)
+      // is actually wired into scanForNewArtifacts, not just implemented
+      // in isolation.
+      const remoteName = 'scan-test-remote-starter-kit';
+      await registerAndClone(remoteName);
+      const cwd = newScratchCwd('starter-kit');
+
+      const appDir = path.join(cwd, 'my-new-app');
+      fs.mkdirSync(appDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(appDir, 'package.json'),
+        JSON.stringify({ name: 'my-new-app', scripts: { build: 'vite build' } }),
+        'utf-8',
+      );
+      fs.mkdirSync(path.join(appDir, 'src'), { recursive: true });
+      fs.writeFileSync(path.join(appDir, 'src', 'routes.tsx'), 'export const router = createBrowserRouter([]);', 'utf-8');
+
+      // Coexists in the same scan with an unrelated agent candidate.
+      const agentsDir = path.join(cwd, '.claude', 'agents');
+      fs.mkdirSync(agentsDir, { recursive: true });
+      fs.writeFileSync(path.join(agentsDir, 'unrelated-agent.md'), '# Unrelated\n', 'utf-8');
+
+      // A directory whose NAME matches an already-pulled artifact's real id
+      // (not its installTarget) -- same "id already tracked" convention the
+      // agent-kind test above uses -- must be excluded even though nobody
+      // asked to pull it as a template specifically.
+      await pullArtifact('lint-config', remoteName, cwd);
+      const alreadyTrackedDir = path.join(cwd, 'lint-config');
+      fs.mkdirSync(path.join(alreadyTrackedDir, 'src'), { recursive: true });
+      fs.writeFileSync(
+        path.join(alreadyTrackedDir, 'package.json'),
+        JSON.stringify({ name: 'lint-config', scripts: { build: 'vite build' } }),
+        'utf-8',
+      );
+      fs.writeFileSync(path.join(alreadyTrackedDir, 'src', 'routes.tsx'), '', 'utf-8');
+
+      const candidates = await scanForNewArtifacts(cwd, remoteName);
+      const appCandidate = candidates.find((c) => c.id === 'my-new-app');
+
+      expect(appCandidate).toMatchObject({
+        kind: 'template',
+        payloadPath: appDir,
+        installTarget: 'my-new-app',
+      });
+      expect(appCandidate?.description).toContain('src/routes.tsx');
+      expect(candidates.some((c) => c.id === 'unrelated-agent')).toBe(true);
+      expect(candidates.some((c) => c.id === 'lint-config')).toBe(false);
+    },
+    30_000,
+  );
 });

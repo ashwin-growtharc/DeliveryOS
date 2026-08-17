@@ -2913,6 +2913,100 @@ than showing the REAL route tree the artifact ships.
   `src/routes.tsx` at all, so the new section stays correctly absent
   for both.
 
+## A new `starter-kit-extractor` skill, plus automated Scan detection for real starter-kit candidates
+
+Prompted directly by the user, after the manual `growtharc-react-vite-starter`
+work above: "we need a starter kit extraction skill" (codify that process
+so it's repeatable), then "is there a starter kit extraction feature in
+the DeliveryOS UI, like there is for the UI components scan?" (there
+wasn't -- this closes that gap with a real, if intentionally narrow,
+automated detector).
+
+- [x] **`.claude/skills/starter-kit-extractor/SKILL.md`** -- a new skill
+      (following the existing `ui-component-extractor` skill's own
+      conventions exactly: frontmatter, "When to activate," a worked
+      example) codifying the whole-project extraction process this
+      session's own `growtharc-react-vite-starter` work already proved
+      out: survey-before-reading (with parallel Explore-agent delegation
+      for large projects), classify real content vs. cruft vs. secrets,
+      read every real file before shipping it (the real bug categories
+      already found this session), a payload structure table mapping
+      each conventional path to the real DeliveryOS Detail-view feature
+      that depends on it (`src/routes.tsx` for the Routes tab,
+      `GUIDELINES.md`'s exact heading structure for the Design/Components
+      tabs), real tooling verification, real end-to-end interactivity/
+      animation verification via a headless browser, and the `push --new`
+      manifest-editing workaround. An explicit "this produces a REPLICA,
+      not a reinterpretation" principle (per direct user feedback) --
+      only genuine, confirmed bugs and required DeliveryOS-convention
+      adaptations are allowed changes, never a rewrite/reorganization/
+      simplification of working source. Also strengthened the existing
+      `ui-component-extractor` skill's own step 4 (per direct user
+      feedback) to generalize "write realistic preview data" beyond its
+      one worked (Dropdown) example -- tables, charts, image/avatar
+      components, lists/carousels, forms, and empty/error states all
+      named explicitly, plus a general test to apply ("would this read as
+      a real product screen, or a placeholder shell").
+- [x] **`detectStarterKitCandidates` (`src/engine/scan/`)** -- a new Scan
+      detector, the whole-project counterpart to
+      `detectUiComponentCandidates`, wired into `scanForNewArtifacts`
+      alongside the existing four. Walks `cwd` recursively (for a
+      monorepo), requiring BOTH a real `package.json` with a `build`
+      script AND real routing evidence (`src/routes.tsx`, or a `pages`/
+      `app` directory with 2+ real files) before flagging a `kind:
+      template` candidate -- deliberately stricter than "any buildable
+      package" (which would flag every internal library in a real
+      monorepo), a real precision tradeoff against
+      `detectUiComponentCandidates`'s own much more permissive "cast a
+      wide net" posture, justified because a mis-flagged whole project
+      costs a reviewer much more than a mis-flagged single component.
+      Stops descending once a real candidate is found (no double-flagging
+      a nested `docs-site/`). Names the real framework in its description
+      when a known dependency is present, warns when no `README.md`
+      exists yet. Always in-place (never staged/copied). Deliberately
+      does NOT attempt the actual judgment-heavy extraction/cleanup
+      itself -- that's what the skill above is for; this only decides the
+      mechanical, decidable question "is there a real, buildable project
+      here."
+      The Tauri app's Scan view and `deliveryos scan` needed ZERO
+      kind-specific changes -- both already group/print candidates
+      generically by `kind`, and `kind: template` already had its own
+      real icon/color (`design-kit`/`growtharc-react-vite-starter` are
+      already `kind: template`). Fixed two small pieces of pre-existing
+      stale documentation found along the way: the CLI's own help text
+      and the app's Scan-view hint text both still only named the four
+      markdown-backed kinds, never the already-existing `src/`
+      UI-component detection -- both now name it, plus the new
+      starter-kit detection.
+      14 new unit tests, plus a new e2e orchestrator test (a real
+      standalone project detected alongside an unrelated agent candidate
+      in the same scan, and a directory whose name matches an
+      already-pulled artifact's real id correctly excluded via the same
+      `isNew` lockfile check every other detector already uses).
+- [x] **Real dogfood**: the actual CLI (`deliveryos scan --remote
+      ai-helpers`) run against this repo itself correctly finds no
+      `template` candidate (no real routing evidence -- a CLI+Tauri app,
+      not a routed web app), and against a real scratch Vite+React
+      project correctly detects it, names "Vite project" from its real
+      dependencies, cites `src/routes.tsx` as the real evidence, and
+      warns about the missing `README.md`.
+      A real, in-browser Playwright check of the whole Scan → Review &
+      propose flow surfaced one genuine (if not currently reachable in
+      production) defensive gap: `detectAndPrefillMetadata`'s catch
+      block didn't reset `pendingInstallParams` after a failed
+      detection, so a future malformed `artifact.detectMetadata`
+      response could leave it corrupted past where that function's own
+      catch could still help (`goToWizardStep('review')` reads
+      `pendingInstallParams.length` completely separately, with no
+      try/catch of its own) -- confirmed the real sidecar handler
+      (`detectArtifactMetadata`) always returns a fully-shaped object
+      today, so this isn't live, but fixed the defensive gap anyway
+      (defaults to `[]` in both the success and failure paths) since it
+      was found via real testing of this exact integration path, not
+      left undocumented.
+      `lint`/`typecheck`/full test suite clean (455 passed, 1 known
+      pre-existing failure unrelated to this work).
+
 ## Real markdown rendering + a tabbed Detail view
 
 Detail had grown a section per feature this session and they all

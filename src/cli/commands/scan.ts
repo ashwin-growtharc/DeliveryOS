@@ -5,9 +5,9 @@ export function registerScanCommand(program: Command): void {
   program
     .command('scan')
     .description(
-      'Scan .claude/agents, .claude/skills, .claude/commands, .claude/rules, and src/ (for reusable '
-        + 'UI components) for content not yet tracked or already in --remote, and print a ready-to-edit '
-        + '`push --new` command for each',
+      'Scan .claude/agents, .claude/skills, .claude/commands, .claude/rules, src/ (for reusable UI '
+        + 'components), and the project itself (for a real, buildable starter-kit candidate) for content '
+        + 'not yet tracked or already in --remote, and print a ready-to-edit `push --new` command for each',
     )
     .requiredOption('-r, --remote <name>', 'Remote to check candidates against')
     .action(async (options: { remote: string }) => {
@@ -15,7 +15,8 @@ export function registerScanCommand(program: Command): void {
 
       if (candidates.length === 0) {
         console.log(
-          'No new content found in .claude/agents, .claude/skills, .claude/commands, .claude/rules, or src/.',
+          'No new content found in .claude/agents, .claude/skills, .claude/commands, .claude/rules, src/, '
+            + 'or the project itself.',
         );
         return;
       }

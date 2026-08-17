@@ -10,6 +10,7 @@ import { RemoteRegistryError } from '../errors';
 import { ProgressCallback } from '../pull/pull';
 import { ScanCandidate } from './types';
 import { detectUiComponentCandidates } from './detectUiComponents';
+import { detectStarterKitCandidates } from './detectStarterKitCandidates';
 
 // Re-exported so existing callers that import `ScanCandidate` from this
 // module (its original home) keep working -- see `./types`'s own doc
@@ -18,23 +19,27 @@ export type { ScanCandidate };
 
 /**
  * Scans `<cwd>/.claude/agents`, `.claude/skills`, `.claude/commands`,
- * `.claude/rules`, and (Phase 6, Phase D) `<cwd>/src/**\/*.{tsx,jsx}` for
- * structurally-reusable React components, for content not already tracked
- * locally (the lockfile) or already present (by id) in `remoteName`'s
- * catalog, so it doesn't show up as "new" if it was already pulled from
- * there, or already proposed by someone else. Fetches `remoteName` fresh
- * first, the same way `push` does, so "already exists" reflects the
- * remote's current state, not a possibly-stale local cache.
+ * `.claude/rules`, (Phase 6, Phase D) `<cwd>/src/**\/*.{tsx,jsx}` for
+ * structurally-reusable React components, and `<cwd>` itself (recursively,
+ * for a monorepo) for a real, standalone, buildable project worth
+ * proposing as a `kind: template` starter kit, for content not already
+ * tracked locally (the lockfile) or already present (by id) in
+ * `remoteName`'s catalog, so it doesn't show up as "new" if it was already
+ * pulled from there, or already proposed by someone else. Fetches
+ * `remoteName` fresh first, the same way `push` does, so "already exists"
+ * reflects the remote's current state, not a possibly-stale local cache.
  *
- * The `ui-component` detection is structurally and conceptually different
- * from the four markdown-backed kinds below it (a static TypeScript parse
- * for a component-shaped export, not a frontmatter/directory convention --
- * see `detectUiComponentCandidates`'s own doc comment and
- * docs/ui-components-feature-design.md §6), which is why it's delegated to
- * its own module (`detectUiComponents.ts`) entirely rather than inlined
- * here like the other four -- this function's own job stays "orchestrate
- * one `isNew` check and merge every kind's candidates," not "know how each
- * kind is actually found."
+ * The `ui-component` and `template` detections are each structurally and
+ * conceptually different from the four markdown-backed kinds above them
+ * (a static TypeScript parse for a component-shaped export / a directory
+ * walk for real routing+build evidence, not a frontmatter/directory
+ * convention -- see `detectUiComponentCandidates`'s/
+ * `detectStarterKitCandidates`'s own doc comments and
+ * docs/ui-components-feature-design.md §6), which is why each is delegated
+ * to its own module entirely rather than inlined here like the other four
+ * -- this function's own job stays "orchestrate one `isNew` check and
+ * merge every kind's candidates," not "know how each kind is actually
+ * found."
  *
  * Deliberately does NOT try to guess `roles`/`teams`/`stacks` -- there's no
  * reliable folder-category signal for a single flat `.claude/agents/`
@@ -129,6 +134,7 @@ export async function scanForNewArtifacts(
   candidates.push(...scanMarkdownFilesRecursively(cwd, 'commands', 'command', isNew));
   candidates.push(...scanMarkdownFilesRecursively(cwd, 'rules', 'rule', isNew));
   candidates.push(...detectUiComponentCandidates(cwd, isNew));
+  candidates.push(...detectStarterKitCandidates(cwd, isNew));
 
   return candidates;
 }
