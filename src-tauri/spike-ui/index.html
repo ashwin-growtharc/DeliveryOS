@@ -286,87 +286,119 @@
               <button id="detail-action-btn" class="btn btn-primary" hidden></button>
             </div>
             <p id="detail-description" class="detail-description"></p>
+            <div id="detail-provenance-badge" class="provenance-badge"></div>
 
-            <!-- Live preview + variant tabs + generated props controls
-                 (Phase C) -- shown only for kind: ui-component artifacts.
-                 See renderDetail/loadDetailPreview in app.js. -->
-            <div id="detail-preview-section" hidden>
-              <div id="detail-preview-tabs" class="tab-row"></div>
-              <div id="detail-preview-frame" class="ui-component-preview-frame detail-preview-frame">
-                <span class="ui-component-preview-loading">Loading preview&hellip;</span>
+            <!-- Top-level content tabs -- built dynamically per artifact
+                 by refreshDetailTabs() in app.js, one tab per section that
+                 actually has real content for THIS artifact (gated on file/
+                 field presence, never a `kind` check, same convention as
+                 every section below). Hidden entirely (no tab-row chrome
+                 at all) when at most one section applies -- the common
+                 case, e.g. a plain artifact with just a README. -->
+            <div id="detail-tabs-row" class="tab-row" hidden></div>
+            <!-- Documentation/Design/Components/Routes each resolve via
+                 their own RPC round-trip -- shown while any of them is
+                 still pending, so a section that ends up applicable
+                 doesn't just silently pop in with no warning it was
+                 coming. See refreshDetailTabs in app.js. -->
+            <div id="detail-tabs-loading" class="detail-tabs-loading" hidden>
+              <span class="spinner" aria-hidden="true"></span> Loading&hellip;
+            </div>
+
+            <div id="detail-tab-panels">
+              <!-- Live preview + variant tabs + generated props controls
+                   (Phase C) -- shown only for kind: ui-component artifacts.
+                   See renderDetail/loadDetailPreview in app.js. -->
+              <div id="detail-preview-section" hidden>
+                <div id="detail-preview-tabs" class="tab-row"></div>
+                <div id="detail-preview-frame" class="ui-component-preview-frame detail-preview-frame">
+                  <span class="ui-component-preview-loading">Loading preview&hellip;</span>
+                </div>
+                <div id="detail-preview-controls" class="controls-panel"></div>
               </div>
-              <div id="detail-preview-controls" class="controls-panel"></div>
-            </div>
 
-            <!-- Non-visual artifacts (Phase 7, kind: backend-plugin): a
-                 rendered README, a signed/provenance badge, and a
-                 required-config checklist collecting the PROJECT's own
-                 install_params values, never the artifact's own defaults.
-                 Shown only when the manifest declares install_params --
-                 see renderDetail/renderInstallParamsSection in app.js. -->
-            <div id="detail-backend-plugin-section" hidden>
-              <div id="detail-provenance-badge" class="provenance-badge"></div>
-              <div id="detail-readme" class="detail-readme" hidden></div>
-              <form id="detail-install-params-form" class="install-params-form">
-                <div id="detail-install-params-fields"></div>
-                <button type="submit" class="btn btn-primary btn-sm">Apply configuration</button>
-              </form>
+              <!-- Non-visual artifacts (Phase 7, kind: backend-plugin): a
+                   required-config checklist collecting the PROJECT's own
+                   install_params values, never the artifact's own
+                   defaults, plus Tier 2 wiring suggestions. Shown only
+                   when the manifest declares install_params/wiring_actions
+                   -- see renderDetail/renderInstallParamsSection in
+                   app.js. -->
+              <div id="detail-configuration-section" hidden>
+                <form id="detail-install-params-form" class="install-params-form">
+                  <div id="detail-install-params-fields"></div>
+                  <button type="submit" class="btn btn-primary btn-sm">Apply configuration</button>
+                </form>
 
-              <!-- Tier 2 of the wiring agent (Phase 7 item 6): a concrete,
-                   tailored suggestion per declared wiring_action -- never an
-                   auto-applied edit. See renderWiringSection in app.js. -->
-              <div id="detail-wiring-section" hidden>
-                <div class="wiring-section-label">Wiring</div>
-                <div id="detail-wiring-actions"></div>
+                <!-- Tier 2 of the wiring agent (Phase 7 item 6): a concrete,
+                     tailored suggestion per declared wiring_action -- never an
+                     auto-applied edit. See renderWiringSection in app.js. -->
+                <div id="detail-wiring-section" hidden>
+                  <div class="wiring-section-label">Wiring</div>
+                  <div id="detail-wiring-actions"></div>
+                </div>
               </div>
-            </div>
 
-            <!-- Generic fallback for any artifact with a real payload-root
-                 README.md that doesn't already get a richer section --
-                 gated on real file presence, never a `kind` check, same
-                 convention as the backend-plugin/template sections above.
-                 Shown only when neither of those two claimed the README
-                 already (a `kind: backend-plugin` artifact's README is
-                 shown inside its own section instead). See
-                 renderDetail/renderGenericReadmeSection in app.js. -->
-            <div id="detail-generic-readme-section" hidden>
-              <div id="detail-generic-readme" class="detail-readme"></div>
-            </div>
-
-            <!-- Phase 11 Detail-view task: design-kit's color tokens, type
-                 scale, and a live component grid, gated on real
-                 GUIDELINES.md presence -- never a `kind: template` check.
-                 See renderDetail/renderTemplateSection in app.js. -->
-            <div id="detail-template-section" hidden>
-              <div class="wiring-section-label">Color tokens</div>
-              <div id="detail-template-tokens" class="token-swatch-grid"></div>
-
-              <div class="wiring-section-label">Type scale</div>
-              <div id="detail-template-type-scale" class="type-sample-list"></div>
-
-              <div class="wiring-section-label">Components</div>
-              <div class="template-theme-toggle-row">
-                <div id="detail-template-theme-toggle" class="chip-picker"></div>
-                <span class="template-theme-toggle-caption">
-                  Today's components have no dark-specific styling, so this won't change how they look yet.
-                </span>
+              <!-- Real rendered markdown -- README.md and/or GUIDELINES.md's
+                   own full prose (structured tokens/rules from the latter
+                   are shown separately, under Design), each gated on real
+                   file presence, never a `kind` check, and each in its own
+                   sandboxed iframe (see renderMarkdownToSandboxedIframe in
+                   app.js). One shared tab regardless of artifact kind --
+                   a `kind: backend-plugin` artifact's README used to render
+                   in a separate section from every other kind's; there's no
+                   real reason for that split once every kind's README lands
+                   in the same place. -->
+              <div id="detail-documentation-section" hidden>
+                <div id="detail-readme-block" hidden>
+                  <div class="wiring-section-label">README</div>
+                  <div id="detail-readme" class="markdown-container"></div>
+                </div>
+                <div id="detail-guidelines-doc-block" hidden>
+                  <div class="wiring-section-label">Guidelines</div>
+                  <div id="detail-guidelines-doc" class="markdown-container"></div>
+                </div>
               </div>
-              <div id="detail-template-grid" class="template-component-grid"></div>
 
-              <div class="wiring-section-label">Layout rules</div>
-              <div id="detail-template-layout" class="layout-rules-strip"></div>
-            </div>
+              <!-- Phase 11 Detail-view task: design-kit's color tokens and
+                   type scale, gated on real GUIDELINES.md presence -- never
+                   a `kind: template` check. See renderDetail/
+                   renderDesignAndComponentsSections in app.js. -->
+              <div id="detail-design-section" hidden>
+                <div class="wiring-section-label">Color tokens</div>
+                <div id="detail-template-tokens" class="token-swatch-grid"></div>
 
-            <!-- Real route/page map for whole-app templates like the
-                 starter kit, parsed straight from the artifact's own
-                 src/routes.tsx -- gated on real file presence, never a
-                 `kind: template` check. Coexists with (doesn't replace)
-                 the generic README section above -- an artifact can
-                 legitimately have both. See
-                 renderDetail/renderRoutesSection in app.js. -->
-            <div id="detail-routes-section" hidden>
-              <div class="wiring-section-label">Routes</div>
-              <div id="detail-routes-tree" class="route-tree"></div>
+                <div class="wiring-section-label">Type scale</div>
+                <div id="detail-template-type-scale" class="type-sample-list"></div>
+
+                <div class="wiring-section-label">Layout rules</div>
+                <div id="detail-template-layout" class="layout-rules-strip"></div>
+              </div>
+
+              <!-- A live component grid, gated on real GUIDELINES.md
+                   presence -- split out from Design above into its own tab
+                   since grid content (potentially many component cards) is
+                   a different kind of thing to browse than a token list.
+                   See renderDetail/renderDesignAndComponentsSections in
+                   app.js. -->
+              <div id="detail-components-section" hidden>
+                <div class="template-theme-toggle-row">
+                  <div id="detail-template-theme-toggle" class="chip-picker"></div>
+                  <span class="template-theme-toggle-caption">
+                    Today's components have no dark-specific styling, so this won't change how they look yet.
+                  </span>
+                </div>
+                <div id="detail-template-grid" class="template-component-grid"></div>
+              </div>
+
+              <!-- Real route/page map for whole-app templates like the
+                   starter kit, parsed straight from the artifact's own
+                   src/routes.tsx -- gated on real file presence, never a
+                   `kind: template` check. See renderDetail/
+                   renderRoutesSection in app.js. -->
+              <div id="detail-routes-section" hidden>
+                <div id="detail-routes-tree" class="route-tree"></div>
+              </div>
             </div>
 
             <div class="meta-grid">
@@ -443,6 +475,17 @@
               <div class="detail-title">
                 <span id="component-detail-name" class="name"></span>
               </div>
+              <!-- Same untracked single-component pull the Components-tab
+                   grid card used to offer -- moved here exclusively per
+                   direct user feedback (the grid card is a compact browse
+                   surface where "View details" is the one real action;
+                   Pull belongs in the fuller view once you're already
+                   looking at just one component). btn-ghost, not
+                   btn-primary -- this component's own real usage rule
+                   (shown right below) is literally "one primary per view,
+                   never two competing for attention." See
+                   openComponentDetail/wireEvents in app.js. -->
+              <button id="component-detail-pull-btn" class="btn btn-ghost btn-sm">Pull</button>
             </div>
             <p id="component-detail-usage-rule" class="component-detail-usage-rule"></p>
             <div id="component-detail-tabs" class="tab-row"></div>
@@ -707,6 +750,7 @@
     </div>
 
     <script src="sidecar.js"></script>
+    <script src="vendor/marked.min.js"></script>
     <script src="app.js"></script>
   </body>
 </html>
