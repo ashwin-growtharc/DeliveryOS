@@ -205,6 +205,38 @@ failure (unresolved import, syntax error) — fix step 2 if it's `react`,
 otherwise decide whether the underlying dependency is worth resolving for
 real or is acceptable to leave failing for Review to see.
 
+### 6. Record source-drift tracking (optional, but do it whenever the real source is available locally)
+
+If the component's real source project is sitting on this machine (not a
+scratch clone about to be deleted), record a `SOURCES.json` at the
+component's own payload root so anyone can later check whether that
+source has moved on since extraction -- via `writeSourcesFile` from
+`src/engine/drift/recordSources.ts`, in a one-off script:
+
+```ts
+import { writeSourcesFile } from './src/engine/drift/recordSources';
+
+writeSourcesFile(
+  '/absolute/path/to/src/ui/Dropdown', // this component's own payload dir
+  'acme/design-system -- src/components',
+  [
+    {
+      payloadPath: 'Dropdown.tsx',
+      sourcePath: 'src/components/Dropdown.tsx', // relative to the source root
+      sourceAbsolutePath: '/absolute/path/to/acme-design-system/src/components/Dropdown.tsx',
+    },
+  ],
+);
+```
+
+Never for the hand-written `preview.tsx` from step 4 -- that has no real
+external source to drift against. Skip this step entirely if the real
+source isn't available locally at extraction time; an artifact with no
+`SOURCES.json` simply doesn't show Detail's "Check for source drift"
+section at all, same "presence, not a blanket rule" gating this whole app
+already uses everywhere else. See `check-drift` in the CLI (or Detail's
+own button, once pushed and pulled) for how this gets used later.
+
 ## Worked example: a Dropdown/Select
 
 Pasted source (a typical shape: hooks from `'react'`, Tailwind classes,

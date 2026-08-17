@@ -4,6 +4,43 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- **Source-drift detection for extracted artifacts.** Once a project or
+  component is extracted from a real external codebase (via the
+  `starter-kit-extractor`/`ui-component-extractor` skills), nothing
+  previously tracked whether that real source had since changed --
+  distinct from the two relationships DeliveryOS already handled well
+  (registry vs. local pulled copy). New `src/engine/drift/` module:
+  `hashFile.ts` (`sha256:<hex>`, same format `computePayloadDigest`
+  already established), `recordSources.ts` (`writeSourcesFile`: hashes
+  each real source file now, writes a `SOURCES.json` to a payload's
+  root), `checkDrift.ts` (`checkSourceDrift`: re-hashes the real source
+  and compares against what was frozen at extraction -- `unchanged`,
+  `drifted`, or `source-missing` per file). Deliberately never diffs the
+  transformed payload file against the source (which would require
+  modeling every deliberate rewrite the extraction skills document) --
+  only asks whether the ORIGINAL source itself has changed. New CLI
+  command `deliveryos check-drift <id> --remote <name> --source <path>`
+  (mirrors `check-updates`'s own naming), a matching
+  `artifact.checkSourceDrift` sidecar RPC, and a new Detail UI section
+  ("Check for source drift") gated on real `SOURCES.json` presence --
+  same "file presence, not kind" convention as every other Detail
+  section, distinct from (and coexisting with) the existing
+  `edited_locally`/`both_changed` drift warning, which is about a LOCAL
+  pulled copy vs. this project's own registry, not a third-party
+  external source. Both extraction skills updated with a new, clearly
+  optional step to record `SOURCES.json` whenever the real source is
+  available locally at extraction time. Real dogfood: recorded
+  `SOURCES.json` for 5 real `kortix-design-kit` components against
+  Suna's actual `apps/web/src/components/ui/` on disk, confirmed
+  `unchanged` for all 5, then confirmed a real temporary edit (and
+  separately, a real temporary rename) to Suna's actual `button.tsx`
+  correctly flips only that one entry to `drifted`/`source-missing`
+  while the other 4 stay `unchanged` -- both real source changes
+  reverted afterward. 8 new unit tests
+  (`test/unit/recordSources.test.ts`, `test/unit/checkDrift.test.ts`).
+  `lint`/`typecheck`/full test suite clean (464 passed, 1 known
+  pre-existing failure unrelated to this work).
+
 - **Scan: automated detection of real, standalone starter-kit candidates**,
   the whole-project counterpart to the existing single-component Scan
   feature. New `detectStarterKitCandidates` (`src/engine/scan/`), wired

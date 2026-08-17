@@ -1029,6 +1029,12 @@
   // async artifact.parseRoutes call.
   let routesRequestId = 0;
 
+  // Same request-token-guard discipline, for renderSourceDriftSection's
+  // own async artifact.readPayloadFile presence check (a separate,
+  // independent check from any of the drift check's own button-click
+  // calls, which use withBusy on the button itself instead).
+  let sourceDriftRequestId = 0;
+
   // openComponentDetail's own single-iframe listener + request-id guard --
   // a THIRD independent "one active interactive iframe" context, alongside
   // detailPreviewMessageHandler (a whole standalone artifact) and
@@ -1382,6 +1388,111 @@
     }
 
     return nodeEl;
+  }
+
+  /** Source-drift-detection's Detail affordance: shown only when the
+   * artifact's payload root has a real SOURCES.json (written once, at
+   * extraction time, by the starter-kit-extractor/ui-component-extractor
+   * skills) -- never a `kind` check, same "file presence, not kind"
+   * convention as every other Detail section here. Reuses the already-
+   * existing artifact.readPayloadFile RPC just to check presence (no new
+   * RPC needed for that); the actual check happens on-demand, once the
+   * user picks a local source folder, via the new
+   * artifact.checkSourceDrift RPC. */
+  async function renderSourceDriftSection(entry) {
+    const requestId = ++sourceDriftRequestId;
+    const section = $('detail-source-drift-section');
+    const resultsEl = $('detail-source-drift-results');
+    const button = $('detail-check-source-drift-btn');
+
+    let content;
+    try {
+      ({ content } = await call('artifact.readPayloadFile', {
+        remote: entry.remoteName,
+        id: entry.manifest.id,
+        path: 'SOURCES.json',
+      }));
+    } catch {
+      content = undefined;
+    }
+    if (requestId !== sourceDriftRequestId) return; // superseded while awaiting
+
+    if (!content) {
+      section.hidden = true;
+      return;
+    }
+
+    section.hidden = false;
+    resultsEl.innerHTML = '';
+    button.onclick = () => void handleCheckSourceDrift(entry, button);
+  }
+
+  /** Runs once, on demand, when the user clicks "Check for source drift" --
+   * unlike every other Detail RPC call above, this deliberately does NOT
+   * run automatically on open: it requires a local folder pick every time
+   * (no destination is remembered), since the real external source lives
+   * wherever it happens to sit on THIS machine, which DeliveryOS has no
+   * other way to know. */
+  async function handleCheckSourceDrift(entry, button) {
+    let source;
+    try {
+      source = await openDialog({ directory: true });
+    } catch (err) {
+      toastError(err);
+      return;
+    }
+    if (!source) {
+      return; // user cancelled
+    }
+
+    const resultsEl = $('detail-source-drift-results');
+    await withBusy(button, 'Checking...', async () => {
+      let results;
+      try {
+        ({ results } = await call('artifact.checkSourceDrift', {
+          remote: entry.remoteName,
+          id: entry.manifest.id,
+          source,
+        }));
+      } catch (err) {
+        toastError(err);
+        return;
+      }
+      renderSourceDriftResults(resultsEl, results);
+    });
+  }
+
+  function renderSourceDriftResults(resultsEl, results) {
+    resultsEl.innerHTML = '';
+
+    const drifted = results.filter((r) => r.status === 'drifted');
+    const sourceMissing = results.filter((r) => r.status === 'source-missing');
+    const unchanged = results.filter((r) => r.status === 'unchanged');
+
+    const summary = document.createElement('div');
+    summary.className = 'source-drift-summary';
+    summary.textContent =
+      `${drifted.length} drifted, ${sourceMissing.length} source missing, ${unchanged.length} unchanged`;
+    resultsEl.appendChild(summary);
+
+    // Worth seeing at a glance (drifted/source-missing), listed first;
+    // "unchanged" is the expected common case and doesn't need the same
+    // prominence, but is still listed so the check reads as complete
+    // (not silently dropping files), same "show the whole picture"
+    // instinct as check-updates's own report.
+    for (const result of [...drifted, ...sourceMissing, ...unchanged]) {
+      const item = document.createElement('div');
+      item.className = `source-drift-item ${result.status}`;
+      const pathEl = document.createElement('span');
+      pathEl.className = 'source-drift-path';
+      pathEl.textContent = result.payloadPath;
+      item.appendChild(pathEl);
+      const statusEl = document.createElement('span');
+      statusEl.textContent =
+        result.status === 'source-missing' ? 'source missing' : result.status;
+      item.appendChild(statusEl);
+      resultsEl.appendChild(item);
+    }
   }
 
   /** Collects whatever was actually typed into the required-config
@@ -2847,6 +2958,13 @@
     // can have a routes.tsx, a README, GUIDELINES.md, all three, or none.
     $('detail-routes-section').hidden = true;
     void renderRoutesSection(entry);
+
+    // Source-drift check: independently gated (its own SOURCES.json
+    // presence check), coexists with every section above -- an extracted
+    // artifact can have a README, GUIDELINES.md, routes.tsx, SOURCES.json,
+    // all four, or none.
+    $('detail-source-drift-section').hidden = true;
+    void renderSourceDriftSection(entry);
 
     $('detail-install-path').textContent = entry.installTarget;
 

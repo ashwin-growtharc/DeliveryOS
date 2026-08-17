@@ -101,3 +101,10 @@ export class BuildFixError extends DeliveryOsError {}
  * doesn't actually keep the payload compiling -- that's a real, reported
  * rollback, not an error. */
 export class DesignFixError extends DeliveryOsError {}
+
+/** Thrown when `checkSourceDrift` is asked to check an artifact whose
+ * payload has no `SOURCES.json` at its root -- there's nothing recorded
+ * to check drift against, so this fails hard and loud rather than
+ * silently reporting an empty result (same posture as
+ * `PristineSnapshotMissingError`). */
+export class SourcesFileMissingError extends DeliveryOsError {}

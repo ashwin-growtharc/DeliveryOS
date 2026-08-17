@@ -3006,3 +3006,88 @@ automated detector).
       left undocumented.
       `lint`/`typecheck`/full test suite clean (455 passed, 1 known
       pre-existing failure unrelated to this work).
+
+## Source-drift detection for extracted artifacts
+
+Prompted directly by the user, after pushing `kortix-design-kit` (a real
+port of Suna's `apps/web`, via the new `starter-kit-extractor`/
+`ui-component-extractor` skills above): once extraction happens, nothing
+tracked whether the REAL external source has since changed. A genuinely
+new, third relationship, distinct from the two DeliveryOS already handled
+well (registry vs. local pulled copy). Scope for v1: a local filesystem
+path to the real source (matches the actual case on this machine -- Suna
+sits locally), not git-repo fetching, which is a real, separate extension
+noted but out of scope here.
+
+- [x] **`src/engine/drift/`** (new module, sibling to `src/engine/
+      provenance/` -- deliberately a different directory, since that one
+      is payload-signing/integrity, a different concern) -- `types.ts`
+      (`SourceEntry`/`SourcesFile`), `hashFile.ts` (`sha256:<hex>`, same
+      format `computePayloadDigest` already established, factored out as
+      its own reusable per-file primitive for the first time),
+      `recordSources.ts` (`writeSourcesFile`: hashes each real source file
+      right now, writes `SOURCES.json` to a payload's root), `checkDrift.ts`
+      (`checkSourceDrift`: re-hashes the real source now and compares
+      against what was frozen at extraction, per entry -- `unchanged`,
+      `drifted`, or `source-missing`). The key simplification: this never
+      diffs the transformed payload file against the source (which would
+      require modeling every deliberate rewrite -- import paths,
+      `motion/react` → `framer-motion`, etc., real complexity
+      `kortix-design-kit`'s own README already documents) -- it only asks
+      whether the ORIGINAL source file itself has changed since
+      extraction, a hash-vs-hash comparison that never touches the
+      payload's own (transformed) content at all.
+- [x] New `SourcesFileMissingError` (`src/engine/errors.ts`) -- thrown when
+      asked to check drift for a payload with no `SOURCES.json` at all,
+      same "fail hard and loud" posture as `PristineSnapshotMissingError`.
+- [x] **`deliveryos check-drift <id> --remote <name> --source <path>`**
+      (new CLI command, `src/cli/commands/checkDrift.ts`) -- mirrors
+      `check-updates`'s own naming convention (`check-X` for "check this
+      artifact against Y"). Resolves the real payload dir via the
+      already-existing `resolvePayloadDir`, prints a grouped report
+      (drifted/source-missing/unchanged counts, drifted and source-missing
+      files listed by name). `--source` is a raw string passthrough at the
+      CLI layer, matching `push --path`'s own established convention.
+- [x] New **`artifact.checkSourceDrift`** sidecar RPC (`src/sidecar.ts`),
+      same args/shape as the CLI, for the app.
+- [x] **Detail UI**: a new "Check for source drift" section, gated on real
+      `SOURCES.json` presence at the payload root (reusing the
+      already-existing `artifact.readPayloadFile` RPC just to check
+      presence -- no new RPC needed for that), same "file presence, not
+      kind" convention as every other Detail section. A button opens a
+      native folder dialog (`openDialog({ directory: true })`, the same
+      convention every other destination/source-picking action in this
+      app already uses), calls the new RPC on demand (deliberately never
+      automatic -- the real source's location on disk is something only
+      the user can supply, every time), and renders a grouped result list
+      with drifted/source-missing items visually distinguished from
+      unchanged ones. Deliberately named/styled distinctly from the
+      existing `detail-drift-warning` section (`edited_locally`/
+      `both_changed` -- a LOCAL pulled copy vs. this project's own
+      registry, a completely different relationship) to avoid confusing
+      the two.
+- [x] Both `starter-kit-extractor` and `ui-component-extractor` skills
+      updated with a new, clearly optional step: if the real source is
+      available locally at extraction time, record `SOURCES.json` via a
+      one-off script calling `writeSourcesFile` (same "small tsx script
+      against an exported engine function" pattern this whole session
+      already established) -- skipped entirely (no error, no missing
+      section) when the real source isn't available locally.
+- [x] Unit tests: `test/unit/recordSources.test.ts` (3 tests),
+      `test/unit/checkDrift.test.ts` (5 tests) -- unchanged/drifted/
+      source-missing cases, a mixed-status case, real temp-dir fixtures.
+- [x] **Real dogfood**: recorded a real `SOURCES.json` in the actual
+      `kortix-design-kit` sandbox folder for 5 real components (Button,
+      Badge, Checkbox, Alert, Breadcrumb) against Suna's real
+      `apps/web/src/components/ui/` on disk, via a one-off script exactly
+      as the skill now documents. `checkSourceDrift` correctly reported
+      all 5 as `unchanged`; temporarily appending a comment to the real
+      `button.tsx` source flipped only that one entry to `drifted` (the
+      other 4 stayed `unchanged`); temporarily renaming it away entirely
+      reported `source-missing`; reverted both real changes afterward, and
+      re-confirmed all 5 back to `unchanged`. The real CLI command
+      (`deliveryos check-drift --help`) prints correctly.
+      `lint`/`typecheck`/full test suite clean (464 passed, 1 known
+      pre-existing failure unrelated to this work -- `artifact.push`
+      (edit mode)'s real-GitHub-auth-boundary test, confirmed to fail
+      identically on the unmodified base commit too).

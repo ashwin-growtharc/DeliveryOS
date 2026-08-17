@@ -370,7 +370,45 @@ honesty about what changed from the original source and a genuinely
 useful record for anyone later auditing why the artifact's content
 differs from where it came from.
 
-### 8. Push
+### 8. Record source-drift tracking (optional, but do it whenever the real source is available locally)
+
+If the real source project is sitting on this machine (not just fetched
+into a scratch clone that's about to be deleted), record a `SOURCES.json`
+at the payload root so anyone can later check whether that source has
+moved on since extraction -- via `writeSourcesFile` from
+`src/engine/drift/recordSources.ts`, called from a one-off script (the
+same "small tsx script against an exported engine function" pattern this
+whole process already uses elsewhere):
+
+```ts
+import { writeSourcesFile } from './src/engine/drift/recordSources';
+
+writeSourcesFile(
+  '/absolute/path/to/the/assembled/payload',
+  'kortix-ai/suna -- apps/web', // a short, human description of the source
+  [
+    {
+      payloadPath: 'components/Button/Button.tsx',
+      sourcePath: 'src/components/ui/button.tsx', // relative to the source root
+      sourceAbsolutePath: '/absolute/path/to/suna/apps/web/src/components/ui/button.tsx',
+    },
+    // ...one entry per payload file that's a genuine port of one real
+    // source file. Never for a hand-written preview.tsx or a generated
+    // README/GUIDELINES.md -- those simply get no entry.
+  ],
+);
+```
+
+This hashes each real source file right now and freezes that hash --
+later, `deliveryos check-drift <id> --remote <name> --source <path>` (or
+Detail's own "Check for source drift" button, once the artifact is
+pushed and pulled) re-hashes the real source and reports whether it's
+since changed. Skip this step entirely if the real source isn't
+available locally at extraction time -- an artifact with no
+`SOURCES.json` simply doesn't show that Detail section at all, the same
+"presence, not a blanket rule" gating this whole app uses everywhere.
+
+### 9. Push
 
 `push --new` via CLI flags only first (no `install_params`/
 `wiring_actions` support there -- see the hard constraint above), then

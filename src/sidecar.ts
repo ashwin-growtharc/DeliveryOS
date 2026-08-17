@@ -61,6 +61,7 @@ import { compileArtifactPreview, compileLocalPreview } from './engine/preview/re
 import { readArtifactPayloadFile } from './engine/payload/readPayloadFile';
 import { resolvePayloadDir, resolveWithinPayloadDir } from './engine/payload/payloadDir';
 import { listArtifactPayloadComponents } from './engine/payload/listPayloadComponents';
+import { checkSourceDrift } from './engine/drift/checkDrift';
 import {
   parseColorTokens,
   parseTypeScale,
@@ -522,6 +523,22 @@ const commands: Record<string, CommandHandler> = {
     const payloadDir = resolvePayloadDir(remote, id);
     const componentDir = resolveWithinPayloadDir(payloadDir, relativeDir);
     return compileLocalPreview(componentDir);
+  },
+
+  // Source-drift-detection: checks whether the real external project an
+  // extracted artifact's SOURCES.json points at has changed since
+  // extraction. `source` is a local folder the user picks via a native
+  // dialog (Detail's own new "Check for source drift" section) --
+  // resolvePayloadDir/checkSourceDrift throw a clear, typed error
+  // (SourcesFileMissingError) if the artifact was never recorded with
+  // source-drift tracking, which the app surfaces as a toast, same as any
+  // other RPC error.
+  'artifact.checkSourceDrift': (args) => {
+    const remote = requireString(args, 'remote');
+    const id = requireString(args, 'id');
+    const source = requireString(args, 'source');
+    const payloadDir = resolvePayloadDir(remote, id);
+    return { results: checkSourceDrift(payloadDir, source) };
   },
 };
 
