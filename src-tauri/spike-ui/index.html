@@ -261,11 +261,12 @@
           </div>
           <p class="field-hint">
             Looks at <code>.claude/agents</code>, <code>.claude/skills</code>,
-            <code>.claude/commands</code>, and <code>.claude/rules</code> in the current project
-            folder for anything not yet tracked here and not already in the selected remote's
-            catalog.
+            <code>.claude/commands</code>, and <code>.claude/rules</code>, <code>src/</code> (for
+            reusable UI components), and the project itself (for a real, buildable starter-kit
+            candidate) in the current project folder for anything not yet tracked here and not
+            already in the selected remote's catalog.
           </p>
-          <p id="scan-empty" class="empty-state" hidden>No new agents/skills found.</p>
+          <p id="scan-empty" class="empty-state" hidden>No new content found.</p>
           <div id="scan-results" class="grouped-results"></div>
         </section>
 

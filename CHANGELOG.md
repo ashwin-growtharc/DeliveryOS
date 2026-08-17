@@ -4,6 +4,54 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- **Scan: automated detection of real, standalone starter-kit candidates**,
+  the whole-project counterpart to the existing single-component Scan
+  feature. New `detectStarterKitCandidates` (`src/engine/scan/`), wired
+  into `scanForNewArtifacts` alongside the existing agent/skill/command/
+  rule/ui-component detectors -- walks `cwd` (recursively, for a
+  monorepo), flagging a directory as a `kind: template` candidate only
+  when it has BOTH a real `package.json` with a `build` script AND real
+  routing evidence (`src/routes.tsx`, or a `pages`/`app` directory with
+  2+ real files) -- deliberately stricter than "any buildable package,"
+  which would flag every internal library in a real monorepo. Once a
+  real candidate is found, it stops descending into it (a nested
+  `docs-site/` with its own tiny `package.json` doesn't also get
+  flagged). Names the real framework in its description when a known
+  dependency is present (Next.js/Vite/Remix/CRA/Vue/Angular/Svelte/
+  SvelteKit), warns when no `README.md` exists yet. Always an in-place
+  candidate (never staged/copied -- a whole project is already
+  self-contained). This is purely a DETECTOR: it flags candidates the
+  same "cast a wide net, Review still required" way the UI-component
+  detector already does; the actual judgment-heavy extraction/cleanup
+  work is the separate, still human/AI-driven `starter-kit-extractor`
+  skill (`.claude/skills/starter-kit-extractor/SKILL.md`, new this same
+  session) -- automating "is this a real project" is decidable; "is it
+  worth extracting, and what needs fixing" isn't.
+  The Tauri app's Scan view and the CLI's `deliveryos scan` needed ZERO
+  kind-specific changes to support this -- both already group/print
+  candidates generically by `kind`, and `kind: template` already had its
+  own real icon/color from earlier `kind: template` artifact work
+  (`design-kit`, `growtharc-react-vite-starter`). Found and fixed one
+  real, if not-currently-reachable, defensive gap while dogfooding this
+  through the real Scan → Review flow: `detectAndPrefillMetadata`'s
+  catch block didn't reset `pendingInstallParams` after a failed
+  detection, so a future malformed `artifact.detectMetadata` response
+  could leave it corrupted past where that function's own catch could
+  still help -- now defaults to `[]` in both the success and failure
+  paths.
+  Also fixed two small pieces of pre-existing stale documentation found
+  while making this change: the CLI's own `--help` text and the app's
+  Scan-view hint text both still only mentioned the four markdown-backed
+  kinds, never the already-existing `src/` UI-component detection --
+  both now mention UI components and the new starter-kit detection.
+  14 new unit tests (`test/unit/detectStarterKitCandidates.test.ts`) plus
+  a new e2e orchestrator test confirming the wiring, real dogfood via the
+  actual CLI (confirmed no false positive against `delivery-os` itself,
+  and correct detection + framework naming + README warning against a
+  real scratch Vite+React project), and a real in-browser Playwright
+  check of the whole Scan → Review & propose flow. `lint`/`typecheck`/
+  full test suite clean (455 passed, 1 known pre-existing failure).
+
 - **Detail view: a real route/page map for whole-app templates like
   `growtharc-react-vite-starter`.** Prompted by real user confusion
   comparing that artifact's Detail view against `design-kit`'s rich
