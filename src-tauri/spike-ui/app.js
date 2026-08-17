@@ -1291,12 +1291,24 @@
    * build -- a `[text](javascript:...)` link rendered as a live,
    * clickable `javascript:` URL), so escaping raw HTML tokens alone (the
    * original fix) left this one path still able to run script on click,
-   * contradicting this function's own stated security model. */
+   * contradicting this function's own stated security model.
+   *
+   * The relative-path check deliberately excludes a leading `//` --
+   * `//evil.com/phish` starts with `/` (so a naive `/^[#/?]/` test wrongly
+   * treats it as a same-site relative path) but is actually a
+   * protocol-relative URL that navigates cross-origin, resolving to
+   * whatever scheme the iframe currently has (e.g. `https://evil.com/
+   * phish`). A crafted README link in that shape would otherwise be
+   * clickable and swap the iframe's own displayed content for an
+   * attacker-controlled page -- not script execution (no
+   * allow-same-origin/allow-top-navigation on this iframe), but a real
+   * phishing vector inside what reads as trusted DeliveryOS chrome. */
   function isSafeMarkdownUrl(href, allowDataImage) {
     const trimmed = String(href ?? '').trim();
     if (/^(https?:|mailto:)/i.test(trimmed)) return true;
     if (allowDataImage && /^data:image\//i.test(trimmed)) return true;
-    if (/^[#/?]/.test(trimmed)) return true;
+    if (/^[#?]/.test(trimmed)) return true;
+    if (/^\/(?!\/)/.test(trimmed)) return true;
     return false;
   }
 
