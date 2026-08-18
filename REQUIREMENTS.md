@@ -12,8 +12,15 @@ these are installed.
 | npm | bundled with Node | Installs `package.json` dependencies. |
 | git | any recent version | `remote add`/`pull`/`push` shell out to it via `simple-git`. |
 | GitHub CLI (`gh`) | any recent version, **authenticated** (`gh auth login`) | `push` gets a GitHub token via `gh auth token` to open PRs. Needs `repo` scope at minimum. |
+| Microsoft Edge or Chrome | already installed (Edge ships with Windows) | `push` generates a real `preview.png` for `ui-component` artifacts via `playwright-core`, which launches an already-installed browser rather than downloading its own. Not required to run DeliveryOS itself — only this one push-time step degrades gracefully (no preview image, push still succeeds) if neither is found. |
 
 Install: `npm install` at the repo root. Verify: `npm run typecheck && npm run lint && npm test`.
+
+## Claude Code integration (Phases 8-10)
+
+| Requirement | Notes |
+|---|---|
+| Claude Code CLI (`claude`), **authenticated** | Required for every AI-assisted feature: "Suggest with Claude" (Add New's description/component-type suggestions), the "want help fixing this?" build-fix flow, and anti-pattern-fix suggestions — all spawn a real `claude -p` subprocess. Also required to install/use the `deliveryos-check-first` and `deliveryos-status` Skills at all, since those ARE Claude Code Skills. Nothing else in DeliveryOS depends on it — the CLI, `pull`/`push`, and the desktop app all work fully without it. |
 
 ## Phase 3+ (Tauri desktop app)
 
