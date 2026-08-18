@@ -4,6 +4,28 @@ All notable changes to DeliveryOS are recorded here, phase by phase. See
 [PLAN.md](PLAN.md) for the roadmap and [ARCHITECTURE.md](ARCHITECTURE.md) for
 design rationale.
 
+- **Fix: Detail's Type Scale section rendered blank for any design kit
+  whose GUIDELINES.md uses a different Type-scale table header
+  convention than the original `design-kit` artifact.** Found via a real
+  screenshot of `kortix-design-kit`'s Detail view (Suna-derived content,
+  headers `Role | Font | Token | Size | Line height`) showing empty rows
+  where the original `design-kit`'s own table (`Element | Font | Size |
+  Weight`) renders fine. Root cause: the renderer hardcoded `row.Element`/
+  `row.Weight`, silently producing `undefined` (blank label/sample text)
+  for any kit using a different label column name -- contradicting
+  `parseTypeScale`'s own stated intent ("a header rename doesn't require
+  a matching code change"). Now falls back through `Element`/`Role`/the
+  row's own first value for the label. A second, related bug: Size
+  values in `rem` (`"0.875rem"`) parsed via a plain leading-integer
+  regex that stops at the decimal point, always yielding a meaningless
+  `0`/`1` and clamping every row to the same 12px floor -- new
+  `parseSizeInPx` handles both a plain px value (unchanged for
+  `design-kit`) and a real `rem * 16` conversion. Verified against both
+  real GUIDELINES.md files on disk: `design-kit`'s 4 rows render
+  identically to before (zero regression); `kortix-design-kit`'s 8 rows
+  now show correct labels and correctly-converted pixel sizes (13-28px)
+  instead of 8 blank rows. `lint`/`typecheck` clean.
+
 - **Scan: automated detection of real, standalone starter-kit candidates**,
   the whole-project counterpart to the existing single-component Scan
   feature. New `detectStarterKitCandidates` (`src/engine/scan/`), wired
