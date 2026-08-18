@@ -1287,7 +1287,36 @@ input, textarea, select {
   color: var(--warning-600);
 }
 
-.detail-readme {
+/* Holds one real, sandboxed markdown iframe (see
+ * renderMarkdownToSandboxedIframe in app.js) -- no text styling of its
+ * own; the rendered document's own <style> (inside the iframe) owns
+ * all of that. Replaces the old .detail-readme, which used to hold raw
+ * pre-wrap monospace text before a real markdown renderer existed. */
+.markdown-container {
+  margin-bottom: 14px;
+}
+
+.detail-tabs-loading {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  opacity: .6;
+  margin: -6px 0 14px;
+}
+
+.markdown-frame {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--card);
+  display: block;
+}
+
+/* Only reached if `marked` itself throws (malformed input) -- same
+ * plain pre-wrap fallback the old .detail-readme rule provided, so a
+ * genuinely broken markdown file still shows SOMETHING readable. */
+.markdown-fallback {
   white-space: pre-wrap;
   font-family: var(--font-mono, monospace);
   font-size: 12.5px;
@@ -1296,9 +1325,7 @@ input, textarea, select {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: 14px 16px;
-  margin-bottom: 14px;
-  max-height: 320px;
-  overflow-y: auto;
+  margin: 0;
 }
 
 .install-params-form {

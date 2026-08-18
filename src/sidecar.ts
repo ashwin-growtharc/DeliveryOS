@@ -62,6 +62,7 @@ import { readArtifactPayloadFile } from './engine/payload/readPayloadFile';
 import { resolvePayloadDir, resolveWithinPayloadDir } from './engine/payload/payloadDir';
 import { listArtifactPayloadComponents } from './engine/payload/listPayloadComponents';
 import { checkSourceDrift } from './engine/drift/checkDrift';
+import { pullPayloadComponent } from './engine/payload/pullPayloadComponent';
 import {
   parseColorTokens,
   parseTypeScale,
@@ -313,7 +314,13 @@ const commands: Record<string, CommandHandler> = {
     const remote = requireString(args, 'remote');
     const id = requireString(args, 'id');
     const content = readArtifactPayloadFile(remote, id, 'GUIDELINES.md');
-    if (content === undefined) {
+    // A 0-byte/whitespace-only GUIDELINES.md is treated the same as absent
+    // -- matches the truthiness check the Documentation tab's own
+    // renderDocumentationTab already uses on this same file (app.js);
+    // without this, an empty file used to show the Design/Components tabs
+    // with nothing in them while Documentation stayed hidden for the same
+    // file, a real inconsistency (found via review).
+    if (content === undefined || content.trim().length === 0) {
       return { present: false, colorTokens: [], typeScale: [], usageRules: {}, layoutRules: null };
     }
     return {
@@ -347,6 +354,22 @@ const commands: Record<string, CommandHandler> = {
     const remote = requireString(args, 'remote');
     const id = requireString(args, 'id');
     return { components: listArtifactPayloadComponents(remote, id) };
+  },
+
+  // Pulls ONE component out of a design-kit-shaped bundle -- unlike
+  // artifact.pull, this is not tracked (no lockfile entry, no pristine
+  // snapshot): a component isn't its own artifact, there's no
+  // install_target for "just Header." destDir comes from a real native
+  // folder dialog the app already drives (window.__TAURI__.dialog.open),
+  // never a fixed convention path -- the person picks where it lands in
+  // their own project, same as every other destination-picking action
+  // in this app (Add New's payload picker, Settings' Change folder).
+  'artifact.pullPayloadComponent': (args) => {
+    const remote = requireString(args, 'remote');
+    const id = requireString(args, 'id');
+    const relativeDir = requireString(args, 'relativeDir');
+    const destDir = requireString(args, 'destDir');
+    return pullPayloadComponent(remote, id, relativeDir, destDir);
   },
 
   // Tier 2 of the wiring agent (Phase 7 item 6): resolves every
