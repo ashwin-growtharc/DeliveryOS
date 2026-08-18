@@ -155,6 +155,7 @@ anti-patterns before they land.
 - Detail view gained: a route/page map for whole-app templates, a dedicated per-component view (variant tabs + live props controls), real markdown rendering (replacing raw literal text) split into Preview/Documentation/Design/Components/Routes tabs, and a way to pull a single component's files without pulling the whole bundle
 - A new `starter-kit-extractor` skill (alongside the existing UI-component one) plus a Scan detector that recognizes whole buildable projects as template candidates
 - Several real bugs found via hands-on use and review passes, each fixed: a markdown XSS gap (unsafe `javascript:` link/image URLs), a "Back to Browse" infinite loop after visiting a component's detail view, a handful of tab-state/stale-data races, and Detail's Type Scale section rendering blank for any design kit whose `GUIDELINES.md` names its table columns differently than the original `design-kit` (found via `kortix-design-kit`)
+- Source-drift detection: a `SOURCES.json` recorded at extraction time (hashing each real source file) lets `deliveryos check-drift` and a new Detail tab later report whether the real external project an artifact was ported from has since changed — `unchanged`/`drifted`/`source-missing` per file, verified against the real `kortix-design-kit` artifact and Suna's actual source on disk
 - **Not yet done**: the full end-to-end test — pull the bundle into a fresh project, plant an anti-pattern, and confirm detection → fix → rebuild all work together
 
 ---

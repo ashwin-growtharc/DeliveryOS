@@ -399,6 +399,27 @@
               <div id="detail-routes-section" hidden>
                 <div id="detail-routes-tree" class="route-tree"></div>
               </div>
+
+              <!-- Source-drift check: whether the real external project an
+                   artifact was extracted from (via the starter-kit-extractor/
+                   ui-component-extractor skills) has changed since
+                   extraction -- gated on real SOURCES.json presence at the
+                   payload root, never a `kind` check, same convention as
+                   every tab above. Distinct from #detail-drift-warning
+                   below: that one is about a LOCAL pulled copy vs. this
+                   project's own registry, not a third-party external source.
+                   See renderDetail/renderSourceDriftSection in app.js. -->
+              <div id="detail-source-drift-section" hidden>
+                <div class="wiring-section-label">Source drift</div>
+                <p class="source-drift-caption">
+                  This artifact was extracted from a real external project. Point at where that
+                  project sits locally to check whether its source has changed since extraction.
+                </p>
+                <button id="detail-check-source-drift-btn" class="btn btn-ghost btn-sm">
+                  Check for source drift
+                </button>
+                <div id="detail-source-drift-results" class="source-drift-results"></div>
+              </div>
             </div>
 
             <div class="meta-grid">

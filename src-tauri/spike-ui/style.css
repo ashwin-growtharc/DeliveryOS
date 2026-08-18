@@ -1387,6 +1387,61 @@ input, textarea, select {
   padding-left: 12px;
 }
 
+/* ---------- Source-drift check (Detail section) ----------
+ * Distinct from .drift-warning above -- that's a LOCAL pulled copy vs.
+ * this project's own registry; this is an extracted artifact vs. the
+ * real third-party project it came from. Reuses the same danger/gold
+ * tokens as .drift-warning/.push-status for the same at-a-glance
+ * severity read, just at list-item scale rather than a full banner. */
+
+.source-drift-caption {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 4px 0 10px;
+}
+
+.source-drift-results {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.source-drift-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  padding: 6px 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+}
+
+.source-drift-item .source-drift-path {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+}
+
+.source-drift-item.drifted {
+  background: var(--danger-100);
+  border-color: var(--danger-500);
+  color: var(--danger-600);
+}
+
+.source-drift-item.source-missing {
+  background: var(--surface-secondary);
+  border-color: var(--gold-500);
+}
+
+.source-drift-item.unchanged {
+  color: var(--text-secondary);
+}
+
+.source-drift-summary {
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
 /* ---------- Tier 2 wiring suggestions (Phase 7 item 6) ---------- */
 
 .wiring-section-label {

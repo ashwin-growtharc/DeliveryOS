@@ -1029,6 +1029,12 @@
   // async artifact.parseRoutes call.
   let routesRequestId = 0;
 
+  // Same request-token-guard discipline, for renderSourceDriftSection's
+  // own async artifact.readPayloadFile presence check (a separate,
+  // independent check from any of the drift check's own button-click
+  // calls, which use withBusy on the button itself instead).
+  let sourceDriftRequestId = 0;
+
   // Array-based counterpart to detailPreviewMessageHandler, for
   // renderMarkdownToSandboxedIframe's own iframes -- a single Documentation
   // tab can hold more than one (README.md AND GUIDELINES.md's own prose,
@@ -1569,6 +1575,108 @@ ${bodyHtml}
     }
 
     return nodeEl;
+  }
+
+  /** Source-drift-detection's Detail affordance: shown only when the
+   * artifact's payload root has a real SOURCES.json (written once, at
+   * extraction time, by the starter-kit-extractor/ui-component-extractor
+   * skills) -- never a `kind` check, same "file presence, not kind"
+   * convention as every other Detail section here. Reuses the already-
+   * existing artifact.readPayloadFile RPC just to check presence (no new
+   * RPC needed for that); the actual check happens on-demand, once the
+   * user picks a local source folder, via the new
+   * artifact.checkSourceDrift RPC. */
+  async function renderSourceDriftSection(entry) {
+    const requestId = ++sourceDriftRequestId;
+    const resultsEl = $('detail-source-drift-results');
+    const button = $('detail-check-source-drift-btn');
+
+    let content;
+    try {
+      ({ content } = await call('artifact.readPayloadFile', {
+        remote: entry.remoteName,
+        id: entry.manifest.id,
+        path: 'SOURCES.json',
+      }));
+    } catch {
+      content = undefined;
+    }
+    if (requestId !== sourceDriftRequestId) return; // superseded while awaiting
+
+    detailTabState.sourceDrift = Boolean(content);
+    refreshDetailTabs();
+    if (!content) return;
+
+    resultsEl.innerHTML = '';
+    button.onclick = () => void handleCheckSourceDrift(entry, button);
+  }
+
+  /** Runs once, on demand, when the user clicks "Check for source drift" --
+   * unlike every other Detail RPC call above, this deliberately does NOT
+   * run automatically on open: it requires a local folder pick every time
+   * (no destination is remembered), since the real external source lives
+   * wherever it happens to sit on THIS machine, which DeliveryOS has no
+   * other way to know. */
+  async function handleCheckSourceDrift(entry, button) {
+    let source;
+    try {
+      source = await openDialog({ directory: true });
+    } catch (err) {
+      toastError(err);
+      return;
+    }
+    if (!source) {
+      return; // user cancelled
+    }
+
+    const resultsEl = $('detail-source-drift-results');
+    await withBusy(button, 'Checking...', async () => {
+      let results;
+      try {
+        ({ results } = await call('artifact.checkSourceDrift', {
+          remote: entry.remoteName,
+          id: entry.manifest.id,
+          source,
+        }));
+      } catch (err) {
+        toastError(err);
+        return;
+      }
+      renderSourceDriftResults(resultsEl, results);
+    });
+  }
+
+  function renderSourceDriftResults(resultsEl, results) {
+    resultsEl.innerHTML = '';
+
+    const drifted = results.filter((r) => r.status === 'drifted');
+    const sourceMissing = results.filter((r) => r.status === 'source-missing');
+    const unchanged = results.filter((r) => r.status === 'unchanged');
+
+    const summary = document.createElement('div');
+    summary.className = 'source-drift-summary';
+    summary.textContent =
+      `${drifted.length} drifted, ${sourceMissing.length} source missing, ${unchanged.length} unchanged`;
+    resultsEl.appendChild(summary);
+
+    // Worth seeing at a glance (drifted/source-missing), listed first;
+    // "unchanged" is the expected common case and doesn't need the same
+    // prominence, but is still listed so the check reads as complete
+    // (not silently dropping files), same "show the whole picture"
+    // instinct as check-updates's own report.
+    for (const result of [...drifted, ...sourceMissing, ...unchanged]) {
+      const item = document.createElement('div');
+      item.className = `source-drift-item ${result.status}`;
+      const pathEl = document.createElement('span');
+      pathEl.className = 'source-drift-path';
+      pathEl.textContent = result.payloadPath;
+      item.appendChild(pathEl);
+      const statusEl = document.createElement('span');
+      statusEl.textContent =
+        result.status === 'source-missing' ? 'source missing' : result.status;
+      item.appendChild(statusEl);
+      resultsEl.appendChild(item);
+    }
   }
 
   /** Collects whatever was actually typed into the required-config
@@ -3048,6 +3156,7 @@ ${bodyHtml}
     { key: 'preview', label: 'Preview', panelId: 'detail-preview-section' },
     { key: 'configuration', label: 'Configuration', panelId: 'detail-configuration-section' },
     { key: 'routes', label: 'Routes', panelId: 'detail-routes-section' },
+    { key: 'sourceDrift', label: 'Source drift', panelId: 'detail-source-drift-section' },
   ];
 
   // The only keys that resolve via an RPC round-trip -- preview/
@@ -3055,7 +3164,7 @@ ${bodyHtml}
   // already in hand. Used to show a real loading indicator while any of
   // these is still pending, so a tab that ends up applicable doesn't
   // just silently pop in with no warning it was coming.
-  const DETAIL_ASYNC_TAB_KEYS = ['documentation', 'design', 'components', 'routes'];
+  const DETAIL_ASYNC_TAB_KEYS = ['documentation', 'design', 'components', 'routes', 'sourceDrift'];
 
   let detailTabState = {};
   let detailActiveTabKey = null;
@@ -3279,6 +3388,12 @@ ${bodyHtml}
     // posture, independently gated: an artifact can have a routes.tsx, a
     // README, GUIDELINES.md, all three, or none.
     void renderRoutesSection(entry);
+
+    // Source-drift check: its own tab, gated on real SOURCES.json
+    // presence, same "resolve via RPC, decide tab membership once it
+    // resolves" posture as Routes above -- an extracted artifact can have
+    // a README, GUIDELINES.md, routes.tsx, SOURCES.json, all four, or none.
+    void renderSourceDriftSection(entry);
 
     $('detail-install-path').textContent = entry.installTarget;
 

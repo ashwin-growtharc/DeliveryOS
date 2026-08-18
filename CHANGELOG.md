@@ -8,6 +8,16 @@ All notable changes to DeliveryOS are recorded here, newest first. See
 
 ## Phase 11 — Design-kit bundle & design-quality checks
 
+- **Source-drift detection for extracted artifacts.** Once a project or
+  component is extracted from a real external codebase (via the
+  `starter-kit-extractor`/`ui-component-extractor` skills), nothing
+  previously tracked whether that real source had since changed. New
+  `src/engine/drift/` module hashes each source file at extraction time
+  (`SOURCES.json` at the payload root) and re-hashes it later to report
+  `unchanged`/`drifted`/`source-missing` — via a new `deliveryos
+  check-drift` CLI command and a "Check for source drift" Detail tab,
+  both gated on real `SOURCES.json` presence. Verified against the real
+  `kortix-design-kit` artifact and Suna's actual source on disk.
 - Fixed Detail's Type Scale section rendering blank for any design kit
   whose `GUIDELINES.md` names its table columns differently than the
   original `design-kit` artifact (found via `kortix-design-kit`, whose
