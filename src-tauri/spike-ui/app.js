@@ -1733,19 +1733,32 @@ ${bodyHtml}
       const sampleRow = document.createElement('div');
       sampleRow.className = 'type-sample-row';
 
+      // Different real design kits name their Type scale table's own
+      // label column differently -- the original design-kit's own
+      // convention calls it "Element"; kortix-design-kit's real,
+      // Suna-derived convention calls it "Role" instead (and has no
+      // "Element" column at all). parseTypeScale deliberately keys rows
+      // by whatever headers the table actually has (see its own doc
+      // comment: "a header rename doesn't require a matching code
+      // change") -- reading only `row.Element` broke that contract and
+      // silently rendered every row blank for any kit using a different
+      // label header. Falls back to the row's own first value for a
+      // convention that uses neither name.
+      const label = row.Element || row.Role || Object.values(row)[0] || '';
+
       const labelEl = document.createElement('span');
       labelEl.className = 'type-sample-label';
-      labelEl.textContent = row.Element || '';
+      labelEl.textContent = label;
 
       const textEl = document.createElement('span');
       textEl.className = 'type-sample-text';
-      // A REAL applied sample, not a data table -- the row's own Element
+      // A REAL applied sample, not a data table -- the row's own label
       // text, rendered in its own real Font/Weight/Size, so this shows
       // what the type actually looks like rather than just naming it.
-      textEl.textContent = row.Element || '';
+      textEl.textContent = label;
       textEl.style.fontFamily = fontFamilyStack(row.Font || '');
       textEl.style.fontWeight = String(parseLeadingNumber(row.Weight, 400));
-      textEl.style.fontSize = `${clamp(parseLeadingNumber(row.Size, 14), 12, 28)}px`;
+      textEl.style.fontSize = `${clamp(parseSizeInPx(row.Size), 12, 28)}px`;
 
       sampleRow.appendChild(labelEl);
       sampleRow.appendChild(textEl);
@@ -1782,6 +1795,22 @@ ${bodyHtml}
   function parseLeadingNumber(text, fallback) {
     const match = /\d+/.exec(String(text ?? ''));
     return match ? Number(match[0]) : fallback;
+  }
+
+  /** GUIDELINES.md Size values show up in two real, legitimate shapes --
+   * a plain px number (design-kit's own convention: "18-24px",
+   * "13-14px") or a real rem value (kortix-design-kit's Suna-derived
+   * convention: "0.875rem", "1.5rem"). `parseLeadingNumber`'s plain
+   * `\d+` match breaks on both: it stops at the decimal point ("0.875"
+   * matches only the leading "0"), and never converts a rem value to a
+   * real pixel size at all. Both kits' own GUIDELINES.md explicitly keep
+   * the root font-size at 100% (16px) by convention, so `rem * 16` is a
+   * real, documented conversion here, not a guess. */
+  function parseSizeInPx(text) {
+    const match = /(\d+(?:\.\d+)?)\s*(rem|px)?/.exec(String(text ?? ''));
+    if (!match) return 14;
+    const number = Number(match[1]);
+    return match[2] === 'rem' ? number * 16 : number;
   }
 
   function clamp(value, min, max) {

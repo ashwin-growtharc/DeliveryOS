@@ -154,7 +154,7 @@ anti-patterns before they land.
 - Catalog growth from a real GrowthArc project template: a new backend-plugin (`azure-msal-sso`, Azure AD/Entra SSO), four more design-kit components, a lint/tooling starter template, and eventually the whole cleaned-up project as one pullable template (`growtharc-react-vite-starter`)
 - Detail view gained: a route/page map for whole-app templates, a dedicated per-component view (variant tabs + live props controls), real markdown rendering (replacing raw literal text) split into Preview/Documentation/Design/Components/Routes tabs, and a way to pull a single component's files without pulling the whole bundle
 - A new `starter-kit-extractor` skill (alongside the existing UI-component one) plus a Scan detector that recognizes whole buildable projects as template candidates
-- Several real bugs found via hands-on use and review passes, each fixed: a markdown XSS gap (unsafe `javascript:` link/image URLs), a "Back to Browse" infinite loop after visiting a component's detail view, and a handful of tab-state/stale-data races
+- Several real bugs found via hands-on use and review passes, each fixed: a markdown XSS gap (unsafe `javascript:` link/image URLs), a "Back to Browse" infinite loop after visiting a component's detail view, a handful of tab-state/stale-data races, and Detail's Type Scale section rendering blank for any design kit whose `GUIDELINES.md` names its table columns differently than the original `design-kit` (found via `kortix-design-kit`)
 - **Not yet done**: the full end-to-end test — pull the bundle into a fresh project, plant an anti-pattern, and confirm detection → fix → rebuild all work together
 
 ---

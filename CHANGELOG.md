@@ -8,6 +8,12 @@ All notable changes to DeliveryOS are recorded here, newest first. See
 
 ## Phase 11 — Design-kit bundle & design-quality checks
 
+- Fixed Detail's Type Scale section rendering blank for any design kit
+  whose `GUIDELINES.md` names its table columns differently than the
+  original `design-kit` artifact (found via `kortix-design-kit`, whose
+  real Suna-derived table has no `Element`/`Weight` columns at all) —
+  now falls back across known column names, and correctly converts
+  `rem`-based sizes to pixels.
 - Scan can now detect a whole standalone project (not just a single
   component) as a pullable `kind: template` candidate, requiring both a
   real build script and real routing evidence so it doesn't over-flag
