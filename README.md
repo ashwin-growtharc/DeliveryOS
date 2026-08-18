@@ -6,40 +6,33 @@ real GitHub pull requests — via a CLI or a desktop app, both backed by the
 same engine. See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design and
 [PLAN.md](PLAN.md) for what's built vs. planned per phase.
 
-**Status:** Phases 0-2 (engine: `remote add`/`list`/`pull`/`push`) are done
-and verified against real GitHub. Phase 3 (desktop app) has a working UI —
-Browse, Pull, Push, Settings, a live progress log, Open Folder — built on
-top of the same engine via a sidecar process. A "UI Components" page
-(live, sandboxed-iframe previews of pushed React/TS and plain-HTML
-components, grouped by a `componentTypes` tag) is also done, including
-Storybook-style variant tabs and a generated props-controls panel on a
-component's Detail view — see
-[docs/ui-components-feature-design.md](docs/ui-components-feature-design.md)
-and `PLAN.md`'s Phase A/B/C entries. Phase 7 (`kind: backend-plugin` —
-auth/login-style artifacts, e.g. a real email/password Auth.js module) is
-now **complete**: install-time config collection, keyless signing verified
-at pull time before any files are written, a deterministic wiring agent
-(auto-applies mechanical setup, suggests but never silently applies edits
-to existing project files), a Detail view surfacing all of it, and a real
-end-to-end test against a freshly-scaffolded second project — see
-`PLAN.md`'s Phase 7 "In short" summary for the plain-language version.
-Phase 8 (a Claude Code Skill — check the catalog before generating new
-code, pull a match, wire it in, and verify the target project actually
-builds) is now **complete** and pushed for real as `deliveryos-check-first`
-on the project's own catalog. Phase 9 (the same principle, applied to
-checking DeliveryOS's own health/status instead of generating code) is
-also **complete**, as `deliveryos-status`. Phase 10 (wiring the check→
-pull→wire→test loop directly into the app's own **Pull** button, plus
-code-driven autofill for Add New) is now **complete**: deterministic
-apply-and-test on Pull; Add New's autofill covering `install_params`,
-`stacks`, `description`, and `owner` for every kind (not just
-backend-plugin), plus an explicit "Suggest with Claude ✨" button for
-real judgment on `description`/`componentTypes` when static analysis
-finds nothing; and an explicit "want help fixing this?" button on a real
-build failure that writes a reviewed, human-confirmed fix and
-auto-rolls-back if it doesn't actually work. See
-[CHANGELOG.md](CHANGELOG.md) for what's shipped, [PLAN.md](PLAN.md) for
-what's left, and the [docs index](#docs-index) below for everything else.
+**Status:** the core loop (pull, edit, propose as a PR) and the desktop app
+are both done and in real use. What's shipped:
+
+- **Engine + CLI** — register a git remote, list/pull/push artifacts, all
+  verified against real GitHub.
+- **Desktop app** — Browse, Pull, Push, Settings, Scan, Add New, a live
+  progress log, all built on the same engine via a sidecar process.
+- **UI Components** — live sandboxed-preview cards for pushed React/TS or
+  plain-HTML components, with variant tabs and a generated props panel.
+- **Design kits & whole-project templates** — a `kind: template` bundle
+  (e.g. a design system, or a full starter kit) pulls as one unit, with a
+  Detail view showing its color tokens, component grid, and route map.
+- **Backend plug-and-play artifacts** (`kind: backend-plugin`) — install-time
+  config collection, signature verification before any files are written,
+  and a wiring agent that applies mechanical setup and suggests (never
+  silently applies) edits to existing project files.
+- **Claude Code integration** — a skill that checks the catalog before
+  generating new code, pulls a match, wires it in, and verifies the build
+  (`deliveryos-check-first`); a companion skill for checking DeliveryOS's
+  own health (`deliveryos-status`); and the same check→pull→wire→test loop
+  wired directly into the app's own Pull button and Add New's autofill.
+- **Scan** — finds reusable content already sitting in a project (agents,
+  skills, commands, rules, UI components, whole starter-kit-shaped
+  projects) and proposes it as a new artifact.
+
+See [CHANGELOG.md](CHANGELOG.md) for what shipped and when, and
+[PLAN.md](PLAN.md) for what's next.
 
 **Relationship to ArcOS:** standalone project, not an ArcOS extension.
 Physically nested inside the `arc_os` folder for convenience only — its own
@@ -181,7 +174,7 @@ The frontend (`src-tauri/spike-ui/*.js`) has no automated test coverage
 | [docs/phase-2-retro.md](docs/phase-2-retro.md) | What broke proving the engine against real ArcOS catalog content |
 | [docs/artifact-arcos-cli-retro.md](docs/artifact-arcos-cli-retro.md) | Adding a whole-repo, Pull-only artifact (`arcos-cli`) |
 | [docs/artifact-launchpad-template-retro.md](docs/artifact-launchpad-template-retro.md) | Adding an artifact from a non-ArcOS project (`launchpad-template`) |
-| [docs/ui-components-feature-design.md](docs/ui-components-feature-design.md) | Design for the "UI Components" preview pipeline and sidebar page (see `PLAN.md` Phase A/B) |
+| [docs/ui-components-feature-design.md](docs/ui-components-feature-design.md) | Design for the "UI Components" preview pipeline and sidebar page (see `PLAN.md` Phase 6) |
 | [docs/phase-A-preview-packaging-spike.md](docs/phase-A-preview-packaging-spike.md) | Phase A spike write-up: proving the sandboxed-iframe + esbuild preview pipeline survives the sidecar's Node SEA packaging |
 | [docs/phase-3-spike-results.md](docs/phase-3-spike-results.md) | Sidecar-packaging feasibility spike: size/latency numbers |
 | [docs/phase-3-ui-scope.md](docs/phase-3-ui-scope.md) | What the desktop app UI does and deliberately doesn't do yet, and why |
