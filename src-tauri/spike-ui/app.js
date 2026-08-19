@@ -1035,6 +1035,11 @@
   // calls, which use withBusy on the button itself instead).
   let sourceDriftRequestId = 0;
 
+  // Same request-token-guard discipline, for renderActivitySection's own
+  // async artifact.readWiringMergeLog call (Phase 12: a visible audit
+  // trail for the wiring-merge log).
+  let activityRequestId = 0;
+
   // Array-based counterpart to detailPreviewMessageHandler, for
   // renderMarkdownToSandboxedIframe's own iframes -- a single Documentation
   // tab can hold more than one (README.md AND GUIDELINES.md's own prose,
@@ -1685,6 +1690,123 @@ ${bodyHtml}
     }
   }
 
+  /** Phase 12's "visible audit trail": the wiring-merge log
+   * (.deliveryos/wiring-merge-log.jsonl) already existed on disk the
+   * moment a merge was first applied, with nowhere in the UI to see it
+   * short of opening a dotfile by hand. Gated on real log entries
+   * existing for THIS artifact -- never a `kind` check, same "data
+   * presence, not kind" convention as every other Detail section here --
+   * resolved via artifact.readWiringMergeLog, already filtered to this
+   * artifact and ordered newest-first server-side. */
+  async function renderActivitySection(entry) {
+    if (!state.projectDir) {
+      detailTabState.activity = false;
+      return;
+    }
+
+    const requestId = ++activityRequestId;
+    let entries;
+    try {
+      ({ entries } = await call('artifact.readWiringMergeLog', {
+        cwd: state.projectDir,
+        remote: entry.remoteName,
+        id: entry.manifest.id,
+      }));
+    } catch {
+      entries = [];
+    }
+    if (requestId !== activityRequestId) return; // superseded while awaiting
+
+    detailTabState.activity = entries.length > 0;
+    refreshDetailTabs();
+    if (entries.length === 0) return;
+
+    const container = $('detail-activity-entries');
+    container.innerHTML = '';
+    for (const record of entries) {
+      container.appendChild(renderActivityEntry(record));
+    }
+  }
+
+  /** One wiring-merge log entry's own card. before/after are full file
+   * contents that could be long, so they're collapsed by default behind a
+   * real <details>/<summary> disclosure rather than more custom
+   * click-to-expand JS -- nothing like it exists yet in this codebase and
+   * it's the correct minimal-JS way to do this. */
+  function renderActivityEntry(record) {
+    const card = document.createElement('div');
+    card.className = 'wiring-action-card';
+
+    const header = document.createElement('div');
+    header.className = 'wiring-action-header';
+    const fileEl = document.createElement('code');
+    fileEl.textContent = record.targetFile;
+    const statusEl = document.createElement('span');
+    // No dedicated success/failure pill exists yet -- .exists/.absent are
+    // the closest read: "rolled back" is the one worth flagging (a real
+    // build failure reverted the write), same warning tone .exists
+    // already carries; "applied" is the unremarkable common case, same
+    // neutral tone .absent already carries.
+    statusEl.className = `wiring-action-status ${record.rolledBack ? 'exists' : 'absent'}`;
+    statusEl.textContent = record.rolledBack ? 'rolled back' : 'applied';
+    header.appendChild(fileEl);
+    header.appendChild(statusEl);
+
+    const timeEl = document.createElement('div');
+    timeEl.className = 'wiring-action-instructions';
+    timeEl.textContent = new Date(record.timestamp).toLocaleString();
+
+    const descEl = document.createElement('div');
+    descEl.className = 'wiring-action-description';
+    descEl.textContent = record.description;
+
+    card.appendChild(header);
+    card.appendChild(timeEl);
+    card.appendChild(descEl);
+    card.appendChild(renderActivityDiffDisclosure('Before', record.before, 'After', record.after));
+
+    if (record.rolledBack && record.rebuildOutput) {
+      card.appendChild(renderActivitySnippetDisclosure('Rebuild output', record.rebuildOutput));
+    }
+
+    return card;
+  }
+
+  /** A single <details> holding both Before/After <pre> blocks together --
+   * one disclosure per entry, not two, since they're only ever meaningful
+   * read side by side. */
+  function renderActivityDiffDisclosure(beforeLabel, before, afterLabel, after) {
+    const details = document.createElement('details');
+    const summary = document.createElement('summary');
+    summary.textContent = 'Before / After';
+    details.appendChild(summary);
+
+    for (const [label, content] of [[beforeLabel, before], [afterLabel, after]]) {
+      const labelEl = document.createElement('div');
+      labelEl.className = 'wiring-section-label';
+      labelEl.textContent = label;
+      const pre = document.createElement('pre');
+      pre.className = 'wiring-action-snippet';
+      pre.textContent = content;
+      details.appendChild(labelEl);
+      details.appendChild(pre);
+    }
+
+    return details;
+  }
+
+  function renderActivitySnippetDisclosure(label, content) {
+    const details = document.createElement('details');
+    const summary = document.createElement('summary');
+    summary.textContent = label;
+    const pre = document.createElement('pre');
+    pre.className = 'wiring-action-snippet';
+    pre.textContent = content;
+    details.appendChild(summary);
+    details.appendChild(pre);
+    return details;
+  }
+
   /** Collects whatever was actually typed into the required-config
    * checklist (blank fields are simply omitted, not sent as empty-string
    * overwrites -- re-opening Detail without retyping an already-configured
@@ -1800,7 +1922,14 @@ ${bodyHtml}
       // full-content whenAbsent.snippet with no ambiguity to resolve).
       if (action.targetFileExists) {
         card.appendChild(
-          renderWiringMergeRow(action.targetFile, action.description, action.instructions, action.snippet),
+          renderWiringMergeRow(
+            action.targetFile,
+            action.description,
+            action.instructions,
+            action.snippet,
+            entry.remoteName,
+            entry.manifest.id,
+          ),
         );
       }
 
@@ -1814,7 +1943,7 @@ ${bodyHtml}
    * merge" reason, or the proposed full file content plus Apply/Discard.
    * Mirrors renderBuildFixRow's exact ask/apply/discard shape. Nothing
    * is written to disk, and nothing is logged, unless Apply is clicked. */
-  function renderWiringMergeRow(targetFile, description, instructions, guidanceSnippet) {
+  function renderWiringMergeRow(targetFile, description, instructions, guidanceSnippet, remoteName, artifactId) {
     const row = document.createElement('div');
     row.className = 'build-fix-row';
 
@@ -1896,6 +2025,8 @@ ${bodyHtml}
                 targetFile,
                 mergedFile: merge.mergedFile,
                 description,
+                remote: remoteName,
+                id: artifactId,
                 costUsd: merge.costUsd,
                 durationMs: merge.durationMs,
               });
@@ -3289,6 +3420,7 @@ ${bodyHtml}
     { key: 'configuration', label: 'Configuration', panelId: 'detail-configuration-section' },
     { key: 'routes', label: 'Routes', panelId: 'detail-routes-section' },
     { key: 'sourceDrift', label: 'Source drift', panelId: 'detail-source-drift-section' },
+    { key: 'activity', label: 'Activity', panelId: 'detail-activity-section' },
   ];
 
   // The only keys that resolve via an RPC round-trip -- preview/
@@ -3296,7 +3428,7 @@ ${bodyHtml}
   // already in hand. Used to show a real loading indicator while any of
   // these is still pending, so a tab that ends up applicable doesn't
   // just silently pop in with no warning it was coming.
-  const DETAIL_ASYNC_TAB_KEYS = ['documentation', 'design', 'components', 'routes', 'sourceDrift'];
+  const DETAIL_ASYNC_TAB_KEYS = ['documentation', 'design', 'components', 'routes', 'sourceDrift', 'activity'];
 
   let detailTabState = {};
   let detailActiveTabKey = null;
@@ -3526,6 +3658,11 @@ ${bodyHtml}
     // resolves" posture as Routes above -- an extracted artifact can have
     // a README, GUIDELINES.md, routes.tsx, SOURCES.json, all four, or none.
     void renderSourceDriftSection(entry);
+
+    // Activity (Phase 12): the wiring-merge log's own entries for this
+    // artifact, independently gated -- an artifact can have source-drift
+    // data, activity data, both, or neither.
+    void renderActivitySection(entry);
 
     $('detail-install-path').textContent = entry.installTarget;
 

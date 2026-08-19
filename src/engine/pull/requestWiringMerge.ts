@@ -182,6 +182,12 @@ export interface ApplyWiringMergeResult {
 
 interface WiringMergeLogEntry {
   timestamp: string;
+  // Which artifact's wiring_action caused this entry -- the log file is
+  // per-PROJECT (keyed by cwd), not per-artifact, so without these a
+  // project with more than one pulled backend-plugin artifact would have
+  // every artifact's entries mixed together with no way to tell them apart.
+  remoteName: string;
+  artifactId: string;
   targetFile: string;
   description: string;
   before: string;
@@ -228,6 +234,8 @@ export async function applyWiringMerge(
   targetFile: string,
   mergedFile: string,
   description: string,
+  remoteName: string,
+  artifactId: string,
   meta: { costUsd?: number; durationMs?: number } = {},
 ): Promise<ApplyWiringMergeResult> {
   const fullPath = resolveContainedTargetFile(cwd, targetFile);
@@ -249,6 +257,8 @@ export async function applyWiringMerge(
 
   appendWiringMergeLog(cwd, {
     timestamp: new Date().toISOString(),
+    remoteName,
+    artifactId,
     targetFile,
     description,
     before,
@@ -261,4 +271,54 @@ export async function applyWiringMerge(
   });
 
   return { applied: !rolledBack, rolledBack, build };
+}
+
+export interface WiringMergeLogRecord {
+  timestamp: string;
+  targetFile: string;
+  description: string;
+  before: string;
+  after: string;
+  rebuildSuccess?: boolean;
+  rebuildOutput?: string;
+  rolledBack: boolean;
+}
+
+/**
+ * Reads back `.deliveryos/wiring-merge-log.jsonl`'s entries for exactly one
+ * artifact's wiring actions, newest first -- the UI's Activity tab feed.
+ * Missing file is the normal case (most artifacts never trigger a merge),
+ * not an error. Deliberately drops `costUsd`/`durationMs` from the returned
+ * shape (not shown anywhere in the UI) while keeping everything a person
+ * would actually want to see: what file, what was proposed, whether it
+ * stuck.
+ */
+export function readWiringMergeLog(cwd: string, remoteName: string, artifactId: string): WiringMergeLogRecord[] {
+  const logPath = wiringMergeLogPath(cwd);
+  if (!fs.existsSync(logPath)) {
+    return [];
+  }
+
+  const lines = fs.readFileSync(logPath, 'utf-8').split('\n').filter((line) => line.trim().length > 0);
+  const records: WiringMergeLogRecord[] = [];
+  for (const line of lines) {
+    const entry = JSON.parse(line) as WiringMergeLogEntry;
+    if (entry.remoteName !== remoteName || entry.artifactId !== artifactId) {
+      continue;
+    }
+    records.push({
+      timestamp: entry.timestamp,
+      targetFile: entry.targetFile,
+      description: entry.description,
+      before: entry.before,
+      after: entry.after,
+      rebuildSuccess: entry.rebuildSuccess,
+      rebuildOutput: entry.rebuildOutput,
+      rolledBack: entry.rolledBack,
+    });
+  }
+
+  // The log file itself is append-only/oldest-first on disk -- reverse so
+  // the UI can show the newest activity first without reversing itself.
+  return records.reverse();
 }

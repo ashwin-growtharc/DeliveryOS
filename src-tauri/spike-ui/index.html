@@ -420,6 +420,21 @@
                 </button>
                 <div id="detail-source-drift-results" class="source-drift-results"></div>
               </div>
+
+              <!-- Activity (Phase 12): a visible audit trail for the
+                   Tier-2 "AI wiring merge" flow above -- what was
+                   proposed, what got applied, what rolled back and why.
+                   The underlying .deliveryos/wiring-merge-log.jsonl
+                   already existed on disk; this is the first place it's
+                   ever shown. Gated on real log entries existing for THIS
+                   artifact, never a `kind` check, same convention as
+                   every tab above -- independent of Source drift (an
+                   artifact can have either, both, or neither). See
+                   renderDetail/renderActivitySection in app.js. -->
+              <div id="detail-activity-section" hidden>
+                <div class="wiring-section-label">Activity</div>
+                <div id="detail-activity-entries"></div>
+              </div>
             </div>
 
             <div class="meta-grid">

@@ -38,7 +38,7 @@ import { resolveInstallParamValues, applyInstallParams, readExistingEnvValues } 
 import { resolveWiringActions } from './engine/pull/wiring';
 import { pullAndAutoWire } from './engine/pull/pullAndAutoWire';
 import { requestBuildFix, applyBuildFix } from './engine/pull/fixBuildFailure';
-import { requestWiringMerge, applyWiringMerge } from './engine/pull/requestWiringMerge';
+import { requestWiringMerge, applyWiringMerge, readWiringMergeLog } from './engine/pull/requestWiringMerge';
 import { requestAntiPatternFix, applyAntiPatternFix } from './engine/scan/fixAntiPattern';
 import { pushArtifact, PushOptions } from './engine/push/push';
 import { checkForUpdates, resolvePendingPushes } from './engine/sync/sync';
@@ -510,9 +510,22 @@ const commands: Record<string, CommandHandler> = {
     const targetFile = requireString(args, 'targetFile');
     const mergedFile = requireString(args, 'mergedFile');
     const description = requireString(args, 'description');
+    const remote = requireString(args, 'remote');
+    const id = requireString(args, 'id');
     const costUsd = typeof args.costUsd === 'number' ? args.costUsd : undefined;
     const durationMs = typeof args.durationMs === 'number' ? args.durationMs : undefined;
-    return applyWiringMerge(cwd, targetFile, mergedFile, description, { costUsd, durationMs });
+    return applyWiringMerge(cwd, targetFile, mergedFile, description, remote, id, { costUsd, durationMs });
+  },
+
+  // Activity tab (Phase 12): reads back the wiring-merge audit log,
+  // filtered to exactly this artifact's own entries -- the log file is
+  // per-project, not per-artifact, so filtering matters the moment a
+  // project has pulled more than one backend-plugin artifact.
+  'artifact.readWiringMergeLog': (args) => {
+    const cwd = requireString(args, 'cwd');
+    const remote = requireString(args, 'remote');
+    const id = requireString(args, 'id');
+    return { entries: readWiringMergeLog(cwd, remote, id) };
   },
 
   // Phase 11 item 4: the "ask" half of the fix step for a design

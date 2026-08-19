@@ -7,6 +7,7 @@ import {
   parseWiringMergeResponse,
   requestWiringMerge,
   applyWiringMerge,
+  readWiringMergeLog,
 } from '../../src/engine/pull/requestWiringMerge';
 import { wiringMergeLogPath } from '../../src/engine/paths';
 import { WiringMergeError } from '../../src/engine/errors';
@@ -158,10 +159,15 @@ describe('applyWiringMerge', () => {
       'utf-8',
     );
 
-    const result = await applyWiringMerge(cwd, 'auth.ts', 'export const merged = 1;', 'wire in the auth guard', {
-      costUsd: 0.02,
-      durationMs: 1500,
-    });
+    const result = await applyWiringMerge(
+      cwd,
+      'auth.ts',
+      'export const merged = 1;',
+      'wire in the auth guard',
+      'test-remote',
+      'test-artifact',
+      { costUsd: 0.02, durationMs: 1500 },
+    );
 
     expect(result.applied).toBe(true);
     expect(result.rolledBack).toBe(false);
@@ -177,6 +183,8 @@ describe('applyWiringMerge', () => {
     expect(entry.after).toBe('export const merged = 1;');
     expect(entry.rolledBack).toBe(false);
     expect(entry.costUsd).toBe(0.02);
+    expect(entry.remoteName).toBe('test-remote');
+    expect(entry.artifactId).toBe('test-artifact');
   }, 30_000);
 
   it('rolls back to the original content when the re-run build still fails, and logs rolledBack: true', async () => {
@@ -188,7 +196,14 @@ describe('applyWiringMerge', () => {
       'utf-8',
     );
 
-    const result = await applyWiringMerge(cwd, 'auth.ts', 'export const stillBroken = 1;', 'wire in the auth guard');
+    const result = await applyWiringMerge(
+      cwd,
+      'auth.ts',
+      'export const stillBroken = 1;',
+      'wire in the auth guard',
+      'test-remote',
+      'test-artifact',
+    );
 
     expect(result.applied).toBe(false);
     expect(result.rolledBack).toBe(true);
@@ -206,7 +221,14 @@ describe('applyWiringMerge', () => {
     fs.writeFileSync(path.join(cwd, 'auth.ts'), 'export const original = 1;', 'utf-8');
     // No package.json at all -- runProjectBuild's own normal "nothing to verify" outcome.
 
-    const result = await applyWiringMerge(cwd, 'auth.ts', 'export const merged = 1;', 'wire in the auth guard');
+    const result = await applyWiringMerge(
+      cwd,
+      'auth.ts',
+      'export const merged = 1;',
+      'wire in the auth guard',
+      'test-remote',
+      'test-artifact',
+    );
 
     expect(result.applied).toBe(true);
     expect(result.rolledBack).toBe(false);
@@ -227,7 +249,7 @@ describe('applyWiringMerge', () => {
 
     try {
       await expect(
-        applyWiringMerge(nestedCwd, '../../../../evil.txt', 'malicious content', 'wire it in'),
+        applyWiringMerge(nestedCwd, '../../../../evil.txt', 'malicious content', 'wire it in', 'test-remote', 'test-artifact'),
       ).rejects.toThrow(WiringMergeError);
 
       const outsidePath = path.resolve(nestedCwd, '..', '..', '..', '..', 'evil.txt');
@@ -240,7 +262,65 @@ describe('applyWiringMerge', () => {
 
   it('refuses a targetFile that no longer exists on disk', async () => {
     await expect(
-      applyWiringMerge(cwd, 'does-not-exist.ts', 'merged content', 'wire it in'),
+      applyWiringMerge(cwd, 'does-not-exist.ts', 'merged content', 'wire it in', 'test-remote', 'test-artifact'),
     ).rejects.toThrow(WiringMergeError);
   });
+});
+
+describe('readWiringMergeLog', () => {
+  let cwd: string;
+
+  beforeEach(() => {
+    cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'deliveryos-read-merge-log-test-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  });
+
+  it('returns [] when the log file does not exist at all', () => {
+    expect(readWiringMergeLog(cwd, 'test-remote', 'test-artifact')).toEqual([]);
+  });
+
+  it('filters out entries belonging to a different artifact, and returns matches newest first', async () => {
+    fs.writeFileSync(path.join(cwd, 'auth.ts'), 'export const original = 1;', 'utf-8');
+    fs.writeFileSync(path.join(cwd, 'db.ts'), 'export const db = 1;', 'utf-8');
+    fs.writeFileSync(
+      path.join(cwd, 'package.json'),
+      JSON.stringify({ name: 'x', scripts: { build: 'node -e "console.log(1)"' } }),
+      'utf-8',
+    );
+
+    await applyWiringMerge(cwd, 'auth.ts', 'export const first = 1;', 'first merge', 'test-remote', 'test-artifact');
+    await applyWiringMerge(cwd, 'db.ts', 'export const other = 1;', 'a different artifact entirely', 'other-remote', 'other-artifact');
+    await applyWiringMerge(cwd, 'auth.ts', 'export const second = 1;', 'second merge', 'test-remote', 'test-artifact');
+
+    const records = readWiringMergeLog(cwd, 'test-remote', 'test-artifact');
+    expect(records).toHaveLength(2);
+    // Newest first -- the log file itself is oldest-first on disk.
+    expect(records[0].description).toBe('second merge');
+    expect(records[1].description).toBe('first merge');
+    expect(records.every((r) => r.rolledBack === false)).toBe(true);
+    // costUsd/durationMs deliberately dropped -- not part of WiringMergeLogRecord.
+    expect(records[0]).not.toHaveProperty('costUsd');
+    expect(records[0]).not.toHaveProperty('durationMs');
+  }, 30_000);
+
+  it('includes a rolled-back entry with its rebuild output', async () => {
+    fs.writeFileSync(path.join(cwd, 'auth.ts'), 'export const original = 1;', 'utf-8');
+    fs.writeFileSync(
+      path.join(cwd, 'package.json'),
+      JSON.stringify({ name: 'x', scripts: { build: 'node -e "process.exit(1)"' } }),
+      'utf-8',
+    );
+
+    await applyWiringMerge(cwd, 'auth.ts', 'export const broken = 1;', 'a broken merge', 'test-remote', 'test-artifact');
+
+    const records = readWiringMergeLog(cwd, 'test-remote', 'test-artifact');
+    expect(records).toHaveLength(1);
+    expect(records[0].rolledBack).toBe(true);
+    expect(records[0].rebuildSuccess).toBe(false);
+    expect(records[0].before).toBe('export const original = 1;');
+    expect(records[0].after).toBe('export const broken = 1;');
+  }, 30_000);
 });
