@@ -8,6 +8,15 @@ All notable changes to DeliveryOS are recorded here, newest first. See
 
 ## Phase 11 — Design-kit bundle & design-quality checks
 
+- **Phase 11's last open item, run for real: the full design-quality
+  end-to-end test.** Pulled the real `design-kit` bundle (now 10
+  components) into a fresh scratch project via the real CLI, confirmed
+  every component compiles/live-previews clean, then planted a genuine
+  self-nesting anti-pattern in a new component simulating "Claude Code
+  built UI from the kit." A real `deliveryos scan` correctly flagged it;
+  the real fix flow (a real Claude subprocess call, then a real apply +
+  recompile) fixed it for real, confirmed by re-checking the fixed file
+  no longer trips the detector. Phase 11 is now fully done.
 - **Source-drift detection for extracted artifacts.** Once a project or
   component is extracted from a real external codebase (via the
   `starter-kit-extractor`/`ui-component-extractor` skills), nothing
