@@ -6,6 +6,28 @@ All notable changes to DeliveryOS are recorded here, newest first. See
 
 ---
 
+## Phase 7 — Backend plug-and-play: AI wiring merge
+
+- **Closed a real, previously-unaddressed gap in Tier-2 wiring**: when a
+  `wiring_action`'s target file already existed at pull time, the only
+  option was "review it yourself" -- even a static `whenPresent.snippet`
+  the artifact's author wrote was just merge guidance text, never
+  applied. New "Merge with Claude" button in Detail's wiring section:
+  reads the real existing file, proposes a genuine merged version via a
+  real Claude subprocess, applies it on confirmation, and re-runs the
+  project's real build to verify -- auto-rolling back if it doesn't
+  actually keep the project building. Same ask→apply→verify→rollback
+  shape already proven for the build-fix and design-fix flows, with its
+  own audit log (`wiring-merge-log.jsonl`).
+  Dogfooded for real against the actual `nextauth-credentials` artifact
+  on a real scratch project: an honest `mergedFile: null` refusal on a
+  genuine library conflict (better-auth vs. NextAuth, never guessed or
+  forced), a real rollback when a proposed merge broke the build for an
+  unrelated environment reason (a missing path alias), and a clean merge
+  + passing rebuild for a genuinely additive case (adding an auth
+  middleware export while preserving an unrelated existing export and
+  merging two matcher arrays). 19 new unit tests.
+
 ## Phase 11 — Design-kit bundle & design-quality checks
 
 - **Phase 11's last open item, run for real: the full design-quality

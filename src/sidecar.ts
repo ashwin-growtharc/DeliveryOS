@@ -38,6 +38,7 @@ import { resolveInstallParamValues, applyInstallParams, readExistingEnvValues } 
 import { resolveWiringActions } from './engine/pull/wiring';
 import { pullAndAutoWire } from './engine/pull/pullAndAutoWire';
 import { requestBuildFix, applyBuildFix } from './engine/pull/fixBuildFailure';
+import { requestWiringMerge, applyWiringMerge } from './engine/pull/requestWiringMerge';
 import { requestAntiPatternFix, applyAntiPatternFix } from './engine/scan/fixAntiPattern';
 import { pushArtifact, PushOptions } from './engine/push/push';
 import { checkForUpdates, resolvePendingPushes } from './engine/sync/sync';
@@ -482,6 +483,36 @@ const commands: Record<string, CommandHandler> = {
     const costUsd = typeof args.costUsd === 'number' ? args.costUsd : undefined;
     const durationMs = typeof args.durationMs === 'number' ? args.durationMs : undefined;
     return applyBuildFix(cwd, filePath, fixedFile, buildError, { costUsd, durationMs });
+  },
+
+  // Backend plug-and-play: the "ask" half of the Tier-2 "AI wiring
+  // merge" flow -- only ever offered by Detail's wiring section for a
+  // resolved wiring_action whose target file already existed at pull
+  // time (targetFileExists: true), previously a dead end with no
+  // mechanism at all. No write, no audit-log entry -- see
+  // requestWiringMerge.ts's own doc comments for why.
+  'artifact.requestWiringMerge': (args) => {
+    const cwd = requireString(args, 'cwd');
+    const targetFile = requireString(args, 'targetFile');
+    const description = requireString(args, 'description');
+    const instructions = requireString(args, 'instructions');
+    const guidanceSnippet = optionalString(args, 'guidanceSnippet');
+    return requestWiringMerge(cwd, targetFile, description, instructions, guidanceSnippet);
+  },
+
+  // Backend plug-and-play: the "apply" half -- writes the merge for
+  // real, re-runs the real build to confirm it, rolls back
+  // automatically if it doesn't actually keep the project building, and
+  // appends exactly one audit-log entry either way. Only reached after
+  // an explicit human confirmation click; never automatic.
+  'artifact.applyWiringMerge': (args) => {
+    const cwd = requireString(args, 'cwd');
+    const targetFile = requireString(args, 'targetFile');
+    const mergedFile = requireString(args, 'mergedFile');
+    const description = requireString(args, 'description');
+    const costUsd = typeof args.costUsd === 'number' ? args.costUsd : undefined;
+    const durationMs = typeof args.durationMs === 'number' ? args.durationMs : undefined;
+    return applyWiringMerge(cwd, targetFile, mergedFile, description, { costUsd, durationMs });
   },
 
   // Phase 11 item 4: the "ask" half of the fix step for a design

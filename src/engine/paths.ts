@@ -66,6 +66,18 @@ export function designFixLogPath(cwd: string): string {
   return path.join(projectDeliveryOsDir(cwd), 'design-fix-log.jsonl');
 }
 
+/** Project-local (cwd-scoped) audit log for a backend-plugin's Tier-2
+ * "AI wiring merge" flow -- same append-only, apply-only-not-request-or-
+ * discard shape as `buildFixLogPath`/`designFixLogPath` above, in its own
+ * file rather than a shared one for the same reason: the target here is
+ * a real project file a `wiring_action` names that already existed
+ * before the pull (`whenPresent`, previously a dead end with no
+ * mechanism at all -- see `requestWiringMerge.ts`), a distinct case from
+ * either of the other two logs. */
+export function wiringMergeLogPath(cwd: string): string {
+  return path.join(projectDeliveryOsDir(cwd), 'wiring-merge-log.jsonl');
+}
+
 /** Project-local (cwd-scoped) directory holding pristine (as-pulled)
  * snapshots of every pulled artifact's payload, keyed by id. Used by
  * `push` to diff a local edit against what was actually pulled. */

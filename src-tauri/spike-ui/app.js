@@ -1089,6 +1089,12 @@
   // is reused or Detail is closed/reopened mid-request.
   let buildFixRequestId = 0;
 
+  // Same request-token-guard discipline, for backend plug-and-play's "AI
+  // wiring merge" rows (renderWiringMergeRow) -- guards against a stale
+  // artifact.requestWiringMerge response clobbering a newer render the
+  // same way buildFixRequestId does for build-fix rows.
+  let wiringMergeRequestId = 0;
+
   /** Clears any live Detail-preview iframe/listener -- called both at the
    * top of loadDetailPreview (about to replace it with a new one) and
    * from renderDetail when switching to a NON-ui-component artifact
@@ -1787,8 +1793,134 @@ ${bodyHtml}
         card.appendChild(snippetEl);
       }
 
+      // Backend plug-and-play: the target file already existing used to
+      // be a dead end -- "review it yourself," nothing else. Now offers
+      // a real, opt-in "Merge with Claude" row for exactly this case
+      // (never for a fresh file, which already got a safe, deterministic
+      // full-content whenAbsent.snippet with no ambiguity to resolve).
+      if (action.targetFileExists) {
+        card.appendChild(
+          renderWiringMergeRow(action.targetFile, action.description, action.instructions, action.snippet),
+        );
+      }
+
       container.appendChild(card);
     }
+  }
+
+  /** Builds one row's DOM for a single Tier-2 wiring_action whose target
+   * file already existed at pull time: a button that asks Claude to
+   * propose a merge, then either its own honest "can't determine a
+   * merge" reason, or the proposed full file content plus Apply/Discard.
+   * Mirrors renderBuildFixRow's exact ask/apply/discard shape. Nothing
+   * is written to disk, and nothing is logged, unless Apply is clicked. */
+  function renderWiringMergeRow(targetFile, description, instructions, guidanceSnippet) {
+    const row = document.createElement('div');
+    row.className = 'build-fix-row';
+
+    const askBtn = document.createElement('button');
+    askBtn.type = 'button';
+    askBtn.className = 'btn btn-sm btn-ghost';
+    askBtn.textContent = 'Merge with Claude ✨';
+    row.appendChild(askBtn);
+
+    const resultEl = document.createElement('div');
+    resultEl.className = 'build-fix-result';
+    resultEl.hidden = true;
+    row.appendChild(resultEl);
+
+    askBtn.addEventListener('click', () => {
+      void withBusy(askBtn, 'Asking…', async () => {
+        const requestId = ++wiringMergeRequestId;
+        let merge;
+        try {
+          merge = await call('artifact.requestWiringMerge', {
+            cwd: state.projectDir,
+            targetFile,
+            description,
+            instructions,
+            guidanceSnippet,
+          });
+        } catch (err) {
+          if (requestId !== wiringMergeRequestId) return; // superseded while awaiting
+          resultEl.hidden = false;
+          resultEl.textContent = `Could not get a merge -- ${err instanceof Error ? err.message : String(err)}`;
+          return;
+        }
+        if (requestId !== wiringMergeRequestId) return; // superseded while awaiting
+
+        resultEl.hidden = false;
+        resultEl.innerHTML = '';
+
+        if (!merge.mergedFile) {
+          const reasonEl = document.createElement('div');
+          reasonEl.textContent = merge.reason || 'Claude could not determine a merge for this file.';
+          resultEl.appendChild(reasonEl);
+          return;
+        }
+
+        const snippetEl = document.createElement('pre');
+        snippetEl.className = 'wiring-action-snippet';
+        snippetEl.textContent = merge.mergedFile;
+        resultEl.appendChild(snippetEl);
+
+        const actionsEl = document.createElement('div');
+        actionsEl.className = 'build-fix-actions';
+        const applyBtn = document.createElement('button');
+        applyBtn.type = 'button';
+        applyBtn.className = 'btn btn-sm';
+        applyBtn.textContent = 'Apply';
+        const discardBtn = document.createElement('button');
+        discardBtn.type = 'button';
+        discardBtn.className = 'btn btn-sm btn-ghost';
+        discardBtn.textContent = 'Discard';
+        actionsEl.appendChild(applyBtn);
+        actionsEl.appendChild(discardBtn);
+        resultEl.appendChild(actionsEl);
+        askBtn.hidden = true;
+
+        discardBtn.addEventListener('click', () => {
+          // Nothing written, nothing logged -- just clears the offer back
+          // to its starting state so it can be asked again if wanted.
+          resultEl.hidden = true;
+          resultEl.innerHTML = '';
+          askBtn.hidden = false;
+        });
+
+        applyBtn.addEventListener('click', () => {
+          void withBusy(applyBtn, 'Applying…', async () => {
+            discardBtn.disabled = true;
+            try {
+              const outcome = await call('artifact.applyWiringMerge', {
+                cwd: state.projectDir,
+                targetFile,
+                mergedFile: merge.mergedFile,
+                description,
+                costUsd: merge.costUsd,
+                durationMs: merge.durationMs,
+              });
+              const outcomeEl = document.createElement('div');
+              if (outcome.rolledBack) {
+                outcomeEl.textContent = `The merge didn't actually keep the project building -- your original file was restored.${outcome.build.output ? ` (${outcome.build.output})` : ''}`;
+              } else if (outcome.build.ran) {
+                outcomeEl.textContent = 'Merge applied -- the build still passes.';
+              } else {
+                outcomeEl.textContent = 'Merge applied (no build command detected to verify it).';
+              }
+              resultEl.innerHTML = '';
+              resultEl.appendChild(outcomeEl);
+            } catch (err) {
+              const errEl = document.createElement('div');
+              errEl.textContent = `Could not apply the merge -- ${err instanceof Error ? err.message : String(err)}`;
+              resultEl.innerHTML = '';
+              resultEl.appendChild(errEl);
+            }
+          });
+        });
+      });
+    });
+
+    return row;
   }
 
   /** Phase 11 Detail-view task: renders design-kit's color tokens/type

@@ -112,6 +112,7 @@ Phase 6 — using one real artifact (email/password login for Next.js).
 - A deterministic "wiring agent": auto-fills the safe placeholders and *suggests* — never silently applies — the handful of edits a project needs to actually wire the module in
 - Proven end to end on a real NextAuth + Prisma login module, pulled into a genuinely fresh Next.js project, through a real `next build`
 - Found and fixed three real bugs this way: a wrong wiring snippet, a path-convention mismatch, and a Windows line-ending bug that would have silently broken signature verification for any Windows user
+- **AI wiring merge**: closed a real, previously-unaddressed gap where a Tier-2 wiring action's target file already existing was a dead end ("review it yourself," nothing else, even with a static merge-guidance snippet). A new "Merge with Claude" button in Detail's wiring section proposes a real merged version of the existing file, applies it, and re-runs the project's real build to verify — auto-rolling back if it doesn't actually keep the project building. Same ask→apply→verify→rollback shape already proven for build-fix and design-fix. Dogfooded for real against the actual `nextauth-credentials` artifact: an honest refusal on a genuine library conflict (never guessed), a real rollback when a proposed merge broke the build for an unrelated environment reason, and a clean merge + passing rebuild for a genuinely additive case.
 
 ## Phase 8 — Claude Code integration: check-first — **Complete**
 
