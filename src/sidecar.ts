@@ -37,6 +37,7 @@ import { pullArtifact, resolveArtifact, ProgressCallback } from './engine/pull/p
 import { resolveInstallParamValues, applyInstallParams, readExistingEnvValues } from './engine/pull/installParams';
 import { resolveWiringActions } from './engine/pull/wiring';
 import { pullAndAutoWire } from './engine/pull/pullAndAutoWire';
+import { buildPostInstallHealthSummary } from './engine/pull/postInstallHealthSummary';
 import { requestBuildFix, applyBuildFix } from './engine/pull/fixBuildFailure';
 import { requestWiringMerge, applyWiringMerge, readWiringMergeLog } from './engine/pull/requestWiringMerge';
 import { requestAntiPatternFix, applyAntiPatternFix } from './engine/scan/fixAntiPattern';
@@ -263,12 +264,17 @@ const commands: Record<string, CommandHandler> = {
   // it -- the app's own Pull button opts into this explicitly (only for
   // artifacts that declare wiring_actions); the CLI's `deliveryos pull`
   // keeps using the plain command above, unchanged.
-  'artifact.pullAndAutoWire': (args, { onProgress }) => {
+  'artifact.pullAndAutoWire': async (args, { onProgress }) => {
     const id = requireString(args, 'id');
     const cwd = requireString(args, 'cwd');
     const remote = optionalString(args, 'remote');
     const values = optionalStringRecord(args, 'values');
-    return pullAndAutoWire(id, remote, cwd, onProgress, values);
+    const result = await pullAndAutoWire(id, remote, cwd, onProgress, values);
+    // Phase 12: the app's own persistent Detail banner and the Pull
+    // toast both need this plain-language read, not just the raw
+    // applied/needsReview/build/missingRequiredParams fields -- computed
+    // here so both consumers get the exact same summary.
+    return { ...result, healthSummary: buildPostInstallHealthSummary(result) };
   },
 
   // Configures an already-pulled artifact's install_params without a full

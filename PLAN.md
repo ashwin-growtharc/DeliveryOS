@@ -159,7 +159,7 @@ anti-patterns before they land.
 - Source-drift detection: a `SOURCES.json` recorded at extraction time (hashing each real source file) lets `deliveryos check-drift` and a new Detail tab later report whether the real external project an artifact was ported from has since changed — `unchanged`/`drifted`/`source-missing` per file, verified against the real `kortix-design-kit` artifact and Suna's actual source on disk
 - **Full end-to-end test, done for real**: pulled the real `design-kit` bundle (now 10 real components) into a fresh scratch project via the real CLI, confirmed every component compiles/live-previews clean via `compileLocalPreview`, then planted a genuine self-nesting anti-pattern in a new component simulating "Claude Code built UI from the kit." A real `deliveryos scan` run correctly flagged it with the exact mechanical warning; the real fix flow (`requestAntiPatternFix` → a real Claude subprocess, then `applyAntiPatternFix`) proposed and applied a real fix, verified it via a real recompile, and a follow-up check confirmed the fixed file no longer trips the detector — genuinely resolved, not just papered over. Audit log entry confirmed on disk.
 
-## Phase 12 — Backend plug-and-play, unlocked further — **Scoped down: 2 items, rest deferred/descoped**
+## Phase 12 — Backend plug-and-play, unlocked further — **Both scoped-in items done**
 
 Goal: reuse the exact trust shape already proven in Phase 7/10 (no tool
 access on the propose step, a human confirms, a real rebuild verifies,
@@ -169,26 +169,32 @@ complicated.
 
 Reviewed against this project's own established discipline (only build
 what's proven needed; don't design for a hypothetical) before committing
-to anything — most of the original 6-item brainstorm didn't hold up. Work
-through what's left one at a time: **plan it, code it, review it, test it
-for real (not just typecheck), iterate** — same SDLC loop as every phase
-above, reusing the existing propose→confirm→verify→rollback shape
-(`requestWiringMerge`/`fixBuildFailure` are the reference implementations)
-rather than inventing a new pattern.
+to anything — most of the original 6-item brainstorm didn't hold up (see
+"Deferred/descoped" below for the rest and why).
 
-**Building next:**
+- **A visible audit trail — done.** Each `wiring-merge-log.jsonl` entry is
+  now tagged with the artifact that caused it (`remoteName`/`artifactId`,
+  fixed before it ever shipped — PR #23 was still open), so a project with
+  more than one pulled backend-plugin artifact doesn't mix their entries
+  together. New "Activity" Detail tab (gated on real matching entries
+  existing) shows what was proposed, applied, or rolled back, with
+  before/after content behind a `<details>` disclosure.
+- **Post-install health narrator — done.** New, deliberately deterministic
+  (no AI call — every input is already a known fact, not a judgment call)
+  `buildPostInstallHealthSummary` turns wiring applied/needsReview, the
+  build result, and any still-missing `install_params` into one coherent
+  plain-language summary — closing a real, confirmed gap where the old
+  toast silently never mentioned missing install params at all. Shown both
+  as the Pull toast and as a persistent Detail banner (the toast fades;
+  the banner doesn't), computed once server-side so both agree.
 
-- **A visible audit trail**: the wiring-merge log
-  (`.deliveryos/wiring-merge-log.jsonl`) already exists on disk — surface
-  it as a real tab in Detail (what was proposed, what got confirmed, what
-  rolled back and why) instead of a file nobody knows to open. Concrete,
-  small, no new schema or engine module needed.
-- **Post-install health narrator**: after a build runs, report the result
-  in plain language instead of a bare pass/fail — including anything still
-  manual (e.g. an env var that still needs a real value before the feature
-  actually works). Synthesizes data DeliveryOS already collects
-  (`runProjectBuild`'s result, `applyInstallParams`'s missing-required
-  list) rather than adding a new capability.
+**Deferred/descoped (see the earlier scoping note in this file's history
+for the full reasoning):** pre-flight compatibility check (needs a second
+real conflicting backend-plugin artifact to design against first);
+plain-English change plan (overlaps with what Detail's wiring cards already
+show); talk-to-install (no shown pain point); multi-plugin orchestration
+(no dependency/data-flow concept exists yet, echoes the "wrong source
+material" mistake Phase 11 already corrected once).
 
 **Deferred, not descoped — needs something to exist first:**
 

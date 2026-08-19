@@ -325,6 +325,16 @@
                    -- see renderDetail/renderInstallParamsSection in
                    app.js. -->
               <div id="detail-configuration-section" hidden>
+                <!-- Phase 12, "post-install health narrator": the persistent
+                     counterpart to the pullAndAutoWire toast, which fades
+                     after a few seconds -- shows that same plain-language
+                     summary (wiring applied/needsReview, build outcome,
+                     still-missing install params) for as long as this
+                     artifact's Detail view is open, so a person coming back
+                     to fill in a missing param still has the context for
+                     why. See renderPostInstallHealthBanner in app.js. -->
+                <div id="detail-post-install-health-banner" class="hint-banner" hidden></div>
+
                 <form id="detail-install-params-form" class="install-params-form">
                   <div id="detail-install-params-fields"></div>
                   <button type="submit" class="btn btn-primary btn-sm">Apply configuration</button>

@@ -1238,6 +1238,25 @@
    * now always-visible regardless of kind, the latter lives in the
    * Documentation tab alongside every other kind's README, see
    * renderDetail/renderDocumentationTab.) */
+  /** Phase 12: the persistent counterpart to the pullAndAutoWire toast --
+   * that toast (see runArtifactAction) fades after a few seconds, so
+   * without this the healthSummary it showed would be gone the moment a
+   * user navigated away and back into Configuration to actually act on
+   * it (e.g. to fill in a still-missing install param). Only ever shows
+   * `lastAutoWireSummary` when its stashed key matches THIS entry -- a
+   * stale summary from a previously-viewed artifact must never leak into
+   * a different one's Detail view. */
+  function renderPostInstallHealthBanner(entry) {
+    const banner = $('detail-post-install-health-banner');
+    if (lastAutoWireSummary && lastAutoWireSummary.key === entryKey(entry)) {
+      banner.textContent = lastAutoWireSummary.summary;
+      banner.hidden = false;
+    } else {
+      banner.hidden = true;
+      banner.textContent = '';
+    }
+  }
+
   function renderInstallParamsSection(entry) {
     const { manifest } = entry;
 
@@ -3033,22 +3052,19 @@ ${bodyHtml}
           // already established.
           const hasWiring = entry.manifest.wiring_actions && entry.manifest.wiring_actions.length > 0;
           if (hasWiring) {
-            const { pullResult, wiring, build } = await call('artifact.pullAndAutoWire', {
+            const { wiring, build, healthSummary } = await call('artifact.pullAndAutoWire', {
               id: entry.manifest.id,
               remote: entry.remoteName,
               cwd: state.projectDir,
             });
-            const parts = [`Pulled ${pullResult.manifest.id}`];
-            if (wiring.applied.length > 0) {
-              parts.push(`applied ${wiring.applied.length} wiring action${wiring.applied.length === 1 ? '' : 's'} automatically`);
-            }
-            if (wiring.needsReview.length > 0) {
-              parts.push(`${wiring.needsReview.length} still need${wiring.needsReview.length === 1 ? 's' : ''} manual review (${wiring.needsReview.join(', ')})`);
-            }
-            if (build.ran) {
-              parts.push(build.success ? 'build passed' : 'build FAILED -- see progress log');
-            }
-            toastSuccess(parts.join('; '));
+            // Phase 12: one coherent plain-language read of everything
+            // that happened (wiring applied/needsReview, build outcome,
+            // AND any still-missing install params -- the toast this
+            // replaces silently never mentioned that last one at all),
+            // computed once in the engine so this and the persistent
+            // Detail banner below always agree.
+            toastSuccess(healthSummary);
+            lastAutoWireSummary = { key: entryKey(entry), summary: healthSummary };
             if (build.ran && !build.success) {
               // Surface the real build output where it's actually visible
               // -- reuses the existing progress log rather than inventing
@@ -3453,6 +3469,14 @@ ${bodyHtml}
   // every render regardless (content may have genuinely changed).
   let detailShownEntryKey = null;
 
+  // Phase 12: the post-install health summary a pullAndAutoWire call just
+  // produced, stashed here (not just toasted) so it's still visible after
+  // the toast itself fades -- session-only, keyed by entryKey so it's
+  // never shown against a DIFFERENT artifact's Detail view. Cleared
+  // implicitly by the key mismatch check in renderPostInstallHealthBanner,
+  // same pattern detailShownEntryKey itself uses above.
+  let lastAutoWireSummary = null;
+
   function resetDetailTabState(entry) {
     detailTabState = {};
     const key = entryKey(entry);
@@ -3628,6 +3652,7 @@ ${bodyHtml}
     const hasWiringActions = manifest.wiring_actions && manifest.wiring_actions.length > 0;
     detailTabState.configuration = hasInstallParams || hasWiringActions;
     if (detailTabState.configuration) {
+      renderPostInstallHealthBanner(entry);
       void renderInstallParamsSection(entry);
       void renderWiringSection(entry);
     }

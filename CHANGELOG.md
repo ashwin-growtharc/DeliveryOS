@@ -6,6 +6,33 @@ All notable changes to DeliveryOS are recorded here, newest first. See
 
 ---
 
+## Phase 12 — Backend plug-and-play, unlocked further
+
+- **A visible audit trail for the wiring-merge log.** Each
+  `wiring-merge-log.jsonl` entry is now tagged with the artifact that
+  caused it (fixed before it ever shipped, since the wiring-merge PR was
+  still open/unmerged), so a project with more than one pulled
+  backend-plugin artifact doesn't mix their entries together. New
+  "Activity" Detail tab, gated on real matching entries existing, shows
+  what was proposed, applied, or rolled back, with before/after content
+  behind a `<details>` disclosure. 6 new/updated unit tests, real
+  dogfood via a throwaway script confirmed filtering and ordering.
+- **Post-install health narrator.** Closed a real, confirmed gap: the
+  toast shown after an auto-wired Pull never mentioned still-missing
+  required `install_params` at all -- silently dropped. New
+  `buildPostInstallHealthSummary` (deliberately deterministic, not an AI
+  call -- every input is already a known fact) synthesizes wiring
+  applied/needsReview, the build result, and missing install params into
+  one coherent plain-language summary, shown both as the Pull toast and
+  as a persistent Detail banner (the toast fades; the banner doesn't).
+  9 new unit tests covering every real scenario (clean pass, missing
+  params, build failure with a capped output excerpt, no build command
+  detected, nothing left to do).
+- Reviewed the original 6-item Phase 12 brainstorm against this
+  project's own discipline (only build what's proven needed) before
+  committing to anything -- 4 of the 6 items were deferred or descoped
+  with reasons recorded in PLAN.md; only the two above were built.
+
 ## Phase 7 — Backend plug-and-play: AI wiring merge
 
 - **Closed a real, previously-unaddressed gap in Tier-2 wiring**: when a
