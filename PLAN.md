@@ -159,10 +159,82 @@ anti-patterns before they land.
 - Source-drift detection: a `SOURCES.json` recorded at extraction time (hashing each real source file) lets `deliveryos check-drift` and a new Detail tab later report whether the real external project an artifact was ported from has since changed — `unchanged`/`drifted`/`source-missing` per file, verified against the real `kortix-design-kit` artifact and Suna's actual source on disk
 - **Full end-to-end test, done for real**: pulled the real `design-kit` bundle (now 10 real components) into a fresh scratch project via the real CLI, confirmed every component compiles/live-previews clean via `compileLocalPreview`, then planted a genuine self-nesting anti-pattern in a new component simulating "Claude Code built UI from the kit." A real `deliveryos scan` run correctly flagged it with the exact mechanical warning; the real fix flow (`requestAntiPatternFix` → a real Claude subprocess, then `applyAntiPatternFix`) proposed and applied a real fix, verified it via a real recompile, and a follow-up check confirmed the fixed file no longer trips the detector — genuinely resolved, not just papered over. Audit log entry confirmed on disk.
 
+## Phase 12 — Backend plug-and-play, unlocked further — **Scoped down: 2 items, rest deferred/descoped**
+
+Goal: reuse the exact trust shape already proven in Phase 7/10 (no tool
+access on the propose step, a human confirms, a real rebuild verifies,
+auto-rollback if it doesn't hold) at more points in a backend-plugin install
+— so the feature gets genuinely more useful to a non-builder, not more
+complicated.
+
+Reviewed against this project's own established discipline (only build
+what's proven needed; don't design for a hypothetical) before committing
+to anything — most of the original 6-item brainstorm didn't hold up. Work
+through what's left one at a time: **plan it, code it, review it, test it
+for real (not just typecheck), iterate** — same SDLC loop as every phase
+above, reusing the existing propose→confirm→verify→rollback shape
+(`requestWiringMerge`/`fixBuildFailure` are the reference implementations)
+rather than inventing a new pattern.
+
+**Building next:**
+
+- **A visible audit trail**: the wiring-merge log
+  (`.deliveryos/wiring-merge-log.jsonl`) already exists on disk — surface
+  it as a real tab in Detail (what was proposed, what got confirmed, what
+  rolled back and why) instead of a file nobody knows to open. Concrete,
+  small, no new schema or engine module needed.
+- **Post-install health narrator**: after a build runs, report the result
+  in plain language instead of a bare pass/fail — including anything still
+  manual (e.g. an env var that still needs a real value before the feature
+  actually works). Synthesizes data DeliveryOS already collects
+  (`runProjectBuild`'s result, `applyInstallParams`'s missing-required
+  list) rather than adding a new capability.
+
+**Deferred, not descoped — needs something to exist first:**
+
+- **Pre-flight compatibility check**: before Pull, read the target project
+  and flag a real, concrete conflict (e.g. an existing ORM the plugin
+  assumes isn't there). Genuinely valuable, but "the plugin's own
+  assumptions" isn't a concept the manifest schema has today, and there's
+  only one real backend-plugin artifact with a stack assumption at all
+  (`nextauth-credentials`, NextAuth+Prisma) — nothing real to genuinely
+  conflict against yet. Revisit once a second real backend-plugin artifact
+  with a different stack assumption exists to design and test this
+  against for real, not synthetically.
+- **Plain-English change plan**: a stakeholder-readable summary shown
+  before Apply. Lower priority, not wrong — Detail's wiring cards already
+  show `targetFile`/`description`/`instructions`/exists-or-not per action
+  structurally; a prose wrapper on top is more an audience/style choice
+  than a functional gap. Worth doing after the two items above, not before.
+
+**Not pursuing for now:**
+
+- **Talk to install** (a natural-language front end for `install_params`):
+  no evidence the existing form is actually painful, and natural language
+  can't manufacture a real secret or DB connection string from a
+  description anyway — the person still has to supply or generate the
+  real value either way. A solution without a shown problem.
+- **Multi-plugin orchestration** (sequence multiple plugins, thread real
+  values between them): the most premature item by far. No dependency/
+  data-flow concept exists anywhere in the manifest schema, and only two
+  real backend-plugin artifacts exist total (`nextauth-credentials`,
+  `azure-msal-sso`), neither designed to compose with the other. Building
+  this now means inventing a whole new architecture speculatively, with
+  nothing real to validate it against — the same "wrong source material"
+  mistake Phase 11's own scoping note already caught and corrected once.
+
+**Sequencing note, stated directly, not assumed:** Tier 0's own still-open
+item — get one real engineer outside the build team to actually adopt
+DeliveryOS — arguably outranks all of Phase 12. Building more
+backend-plugin surface before anyone outside the build team has used what
+already exists risks the exact thing Tier 0 exists to guard against:
+building more on an unproven foundation.
+
 ---
 
 ## What's next
 
+- **Phase 12** (backend plug-and-play, unlocked further) — not started, see above
 - **Phase 4** (team rollout: auth/SSO, profiles, multi-remote) — deferred until GrowthArc has real identity infrastructure
 - **Phase 3's installer** — a signed, packaged installer per OS is not started; not needed yet at this stage
 - **Phase 3's fresh-machine install test** — deferred, needs a genuinely uninvolved person on a clean machine
