@@ -56,6 +56,7 @@ deliveryos remote add <git-url> [--name <name>]   # register a git-backed remote
 deliveryos list [--remote <name>] [--json]         # list available artifacts
 deliveryos pull <id> [--remote <name>]             # pull an artifact locally
 deliveryos remove <id>                             # remove a previously-pulled artifact
+deliveryos config <id> [--remote <name>] --set KEY=VALUE  # rotate/configure install_params without a re-pull
 
 deliveryos push <id> [--remote <name>]             # push a local edit as a PR
 deliveryos push <id> --new --remote <name> --path <dir> --kind <kind> \

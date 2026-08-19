@@ -236,7 +236,7 @@ backend-plugin surface before anyone outside the build team has used what
 already exists risks the exact thing Tier 0 exists to guard against:
 building more on an unproven foundation.
 
-## Phase 13 — Backend plug-and-play: basic hygiene — **In progress (3 of 5 items done)**
+## Phase 13 — Backend plug-and-play: basic hygiene — **In progress (4 of 5 items done)**
 
 Goal: close the bare-minimum operational gaps a real code audit found in
 the `backend-plugin` install path — none of these need AI, they're plain
@@ -313,19 +313,23 @@ actually needs. Ranked by risk, not by build order.
   not the actual grandchild process it spawned — a "timed out" build/
   install can keep running in the background after being reported as
   timed out.
-- **Post-pull secret rotation.** The engine-level `applyInstallParams` RPC
-  already exists (`src/sidecar.ts`) but nothing calls it except the
-  sidecar itself — no CLI command wraps it, and `cli/commands/pull.ts`
-  tells users to "edit `.env.local` directly" instead. It also never
-  re-runs wiring, so a rotated value only reaches code that reads
-  `process.env` at runtime. Needs: a real `deliveryos config` (or similar)
-  command that goes through the same path the UI already has.
+- **Post-pull secret rotation — done.** New `deliveryos config <id>
+  [--remote <name>] --set KEY=VALUE` (`src/cli/commands/config.ts`) wraps
+  the exact same real sequence the sidecar's own `artifact.applyInstallParams`
+  RPC already used (`resolveArtifact` -> `resolveInstallParamValues` against
+  `readExistingEnvValues` -> `applyInstallParams`), so a CLI-only user no
+  longer has to "edit `.env.local` directly" as `pull.ts` used to tell them.
+  Reports the same `missingRequiredParams`/`gitignoreWarning` output
+  `pull.ts` already does, plus its own honest, undecorated note that it does
+  NOT re-run `wiring_actions` — a rotated value only reaches code that reads
+  `process.env` at runtime, since that's still the separate, bigger,
+  deliberately-deferred "real update-apply path" item below.
 
 ---
 
 ## What's next
 
-- **Phase 13** (backend plug-and-play: basic hygiene) — in progress, 3 of 5 items done (uninstall, secrets safety net, timeouts), see above
+- **Phase 13** (backend plug-and-play: basic hygiene) — in progress, 4 of 5 items done (uninstall, secrets safety net, timeouts, post-pull secret rotation), see above
 - **Phase 12** — both scoped-in items done; the rest deferred/descoped, see above
 - **Phase 4** (team rollout: auth/SSO, profiles, multi-remote) — deferred until GrowthArc has real identity infrastructure
 - **Phase 3's installer** — a signed, packaged installer per OS is not started; not needed yet at this stage

@@ -8,6 +8,19 @@ All notable changes to DeliveryOS are recorded here, newest first. See
 
 ## Phase 13 — Backend plug-and-play: basic hygiene (in progress)
 
+- **Post-pull secret rotation: `deliveryos config <id>`.** The engine-level
+  `applyInstallParams` RPC (`src/sidecar.ts`) already existed, but nothing
+  outside the sidecar could call it -- no CLI command wrapped it, and
+  `cli/commands/pull.ts` told CLI-only users to "edit `.env.local` directly"
+  instead. New `deliveryos config <id> [--remote <name>] --set KEY=VALUE`
+  (`src/cli/commands/config.ts`) wraps the exact same real sequence the
+  sidecar handler already used (`resolveArtifact` -> `resolveInstallParamValues`
+  against `readExistingEnvValues` -> `applyInstallParams`), and reports the
+  same `missingRequiredParams`/`gitignoreWarning` output `pull.ts` already
+  does. Also prints its own honest, undecorated note that it does NOT
+  re-run `wiring_actions` -- a rotated value only reaches code that reads
+  `process.env` at runtime, since a real re-wire path is still the
+  separate, deferred "A real update-apply path" item below.
 - **Uninstall: `deliveryos remove <id>`.** There was no way to cleanly back
   out a pulled artifact at all -- `removeRemoteEntry` only unregisters a
   git remote, never a pulled artifact's own files, and nothing recorded

@@ -4,6 +4,7 @@ import { registerListCommand } from './commands/list';
 import { registerPullCommand } from './commands/pull';
 import { registerPushCommand } from './commands/push';
 import { registerRemoveCommand } from './commands/remove';
+import { registerConfigCommand } from './commands/config';
 import { registerCheckUpdatesCommand } from './commands/checkUpdates';
 import { registerCheckDriftCommand } from './commands/checkDrift';
 import { registerScanCommand } from './commands/scan';
@@ -22,6 +23,7 @@ export function buildProgram(): Command {
   registerPullCommand(program);
   registerPushCommand(program);
   registerRemoveCommand(program);
+  registerConfigCommand(program);
   registerCheckUpdatesCommand(program);
   registerCheckDriftCommand(program);
   registerScanCommand(program);
