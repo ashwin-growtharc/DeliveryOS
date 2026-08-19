@@ -142,7 +142,7 @@ in and verifies the build; Add New auto-fills its own fields from the code.
 - "Suggest with Claude" — an explicit, opt-in button for the two fields static analysis honestly can't fill (description, component type)
 - Found and fixed a real Windows command-injection risk and confirmed Claude Code's own tool-restriction flags aren't reliably enforced, redesigning the whole feature so nothing depends on them holding
 
-## Phase 11 — A design-kit bundle, plus a design-quality check — **Done (one end-to-end test still open)**
+## Phase 11 — A design-kit bundle, plus a design-quality check — **Done**
 
 Goal: a real design-kit bundle can be pulled into a project, and after
 Claude Code builds UI from it, a design-quality check catches real
@@ -156,7 +156,7 @@ anti-patterns before they land.
 - A new `starter-kit-extractor` skill (alongside the existing UI-component one) plus a Scan detector that recognizes whole buildable projects as template candidates
 - Several real bugs found via hands-on use and review passes, each fixed: a markdown XSS gap (unsafe `javascript:` link/image URLs), a "Back to Browse" infinite loop after visiting a component's detail view, a handful of tab-state/stale-data races, and Detail's Type Scale section rendering blank for any design kit whose `GUIDELINES.md` names its table columns differently than the original `design-kit` (found via `kortix-design-kit`)
 - Source-drift detection: a `SOURCES.json` recorded at extraction time (hashing each real source file) lets `deliveryos check-drift` and a new Detail tab later report whether the real external project an artifact was ported from has since changed — `unchanged`/`drifted`/`source-missing` per file, verified against the real `kortix-design-kit` artifact and Suna's actual source on disk
-- **Not yet done**: the full end-to-end test — pull the bundle into a fresh project, plant an anti-pattern, and confirm detection → fix → rebuild all work together
+- **Full end-to-end test, done for real**: pulled the real `design-kit` bundle (now 10 real components) into a fresh scratch project via the real CLI, confirmed every component compiles/live-previews clean via `compileLocalPreview`, then planted a genuine self-nesting anti-pattern in a new component simulating "Claude Code built UI from the kit." A real `deliveryos scan` run correctly flagged it with the exact mechanical warning; the real fix flow (`requestAntiPatternFix` → a real Claude subprocess, then `applyAntiPatternFix`) proposed and applied a real fix, verified it via a real recompile, and a follow-up check confirmed the fixed file no longer trips the detector — genuinely resolved, not just papered over. Audit log entry confirmed on disk.
 
 ---
 
@@ -167,4 +167,3 @@ anti-patterns before they land.
 - **Phase 3's fresh-machine install test** — deferred, needs a genuinely uninvolved person on a clean machine
 - **Phase 5's** OS-level notifications, lifecycle/deprecation states, and success-metrics tracking — not started
 - **Tier 0's** "prove adoption with a real outside engineer" and real usage-number tracking — still open
-- **Phase 11's** full end-to-end test (bundle pull → planted anti-pattern → detect → fix → rebuild) — still open
