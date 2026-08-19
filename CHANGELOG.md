@@ -6,6 +6,48 @@ All notable changes to DeliveryOS are recorded here, newest first. See
 
 ---
 
+## Phase 13 — Backend plug-and-play: basic hygiene (in progress)
+
+- **Secrets safety net for `.env.local`.** `applyInstallParams` writes
+  real secret values into `.env.local` with zero check anywhere that the
+  file is actually gitignored -- a real path to committing a secret to a
+  shared remote. New `checkEnvLocalGitignoreCoverage` (same `ignore`-
+  package pattern as `push/diff.ts`'s `loadIgnoreFilter`) warns clearly
+  when it isn't covered, whether by no `.gitignore` at all or one that
+  just doesn't happen to include it -- never auto-edits `.gitignore`,
+  only warns. Only checked when a call actually wrote something (mirrors
+  `upsertEnvFile`'s own no-op-on-empty gate), so the overwhelming
+  majority of artifacts with no `install_params` never trigger a
+  pointless check. Surfaced as its own distinct toast -- never folded
+  into the calm post-install health summary -- everywhere a real
+  pull/configure can write a secret: plain pull, `pullAndAutoWire`, the
+  Configuration tab's apply button, and bulk pull (aggregated once,
+  since every artifact in one run shares the same `.gitignore`). 11 new
+  unit tests.
+- **Timeouts on build/install commands.** Neither the build check
+  (`runProjectBuild`/`execAsync` in `src/engine/pull/verifyBuild.ts`) nor
+  the post-install command (`execSync` in `src/engine/pull/pull.ts`) had a
+  timeout at all -- a hung/interactive command blocked indefinitely.
+  Both now carry a real one (`BUILD_VERIFY_TIMEOUT_MS` = 5min,
+  `POST_INSTALL_TIMEOUT_MS` = 10min). Also closed a real, confirmed gap
+  where "the tool to run this isn't on PATH" looked identical to "the
+  code doesn't compile": both call sites now report a genuine timeout and
+  a genuine missing-tool case as their own distinct, honest outcome
+  (`BuildVerificationResult`'s new additive `timedOut`/`toolNotFound`
+  fields; `PostInstallError`'s message text gains distinct prefixes for
+  the same two cases). The "tool not found" detection was verified
+  empirically first, not assumed from docs: on Windows, `exec`/`execSync`
+  route through cmd.exe, so a missing tool never throws a Node-level
+  ENOENT -- it's the shell reporting an ordinary-looking non-zero exit
+  with its own "not recognized"/"not found" wording. 6 new unit tests
+  (`test/unit/verifyBuild.test.ts`, `test/unit/pull.test.ts`) exercise
+  real hung/missing-tool commands with test-only timeout overrides, not
+  mocks. One real, confirmed limitation found along the way, deliberately
+  left as a known gap (bigger than this item's scope): on Windows, killing
+  a timed-out command only terminates the immediate shell wrapper, not the
+  grandchild process it actually spawned -- a "timed out" command can keep
+  running in the background afterward.
+
 ## Phase 12 — Backend plug-and-play, unlocked further
 
 - **A visible audit trail for the wiring-merge log.** Each

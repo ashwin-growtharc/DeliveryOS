@@ -46,8 +46,31 @@ export interface PullResult {
  */
 export type ProgressCallback = (stage: string, message: string) => void;
 
-function isExecError(err: unknown): err is Error & { stdout?: Buffer; stderr?: Buffer } {
+function isExecError(
+  err: unknown,
+): err is Error & { stdout?: Buffer; stderr?: Buffer; code?: string } {
   return err instanceof Error;
+}
+
+// post_install commands are commonly `npm install`-shaped: on a fresh
+// machine with a cold npm/pip cache, no local package cache, native
+// module builds, or just a slow network, this can legitimately take
+// several minutes -- longer runway than the build-verify timeout
+// (`verifyBuild.ts`'s `BUILD_VERIFY_TIMEOUT_MS`) since this runs exactly
+// once per pull rather than repeatedly, and installs are typically
+// slower than a plain rebuild.
+const POST_INSTALL_TIMEOUT_MS = 10 * 60 * 1000;
+
+// Detects "the command's own tool isn't installed / isn't on PATH at all"
+// as distinct from "the tool ran and found a real problem" -- same
+// empirically-confirmed reasoning as `verifyBuild.ts`'s copy of this
+// check (see that file's doc comment): `execSync` runs through a shell,
+// so a missing tool surfaces as the shell's own non-zero exit with this
+// wording, never a Node-level ENOENT.
+function isToolNotFoundError(text: string): boolean {
+  return /is not recognized as an internal or external command/i.test(text)
+    || /command not found/i.test(text)
+    || /:\s*not found\s*$/im.test(text);
 }
 
 /**
@@ -93,6 +116,11 @@ export function resolveArtifact(
  * CLI's `--set KEY=VALUE` flags or the app's own required-config
  * checklist), then upserts the cwd-scoped lockfile. The lockfile is only
  * updated once the copy and post_install both succeed.
+ *
+ * `postInstallTimeoutMs` defaults to `POST_INSTALL_TIMEOUT_MS` for every
+ * real caller (none pass it) -- it exists purely so tests can exercise the
+ * real timeout path with a real hung command in milliseconds instead of
+ * actually waiting out the production constant.
  */
 export async function pullArtifact(
   id: string,
@@ -100,6 +128,7 @@ export async function pullArtifact(
   cwd: string,
   onProgress?: ProgressCallback,
   providedValues: Record<string, string> = {},
+  postInstallTimeoutMs: number = POST_INSTALL_TIMEOUT_MS,
 ): Promise<PullResult> {
   onProgress?.('resolve', `Resolving artifact "${id}"...`);
   const entry = resolveArtifact(id, remoteName);
@@ -140,13 +169,36 @@ export async function pullArtifact(
     // that stream mid-line. Capturing it instead and returning it lets each
     // caller (CLI vs. sidecar) decide how to surface it.
     try {
-      postInstallOutput = execSync(manifest.post_install, { cwd: installTarget, stdio: 'pipe' })
-        .toString('utf-8');
+      postInstallOutput = execSync(manifest.post_install, {
+        cwd: installTarget,
+        stdio: 'pipe',
+        timeout: postInstallTimeoutMs,
+      }).toString('utf-8');
     } catch (err) {
       const stdout = isExecError(err) ? err.stdout?.toString('utf-8') ?? '' : '';
       const stderr = isExecError(err) ? err.stderr?.toString('utf-8') ?? '' : '';
       const detail = err instanceof Error ? err.message : String(err);
       const output = [stdout, stderr].filter((s) => s.trim().length > 0).join('\n');
+
+      // Confirmed empirically: `execSync` killed for exceeding its
+      // `timeout` throws with `code: 'ETIMEDOUT'` -- unlike the
+      // promisified async `exec` used in `verifyBuild.ts`, which reports
+      // no distinct code at all for the same condition (see that file's
+      // doc comment).
+      if (isExecError(err) && err.code === 'ETIMEDOUT') {
+        throw new PostInstallError(
+          `post_install command timed out after ${postInstallTimeoutMs}ms for artifact "${manifest.id}" (still running/hung, no result was produced): ${manifest.post_install}`
+            + (output ? `\n${output}` : ''),
+        );
+      }
+
+      if (isToolNotFoundError([detail, output].join('\n'))) {
+        throw new PostInstallError(
+          `post_install command's tool was not found on this machine's PATH for artifact "${manifest.id}": ${manifest.post_install}`
+            + (output ? `\n${output}` : ''),
+        );
+      }
+
       throw new PostInstallError(
         `post_install command failed for artifact "${manifest.id}": ${detail}`
           + (output ? `\n${output}` : ''),

@@ -236,7 +236,7 @@ backend-plugin surface before anyone outside the build team has used what
 already exists risks the exact thing Tier 0 exists to guard against:
 building more on an unproven foundation.
 
-## Phase 13 — Backend plug-and-play: basic hygiene — **Not started**
+## Phase 13 — Backend plug-and-play: basic hygiene — **In progress (2 of 5 items done)**
 
 Goal: close the bare-minimum operational gaps a real code audit found in
 the `backend-plugin` install path — none of these need AI, they're plain
@@ -254,12 +254,21 @@ actually needs. Ranked by risk, not by build order.
   the caller is on its own for cleaning up local files. Needs: a real
   command that reverts what wiring added, strips the lockfile entry, and
   leaves the project in a known state.
-- **Secrets safety net (highest priority).** `applyInstallParams`
-  (`src/engine/pull/installParams.ts`) writes real secrets in plain text
-  to `.env.local` with no check anywhere that the file is actually
-  gitignored, before or after writing. Needs: verify (or create) a
-  `.gitignore` entry for it, and warn — don't silently proceed — if the
-  file would otherwise be trackable by git.
+- **Secrets safety net (highest priority) — done.** New
+  `checkEnvLocalGitignoreCoverage` (`src/engine/pull/installParams.ts`,
+  same `ignore`-package pattern as `push/diff.ts`'s `loadIgnoreFilter`)
+  warns clearly whenever a pull/configure actually writes a real secret
+  into `.env.local` and that file isn't covered by the project's own
+  `.gitignore` — whether because none exists at all, or one exists but
+  doesn't happen to include it. Never auto-edits `.gitignore` — warns,
+  doesn't silently fix. Only checked when something was actually written
+  that call (mirrors `upsertEnvFile`'s own no-op-on-empty gate), so the
+  overwhelming majority of artifacts with no `install_params` never
+  trigger a pointless check. Surfaced as its own distinct toast — never
+  folded into the calm post-install health summary — everywhere a real
+  pull/configure can write a secret: plain pull, `pullAndAutoWire`, the
+  Configuration tab's apply button, and bulk pull (aggregated once, since
+  every artifact in one run shares the same `.gitignore`).
 - **A real update-apply path.** `checkForUpdates`
   (`src/engine/sync/sync.ts`) only prints `installed → available`; nothing
   re-pulls or re-runs `wiring_actions` for any artifact kind today. For
@@ -267,12 +276,28 @@ actually needs. Ranked by risk, not by build order.
   need to land. Needs: an actual "pull the new version and re-wire without
   clobbering local edits" flow — reusing the existing wiring-merge shape
   for any file a local edit touched.
-- **Timeouts on build/install commands.** Neither the build check
-  (`execAsync` in `src/engine/pull/verifyBuild.ts`) nor the post-install
-  command (`execSync` in `src/engine/pull/pull.ts`) has a timeout — a hung
-  command blocks indefinitely, and "npm isn't on PATH" currently looks
-  identical to "the code doesn't compile." Needs: a real timeout plus a
-  distinct, honest error for "the tool to check this isn't available."
+- **Timeouts on build/install commands — done.** Both the build check
+  (`execAsync` in `src/engine/pull/verifyBuild.ts`, `BUILD_VERIFY_TIMEOUT_MS`
+  = 5min) and the post-install command (`execSync` in
+  `src/engine/pull/pull.ts`, `POST_INSTALL_TIMEOUT_MS` = 10min) now carry a
+  real timeout instead of hanging indefinitely. Both also now tell "the
+  tool to run this isn't on PATH at all" apart from "it ran and hit a real
+  problem" apart from "it timed out" — confirmed empirically (not assumed
+  from docs) that on Windows `exec`/`execSync` route through cmd.exe, so a
+  missing tool never throws a Node-level ENOENT; it's the shell itself
+  reporting an ordinary-looking non-zero exit with "is not recognized as an
+  internal or external command" (POSIX shells: exit 127 / "command not
+  found", included for parity though not directly exercised here).
+  `BuildVerificationResult` gained additive `timedOut`/`toolNotFound`
+  fields; `PostInstallError`'s message text gained distinct prefixes for
+  the same two cases (nothing currently branches on `PostInstallError`'s
+  message programmatically, so text distinction was sufficient — no new
+  error type). One real, confirmed limitation found along the way and
+  deliberately not fixed here (bigger than this item's scope): on Windows,
+  killing a timed-out command only terminates the immediate shell wrapper,
+  not the actual grandchild process it spawned — a "timed out" build/
+  install can keep running in the background after being reported as
+  timed out.
 - **Post-pull secret rotation.** The engine-level `applyInstallParams` RPC
   already exists (`src/sidecar.ts`) but nothing calls it except the
   sidecar itself — no CLI command wraps it, and `cli/commands/pull.ts`
@@ -285,7 +310,7 @@ actually needs. Ranked by risk, not by build order.
 
 ## What's next
 
-- **Phase 13** (backend plug-and-play: basic hygiene) — not started, see above
+- **Phase 13** (backend plug-and-play: basic hygiene) — in progress, 2 of 5 items done (secrets safety net, timeouts), see above
 - **Phase 12** — both scoped-in items done; the rest deferred/descoped, see above
 - **Phase 4** (team rollout: auth/SSO, profiles, multi-remote) — deferred until GrowthArc has real identity infrastructure
 - **Phase 3's installer** — a signed, packaged installer per OS is not started; not needed yet at this stage
