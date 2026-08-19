@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { readLockfile, upsertEntry } from '../../src/engine/lockfile/lockfile';
+import { readLockfile, upsertEntry, removeEntry } from '../../src/engine/lockfile/lockfile';
 import { lockfilePath, projectDeliveryOsDir } from '../../src/engine/paths';
 
 let cwd: string;
@@ -109,5 +109,37 @@ describe('lockfile', () => {
     // asserted, not a specific value.
     const a = lockfile.entries.find((e) => e.id === 'artifact-a');
     expect(a?.version).toMatch(/^1\.0\.\d$/);
+  });
+
+  it('removeEntry removes the matching entry and leaves every other entry untouched', async () => {
+    await upsertEntry(cwd, { id: 'artifact-a', version: '1.0.0', remote: 'test-remote' });
+    await upsertEntry(cwd, { id: 'artifact-b', version: '2.0.0', remote: 'test-remote', installTarget: '/tmp/b' });
+    await upsertEntry(cwd, { id: 'artifact-c', version: '3.0.0', remote: 'other-remote' });
+
+    await removeEntry(cwd, 'artifact-b');
+
+    const lockfile = readLockfile(cwd);
+    const ids = lockfile.entries.map((e) => e.id).sort();
+    expect(ids).toEqual(['artifact-a', 'artifact-c']);
+    // The surviving entries are untouched, not just present by id.
+    expect(lockfile.entries.find((e) => e.id === 'artifact-a')).toEqual({
+      id: 'artifact-a',
+      version: '1.0.0',
+      remote: 'test-remote',
+    });
+    expect(lockfile.entries.find((e) => e.id === 'artifact-c')).toEqual({
+      id: 'artifact-c',
+      version: '3.0.0',
+      remote: 'other-remote',
+    });
+  });
+
+  it('removeEntry on an id that is not present is a safe no-op', async () => {
+    await upsertEntry(cwd, { id: 'artifact-a', version: '1.0.0', remote: 'test-remote' });
+
+    await removeEntry(cwd, 'does-not-exist');
+
+    const lockfile = readLockfile(cwd);
+    expect(lockfile.entries.map((e) => e.id)).toEqual(['artifact-a']);
   });
 });

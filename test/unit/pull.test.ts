@@ -5,6 +5,7 @@ import * as path from 'path';
 import { pullArtifact } from '../../src/engine/pull/pull';
 import { PostInstallError } from '../../src/engine/errors';
 import { remotesRegistryPath, remoteCachePath } from '../../src/engine/paths';
+import { readLockfile } from '../../src/engine/lockfile/lockfile';
 
 // Same lightweight "fake a registered remote + cache directly on disk"
 // pattern as test/unit/pullPayloadComponent.test.ts -- pullArtifact reads
@@ -144,5 +145,19 @@ describe('pullArtifact post_install error reporting', () => {
       expect(message).not.toContain('post_install command failed');
       expect(message).not.toContain('timed out');
     }
+  }, 30_000);
+});
+
+describe('pullArtifact lockfile recording (Phase 13 uninstall groundwork)', () => {
+  it('records the real resolved installTarget on the lockfile entry it writes', async () => {
+    writeRegistry(['test-remote']);
+    writeArtifact('records-install-target', 'node -e "process.exit(0)"');
+
+    const result = await pullArtifact('records-install-target', undefined, cwd);
+
+    const lockfile = readLockfile(cwd);
+    const entry = lockfile.entries.find((e) => e.id === 'records-install-target');
+    expect(entry?.installTarget).toBe(result.installTarget);
+    expect(entry?.installTarget).toBe(path.resolve(cwd, 'installed'));
   }, 30_000);
 });

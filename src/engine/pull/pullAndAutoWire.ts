@@ -2,6 +2,7 @@ import { pullArtifact, PullResult, ProgressCallback } from './pull';
 import { resolveWiringActions } from './wiring';
 import { applyDeterministicWiring, AppliedWiringResult } from './applyWiring';
 import { runProjectBuild, BuildVerificationResult } from './verifyBuild';
+import { readLockfile, upsertEntry } from '../lockfile/lockfile';
 
 export interface AutoWireResult {
   pullResult: PullResult;
@@ -41,6 +42,25 @@ export async function pullAndAutoWire(
   onProgress?.('wiring', 'Applying automatic wiring...');
   const resolved = resolveWiringActions(pullResult.manifest.wiring_actions, cwd);
   const wiring = applyDeterministicWiring(resolved, cwd);
+
+  // Records which files THIS pull created fresh (Phase 13's uninstall gap)
+  // -- a second, separate lockfile write rather than folding it into
+  // pullArtifact's own upsertEntry call above, since applyDeterministicWiring
+  // only ever runs here, not in pullArtifact itself. Re-reads the entry
+  // pullArtifact just wrote (rather than reconstructing one from scratch)
+  // so any other field it already carries (installTarget, a pre-existing
+  // pendingPr) survives untouched -- same "spread the existing entry, only
+  // override the one field this call cares about" convention
+  // resolvePendingPushes already uses in sync.ts. Skipped entirely when
+  // wiring created nothing, so an artifact with wiring_actions that all
+  // resolved to needsReview never gets a pointless second write.
+  if (wiring.applied.length > 0) {
+    const lockfile = readLockfile(cwd);
+    const entry = lockfile.entries.find((e) => e.id === pullResult.manifest.id);
+    if (entry) {
+      await upsertEntry(cwd, { ...entry, wiredFiles: wiring.applied });
+    }
+  }
 
   onProgress?.('build', 'Verifying the project still builds...');
   const build = await runProjectBuild(cwd);

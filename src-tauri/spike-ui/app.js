@@ -3269,6 +3269,59 @@ ${bodyHtml}
     });
   }
 
+  /** Detail's Remove button handler (Phase 13's uninstall): confirm-gated,
+   * same tone as the "discard local edit and re-sync" confirm above --
+   * names the artifact and says plainly what's about to happen, since
+   * deleting real installed files is not reversible from inside the app.
+   * Uses the same withBusy/beginProgress/loadCatalog+refreshDetailIfShown
+   * shape as runArtifactAction/handleCheckPushStatus, so this artifact's
+   * card and Detail view both reflect its now-not_pulled status the exact
+   * same way a fresh pull's own catalog refresh already does. The
+   * manual-review follow-up (filesNeedingManualReview/envParamsStillSet)
+   * gets its OWN toast, same posture as pullResult.gitignoreWarning
+   * elsewhere in this file -- never folded into the success toast, where
+   * it could easily get missed among routine "removed" news. */
+  async function handleRemoveArtifact(entry) {
+    if (
+      !window.confirm(
+        `This will delete ${entry.manifest.id}'s installed files from this project and stop ` +
+          `tracking it in DeliveryOS. This cannot be undone. Continue?`,
+      )
+    ) {
+      return;
+    }
+
+    const btn = $('detail-remove-btn');
+    await withBusy(btn, 'Removing...', async () => {
+      await beginProgress();
+      try {
+        const result = await call('artifact.remove', {
+          id: entry.manifest.id,
+          cwd: state.projectDir,
+        });
+        endProgress(true);
+        toastSuccess(`Removed ${entry.manifest.id}.`);
+
+        const followUps = [];
+        if (result.filesNeedingManualReview.length > 0) {
+          followUps.push(`files needing manual review: ${result.filesNeedingManualReview.join(', ')}`);
+        }
+        if (result.envParamsStillSet.length > 0) {
+          followUps.push(`.env.local values still set: ${result.envParamsStillSet.join(', ')}`);
+        }
+        if (followUps.length > 0) {
+          toastError(new Error(`Not fully cleaned up automatically -- ${followUps.join('; ')}.`));
+        }
+
+        await loadCatalog();
+        refreshDetailIfShown(entry);
+      } catch (err) {
+        endProgress(false);
+        toastError(err);
+      }
+    });
+  }
+
   /** Detail's Edit form submit handler: pushes a metadata-only edit
    * (description/roles/teams/stacks), never touching the artifact's
    * payload/content at all. Uses the same shared progress panel and
@@ -3760,6 +3813,18 @@ ${bodyHtml}
     $('edit-cancel-btn').onclick = () => {
       editForm.hidden = true;
     };
+
+    // Remove (Phase 13's uninstall): same "needs an existing lockfile
+    // entry" gate as Open folder/Edit above -- nothing to back out of a
+    // project that was never pulled into it.
+    const removeBtn = $('detail-remove-btn');
+    if (entry.localStatus !== 'not_pulled') {
+      removeBtn.hidden = false;
+      removeBtn.onclick = () => void handleRemoveArtifact(entry);
+    } else {
+      removeBtn.hidden = true;
+      removeBtn.onclick = null;
+    }
 
     const actionBtn = $('detail-action-btn');
     const action = actionButtonFor(entry);

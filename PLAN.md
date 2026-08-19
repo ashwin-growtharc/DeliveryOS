@@ -236,7 +236,7 @@ backend-plugin surface before anyone outside the build team has used what
 already exists risks the exact thing Tier 0 exists to guard against:
 building more on an unproven foundation.
 
-## Phase 13 — Backend plug-and-play: basic hygiene — **In progress (2 of 5 items done)**
+## Phase 13 — Backend plug-and-play: basic hygiene — **In progress (3 of 5 items done)**
 
 Goal: close the bare-minimum operational gaps a real code audit found in
 the `backend-plugin` install path — none of these need AI, they're plain
@@ -247,13 +247,28 @@ Same loop as Phase 12: **plan it, code it, review it, test it for real,
 iterate**, one item at a time, no abstraction beyond what each item
 actually needs. Ranked by risk, not by build order.
 
-- **Uninstall (highest priority).** No `deliveryos remove <id>` exists —
-  `src/engine/lockfile/lockfile.ts` has no delete/`removeEntry` function,
-  and `removeRemoteEntry` (`src/engine/remote/remoteRegistry.ts`) only
-  unregisters a git remote, not a pulled artifact; its own comment says
-  the caller is on its own for cleaning up local files. Needs: a real
-  command that reverts what wiring added, strips the lockfile entry, and
-  leaves the project in a known state.
+- **Uninstall (highest priority) — done.** `LockEntry` gained two additive
+  fields (`src/engine/lockfile/types.ts`): `installTarget` (the real
+  resolved path a pull actually copied a payload to, recorded by
+  `pullArtifact` itself) and `wiredFiles` (which files
+  `applyDeterministicWiring` created FRESH for an artifact — recorded by
+  `pullAndAutoWire` via a second, separate `upsertEntry` call right after
+  its own wiring step runs, only when it created at least one file). New
+  `removeEntry` (`src/engine/lockfile/lockfile.ts`) mirrors `upsertEntry`'s
+  own real inter-process lock. New `removeArtifact`
+  (`src/engine/pull/removeArtifact.ts`) does the actual uninstall: deletes
+  `installTarget` (falling back to resolving it via the manifest for an
+  old-shape entry with no recorded path), deletes every real `wiredFiles`
+  entry (re-validated for containment via `resolveContainedTargetFile`,
+  never trusted blindly even though it's DeliveryOS's own prior write),
+  deletes the pristine snapshot, and drops the lockfile entry last. Never
+  touches `.env.local` or a file that merely existed before the pull (or
+  went through the AI wiring-merge flow) — both are only ever reported
+  (`envParamsStillSet`/`filesNeedingManualReview`) so a person knows to
+  look, never auto-deleted. Wired up as `deliveryos remove <id>`
+  (`src/cli/commands/remove.ts`), the `artifact.remove` sidecar command,
+  and a confirm-gated Remove button in Detail (visible under the same
+  "already pulled" gate as Open folder/Edit).
 - **Secrets safety net (highest priority) — done.** New
   `checkEnvLocalGitignoreCoverage` (`src/engine/pull/installParams.ts`,
   same `ignore`-package pattern as `push/diff.ts`'s `loadIgnoreFilter`)
@@ -310,7 +325,7 @@ actually needs. Ranked by risk, not by build order.
 
 ## What's next
 
-- **Phase 13** (backend plug-and-play: basic hygiene) — in progress, 2 of 5 items done (secrets safety net, timeouts), see above
+- **Phase 13** (backend plug-and-play: basic hygiene) — in progress, 3 of 5 items done (uninstall, secrets safety net, timeouts), see above
 - **Phase 12** — both scoped-in items done; the rest deferred/descoped, see above
 - **Phase 4** (team rollout: auth/SSO, profiles, multi-remote) — deferred until GrowthArc has real identity infrastructure
 - **Phase 3's installer** — a signed, packaged installer per OS is not started; not needed yet at this stage

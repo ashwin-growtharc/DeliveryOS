@@ -8,6 +8,28 @@ All notable changes to DeliveryOS are recorded here, newest first. See
 
 ## Phase 13 — Backend plug-and-play: basic hygiene (in progress)
 
+- **Uninstall: `deliveryos remove <id>`.** There was no way to cleanly back
+  out a pulled artifact at all -- `removeRemoteEntry` only unregisters a
+  git remote, never a pulled artifact's own files, and nothing recorded
+  which files a pull's wiring had created fresh vs. which already existed
+  in the project. `LockEntry` gains two additive fields: `installTarget`
+  (the real resolved path `pullArtifact` copied a payload to) and
+  `wiredFiles` (`applyDeterministicWiring`'s own `applied` list, recorded
+  by `pullAndAutoWire` via a second `upsertEntry` call right after wiring
+  runs, only when it created something). New `removeEntry`
+  (`src/engine/lockfile/lockfile.ts`) mirrors `upsertEntry`'s real
+  inter-process lock. New `removeArtifact`
+  (`src/engine/pull/removeArtifact.ts`) deletes the install directory
+  (falling back to resolving it via the manifest for an old-shape entry
+  with no recorded path), deletes every real `wiredFiles` entry
+  (re-validated for containment, never trusted blindly), deletes the
+  pristine snapshot, then drops the lockfile entry last -- and reports,
+  never auto-touches, anything that predates the pull or went through the
+  AI wiring-merge flow (`filesNeedingManualReview`) or is still sitting in
+  `.env.local` (`envParamsStillSet`). Wired up as a CLI command, the
+  `artifact.remove` sidecar command, and a confirm-gated Remove button in
+  Detail. 11 new unit tests plus an updated e2e assertion for the
+  lockfile's new shape.
 - **Secrets safety net for `.env.local`.** `applyInstallParams` writes
   real secret values into `.env.local` with zero check anywhere that the
   file is actually gitignored -- a real path to committing a secret to a

@@ -34,6 +34,7 @@ import { readLockfile } from './engine/lockfile/lockfile';
 import { computeChangedFiles } from './engine/push/diff';
 import { pristinePath } from './engine/paths';
 import { pullArtifact, resolveArtifact, ProgressCallback } from './engine/pull/pull';
+import { removeArtifact } from './engine/pull/removeArtifact';
 import { resolveInstallParamValues, applyInstallParams, readExistingEnvValues } from './engine/pull/installParams';
 import { resolveWiringActions } from './engine/pull/wiring';
 import { pullAndAutoWire } from './engine/pull/pullAndAutoWire';
@@ -398,6 +399,17 @@ const commands: Record<string, CommandHandler> = {
     const cwd = requireString(args, 'cwd');
     const options = (args.options ?? {}) as PushOptions;
     return await pushArtifact(id, options, cwd, undefined, onProgress);
+  },
+
+  // Phase 13's uninstall: backs out a previously-pulled artifact (install
+  // directory, any files applyDeterministicWiring created fresh for it, its
+  // pristine snapshot, and its lockfile entry). No `remote` arg needed --
+  // the lockfile entry already records which remote this artifact came
+  // from, same as every other lockfile-driven command in this file.
+  'artifact.remove': async (args) => {
+    const id = requireString(args, 'id');
+    const cwd = requireString(args, 'cwd');
+    return await removeArtifact(cwd, id);
   },
 
   'remote.list': () => listRemotes(),

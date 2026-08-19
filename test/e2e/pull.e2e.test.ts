@@ -52,7 +52,7 @@ interface CatalogJsonEntry {
 
 interface LockFileJson {
   version: 1;
-  entries: { id: string; version: string; remote: string }[];
+  entries: { id: string; version: string; remote: string; installTarget?: string }[];
 }
 
 describe('pull e2e', () => {
@@ -130,7 +130,15 @@ describe('pull e2e', () => {
       fs.readFileSync(path.join(scratchCwd, '.deliveryos', 'lock.json'), 'utf-8'),
     ) as LockFileJson;
     const entry = lockfile.entries.find((e) => e.id === artifact.id);
-    expect(entry).toEqual({ id: artifact.id, version: '1.0.0', remote: 'test-remote' });
+    // installTarget (Phase 13's uninstall groundwork) is now recorded
+    // alongside id/version/remote -- the real resolved path pullArtifact
+    // just copied the payload into.
+    expect(entry).toEqual({
+      id: artifact.id,
+      version: '1.0.0',
+      remote: 'test-remote',
+      installTarget,
+    });
   });
 
   it('pulls an artifact without post_install', () => {

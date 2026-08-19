@@ -247,6 +247,7 @@ export async function pullArtifact(
     id: manifest.id,
     version: manifest.version,
     remote: resolvedRemoteName,
+    installTarget,
   });
 
   return {
