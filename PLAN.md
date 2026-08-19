@@ -236,11 +236,57 @@ backend-plugin surface before anyone outside the build team has used what
 already exists risks the exact thing Tier 0 exists to guard against:
 building more on an unproven foundation.
 
+## Phase 13 — Backend plug-and-play: basic hygiene — **Not started**
+
+Goal: close the bare-minimum operational gaps a real code audit found in
+the `backend-plugin` install path — none of these need AI, they're plain
+engineering that a real install feature normally has and this one
+currently doesn't.
+
+Same loop as Phase 12: **plan it, code it, review it, test it for real,
+iterate**, one item at a time, no abstraction beyond what each item
+actually needs. Ranked by risk, not by build order.
+
+- **Uninstall (highest priority).** No `deliveryos remove <id>` exists —
+  `src/engine/lockfile/lockfile.ts` has no delete/`removeEntry` function,
+  and `removeRemoteEntry` (`src/engine/remote/remoteRegistry.ts`) only
+  unregisters a git remote, not a pulled artifact; its own comment says
+  the caller is on its own for cleaning up local files. Needs: a real
+  command that reverts what wiring added, strips the lockfile entry, and
+  leaves the project in a known state.
+- **Secrets safety net (highest priority).** `applyInstallParams`
+  (`src/engine/pull/installParams.ts`) writes real secrets in plain text
+  to `.env.local` with no check anywhere that the file is actually
+  gitignored, before or after writing. Needs: verify (or create) a
+  `.gitignore` entry for it, and warn — don't silently proceed — if the
+  file would otherwise be trackable by git.
+- **A real update-apply path.** `checkForUpdates`
+  (`src/engine/sync/sync.ts`) only prints `installed → available`; nothing
+  re-pulls or re-runs `wiring_actions` for any artifact kind today. For
+  backend-plugin specifically this is where a real security fix would
+  need to land. Needs: an actual "pull the new version and re-wire without
+  clobbering local edits" flow — reusing the existing wiring-merge shape
+  for any file a local edit touched.
+- **Timeouts on build/install commands.** Neither the build check
+  (`execAsync` in `src/engine/pull/verifyBuild.ts`) nor the post-install
+  command (`execSync` in `src/engine/pull/pull.ts`) has a timeout — a hung
+  command blocks indefinitely, and "npm isn't on PATH" currently looks
+  identical to "the code doesn't compile." Needs: a real timeout plus a
+  distinct, honest error for "the tool to check this isn't available."
+- **Post-pull secret rotation.** The engine-level `applyInstallParams` RPC
+  already exists (`src/sidecar.ts`) but nothing calls it except the
+  sidecar itself — no CLI command wraps it, and `cli/commands/pull.ts`
+  tells users to "edit `.env.local` directly" instead. It also never
+  re-runs wiring, so a rotated value only reaches code that reads
+  `process.env` at runtime. Needs: a real `deliveryos config` (or similar)
+  command that goes through the same path the UI already has.
+
 ---
 
 ## What's next
 
-- **Phase 12** (backend plug-and-play, unlocked further) — not started, see above
+- **Phase 13** (backend plug-and-play: basic hygiene) — not started, see above
+- **Phase 12** — both scoped-in items done; the rest deferred/descoped, see above
 - **Phase 4** (team rollout: auth/SSO, profiles, multi-remote) — deferred until GrowthArc has real identity infrastructure
 - **Phase 3's installer** — a signed, packaged installer per OS is not started; not needed yet at this stage
 - **Phase 3's fresh-machine install test** — deferred, needs a genuinely uninvolved person on a clean machine
