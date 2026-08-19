@@ -28,6 +28,11 @@ export interface PullResult {
    * otherwise-successful pull over one missing value. Always `[]` for
    * an artifact with no `install_params` at all. */
   missingRequiredParams: string[];
+  /** Set only when this pull actually wrote a real secret value into
+   * `.env.local` AND that file doesn't look covered by the project's own
+   * `.gitignore` -- see `checkEnvLocalGitignoreCoverage`. Absent for the
+   * overwhelming majority of pulls (no install_params written at all). */
+  gitignoreWarning?: string;
 }
 
 /**
@@ -178,7 +183,7 @@ export async function pullArtifact(
     providedValues,
     readExistingEnvValues(cwd),
   );
-  applyInstallParams(cwd, values);
+  const { gitignoreWarning } = applyInstallParams(cwd, values);
   // Tier 1 of the wiring agent (Phase 7 item 6) -- derived straight from
   // install_params, no separate declared action. Same no-op guarantee as
   // applyInstallParams for the overwhelming majority of artifacts that
@@ -198,5 +203,6 @@ export async function pullArtifact(
     installTarget,
     postInstallOutput,
     missingRequiredParams: missingRequired,
+    gitignoreWarning,
   };
 }

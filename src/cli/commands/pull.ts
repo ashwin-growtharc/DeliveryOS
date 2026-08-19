@@ -43,5 +43,8 @@ export function registerPullCommand(program: Command): void {
             + `--set KEY=VALUE, or edit .env.local directly.`,
         );
       }
+      if (result.gitignoreWarning) {
+        console.log(result.gitignoreWarning);
+      }
     });
 }

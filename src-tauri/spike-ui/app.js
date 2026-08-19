@@ -1855,6 +1855,12 @@ ${bodyHtml}
       } else {
         toastSuccess('Configuration applied.');
       }
+      // A real secrets-exposure risk -- this is specifically the "you just
+      // typed in a secret" moment, so it gets its own distinct toast, never
+      // folded quietly into the message above where it could be missed.
+      if (result.gitignoreWarning) {
+        toastError(new Error(result.gitignoreWarning));
+      }
     } catch (err) {
       toastError(err);
     }
@@ -2825,16 +2831,22 @@ ${bodyHtml}
       await beginProgress();
       let succeeded = 0;
       const failures = [];
+      // Every artifact pulled here shares the same `cwd`/`.gitignore`, so a
+      // warning from one is the exact same warning every other would also
+      // produce -- a single aggregated toast at the end is the right call,
+      // not one per artifact (which would just be the same message N times).
+      let gitignoreWarning;
       for (let i = 0; i < pullable.length; i += 1) {
         const entry = pullable[i];
         btn.textContent = `Pulling ${i + 1}/${pullable.length}: ${entry.manifest.id}`;
         try {
-          await call('artifact.pull', {
+          const result = await call('artifact.pull', {
             id: entry.manifest.id,
             remote: entry.remoteName,
             cwd: state.projectDir,
           });
           succeeded += 1;
+          gitignoreWarning = gitignoreWarning || result.gitignoreWarning;
         } catch (err) {
           failures.push(`${entry.manifest.id}: ${err instanceof Error ? err.message : String(err)}`);
         }
@@ -2843,6 +2855,9 @@ ${bodyHtml}
 
       if (succeeded > 0) {
         toastSuccess(`Pulled ${succeeded} artifact${succeeded === 1 ? '' : 's'}`);
+      }
+      if (gitignoreWarning) {
+        toastError(new Error(gitignoreWarning));
       }
       for (const failure of failures) {
         toastError(new Error(failure));
@@ -3052,7 +3067,7 @@ ${bodyHtml}
           // already established.
           const hasWiring = entry.manifest.wiring_actions && entry.manifest.wiring_actions.length > 0;
           if (hasWiring) {
-            const { wiring, build, healthSummary } = await call('artifact.pullAndAutoWire', {
+            const { pullResult, wiring, build, healthSummary } = await call('artifact.pullAndAutoWire', {
               id: entry.manifest.id,
               remote: entry.remoteName,
               cwd: state.projectDir,
@@ -3065,6 +3080,13 @@ ${bodyHtml}
             // Detail banner below always agree.
             toastSuccess(healthSummary);
             lastAutoWireSummary = { key: entryKey(entry), summary: healthSummary };
+            // A real secrets-exposure risk gets its OWN toast, additional
+            // to the calm health summary above -- never folded into it,
+            // where it could easily get missed among routine wiring/build
+            // news.
+            if (pullResult.gitignoreWarning) {
+              toastError(new Error(pullResult.gitignoreWarning));
+            }
             if (build.ran && !build.success) {
               // Surface the real build output where it's actually visible
               // -- reuses the existing progress log rather than inventing
@@ -3081,6 +3103,9 @@ ${bodyHtml}
               cwd: state.projectDir,
             });
             toastSuccess(`Pulled ${result.manifest.id}`);
+            if (result.gitignoreWarning) {
+              toastError(new Error(result.gitignoreWarning));
+            }
           }
         } else {
           const result = await call('artifact.push', {

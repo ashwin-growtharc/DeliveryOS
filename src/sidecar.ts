@@ -294,8 +294,8 @@ const commands: Record<string, CommandHandler> = {
       values,
       readExistingEnvValues(cwd),
     );
-    applyInstallParams(cwd, resolved.values);
-    return { missingRequiredParams: resolved.missingRequired };
+    const { gitignoreWarning } = applyInstallParams(cwd, resolved.values);
+    return { missingRequiredParams: resolved.missingRequired, gitignoreWarning };
   },
 
   // Reads one file (e.g. README.md) directly out of an artifact's payload
