@@ -6,6 +6,67 @@ All notable changes to DeliveryOS are recorded here, newest first. See
 
 ---
 
+## Phase 15 — Full-codebase audit and fix pass
+
+- **Security fixes**: path-traversal via untrusted manifest
+  `install_target`/`payload_path` closed in 4 places (`pull.ts`, `push.ts`,
+  `payloadDir.ts`'s `resolvePayloadDir`, new shared `resolveContainedPath`
+  in `paths.ts`); `removeArtifact.ts`'s primary delete target re-validated
+  for containment (previously only `wiredFiles` was); `remoteCachePath`
+  now sanitizes `name` (matching its sibling `previewCachePath`); a
+  case-sensitive filename exclusion in `pullPayloadComponent.ts` fixed.
+- **Data-loss fixes**: `fixBuildFailure.ts`/`requestWiringMerge.ts` now
+  refuse (rather than silently truncate-and-overwrite) a file over 8000
+  chars; `bumpVersion` gained a `default` case instead of silently
+  returning `undefined`; `branchName.ts` no longer produces an invalid
+  double-slash ref for an unslugifiable id; `sync.ts`'s merged-PR branch
+  no longer drops `installTarget`/`wiredFiles`; `lockfile.ts` throws a
+  clear `LockfileCorruptError` instead of a raw `SyntaxError` on corrupt
+  `lock.json`; `runClaudeSubprocess.ts` gained a real `maxBuffer`.
+- **Frontend fixes**: per-row (not shared module-level) request-token
+  guards for the build-fix/wiring-merge/design-fix rows, fixing a
+  cross-row response collision; Add New's Enter-key handler no longer
+  hijacks Enter on a focused button; `--font-mono` now defined; new
+  adaptive `--icon-fg-warm`/`--icon-fg-cool` tokens fix dark-mode icon
+  contrast; the Documentation tab's markdown iframe is now theme-aware;
+  `loadUiComponentPreview` checks `row.isConnected` before acting on a
+  stale resolution; `beginProgress`'s internal `listen()` call can no
+  longer leave the progress panel stuck; dead `.detail-card` CSS class
+  removed; toast stack gained `aria-live`, 3 search inputs gained
+  `aria-label`.
+- **Concurrency**: `remoteRegistry.ts`'s add/remove now use the same
+  `proper-lockfile` pattern as `lockfile.ts`. (A separate, real
+  cross-command git-sequence race in the sidecar was found but
+  deliberately not fixed this pass -- see PLAN.md's Phase 15 entry.)
+- **CLI/sidecar parity**: added `deliveryos remote list` and
+  `deliveryos check-pending-pushes`; `deliveryos list` now reports
+  `localStatus`; sidecar's `artifact.push` now validates `bump`;
+  `artifact.applyInstallParams` now returns the same "doesn't re-run
+  wiring_actions" note the CLI already printed.
+- **Docs**: ARCHITECTURE.md/DESIGN_SYSTEM.md corrected in place (both had
+  drifted badly -- fictional nav/AI-component sections, a stuck-at-Phase-0
+  header); README.md's CLI section filled in with every previously-missing
+  command and flag.
+- **Tests**: 5 new previously-zero-coverage files
+  (`paths.test.ts`, `remoteRegistry.test.ts`, `runClaudeSubprocess.test.ts`,
+  `githubAuth.test.ts`, `output.test.ts`), plus regression tests added to
+  8 existing suites for every fix above.
+
+## Phase 14 — Dark mode
+
+- **Dark mode toggle in the desktop app.** New `--ink` token replaces 28
+  text-role usages of `--primary-700`/`--primary-800` (kept, unchanged,
+  for their other role: the 5 solid-fill button/chip backgrounds paired
+  with white text). Pale accent tints (`sage-100`, `sand-100/200`,
+  `sky-100`, `success/warning/danger-100`) get real darkened dark-mode
+  equivalents, with `success/warning/danger-600` lightened to match, so
+  badges/banners don't render as bright light-mode patches on a dark
+  page. Defaults to `prefers-color-scheme`, overridden either direction
+  once the user makes an explicit choice via a new toggle button in the
+  context strip (new `i-theme-sun`/`i-theme-moon` icons, persisted to
+  `localStorage`). A small inline head script in `index.html` applies a
+  saved choice before first paint to avoid a flash of the wrong theme.
+
 ## Phase 13 — Backend plug-and-play: basic hygiene (in progress)
 
 - **Configuration tab reuses an already-existing value.**

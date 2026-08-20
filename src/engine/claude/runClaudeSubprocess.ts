@@ -79,6 +79,19 @@ export const DISALLOWED_TOOLS = [
  *   strings this code controls (`-p`, `--disallowedTools`,
  *   `disallowedTools`, `--output-format`, `json`) ever go through the
  *   shell-concatenated argv.
+ *
+ * Known, accepted limitation on Windows (same class already found,
+ * confirmed, and deliberately left as-is for `verifyBuild.ts`/`pull.ts`'s
+ * own timeouts -- see those files' own doc comments): `shell: true` here
+ * means `execFile`'s `timeout` option kills the immediate `cmd.exe`
+ * wrapper it spawned, not the real `claude` process underneath (itself a
+ * further shim layer on Windows), which can keep running orphaned after a
+ * timeout is reported. Not fixed here for the same reason it wasn't fixed
+ * there: a real process-tree kill (`taskkill /T /F` on Windows) is a
+ * bigger, separate change than any single caller's timeout handling, and
+ * this codebase already made that call once -- doing it differently here
+ * would leave the three timeout paths inconsistent with each other for no
+ * real benefit.
  */
 export function runClaudeSubprocess(
   prompt: string,
@@ -89,7 +102,15 @@ export function runClaudeSubprocess(
     const child = execFile(
       'claude',
       ['-p', '--disallowedTools', disallowedTools, '--output-format', 'json'],
-      { encoding: 'utf-8', timeout: timeoutMs, shell: true },
+      // maxBuffer left at its default (undefined) would silently fall back
+      // to Node's own 1 MB cap -- a large real response would then kill
+      // the subprocess with a raw "stdout maxBuffer exceeded" Node error
+      // instead of ever reaching the normal JSON-parse error paths this
+      // module's callers already handle cleanly. 10 MB comfortably covers
+      // a real `claude --output-format json` envelope (which itself wraps
+      // a proposed file's full content for fixBuildFailure.ts/
+      // requestWiringMerge.ts) without removing the cap entirely.
+      { encoding: 'utf-8', timeout: timeoutMs, maxBuffer: 10 * 1024 * 1024, shell: true },
       (err, stdout) => {
         if (err) {
           reject(err);

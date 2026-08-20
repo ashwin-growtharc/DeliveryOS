@@ -119,6 +119,16 @@ export class SourcesFileMissingError extends DeliveryOsError {}
  * a path to delete. */
 export class ArtifactNotPulledError extends DeliveryOsError {}
 
+/** Thrown when a project's `lock.json` exists but can't be parsed as JSON --
+ * hand-corrupted, truncated by a crash mid-write (writeLockfile's own
+ * write-temp-then-rename is meant to prevent this, but the file could
+ * still be edited by hand afterward), or written by something else
+ * entirely. Every lockfile-touching command (`pull`, `push`, `remove`,
+ * `list`, ...) reads through this, so failing with a clear, named error
+ * here beats a raw `SyntaxError` stack trace surfacing from deep inside
+ * whichever command happened to run first. */
+export class LockfileCorruptError extends DeliveryOsError {}
+
 /** Thrown when a backend-plugin's Tier-2 "AI wiring merge" flow fails
  * outright: the real `claude` CLI subprocess call fails, returns
  * something that can't be parsed as the requested JSON shape, or a

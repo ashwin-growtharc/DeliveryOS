@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { pullArtifact } from '../../src/engine/pull/pull';
-import { PostInstallError } from '../../src/engine/errors';
+import { ArtifactResolutionError, ManifestValidationError, PostInstallError } from '../../src/engine/errors';
 import { remotesRegistryPath, remoteCachePath } from '../../src/engine/paths';
 import { readLockfile } from '../../src/engine/lockfile/lockfile';
 
@@ -146,6 +146,85 @@ describe('pullArtifact post_install error reporting', () => {
       expect(message).not.toContain('timed out');
     }
   }, 30_000);
+});
+
+describe('pullArtifact containment checks (install_target / payload_path)', () => {
+  it('refuses install_target that resolves outside cwd, before any file is written', async () => {
+    writeRegistry(['test-remote']);
+    const remoteCacheDir = remoteCachePath('test-remote');
+    const payloadDir = path.join(remoteCacheDir, 'artifacts', 'evil-target', 'payload');
+    fs.mkdirSync(payloadDir, { recursive: true });
+    fs.writeFileSync(path.join(payloadDir, 'README.md'), '# evil\n', 'utf-8');
+    fs.writeFileSync(
+      path.join(remoteCacheDir, 'artifacts', 'evil-target', 'manifest.yaml'),
+      [
+        'id: evil-target',
+        'kind: template',
+        'description: Test artifact with a malicious install_target',
+        'owner: team-x',
+        'version: 1.0.0',
+        'source_repo: https://example.invalid/repo',
+        'install_target: ../../../../escaped',
+        'review_required: false',
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    await expect(pullArtifact('evil-target', undefined, cwd)).rejects.toBeInstanceOf(ManifestValidationError);
+    // Nothing was created outside cwd -- the escape target's parent (four
+    // levels up from cwd) never gains an "escaped" child directory.
+    expect(fs.existsSync(path.join(cwd, '..', '..', '..', '..', 'escaped'))).toBe(false);
+  });
+
+  it('refuses payload_path that resolves outside the remote clone', async () => {
+    writeRegistry(['test-remote']);
+    const remoteCacheDir = remoteCachePath('test-remote');
+    fs.mkdirSync(path.join(remoteCacheDir, 'artifacts', 'evil-payload'), { recursive: true });
+    fs.writeFileSync(
+      path.join(remoteCacheDir, 'artifacts', 'evil-payload', 'manifest.yaml'),
+      [
+        'id: evil-payload',
+        'kind: template',
+        'description: Test artifact with a malicious payload_path',
+        'owner: team-x',
+        'version: 1.0.0',
+        'source_repo: https://example.invalid/repo',
+        'install_target: installed',
+        'review_required: false',
+        'payload_path: ../../../../escaped',
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    await expect(pullArtifact('evil-payload', undefined, cwd)).rejects.toBeInstanceOf(ManifestValidationError);
+  });
+
+  it('reports a clear error (not a raw ENOENT) when the payload source does not exist on disk', async () => {
+    writeRegistry(['test-remote']);
+    const remoteCacheDir = remoteCachePath('test-remote');
+    // Manifest written, but its artifacts/<id>/payload/ directory never
+    // created -- a bad payload_path or an out-of-date remote.
+    fs.mkdirSync(path.join(remoteCacheDir, 'artifacts', 'missing-payload'), { recursive: true });
+    fs.writeFileSync(
+      path.join(remoteCacheDir, 'artifacts', 'missing-payload', 'manifest.yaml'),
+      [
+        'id: missing-payload',
+        'kind: template',
+        'description: Test artifact with no real payload on disk',
+        'owner: team-x',
+        'version: 1.0.0',
+        'source_repo: https://example.invalid/repo',
+        'install_target: installed',
+        'review_required: false',
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    await expect(pullArtifact('missing-payload', undefined, cwd)).rejects.toBeInstanceOf(ArtifactResolutionError);
+  });
 });
 
 describe('pullArtifact lockfile recording (Phase 13 uninstall groundwork)', () => {

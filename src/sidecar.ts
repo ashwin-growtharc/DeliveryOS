@@ -27,12 +27,13 @@
  * the final `{ok, result}` / `{ok:false, error}` line, which remains the
  * actual completion signal.
  */
-import * as path from 'path';
 import * as readline from 'readline';
-import { buildCatalog, refreshCatalog, CatalogEntry } from './engine/catalog/catalog';
-import { readLockfile } from './engine/lockfile/lockfile';
-import { computeChangedFiles } from './engine/push/diff';
-import { pristinePath } from './engine/paths';
+import {
+  buildCatalog,
+  refreshCatalog,
+  annotateCatalog,
+  CatalogListEntry,
+} from './engine/catalog/catalog';
 import { pullArtifact, resolveArtifact, ProgressCallback } from './engine/pull/pull';
 import { removeArtifact } from './engine/pull/removeArtifact';
 import { resolveInstallParamValues, applyInstallParams, readExistingEnvValues } from './engine/pull/installParams';
@@ -43,6 +44,7 @@ import { requestBuildFix, applyBuildFix } from './engine/pull/fixBuildFailure';
 import { requestWiringMerge, applyWiringMerge, readWiringMergeLog } from './engine/pull/requestWiringMerge';
 import { requestAntiPatternFix, applyAntiPatternFix } from './engine/scan/fixAntiPattern';
 import { pushArtifact, PushOptions } from './engine/push/push';
+import { parseBumpKind } from './engine/manifest/version';
 import { checkForUpdates, resolvePendingPushes } from './engine/sync/sync';
 import { scanForNewArtifacts } from './engine/scan/scan';
 import { detectArtifactMetadata } from './engine/scan/detectArtifactMetadata';
@@ -59,7 +61,6 @@ import {
 import { cloneRemote, cachePath } from './engine/remote/remoteCache';
 import * as fs from 'fs';
 import { RemoteRegistryError } from './engine/errors';
-import { Manifest } from './engine/manifest/schema';
 import { compileArtifactPreview, compileLocalPreview } from './engine/preview/resolveArtifactPreview';
 import { readArtifactPayloadFile } from './engine/payload/readPayloadFile';
 import { resolvePayloadDir, resolveWithinPayloadDir } from './engine/payload/payloadDir';
@@ -107,20 +108,6 @@ type CommandHandler = (
   ctx: { onProgress: ProgressCallback },
 ) => unknown | Promise<unknown>;
 
-type LocalStatus = 'not_pulled' | 'pulled' | 'edited_locally';
-
-export interface CatalogListEntry {
-  manifest: Manifest;
-  remoteName: string;
-  localStatus: LocalStatus;
-  installTarget: string;
-  /** Set when a previous push opened a PR for this artifact that hasn't
-   * been resolved yet (see `resolvePendingPushes`) -- lets the UI show real
-   * transparency about a push's outcome without a separate network call
-   * just to display it, since this is already-known local lockfile data. */
-  pendingPr?: { number: number; url: string };
-}
-
 function requireString(args: Record<string, unknown>, key: string): string {
   const value = args[key];
   if (typeof value !== 'string' || value.length === 0) {
@@ -150,46 +137,6 @@ function optionalStringRecord(args: Record<string, unknown>, key: string): Recor
     }
   }
   return result;
-}
-
-/**
- * Computes each catalog entry's status relative to the cwd-scoped
- * lockfile/pristine snapshot:
- *  - no lockfile entry -> 'not_pulled'
- *  - lockfile entry, no diff against the pristine snapshot -> 'pulled'
- *  - lockfile entry, diff detected -> 'edited_locally'
- *  - lockfile entry, but the diff can't be computed (e.g. a missing
- *    pristine snapshot, `PristineSnapshotMissingError`) -> falls back to
- *    'pulled' rather than throwing, so one bad entry never breaks Browse
- *    for every other artifact in the same `catalog.list` call.
- */
-function annotateCatalog(
-  entries: CatalogEntry[],
-  cwd: string,
-  remote: string | undefined,
-): CatalogListEntry[] {
-  const filtered = remote ? entries.filter((entry) => entry.remoteName === remote) : entries;
-  const lockfile = readLockfile(cwd);
-
-  return filtered.map((entry) => {
-    const { manifest, remoteName } = entry;
-    const installTarget = path.resolve(cwd, manifest.install_target);
-    const lockEntry = lockfile.entries.find((e) => e.id === manifest.id);
-
-    let localStatus: LocalStatus;
-    if (!lockEntry) {
-      localStatus = 'not_pulled';
-    } else {
-      try {
-        const changedFiles = computeChangedFiles(installTarget, pristinePath(cwd, manifest.id));
-        localStatus = changedFiles.length === 0 ? 'pulled' : 'edited_locally';
-      } catch {
-        localStatus = 'pulled';
-      }
-    }
-
-    return { manifest, remoteName, localStatus, installTarget, pendingPr: lockEntry?.pendingPr };
-  });
 }
 
 function catalogList(args: Record<string, unknown>): CatalogListEntry[] {
@@ -227,7 +174,7 @@ async function remoteAdd(
   }
 
   const dest = await cloneRemote(name, url);
-  addRemoteEntry({ name, url, addedAt: new Date().toISOString() });
+  await addRemoteEntry({ name, url, addedAt: new Date().toISOString() });
 
   return { name, url, dest };
 }
@@ -236,9 +183,9 @@ async function remoteAdd(
  * `runRemoteRemove`'s order exactly (src/cli/commands/remoteAdd.ts).
  * Doesn't touch any project's lockfile/pulled files, only this remote's
  * own registration + cache. */
-function remoteRemove(args: Record<string, unknown>): { name: string } {
+async function remoteRemove(args: Record<string, unknown>): Promise<{ name: string }> {
   const name = requireString(args, 'name');
-  removeRemoteEntry(name); // throws RemoteRegistryError if not registered
+  await removeRemoteEntry(name); // throws RemoteRegistryError if not registered
   const dest = cachePath(name);
   if (fs.existsSync(dest)) {
     fs.rmSync(dest, { recursive: true, force: true });
@@ -296,7 +243,17 @@ const commands: Record<string, CommandHandler> = {
       readExistingEnvValues(cwd),
     );
     const { gitignoreWarning } = applyInstallParams(cwd, resolved.values);
-    return { missingRequiredParams: resolved.missingRequired, gitignoreWarning };
+    return {
+      missingRequiredParams: resolved.missingRequired,
+      gitignoreWarning,
+      // Same real scope boundary the CLI's own `config` command has always
+      // printed on every call (src/cli/commands/config.ts) -- this only
+      // rotates the value sitting in .env.local, never re-running
+      // wiring_actions, so the app's own Configuration tab had no way to
+      // tell a person the same thing the CLI already did.
+      note: 'This does not re-run wiring_actions -- only code that reads process.env at runtime will '
+        + 'see the new value.',
+    };
   },
 
   // Detail's Configuration tab pre-fills each install_param field on every
@@ -422,6 +379,14 @@ const commands: Record<string, CommandHandler> = {
     const id = requireString(args, 'id');
     const cwd = requireString(args, 'cwd');
     const options = (args.options ?? {}) as PushOptions;
+    // Unlike every other field on `options` (already narrow, engine-typed
+    // shapes coming from the app's own UI, not free-text), `bump` arrives
+    // as a plain string the app could in principle send anything for --
+    // validated here the same way the CLI's own `parseBumpKind` already
+    // validates `--bump`, so a bad value fails clearly right here instead
+    // of reaching `bumpVersion` at runtime and surfacing many calls later
+    // as an unrelated "version: Required" manifest-validation error.
+    options.bump = parseBumpKind(options.bump);
     return await pushArtifact(id, options, cwd, undefined, onProgress);
   },
 

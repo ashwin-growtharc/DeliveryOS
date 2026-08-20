@@ -379,6 +379,242 @@ actually needs. Ranked by risk, not by build order.
 
 ---
 
+## Phase 14 — Dark mode — **Done**
+
+Goal: a real dark mode for the desktop app's own chrome, toggled from the
+context strip, not just a naive color inversion.
+
+- **Token audit before touching anything.** `style.css` had exactly one
+  `:root` block and zero existing `data-theme`/`prefers-color-scheme`
+  infrastructure. `--primary-700/800/900` (navy) turned out to be doing
+  double duty: 28 of its 33 usages were plain body/UI text color, the
+  other 5 were solid-fill button/chip backgrounds (`.btn-primary`,
+  `.chip.active`) paired with white text on top. Migrating all 33 blindly
+  would have made primary buttons render light-on-light in dark mode; the
+  fill-role 5 needed to stay a fixed brand color across both themes.
+- **New `--ink` token**, equal to `--primary-700`'s value in light mode
+  (so introducing it changed nothing visually), replaces all 28 text-role
+  usages. `--primary-700/800/900` themselves are left untouched in both
+  themes, now serving only their fill role. Two other dangling tokens the
+  CSS already referenced but never defined (`--text-secondary`, and a
+  second, unrelated `--ink` fallback inside the pre-existing
+  whole-app-template light/dark preview feature) got real values too.
+- **Pale accent tints get real dark equivalents, not a blanket fixed
+  look**: `sage-100`, `sand-100/200`, `sky-100`, `success/warning/danger-100`
+  each got a darkened panel color for dark mode, with
+  `success/warning/danger-600` lightened to match (both are exclusively
+  used as a text/bg pair, confirmed via a full-file grep before touching
+  either). Saturated standalone accents (`gold-500`, `danger-500`,
+  `accent-500/600`, `cyan-500/600`, `mint-500`, `sage-500/700`, gradients)
+  are left constant — already vivid enough to read on a dark surface, and
+  the point of a fixed palette there is brand identity, not adaptation.
+- Defined via `@media (prefers-color-scheme: dark)` for the no-explicit-
+  choice default, plus `:root[data-theme="dark"]`/`:root[data-theme="light"]`
+  overrides that win either direction once the user has toggled explicitly.
+- **Toggle**: new `theme-toggle-btn` in the context strip (next to "Change
+  folder"), new `i-theme-sun`/`i-theme-moon` icon symbols following the
+  existing sprite-sheet convention (sun shown while dark — click to go
+  back to light — and vice versa). `app.js`'s `toggleTheme`/`initTheme`
+  set/read the `data-theme` attribute and persist the choice to
+  `localStorage` (`deliveryos.theme`, same convention as the existing
+  `deliveryos.projectDir` key); a live `prefers-color-scheme` listener
+  keeps the icon in sync with OS changes for as long as no explicit choice
+  has been made yet. A small inline `<script>` in `index.html`'s `<head>`
+  applies any saved choice synchronously, before first paint, so there's
+  no flash of the wrong theme while `app.js` (loaded at the end of body)
+  is still parsing.
+- No test-suite coverage exists for `spike-ui/`'s vanilla JS/CSS/HTML
+  (confirmed: `eslint.config.js` only targets `**/*.ts`, and no test file
+  references these files) — verified instead via `node --check` on
+  `app.js` (parses cleanly), a brace-balance check on `style.css` (298
+  open/close), and an svg-tag-balance check on `index.html` (9/9), plus a
+  full manual line-by-line audit of every `--primary-700/800` usage before
+  migrating it.
+
+## Phase 15 — Full-codebase audit and fix pass — **Done**
+
+Goal: a real, thorough bug/gap/improvement audit across the entire
+codebase (backend engine, CLI, sidecar, frontend), not scoped to one
+feature area -- 6 parallel research agents each covering a distinct slice
+(core artifact lifecycle, remote/sync/push/git, scan/catalog/preview,
+CLI+sidecar, frontend, tests+docs), followed by personal verification of
+every finding against the actual code (not trusted at face value) and a
+fix pass through everything confirmed real.
+
+- **Security (path traversal / arbitrary file ops) — fixed, 5 confirmed
+  instances of the same bug class.** `manifest.install_target`/
+  `payload_path` are untrusted (an artifact author's own manifest, not
+  something DeliveryOS controls) but were resolved with plain
+  `path.join`/`path.resolve` and no containment check in FOUR places:
+  `pull.ts` (both fields), `push.ts` (`payload_path`), and
+  `payloadDir.ts`'s `resolvePayloadDir` (`payload_path`) -- a crafted
+  manifest could write/read/delete outside the intended remote-cache or
+  project directory the moment anyone pulled or pushed it. New shared
+  `resolveContainedPath(root, candidate)` (`src/engine/paths.ts`,
+  generalizing `wiring.ts`'s existing `resolveContainedTargetFile`) closes
+  all four. `removeArtifact.ts`'s `installTarget` deletion had the same
+  gap -- re-validated now, matching the "defense in depth" treatment its
+  own `wiredFiles` deletion already had, failing loud (not silently
+  no-op'ing) since this is the PRIMARY thing being removed. `remoteCachePath`
+  (`paths.ts`) never sanitized `name` (unlike its sibling
+  `previewCachePath` two lines below it) -- `remote add --name ../../../X`
+  could clone outside the cache root; now uses the same
+  `assertSafePathSegment` guard. `pullPayloadComponent.ts`'s
+  `EXCLUDED_FILENAMES` check was case-sensitive (unlike its sibling
+  exclusion sets), letting `Preview.tsx` leak into pulled projects.
+- **Data-loss/correctness bugs — fixed.** `fixBuildFailure.ts`/
+  `requestWiringMerge.ts` silently truncated a target file to 8000 chars
+  before asking the model for "the full corrected/merged file," then
+  blindly wrote the response back as the file's entire new content -- for
+  any file over the cap, the model never saw (and so couldn't reproduce)
+  content past the truncation point, and the rebuild-verify safety net
+  doesn't reliably catch a truncated result that still happens to compile.
+  Both now refuse outright (a clear reason, no subprocess call) for an
+  oversized file rather than risk silent deletion. `bumpVersion` had no
+  `default` case in its switch -- an invalid runtime value (reachable via
+  the sidecar's `artifact.push`, which cast `options.bump` without
+  validating it, unlike the CLI's own `parseBumpKind`) silently returned
+  `undefined`, surfacing many calls later as an unrelated "version:
+  Required" error; now throws immediately, and `parseBumpKind` moved to
+  `version.ts` as a shared export both the CLI and sidecar call.
+  `branchName.ts`'s `slugifyForRef` produced an invalid double-slash git
+  ref for an id that strips to nothing (e.g. `"???"`) -- now falls back to
+  a short hash of the original id. `sync.ts`'s `resolvePendingPushes`
+  merged-PR branch wrote a bare `{id, version, remote}` instead of
+  spreading the existing entry, silently dropping `installTarget`/
+  `wiredFiles` the moment a pushed edit's PR got merged (the closed-PR
+  branch 3 lines below already spread correctly). `lockfile.ts`'s
+  `readLockfile` had an unguarded `JSON.parse` -- a corrupted `lock.json`
+  crashed every lockfile-touching command with a raw `SyntaxError`; now
+  throws a new, clear `LockfileCorruptError`. `pull.ts` never checked the
+  payload source existed before `fs.cpSync`, nor validated `payload_path`
+  containment -- both fixed alongside the security fix above.
+  `runClaudeSubprocess.ts` had no `maxBuffer` set (silently defaulting to
+  Node's 1MB cap, killing a large real response with a raw buffer-overflow
+  error) -- now 10MB. Its Windows zombie-process-on-timeout gap (killing a
+  timed-out call only terminates the immediate shell wrapper, not the real
+  `claude` process underneath) is the exact same class already found,
+  confirmed, and deliberately left as a documented known limitation for
+  `verifyBuild.ts`/`pull.ts`'s own timeouts earlier this project --
+  documented the same way here for consistency, not fixed differently.
+- **Frontend (spike-ui) bugs — fixed.** `wiringMergeRequestId`/
+  `buildFixRequestId` were shared MODULE-LEVEL request-token counters used
+  to guard every "Merge with Claude"/"Want help fixing this?" row on the
+  page at once -- clicking Ask on one row while a DIFFERENT row's request
+  was still in flight silently discarded that other row's result the
+  moment it resolved, even though the two rows target unrelated files. Now
+  scoped to each row's own closure, still guarding the originally-intended
+  case (a row's own second click superseding its first request) without
+  the cross-row collision; `renderDesignFixRow` gained the same guard it
+  was missing despite its own doc comment claiming to mirror
+  `renderBuildFixRow`. The Add New form's Enter-key handler hijacked Enter
+  on any focused `<button>` inside the form (only excluded tag-picker
+  inputs/textareas) into "go to next step," making Back/Review/"Choose
+  file…"/"+ Add param"/"Suggest with Claude" all unreachable via keyboard
+  -- now excludes `BUTTON` too. `--font-mono` was referenced by 5 CSS rules
+  but never defined in `:root`, silently falling back to the generic
+  monospace font; now a real token. `skill`/`command`/`java`/`typescript`/
+  `go`/teams icon swatches paired a fixed hardcoded hex fg color with a bg
+  token (`sand-100`/`sky-100`) that DOES get a real dark-mode tint,
+  dropping to ~2.2-2.5:1 contrast in dark mode -- new adaptive
+  `--icon-fg-warm`/`--icon-fg-cool` tokens fix the pairing (same root
+  cause found independently for `doc`/the tag-icon fallback, which used
+  `--primary-700`, the deliberately-fixed brand token, instead of `--ink`).
+  The Documentation tab's markdown iframe had a hardcoded light-only
+  `<style>` with no background set at all -- a stark white rectangle
+  inside an otherwise dark Detail card; now themed at render time.
+  `loadUiComponentPreview` had no check for the row having been detached
+  from the DOM (a category-tab switch re-renders the whole list) before a
+  stale compile resolved -- would still spawn a live iframe and register a
+  real window-level listener for a row nothing shows anymore; now checks
+  `row.isConnected` first. `beginProgress`'s `listen()` call could
+  previously throw before any caller's own try block (every one of the 7
+  call sites awaits `beginProgress()` BEFORE its try, deliberately, to
+  close a progress-subscription race), leaving the panel stuck on
+  "Working…" forever with no `endProgress(false)` ever reached -- now
+  caught internally, degrading to "no live progress lines this action" but
+  never leaking out of `beginProgress` itself. Also: dead `.detail-card`
+  CSS class removed from `index.html` (zero matching rule anywhere),
+  `aria-live="polite"` added to the toast stack, `aria-label` added to 3
+  search inputs missing one.
+- **Concurrency — one real gap fixed, one deliberately deferred.**
+  `remoteRegistry.ts`'s `addRemoteEntry`/`removeRemoteEntry` were an
+  unlocked read-modify-write (same race class `lockfile.ts`'s own
+  `upsertEntry` was already fixed for) -- now wrapped in the same
+  `proper-lockfile` pattern, both now `async`. The sidecar's `handleLine`
+  loop fires each command without awaiting the previous one, and `push`/
+  `sync.checkForUpdates`/`sync.resolvePendingPushes` all mutate the same
+  on-disk git clone (`cachePath(remoteName)`) with zero locking --
+  confirmed real, but a correct fix means wrapping `pushArtifact`'s entire
+  ~340-line git-mutating span (from `fetchAndReset` through the final
+  `pushBranch`, spanning several early-return branches for edit/propose-
+  new/metadataEdit modes) in a lock with a `finally`-guaranteed release --
+  deliberately NOT attempted here: a rushed lock that leaks on one exit
+  path in a large, safety-critical function would be worse than the
+  current narrow race (two people/processes pushing/syncing the SAME
+  remote at literally the same moment). Left as a documented, real,
+  deliberately-deferred item.
+- **CLI/sidecar parity gaps — fixed.** `deliveryos remote list` and
+  `deliveryos check-pending-pushes` didn't exist at all (the sidecar's own
+  `remote.list`/`sync.resolvePendingPushes` RPCs always had this) -- both
+  added. `deliveryos list` never computed `localStatus` (pulled/edited/
+  not-pulled), unlike the app's own Browse view over the exact same
+  catalog data -- the sidecar's private `annotateCatalog` function was
+  extracted to `src/engine/catalog/catalog.ts` (a real, shared engine
+  function now, not sidecar-only) and wired into the CLI's `list` command
+  too. The sidecar's `artifact.push` handler cast `options.bump` without
+  validating it (unlike the CLI's own `parseBumpKind`) -- now validates via
+  the same shared function. The sidecar's `artifact.applyInstallParams`
+  never returned the CLI's own "this does not re-run wiring_actions"
+  caveat -- now does, surfaced as part of the app's success toast.
+  `collectSetFlag`'s duplication between `pull.ts`/`config.ts` was
+  reviewed and found to be an ALREADY-deliberate, already-documented
+  decision (`config.ts`'s own comment explains why) -- left as-is rather
+  than re-litigated.
+- **Documentation — corrected in place, not rewritten wholesale.**
+  `ARCHITECTURE.md` was stuck describing "Phase 0... built" with a
+  6-phase roadmap table (0-5) and a kind table calling `template` "not yet
+  managed" -- corrected with clear notes pointing at PLAN.md as the
+  current source of truth, rather than attempting to rewrite its entire
+  original 5-layer design-proposal narrative (itself never fully built as
+  written -- profiles/role-routing, `dataset`/`snippet`/`config`/
+  `reference` kinds, "ArcOS as a remote" -- left as historical context,
+  clearly labeled). `DESIGN_SYSTEM.md`'s Navigation section described a
+  fictional `Home`/`Studio`/`Monitor`/`Library`/`Admin` route structure
+  with client-side redirects; its "AI Components"/"Animations" tables
+  named components (`GlowCard`, `AIBadge`, `PulseIndicator`, `AISparkle`,
+  `StreamingText`, `ArcAIPromptBox`) and animations (`pulse-glow`,
+  `gradient-shift`, `shimmer-border`, `breathing`, `neural-pulse`) with
+  zero matches anywhere in the real app -- all corrected to describe what
+  actually ships (the real sidebar, the real "Suggest/Merge/Want help
+  fixing" ✨ buttons, `.hint-banner-ai`). Also fixed: a `gradient` button
+  variant that `style.css` itself already says has no counterpart, and an
+  Accessibility-section reference to `primary-500`, a token that doesn't
+  exist. Phase 14's dark-mode tokens (`--ink`, `--text-secondary`,
+  `--icon-fg-warm/cool`, `--font-mono`, the full dark palette) documented
+  for the first time. `README.md`'s CLI section was missing
+  `check-updates`, `check-drift`, `scan`, `wiring`, `remote list`,
+  `remote remove`, `check-pending-pushes`, `pull --set`, and edit-mode
+  metadata-only push -- all added.
+- **Test coverage — added for every fix above, plus 4 previously-untested
+  files.** New `test/unit/paths.test.ts` (the new `resolveContainedPath`
+  helper + `remoteCachePath` sanitization), `remoteRegistry.test.ts`
+  (previously zero coverage, including a real concurrent-add race test),
+  `runClaudeSubprocess.test.ts` (previously zero coverage; the codebase's
+  only `child_process` mock, since a real `claude` invocation isn't
+  hermetic), `githubAuth.test.ts` (previously zero coverage; every real
+  e2e test explicitly stubs this out, so none of its 3 branches had ever
+  actually run anywhere), and `output.test.ts` (previously zero coverage).
+  Extended `pull.test.ts`, `payloadDir.test.ts`, `removeArtifact.test.ts`,
+  `branchName.test.ts`, `lockfile.test.ts`, `fixBuildFailure.test.ts`,
+  `requestWiringMerge.test.ts`, and the `sync.resolvePendingPushes`/
+  `pull` e2e suites with regression tests for each fix. Full suite:
+  566 tests, only the one pre-existing GitHub-auth-boundary e2e failure
+  (real, expected, unrelated to this pass) plus occasional
+  resource-contention flakiness on a Playwright preview-render test under
+  full parallel load (both confirmed pre-existing, re-verified in
+  isolation each time).
+
 ## What's next
 
 - **Phase 13** (backend plug-and-play: basic hygiene) — in progress, 5 of 6 items done (uninstall, secrets safety net, timeouts, post-pull secret rotation, config-form reuse-existing-value autofill); real update-apply path not started, and config-form autofill's other two sub-cases (genuine local signal, neither) deliberately deferred/descoped, see above

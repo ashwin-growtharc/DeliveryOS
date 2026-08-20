@@ -4,8 +4,8 @@ import { execSync } from 'child_process';
 import { buildCatalog, CatalogEntry } from '../catalog/catalog';
 import { cachePath } from '../remote/remoteCache';
 import { upsertEntry } from '../lockfile/lockfile';
-import { pristinePath } from '../paths';
-import { ArtifactResolutionError, PostInstallError } from '../errors';
+import { pristinePath, resolveContainedPath } from '../paths';
+import { ArtifactResolutionError, ManifestValidationError, PostInstallError } from '../errors';
 import { Manifest } from '../manifest/schema';
 import {
   resolveInstallParamValues,
@@ -135,13 +135,46 @@ export async function pullArtifact(
   const { manifest, remoteName: resolvedRemoteName } = entry;
 
   const remoteDir = cachePath(resolvedRemoteName);
+  // `payload_path`/`install_target` are untrusted -- they come from
+  // whatever the artifact author's manifest says, not something DeliveryOS
+  // controls, and (unlike the payload's own content) neither is covered by
+  // signature verification below. Resolving either with plain path.join/
+  // path.resolve and no containment check would let a value like
+  // "../../../../evil" or an absolute path escape the remote's own clone
+  // (for payload_path) or the project (for install_target) entirely --
+  // exactly the threat model `resolveContainedTargetFile` already guards
+  // wiring_actions' own target_file against; this is that same check
+  // applied to the two manifest fields that didn't have it yet.
+  //
   // `payload_path`, when set, points directly at the artifact's real payload
   // location (a file or directory) relative to the remote's root, bypassing
   // the artifacts/<id>/payload/ convention entirely. Absent: unchanged.
-  const payloadSrc = manifest.payload_path
-    ? path.join(remoteDir, manifest.payload_path)
-    : path.join(remoteDir, 'artifacts', manifest.id, 'payload');
-  const installTarget = path.resolve(cwd, manifest.install_target);
+  let payloadSrc: string;
+  if (manifest.payload_path) {
+    const contained = resolveContainedPath(remoteDir, manifest.payload_path);
+    if (!contained) {
+      throw new ManifestValidationError(
+        `Artifact "${manifest.id}"'s payload_path ("${manifest.payload_path}") resolves outside the `
+          + `remote's own directory -- refusing to pull.`,
+      );
+    }
+    payloadSrc = contained;
+  } else {
+    payloadSrc = path.join(remoteDir, 'artifacts', manifest.id, 'payload');
+  }
+  if (!fs.existsSync(payloadSrc)) {
+    throw new ArtifactResolutionError(
+      `Artifact "${manifest.id}"'s payload was not found at the expected location (${payloadSrc}) -- `
+        + `the remote may be out of date, or payload_path may be wrong. Try refreshing the catalog.`,
+    );
+  }
+  const installTarget = resolveContainedPath(cwd, manifest.install_target);
+  if (!installTarget) {
+    throw new ManifestValidationError(
+      `Artifact "${manifest.id}"'s install_target ("${manifest.install_target}") resolves outside the `
+        + `project -- refusing to install.`,
+    );
+  }
 
   // Verifies BEFORE any files are written -- a no-op for the overwhelming
   // majority of artifacts, which declare no `signature` at all. The

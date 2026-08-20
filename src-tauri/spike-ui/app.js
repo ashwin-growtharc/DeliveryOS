@@ -12,6 +12,7 @@
   const { relaunch } = window.__TAURI__.process;
 
   const PROJECT_DIR_KEY = 'deliveryos.projectDir';
+  const THEME_KEY = 'deliveryos.theme';
 
   // Display order + label for each of manifest.tags's own (plural) keys --
   // e.g. a `stacks: ['python']` tag shows under the "stack" category.
@@ -39,15 +40,31 @@
   // manifest schema, not a closed enum -- see ARCHITECTURE.md), so this is
   // a convenience lookup, not a whitelist: any kind not listed here falls
   // back to a neutral diamond glyph rather than a broken/missing icon.
+  // skill/command's fg used to be hardcoded hex (#8A5A2B / #2E5E82) --
+  // fine paired with sand-100/sky-100's own light-mode value, but those
+  // two tokens get a real DARK tint for dark mode (style.css's dark-mode
+  // blocks) while a fixed medium-brown/medium-blue text does not, dropping
+  // to ~2.2-2.5:1 contrast against the now-dark background (confirmed).
+  // --icon-fg-warm/--icon-fg-cool are the adaptive counterparts, defined
+  // alongside sand-100/sky-100 in style.css so the pairing stays legible
+  // in both themes. template/rust/javascript's fg stays hardcoded (below,
+  // and in STACK_ICON) since their bg (--gold-500) is a fixed, standalone
+  // saturated accent left unchanged across themes on purpose -- the fixed
+  // dark text pairs with it fine regardless of theme.
   const KIND_ICON = {
     agent: { icon: 'i-kind-agent', bg: 'var(--sage-100)', fg: 'var(--sage-700)' },
-    skill: { icon: 'i-kind-skill', bg: 'var(--sand-100)', fg: '#8A5A2B' },
-    command: { icon: 'i-kind-command', bg: 'var(--sky-100)', fg: '#2E5E82' },
+    skill: { icon: 'i-kind-skill', bg: 'var(--sand-100)', fg: 'var(--icon-fg-warm)' },
+    command: { icon: 'i-kind-command', bg: 'var(--sky-100)', fg: 'var(--icon-fg-cool)' },
     rule: { icon: 'i-kind-rule', bg: 'var(--sage-50)', fg: 'var(--primary-700)' },
     template: { icon: 'i-kind-template', bg: 'var(--gold-500)', fg: '#6B4A00' },
-    doc: { icon: 'i-kind-doc', bg: 'var(--surface-inset)', fg: 'var(--primary-700)' },
+    // Uses --ink (adaptive text), not --primary-700 (deliberately FIXED,
+    // brand-fill-only) -- surface-inset itself adapts to dark mode, and
+    // pairing it with fixed navy text has the exact same contrast problem
+    // skill/command's fg had, just via a token reference instead of a
+    // hardcoded hex.
+    doc: { icon: 'i-kind-doc', bg: 'var(--surface-inset)', fg: 'var(--ink)' },
   };
-  const KIND_ICON_FALLBACK = { icon: 'i-kind-default', bg: 'var(--surface-inset)', fg: 'var(--primary-700)' };
+  const KIND_ICON_FALLBACK = { icon: 'i-kind-default', bg: 'var(--surface-inset)', fg: 'var(--ink)' };
 
   /** Returns the inner HTML for a `.kind-swatch` element (a colored,
    * rounded icon tile) for `kind` -- append `' sm'`/`' lg'` to `sizeClass`
@@ -81,11 +98,11 @@
   // convenience, not an attempt to cover every possible value.
   const STACK_ICON = {
     python: { icon: 'i-lang-python', bg: 'var(--sage-100)', fg: 'var(--sage-700)' },
-    java: { icon: 'i-lang-java', bg: 'var(--sand-100)', fg: '#8A5A2B' },
+    java: { icon: 'i-lang-java', bg: 'var(--sand-100)', fg: 'var(--icon-fg-warm)' },
     rust: { icon: 'i-lang-rust', bg: 'var(--gold-500)', fg: '#6B4A00' },
-    typescript: { text: 'TS', bg: 'var(--sky-100)', fg: '#2E5E82' },
+    typescript: { text: 'TS', bg: 'var(--sky-100)', fg: 'var(--icon-fg-cool)' },
     javascript: { text: 'JS', bg: 'var(--gold-500)', fg: '#6B4A00' },
-    go: { text: 'Go', bg: 'var(--sky-100)', fg: '#2E5E82' },
+    go: { text: 'Go', bg: 'var(--sky-100)', fg: 'var(--icon-fg-cool)' },
     ruby: { text: 'Rb', bg: 'var(--danger-100)', fg: 'var(--danger-600)' },
   };
 
@@ -100,13 +117,13 @@
           : `<span class="tag-item-icon-text">${escapeHtml(entry.text)}</span>`;
         return { bg: entry.bg, fg: entry.fg, html };
       }
-      return { bg: 'var(--surface-inset)', fg: 'var(--primary-700)', html: '<svg><use href="#i-tag"/></svg>' };
+      return { bg: 'var(--surface-inset)', fg: 'var(--ink)', html: '<svg><use href="#i-tag"/></svg>' };
     }
     if (category === 'roles') {
       return { bg: 'var(--sage-100)', fg: 'var(--sage-700)', html: '<svg><use href="#i-role"/></svg>' };
     }
     // 'teams' (displayed as "project")
-    return { bg: 'var(--sky-100)', fg: '#2E5E82', html: '<svg><use href="#i-folder"/></svg>' };
+    return { bg: 'var(--sky-100)', fg: 'var(--icon-fg-cool)', html: '<svg><use href="#i-folder"/></svg>' };
   }
 
   const state = {
@@ -917,6 +934,18 @@
     const frame = row.querySelector('.ui-component-preview-frame');
     try {
       const result = await call('preview.compile', { remote: entry.remoteName, id: entry.manifest.id });
+      // `row` can have been detached from the DOM (a category-tab switch
+      // re-renders the whole list via renderUiComponentsList's own
+      // `container.innerHTML = ''`) while this call was still in flight --
+      // without this check, a stale resolution would still spawn a real,
+      // live iframe and register a real window-level message listener for
+      // a row nothing shows anymore, which then keeps running and firing
+      // resize messages until some LATER re-render happens to sweep it up
+      // via uiComponentsListMessageHandlers. Nothing useful to attach to
+      // anymore, so just stop here.
+      if (!row.isConnected) {
+        return;
+      }
       const iframe = document.createElement('iframe');
       iframe.sandbox = 'allow-scripts';
       iframe.srcdoc = result.html;
@@ -1094,17 +1123,19 @@
   // queuing logic needed.
   let currentTemplateTheme = 'light';
 
-  // Same request-token-guard discipline again, for Phase 10 item 2's
-  // "want help fixing this?" rows -- guards against a stale
-  // artifact.requestBuildFix response clobbering a newer render if a row
-  // is reused or Detail is closed/reopened mid-request.
-  let buildFixRequestId = 0;
-
-  // Same request-token-guard discipline, for backend plug-and-play's "AI
-  // wiring merge" rows (renderWiringMergeRow) -- guards against a stale
-  // artifact.requestWiringMerge response clobbering a newer render the
-  // same way buildFixRequestId does for build-fix rows.
-  let wiringMergeRequestId = 0;
+  // Note: renderBuildFixRow/renderWiringMergeRow each keep their OWN
+  // request-id counter as a variable local to that specific row's closure
+  // (declared inside the render function itself, not here) -- a single
+  // shared module-level counter used to guard EVERY row on the page at
+  // once, which meant clicking "Ask" on one row while a DIFFERENT row's
+  // request was still in flight silently discarded that other row's
+  // result the moment it resolved (both rows increment the same counter,
+  // so the first row's captured requestId immediately goes stale) --
+  // even though the two rows target unrelated files with nothing to do
+  // with each other. A per-row counter still protects against the
+  // original, intended case (the SAME row's own request being superseded
+  // by a second click before the first reply arrives) without that
+  // cross-row collision.
 
   /** Clears any live Detail-preview iframe/listener -- called both at the
    * top of loadDetailPreview (about to replace it with a new one) and
@@ -1405,7 +1436,15 @@
     const iframe = document.createElement('iframe');
     iframe.sandbox = 'allow-scripts';
     iframe.className = 'markdown-frame';
-    iframe.srcdoc = buildMarkdownDocument(html);
+    // A real, confirmed dark-mode gap: this document's own <style> used to
+    // be hardcoded light-only colors with no background set at all (so it
+    // rendered on the browser's default white iframe canvas) -- harmless
+    // in light mode (the surrounding .markdown-frame container is white
+    // too) but a stark white rectangle inside an otherwise dark Detail
+    // card once dark mode shipped. Reflects the CURRENT theme at render
+    // time, same "syncs once, not live-reactive to a later toggle" scope
+    // as the template preview iframes' own theme sync.
+    iframe.srcdoc = buildMarkdownDocument(html, getEffectiveTheme());
     container.appendChild(iframe);
 
     const handler = (event) => {
@@ -1434,7 +1473,20 @@
    * injectContentHeightReporter (that one tracks a React #root's mount/
    * remount lifecycle; a static markdown document has no such lifecycle,
    * just a plain ResizeObserver on <body>). */
-  function buildMarkdownDocument(bodyHtml) {
+  function buildMarkdownDocument(bodyHtml, theme) {
+    // A real, confirmed dark-mode gap this closes: this document used to
+    // be hardcoded light-only colors with no explicit body background at
+    // all, so it rendered on the browser's default white iframe canvas
+    // regardless of the app's own theme -- fine in light mode (the
+    // surrounding .markdown-frame container is white too) but a stark
+    // white rectangle inside an otherwise dark Detail card in dark mode.
+    // Same exact hex values as style.css's own dark-mode token overrides
+    // (this sandboxed document can't reach the parent page's CSS custom
+    // properties, so the values are duplicated here rather than shared).
+    const isDark = theme === 'dark';
+    const colors = isDark
+      ? { bg: '#211C15', ink: '#F0EAE0', border: '#3A3226', codeBg: '#241F18', tableStripe: '#191510', accent: '#7A9955' }
+      : { bg: '#FFFCF2', ink: '#1E3C53', border: '#E0D9CE', codeBg: '#F6F1E9', tableStripe: '#FFFCF2', accent: '#ACC384' };
     return `<!doctype html>
 <html><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:;">
@@ -1450,7 +1502,8 @@
     font-family: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
     font-size: 14px;
     line-height: 1.65;
-    color: #1E3C53;
+    background: ${colors.bg};
+    color: ${colors.ink};
     padding: 4px 2px 20px;
     max-width: 760px;
     /* Found by review: a long unbroken token (a URL, hash, or path with
@@ -1467,24 +1520,24 @@
     margin: 1.4em 0 .5em;
   }
   h1 { font-size: 26px; margin-top: 0; }
-  h2 { font-size: 21px; border-bottom: 1px solid #E0D9CE; padding-bottom: .3em; }
+  h2 { font-size: 21px; border-bottom: 1px solid ${colors.border}; padding-bottom: .3em; }
   h3 { font-size: 17px; }
   p, ul, ol { margin: 0 0 1em; }
   ul, ol { padding-left: 1.4em; }
   li { margin-bottom: .3em; }
-  a { color: #1E3C53; text-decoration: underline; text-decoration-color: #C9BFAF; }
-  a:hover { text-decoration-color: #1E3C53; }
+  a { color: ${colors.ink}; text-decoration: underline; text-decoration-color: ${colors.border}; }
+  a:hover { text-decoration-color: ${colors.ink}; }
   code {
     font-family: 'JetBrains Mono', ui-monospace, Consolas, monospace;
     font-size: 12.5px;
-    background: #F6F1E9;
-    border: 1px solid #E0D9CE;
+    background: ${colors.codeBg};
+    border: 1px solid ${colors.border};
     border-radius: 4px;
     padding: 1px 5px;
   }
   pre {
-    background: #F6F1E9;
-    border: 1px solid #E0D9CE;
+    background: ${colors.codeBg};
+    border: 1px solid ${colors.border};
     border-radius: 8px;
     padding: 12px 14px;
     overflow-x: auto;
@@ -1493,15 +1546,15 @@
   blockquote {
     margin: 0 0 1em;
     padding: .2em 1em;
-    border-left: 3px solid #ACC384;
-    color: #1E3C53;
+    border-left: 3px solid ${colors.accent};
+    color: ${colors.ink};
     opacity: .85;
   }
   table { border-collapse: collapse; margin: 0 0 1em; width: 100%; }
-  th, td { border: 1px solid #E0D9CE; padding: 6px 10px; text-align: left; font-size: 13px; }
-  th { background: #F6F1E9; font-weight: 600; }
-  tr:nth-child(even) td { background: #FFFCF2; }
-  hr { border: none; border-top: 1px solid #E0D9CE; margin: 1.5em 0; }
+  th, td { border: 1px solid ${colors.border}; padding: 6px 10px; text-align: left; font-size: 13px; }
+  th { background: ${colors.codeBg}; font-weight: 600; }
+  tr:nth-child(even) td { background: ${colors.tableStripe}; }
+  hr { border: none; border-top: 1px solid ${colors.border}; margin: 1.5em 0; }
   img { max-width: 100%; }
 </style>
 </head><body>
@@ -1886,7 +1939,10 @@ ${bodyHtml}
           `Still missing required value(s): ${result.missingRequiredParams.join(', ')}.`,
         ));
       } else {
-        toastSuccess('Configuration applied.');
+        // Same real scope-boundary note the CLI's own `config` command has
+        // always printed on every call -- the app's Configuration tab had
+        // no way to tell a person the same thing until this was added.
+        toastSuccess(`Configuration applied. ${result.note ?? ''}`.trim());
       }
       // A real secrets-exposure risk -- this is specifically the "you just
       // typed in a secret" moment, so it gets its own distinct toast, never
@@ -2004,6 +2060,11 @@ ${bodyHtml}
   function renderWiringMergeRow(targetFile, description, instructions, guidanceSnippet, remoteName, artifactId) {
     const row = document.createElement('div');
     row.className = 'build-fix-row';
+
+    // Scoped to THIS row alone (see the note above renderBuildFixRow's own
+    // shared-counter removal) -- guards only against this row's own second
+    // click superseding its first in-flight request, never a different row.
+    let wiringMergeRequestId = 0;
 
     const askBtn = document.createElement('button');
     askBtn.type = 'button';
@@ -2571,6 +2632,15 @@ ${bodyHtml}
   function renderBuildFixRow(filePath, buildErrorText) {
     const row = document.createElement('div');
     row.className = 'build-fix-row';
+
+    // Scoped to THIS row alone -- a shared module-level counter here used
+    // to let clicking "Ask" on one file's row silently discard a
+    // DIFFERENT file's row's still-in-flight result the moment it
+    // resolved (both rows incremented the same counter, immediately
+    // staling the other's captured requestId), even though the two rows
+    // target unrelated files. This still guards the originally-intended
+    // case -- this row's own second click superseding its first request.
+    let buildFixRequestId = 0;
 
     const askBtn = document.createElement('button');
     askBtn.type = 'button';
@@ -3447,10 +3517,24 @@ ${bodyHtml}
       progressUnlisten();
       progressUnlisten = null;
     }
-    progressUnlisten = await listen('sidecar-progress', (event) => {
-      const { stage, message } = event.payload;
-      appendProgressLine(stage, message);
-    });
+    try {
+      progressUnlisten = await listen('sidecar-progress', (event) => {
+        const { stage, message } = event.payload;
+        appendProgressLine(stage, message);
+      });
+    } catch (err) {
+      // Every call site does `await beginProgress()` BEFORE its own try
+      // block (deliberately -- see this function's own doc comment about
+      // closing the race before the real sidecar call goes out), so a
+      // rejection here would otherwise propagate out of beginProgress
+      // itself, skip every caller's endProgress(false) in its catch
+      // block, and leave the panel stuck showing "Working…" forever.
+      // Caught here instead: progress LINES just won't stream live for
+      // this action (a real but narrow degradation -- listen() itself
+      // failing is rare), but the action itself still runs and still
+      // reaches its own endProgress() normally either way.
+      progressUnlisten = null;
+    }
   }
 
   /** Marks the progress panel as finished (success or failure) and tears
@@ -4451,6 +4535,15 @@ ${bodyHtml}
     const row = document.createElement('div');
     row.className = 'design-fix-row';
 
+    // Scoped to THIS row alone -- same request-token-guard shape
+    // renderBuildFixRow/renderWiringMergeRow use, closing the gap between
+    // this function's own doc comment (which already claimed to mirror
+    // renderBuildFixRow's structure) and what the code actually did.
+    // Guards against a stale artifact.requestAntiPatternFix response
+    // clobbering a newer render if this row is reused or the wizard
+    // navigates away and back mid-request.
+    let designFixRequestId = 0;
+
     const banner = document.createElement('div');
     banner.className = 'hint-banner-ai';
     banner.textContent = finding;
@@ -4469,14 +4562,17 @@ ${bodyHtml}
 
     askBtn.addEventListener('click', () => {
       void withBusy(askBtn, 'Asking…', async () => {
+        const requestId = ++designFixRequestId;
         let fix;
         try {
           fix = await call('artifact.requestAntiPatternFix', { payloadPath, finding });
         } catch (err) {
+          if (requestId !== designFixRequestId) return; // superseded while awaiting
           resultEl.hidden = false;
           resultEl.textContent = `Could not get a fix -- ${err instanceof Error ? err.message : String(err)}`;
           return;
         }
+        if (requestId !== designFixRequestId) return; // superseded while awaiting
 
         resultEl.hidden = false;
         resultEl.innerHTML = '';
@@ -5480,6 +5576,59 @@ ${bodyHtml}
     }
   }
 
+  // ---------- theme ----------
+  // index.html's own inline head script already applies a saved choice
+  // (via the `data-theme` attribute) before first paint, to avoid a flash
+  // of the wrong theme -- this section only needs to keep the toggle
+  // button's own icon/label in sync and handle the click itself.
+
+  /** No explicit `data-theme` attribute means "following the OS
+   * preference" -- resolves that down to the actual theme in effect right
+   * now, since the toggle always flips relative to what's ACTUALLY
+   * showing, not just whatever was last explicitly chosen. */
+  function getEffectiveTheme() {
+    const explicit = document.documentElement.getAttribute('data-theme');
+    if (explicit === 'dark' || explicit === 'light') {
+      return explicit;
+    }
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  }
+
+  function updateThemeToggleButton() {
+    const btn = $('theme-toggle-btn');
+    const isDark = getEffectiveTheme() === 'dark';
+    // Sun while dark (click it to go back to light), moon while light --
+    // the icon always names the theme clicking it will switch TO.
+    btn.querySelector('use').setAttribute('href', isDark ? '#i-theme-sun' : '#i-theme-moon');
+    const label = isDark ? 'Switch to light mode' : 'Switch to dark mode';
+    btn.setAttribute('aria-label', label);
+    btn.title = label;
+  }
+
+  function toggleTheme() {
+    const next = getEffectiveTheme() === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    try {
+      localStorage.setItem(THEME_KEY, next);
+    } catch (err) {
+      // localStorage unavailable -- the choice just won't survive a
+      // restart; the toggle itself still works for this session.
+    }
+    updateThemeToggleButton();
+  }
+
+  function initTheme() {
+    updateThemeToggleButton();
+    // Only matters before the user has ever made an explicit choice: keep
+    // the button's icon tracking a live OS theme change rather than only
+    // whatever `prefers-color-scheme` was at page load.
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+      if (!document.documentElement.getAttribute('data-theme')) {
+        updateThemeToggleButton();
+      }
+    });
+  }
+
   // ---------- wiring ----------
 
   function wireEvents() {
@@ -5492,6 +5641,7 @@ ${bodyHtml}
       btn.addEventListener('click', () => showView(btn.dataset.view));
     }
 
+    $('theme-toggle-btn').addEventListener('click', () => toggleTheme());
     $('change-folder-btn').addEventListener('click', () => void changeFolder());
     $('refresh-btn').addEventListener('click', () => void refreshCatalogFromRemotes());
     $('check-artifact-updates-btn').addEventListener('click', () => void handleCheckForArtifactUpdates());
@@ -5605,13 +5755,20 @@ ${bodyHtml}
     // Enter anywhere in the form advances to the next step instead of
     // submitting early -- except inside a tag picker's own text input,
     // where Enter already means "commit this chip, keep typing the next
-    // one" (see createTagPicker), and except on the Review step, where
-    // Enter doing nothing is safer than accidentally proposing something.
+    // one" (see createTagPicker), except on the Review step, where Enter
+    // doing nothing is safer than accidentally proposing something, and
+    // except when a BUTTON itself has focus -- a real, confirmed bug:
+    // Back/Review/"Choose file…"/"+ Add param"/"Suggest with Claude" all
+    // live inside this same form, so without this exclusion, tabbing to
+    // any of them and pressing Enter (a button's own native activation
+    // key) got hijacked into "go to next step" instead, making every one
+    // of those buttons unreachable via keyboard.
     $('addnew-form').addEventListener('keydown', (ev) => {
       if (ev.key !== 'Enter') {
         return;
       }
-      if (ev.target.classList.contains('tag-picker-input') || ev.target.tagName === 'TEXTAREA') {
+      if (ev.target.classList.contains('tag-picker-input') || ev.target.tagName === 'TEXTAREA'
+        || ev.target.tagName === 'BUTTON') {
         return;
       }
       if (ADDNEW_STEPS[wizardStepIndex] === 'review') {
@@ -5627,6 +5784,7 @@ ${bodyHtml}
   }
 
   async function init() {
+    initTheme();
     initTagPickers();
     wireEvents();
 

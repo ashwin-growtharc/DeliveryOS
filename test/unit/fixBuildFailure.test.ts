@@ -127,6 +127,21 @@ describe('requestBuildFix (Phase 10 item 2, no subprocess needed for these cases
     expect(result.fixedFile).toBeNull();
     expect(result.reason).toContain('no longer exists');
   });
+
+  it('refuses a file larger than MAX_FILE_CHARS, without ever calling the subprocess -- the real data-loss risk this closes', async () => {
+    // Real, confirmed bug this guards against: silently truncating an
+    // oversized file before asking for "the full corrected file" let
+    // applyBuildFix later write back a response that only ever covered
+    // the first 8000 chars, silently deleting everything past that point.
+    const filePath = 'huge-file.ts';
+    fs.writeFileSync(path.join(cwd, filePath), 'x'.repeat(8001), 'utf-8');
+
+    const result = await requestBuildFix(cwd, filePath, 'some error');
+
+    expect(result.fixedFile).toBeNull();
+    expect(result.reason).toContain('too large');
+    expect(result.reason).toContain('8001');
+  });
 });
 
 describe('applyBuildFix (Phase 10 item 2)', () => {

@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as properLockfile from 'proper-lockfile';
 import { lockfilePath, projectDeliveryOsDir } from '../paths';
 import { LockFile, LockEntry } from './types';
+import { LockfileCorruptError } from '../errors';
 
 const EMPTY_LOCKFILE: LockFile = { version: 1, entries: [] };
 
@@ -13,7 +14,13 @@ export function readLockfile(cwd: string): LockFile {
     return { version: 1, entries: [] };
   }
   const raw = fs.readFileSync(filePath, 'utf-8');
-  const parsed = JSON.parse(raw) as LockFile;
+  let parsed: LockFile;
+  try {
+    parsed = JSON.parse(raw) as LockFile;
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    throw new LockfileCorruptError(`Failed to parse lockfile "${filePath}": ${detail}`);
+  }
   if (!parsed.entries || !Array.isArray(parsed.entries)) {
     return { ...EMPTY_LOCKFILE };
   }

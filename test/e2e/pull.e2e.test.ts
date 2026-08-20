@@ -155,6 +155,27 @@ describe('pull e2e', () => {
     expect(fs.existsSync(path.join(installTarget, '.post_install_ran'))).toBe(false);
   });
 
+  it('list --json reports localStatus reflecting real pulled vs. not-pulled state -- a real CLI/sidecar parity gap this closes (the app\'s own Browse view has always shown this over the same catalog data)', () => {
+    const result = runCli(['list', '--json'], scratchCwd, deliveryOsHome);
+    expect(result.status).toBe(0);
+    const entries = JSON.parse(result.stdout) as (CatalogJsonEntry & { localStatus: string })[];
+
+    // Only the 2 artifacts actually pulled by the two preceding tests are
+    // 'pulled' -- the 3rd, never pulled in this file, must still read
+    // 'not_pulled'.
+    const pulledSoFar = [
+      TEST_ARTIFACTS.find((a) => a.hasPostInstall)!.id,
+      TEST_ARTIFACTS.find((a) => !a.hasPostInstall)!.id,
+    ];
+    for (const id of pulledSoFar) {
+      expect(entries.find((e) => e.id === id)?.localStatus, `expected "${id}" to be pulled`).toBe('pulled');
+    }
+    const neverPulled = TEST_ARTIFACTS.find((a) => !pulledSoFar.includes(a.id));
+    if (neverPulled) {
+      expect(entries.find((e) => e.id === neverPulled.id)?.localStatus).toBe('not_pulled');
+    }
+  });
+
   it('re-pulling the same id upserts the lockfile instead of duplicating', () => {
     const artifact = TEST_ARTIFACTS.find((a) => a.hasPostInstall);
     if (!artifact) throw new Error('fixture must have one artifact with post_install');
@@ -214,6 +235,24 @@ describe('pull e2e', () => {
     const result = runCli(['remote', 'remove', 'never-registered'], scratchCwd, deliveryOsHome);
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain('never-registered');
+  });
+
+  it('check-pending-pushes reports nothing to check for a project with no pushed edits -- a real CLI/sidecar parity gap this closes (the sidecar\'s own sync.resolvePendingPushes RPC has always had this; the underlying engine function is already covered end to end in test/e2e/sync.resolvePendingPushes.test.ts, so this only confirms the CLI wiring)', () => {
+    const result = runCli(['check-pending-pushes'], scratchCwd, deliveryOsHome);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('No pending pushes to check.');
+  });
+
+  it('remote list shows a registered remote via --json, and via the real CLI (a real CLI/sidecar parity gap this closes -- the sidecar\'s own remote.list RPC has always had this)', () => {
+    const jsonResult = runCli(['remote', 'list', '--json'], scratchCwd, deliveryOsHome);
+    expect(jsonResult.status).toBe(0);
+    const remotes = JSON.parse(jsonResult.stdout) as { name: string; url: string }[];
+    expect(remotes.find((r) => r.name === 'test-remote')?.url).toBe(fixtureRemoteDir);
+
+    const humanResult = runCli(['remote', 'list'], scratchCwd, deliveryOsHome);
+    expect(humanResult.status).toBe(0);
+    expect(humanResult.stdout).toContain('test-remote');
+    expect(humanResult.stdout).toContain(fixtureRemoteDir);
   });
 
   describe('install_params (Phase 7)', () => {

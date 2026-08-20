@@ -1,20 +1,35 @@
 import * as path from 'path';
 import { resolveArtifact } from '../pull/pull';
 import { cachePath } from '../remote/remoteCache';
+import { resolveContainedPath } from '../paths';
+import { ManifestValidationError } from '../errors';
 
 /**
  * Resolves a cataloged artifact's real payload directory in its remote's
  * local cache, given just `(remoteName, id)` -- the same `payload_path`
  * escape-hatch convention `pullArtifact`/`pushArtifact`/`compileArtifactPreview`
  * all already used independently before this was factored out here.
+ *
+ * `payload_path` is untrusted manifest input (same threat model as
+ * `pullArtifact`'s own containment check on it) -- resolved here via
+ * `resolveContainedPath` rather than a plain `path.join`, so a value like
+ * `"../../../../evil"` can't escape the remote's own clone.
  */
 export function resolvePayloadDir(remoteName: string, id: string): string {
   const entry = resolveArtifact(id, remoteName);
   const { manifest } = entry;
   const remoteDir = cachePath(remoteName);
-  return manifest.payload_path
-    ? path.join(remoteDir, manifest.payload_path)
-    : path.join(remoteDir, 'artifacts', manifest.id, 'payload');
+  if (!manifest.payload_path) {
+    return path.join(remoteDir, 'artifacts', manifest.id, 'payload');
+  }
+  const contained = resolveContainedPath(remoteDir, manifest.payload_path);
+  if (!contained) {
+    throw new ManifestValidationError(
+      `Artifact "${manifest.id}"'s payload_path ("${manifest.payload_path}") resolves outside the `
+        + `remote's own directory.`,
+    );
+  }
+  return contained;
 }
 
 /**

@@ -75,7 +75,7 @@ describe('sync.resolvePendingPushes e2e', () => {
     'push records a pendingPr; resolvePendingPushes on a MERGED PR resyncs pristine so edited_locally resolves back to pulled',
     async () => {
       const remoteName = 'test-remote-merged';
-      addRemoteEntry({ name: remoteName, url: FAKE_GITHUB_URL, addedAt: new Date().toISOString() });
+      await addRemoteEntry({ name: remoteName, url: FAKE_GITHUB_URL, addedAt: new Date().toISOString() });
       await cloneRemote(remoteName, fixtureRemoteDir);
 
       const artifact = TEST_ARTIFACTS.find((a) => !a.hasPostInstall && a.id === 'welcome-template')!;
@@ -114,6 +114,14 @@ describe('sync.resolvePendingPushes e2e', () => {
       const afterResolve = readLockfile(cwd).entries.find((e) => e.id === artifact.id);
       expect(afterResolve?.pendingPr).toBeUndefined();
 
+      // Real, confirmed regression: this branch used to write a bare
+      // {id, version, remote} object instead of spreading the existing
+      // entry, silently dropping installTarget (and wiredFiles, for an
+      // artifact that has any) the moment a pushed edit's PR got merged --
+      // removeArtifact would then treat this as an old-shape entry with no
+      // recorded install location at all.
+      expect(afterResolve?.installTarget).toBe(installTarget);
+
       // The whole point: edited_locally must now resolve back to "no diff"
       // since the pristine snapshot was resynced from the (now-merged) edit.
       expect(computeChangedFiles(installTarget, pristinePath(cwd, artifact.id))).toEqual([]);
@@ -125,7 +133,7 @@ describe('sync.resolvePendingPushes e2e', () => {
     'resolvePendingPushes on a still-OPEN PR leaves pendingPr and the local edit untouched',
     async () => {
       const remoteName = 'test-remote-open';
-      addRemoteEntry({ name: remoteName, url: FAKE_GITHUB_URL, addedAt: new Date().toISOString() });
+      await addRemoteEntry({ name: remoteName, url: FAKE_GITHUB_URL, addedAt: new Date().toISOString() });
       await cloneRemote(remoteName, fixtureRemoteDir);
 
       const artifact = TEST_ARTIFACTS.find((a) => !a.hasPostInstall && a.id === 'lint-config')!;
@@ -170,7 +178,7 @@ describe('sync.resolvePendingPushes e2e', () => {
     'resolvePendingPushes on a CLOSED (rejected, not merged) PR clears pendingPr but leaves the local edit as-is',
     async () => {
       const remoteName = 'test-remote-rejected';
-      addRemoteEntry({ name: remoteName, url: FAKE_GITHUB_URL, addedAt: new Date().toISOString() });
+      await addRemoteEntry({ name: remoteName, url: FAKE_GITHUB_URL, addedAt: new Date().toISOString() });
       await cloneRemote(remoteName, fixtureRemoteDir);
 
       const artifact = TEST_ARTIFACTS.find((a) => !a.hasPostInstall && a.id === 'welcome-template')!;

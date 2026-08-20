@@ -62,7 +62,7 @@ function makeFakeOctokit(isPrivate = false): FakeOctokit {
  * and clones it, so each test scenario gets its own isolated cache dir and
  * never observes branches created by another scenario. */
 async function registerAndClone(name: string, fixtureRemoteDir: string): Promise<void> {
-  addRemoteEntry({ name, url: FAKE_GITHUB_URL, addedAt: new Date().toISOString() });
+  await addRemoteEntry({ name, url: FAKE_GITHUB_URL, addedAt: new Date().toISOString() });
   await cloneRemote(name, fixtureRemoteDir);
 }
 

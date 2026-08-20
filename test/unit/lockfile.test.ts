@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { readLockfile, upsertEntry, removeEntry } from '../../src/engine/lockfile/lockfile';
 import { lockfilePath, projectDeliveryOsDir } from '../../src/engine/paths';
+import { LockfileCorruptError } from '../../src/engine/errors';
 
 let cwd: string;
 
@@ -132,6 +133,14 @@ describe('lockfile', () => {
       version: '3.0.0',
       remote: 'other-remote',
     });
+  });
+
+  it('readLockfile throws a clear LockfileCorruptError (not a raw SyntaxError) when lock.json is not valid JSON', () => {
+    fs.mkdirSync(projectDeliveryOsDir(cwd), { recursive: true });
+    fs.writeFileSync(lockfilePath(cwd), '{ not valid json !!', 'utf-8');
+
+    expect(() => readLockfile(cwd)).toThrow(LockfileCorruptError);
+    expect(() => readLockfile(cwd)).toThrow(/Failed to parse lockfile/);
   });
 
   it('removeEntry on an id that is not present is a safe no-op', async () => {

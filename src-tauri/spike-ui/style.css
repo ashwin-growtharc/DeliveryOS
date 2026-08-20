@@ -20,8 +20,30 @@
   --sand-100: #F6E8CC; --sand-200: #EDD9B3; --sand-500: #DBC6AB;
   /* additional warm tones */
   --gold-500: #FBD17E; --sky-100: #DBE8F4;
-  /* primary -- navy teal */
+  /* Text-on-tint pair for icon swatches sitting on --sand-100 (kindSwatch's
+     skill/java entries in app.js) -- a fixed hex fg used to pair fine with
+     sand-100's light value, but sand-100 itself gets a real dark tint for
+     dark mode (below), and a medium warm-brown text stopped being legible
+     against it (~2.2:1 contrast, confirmed). Adaptive so both stay paired. */
+  --icon-fg-warm: #8A5A2B;
+  /* Same pairing problem, for --sky-100 (command/typescript/go entries). */
+  --icon-fg-cool: #2E5E82;
+  /* primary -- navy teal. Fixed brand-identity color, deliberately NOT
+     redefined for dark mode: it's only ever used as a solid fill (button/
+     chip backgrounds) with white text on top, which stays legible on a
+     dark page. Body/UI text uses --ink instead (below), which does
+     adapt -- see the dark-mode blocks at the end of this file. */
   --primary-700: #1E3C53; --primary-800: #162D3F; --primary-900: #0E1E2B;
+  /* Generic UI text color. Equal to primary-700 in light mode (so this
+     introduces no visual change here), but a distinct token so dark mode
+     can turn text light without also turning brand-fill buttons light. */
+  --ink: var(--primary-700);
+  --text-secondary: #6E6455;
+  /* Same stack `code, .mono` already sets directly below -- defined as a
+     token too since 5 other rules reference `var(--font-mono, monospace)`
+     and, with no --font-mono ever defined, were silently falling back to
+     the bare generic monospace fallback instead of the real font. */
+  --font-mono: 'JetBrains Mono', ui-monospace, Consolas, monospace;
   /* AI accent colors -- AI-specific elements only, see rule comments below */
   --accent-500: #7A00DF; --accent-600: #6600B8; --cyan-500: #0693E3; --cyan-600: #0577B8; --mint-500: #00D084;
   /* status */
@@ -33,6 +55,76 @@
   --gradient-mint: linear-gradient(135deg, #00D084, #0693E3);
   --shadow-1: 0 1px 3px rgb(0 0 0/0.04); --shadow-2: 0 4px 12px rgb(0 0 0/0.08);
   --radius-md: .5rem; --radius-lg: 1rem; --radius-xl: 1.25rem; --radius-pill: 31.25rem;
+}
+
+/* ---------- dark mode ----------
+ * Defaults to the OS preference (prefers-color-scheme) until the user
+ * makes an explicit choice via the sidebar toggle (app.js), at which
+ * point a `data-theme` attribute on <html> wins in both directions --
+ * same "media query sets the default, an explicit attribute overrides
+ * it either way" pattern used for themeable web content generally.
+ *
+ * A genuine dark palette, not an inversion: surfaces keep the app's warm
+ * (not cold blue-black) character, and every pale accent tint
+ * (sage-100, sand-100/200, sky-100, success/warning/danger-100) gets its
+ * own darkened panel color, with success/warning/danger-600 lightened to
+ * match -- otherwise those badges/banners would keep rendering as bright
+ * light-mode patches on an otherwise dark page. --primary-700/800/900
+ * (brand-fill buttons/chips, white text on top) and the saturated
+ * standalone accents (gold-500, danger-500, accent-500/600, cyan-500/600,
+ * mint-500, sage-500/700, sand-500) are left unchanged in both themes --
+ * already vivid enough to read on a dark surface, and changing them would
+ * dilute the brand identity they exist to carry. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface: #191510; --surface-secondary: #191510; --surface-tertiary: #241F18; --surface-inset: #2C2620;
+    --card: #211C15;
+    --border: #3A3226; --border-strong: #4A4133; --border-subtle: #2C2620;
+    --ink: #F0EAE0;
+    --text-secondary: #A79A87;
+    --sage-100: #26301C;
+    --sand-100: #2E2618; --sand-200: #3A2F1D;
+    --sky-100: #1B2733;
+    --icon-fg-warm: #D9B98A; --icon-fg-cool: #8FC0E3;
+    --success-100: #14311F; --success-600: #5FCB8B;
+    --warning-100: #362408; --warning-600: #E3A73F;
+    --danger-100: #3A1712; --danger-600: #F1795C;
+    --shadow-1: 0 1px 3px rgb(0 0 0/0.35); --shadow-2: 0 4px 14px rgb(0 0 0/0.5);
+  }
+}
+
+:root[data-theme="dark"] {
+  --surface: #191510; --surface-secondary: #191510; --surface-tertiary: #241F18; --surface-inset: #2C2620;
+  --card: #211C15;
+  --border: #3A3226; --border-strong: #4A4133; --border-subtle: #2C2620;
+  --ink: #F0EAE0;
+  --text-secondary: #A79A87;
+  --sage-100: #26301C;
+  --sand-100: #2E2618; --sand-200: #3A2F1D;
+  --sky-100: #1B2733;
+  --icon-fg-warm: #D9B98A; --icon-fg-cool: #8FC0E3;
+  --success-100: #14311F; --success-600: #5FCB8B;
+  --warning-100: #362408; --warning-600: #E3A73F;
+  --danger-100: #3A1712; --danger-600: #F1795C;
+  --shadow-1: 0 1px 3px rgb(0 0 0/0.35); --shadow-2: 0 4px 14px rgb(0 0 0/0.5);
+}
+
+/* Forces light mode even when the OS prefers dark -- an explicit
+   opposite choice has to win over the media query, not just add to it. */
+:root[data-theme="light"] {
+  --surface: #FFFCF2; --surface-secondary: #FFFCF2; --surface-tertiary: #F6F1E9; --surface-inset: #EDE6DA;
+  --card: #FFFFFF;
+  --border: #E0D9CE; --border-strong: #C9BFAF; --border-subtle: #EDE6DA;
+  --ink: #1E3C53;
+  --text-secondary: #6E6455;
+  --sage-100: #EAF4DB;
+  --sand-100: #F6E8CC; --sand-200: #EDD9B3;
+  --sky-100: #DBE8F4;
+  --icon-fg-warm: #8A5A2B; --icon-fg-cool: #2E5E82;
+  --success-100: #DCF8E6; --success-600: #236D40;
+  --warning-100: #FFF4E0; --warning-600: #9C5D00;
+  --danger-100: #FFE5E0; --danger-600: #A2341F;
+  --shadow-1: 0 1px 3px rgb(0 0 0/0.04); --shadow-2: 0 4px 12px rgb(0 0 0/0.08);
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -58,7 +150,7 @@ body {
   margin: 0;
   font-family: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
   background: var(--surface);
-  color: var(--primary-700);
+  color: var(--ink);
   line-height: 1.5;
   font-size: 14px;
   /* A global safety net: fixing each individual long-unbreakable-string
@@ -94,7 +186,7 @@ button {
 
 input, textarea, select {
   font: inherit;
-  color: var(--primary-700);
+  color: var(--ink);
 }
 
 /* Accessibility: visible keyboard focus on every interactive element, 2px
@@ -102,7 +194,7 @@ input, textarea, select {
  * section. `:focus-visible` (not `:focus`) so mouse/touch clicks don't get
  * a ring, only keyboard/programmatic focus. */
 :focus-visible {
-  outline: 2px solid var(--primary-700);
+  outline: 2px solid var(--ink);
   outline-offset: 2px;
 }
 
@@ -142,7 +234,7 @@ input, textarea, select {
 .sidebar-brand {
   font-family: 'EB Garamond', Georgia, serif;
   font-size: 23px;
-  color: var(--primary-700);
+  color: var(--ink);
   padding: 0 8px 22px;
   letter-spacing: .2px;
 }
@@ -159,7 +251,7 @@ input, textarea, select {
   gap: 10px;
   padding: 9px 12px;
   border-radius: var(--radius-md);
-  color: var(--primary-700);
+  color: var(--ink);
   opacity: .7;
   font-weight: 500;
   font-size: 13.5px;
@@ -181,7 +273,7 @@ input, textarea, select {
 .sidebar-item.active {
   opacity: 1;
   background: var(--sage-100);
-  color: var(--primary-700);
+  color: var(--ink);
   font-weight: 600;
 }
 
@@ -229,7 +321,7 @@ input, textarea, select {
 
 .folder-path {
   font-family: 'JetBrains Mono', monospace;
-  color: var(--primary-700);
+  color: var(--ink);
   background: var(--surface-tertiary);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -257,7 +349,7 @@ input, textarea, select {
   border-radius: var(--radius-md);
   padding: 7px 14px;
   cursor: pointer;
-  color: var(--primary-700);
+  color: var(--ink);
   transition: background .1s ease, opacity .1s ease, box-shadow .15s ease;
 }
 
@@ -294,7 +386,7 @@ input, textarea, select {
 }
 
 .btn-ghost {
-  color: var(--primary-700);
+  color: var(--ink);
   border-color: transparent;
   background: transparent;
 }
@@ -306,6 +398,21 @@ input, textarea, select {
 .btn-sm {
   font-size: 12px;
   padding: 5px 11px;
+}
+
+/* A button whose only content is one .glyph icon (currently: the theme
+   toggle) -- square padding instead of .btn-sm's text-shaped padding, so
+   the icon sits centered rather than off-balance. */
+.btn-icon-only {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+}
+
+.btn-icon-only .glyph {
+  width: 16px;
+  height: 16px;
 }
 
 .btn-danger-ghost {
@@ -359,7 +466,7 @@ input, textarea, select {
 }
 
 .empty-state {
-  color: var(--primary-700);
+  color: var(--ink);
   opacity: .6;
   font-size: 13.5px;
   padding: 24px 4px;
@@ -443,7 +550,7 @@ input, textarea, select {
   border-radius: var(--radius-md);
   padding: 8px 12px;
   background: var(--card);
-  color: var(--primary-700);
+  color: var(--ink);
   font-size: 13px;
   flex-shrink: 0;
 }
@@ -474,7 +581,7 @@ input, textarea, select {
   padding: 5px 12px;
   border-radius: var(--radius-md);
   border: 1px solid var(--border);
-  color: var(--primary-700);
+  color: var(--ink);
   opacity: .75;
   background: var(--card);
   cursor: pointer;
@@ -509,7 +616,7 @@ input, textarea, select {
   padding: 9px 15px 11px;
   font-size: 13.5px;
   font-weight: 500;
-  color: var(--primary-700);
+  color: var(--ink);
   opacity: .5;
   cursor: pointer;
   white-space: nowrap;
@@ -522,7 +629,7 @@ input, textarea, select {
 .tab-row .tab.active {
   opacity: 1;
   font-weight: 600;
-  border-bottom-color: var(--primary-700);
+  border-bottom-color: var(--ink);
 }
 
 .page-head {
@@ -911,7 +1018,7 @@ input, textarea, select {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: .04em;
-  color: var(--primary-700);
+  color: var(--ink);
   margin-bottom: 8px;
 }
 
@@ -1056,7 +1163,7 @@ input, textarea, select {
 
 .badge.not_pulled {
   background: var(--surface-inset);
-  color: var(--primary-700);
+  color: var(--ink);
   opacity: .8;
 }
 
@@ -1078,7 +1185,7 @@ input, textarea, select {
  * rule. */
 .badge.update_available {
   background: var(--sand-200);
-  color: var(--primary-800);
+  color: var(--ink);
   opacity: 1;
 }
 
@@ -1156,7 +1263,7 @@ input, textarea, select {
 }
 
 .meta-grid .k {
-  color: var(--primary-700);
+  color: var(--ink);
   opacity: .55;
   font-size: 11.5px;
   font-weight: 500;
@@ -1177,7 +1284,7 @@ input, textarea, select {
   border-radius: var(--radius-md);
   padding: 2px 9px;
   margin: 3px 5px 0 0;
-  color: var(--primary-700);
+  color: var(--ink);
   opacity: .85;
 }
 
@@ -1197,7 +1304,7 @@ input, textarea, select {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: 9px 11px;
-  color: var(--primary-700);
+  color: var(--ink);
   opacity: .85;
   word-break: break-all;
 }
@@ -1257,7 +1364,7 @@ input, textarea, select {
 
 .push-status-text {
   font-size: 13px;
-  color: var(--primary-700);
+  color: var(--ink);
   margin: 0 0 10px;
 }
 
@@ -1372,7 +1479,7 @@ input, textarea, select {
 .route-node-path {
   font-family: 'JetBrains Mono', monospace;
   font-size: 12px;
-  color: var(--primary-700);
+  color: var(--ink);
 }
 
 .route-node-error-note {
@@ -1701,7 +1808,7 @@ input, textarea, select {
   height: 14px;
   border-radius: 50%;
   border: 2px solid var(--border-strong);
-  border-top-color: var(--primary-700);
+  border-top-color: var(--ink);
   animation: spin .7s linear infinite;
   flex-shrink: 0;
 }
@@ -1909,7 +2016,7 @@ input, textarea, select {
 .chip.tag-picker-suggestion {
   border: 1px dashed var(--border-strong);
   background: transparent;
-  color: var(--primary-700);
+  color: var(--ink);
   opacity: .8;
 }
 
@@ -1929,13 +2036,13 @@ input, textarea, select {
   border: 1px solid var(--border);
   border-radius: var(--radius-pill);
   padding: 3px 6px 3px 10px;
-  color: var(--primary-700);
+  color: var(--ink);
 }
 
 .tag-chip-remove {
   border: none;
   background: transparent;
-  color: var(--primary-700);
+  color: var(--ink);
   opacity: .55;
   cursor: pointer;
   font-size: 14px;
@@ -1955,7 +2062,7 @@ input, textarea, select {
   padding: 4px 2px;
   background: transparent;
   font-size: 13px;
-  color: var(--primary-700);
+  color: var(--ink);
 }
 
 .payload-picker {
@@ -2050,7 +2157,7 @@ input, textarea, select {
   font-family: 'EB Garamond', Georgia, serif;
   font-size: 22px;
   font-weight: 400;
-  color: var(--primary-700);
+  color: var(--ink);
   opacity: 1;
   margin-bottom: 12px;
 }

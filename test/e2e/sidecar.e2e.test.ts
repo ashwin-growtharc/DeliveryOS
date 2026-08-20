@@ -532,7 +532,7 @@ describe('sidecar e2e', () => {
       // sidecar subprocess.
       const remoteName = 'sidecar-remote-push-wall';
       const fakeGithubUrl = 'https://github.com/deliveryos-qa-fake-owner/deliveryos-qa-fake-repo.git';
-      addRemoteEntry({ name: remoteName, url: fakeGithubUrl, addedAt: new Date().toISOString() });
+      await addRemoteEntry({ name: remoteName, url: fakeGithubUrl, addedAt: new Date().toISOString() });
       await cloneRemote(remoteName, fixtureRemoteDir);
 
       const cwd = newScratchCwd('push-wall');
@@ -678,7 +678,7 @@ describe('sidecar e2e', () => {
       const remoteName = 'sidecar-remote-push-progress';
       const fakeGithubUrl =
         'https://github.com/deliveryos-qa-fake-owner/deliveryos-qa-fake-repo-progress.git';
-      addRemoteEntry({ name: remoteName, url: fakeGithubUrl, addedAt: new Date().toISOString() });
+      await addRemoteEntry({ name: remoteName, url: fakeGithubUrl, addedAt: new Date().toISOString() });
       await cloneRemote(remoteName, fixtureRemoteDir);
 
       const cwd = newScratchCwd('push-progress');

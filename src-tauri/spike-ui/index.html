@@ -11,6 +11,22 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="style.css" />
+    <script>
+      // Applied synchronously, before body/CSS paint, so a saved dark-mode
+      // choice doesn't show a flash of the light theme while app.js (which
+      // loads at the end of body) is still parsing.
+      (function () {
+        try {
+          var saved = localStorage.getItem('deliveryos.theme');
+          if (saved === 'dark' || saved === 'light') {
+            document.documentElement.setAttribute('data-theme', saved);
+          }
+        } catch (e) {
+          // localStorage unavailable (e.g. disabled) -- fall back to
+          // prefers-color-scheme, same as if nothing were saved.
+        }
+      })();
+    </script>
   </head>
   <body>
     <!-- Icon defs used throughout via <svg><use href="#i-..."/></svg> --
@@ -94,6 +110,16 @@
           <circle cx="10" cy="10" r="1.1" fill="currentColor" stroke="none" />
           <path d="M10 3.5v1.4M10 15.1v1.4M16.5 10h-1.4M4.9 10H3.5M14.6 5.4l-1 1M6.4 13.6l-1 1M14.6 14.6l-1-1M6.4 6.4l-1-1" />
         </symbol>
+        <!-- Theme toggle: sun shown while in dark mode ("switch to light"),
+             moon shown while in light mode ("switch to dark") -- app.js
+             swaps the <use> href, same convention as kindIcon(). -->
+        <symbol id="i-theme-sun" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+          <circle cx="10" cy="10" r="3.4" />
+          <path d="M10 2.3v2M10 15.7v2M17.7 10h-2M4.3 10h-2M15.4 4.6l-1.4 1.4M6 14l-1.4 1.4M15.4 15.4l-1.4-1.4M6 6l-1.4-1.4" />
+        </symbol>
+        <symbol id="i-theme-moon" viewBox="0 0 20 20" fill="currentColor">
+          <path d="M15.5 12.9A6.8 6.8 0 0 1 7.1 4.5a6.8 6.8 0 1 0 8.4 8.4Z" />
+        </symbol>
       </defs>
     </svg>
 
@@ -117,6 +143,9 @@
             <span class="folder-label">Project</span>
             <span id="folder-path" class="folder-path">No folder selected</span>
             <span class="context-strip-spacer"></span>
+            <button id="theme-toggle-btn" class="btn btn-ghost btn-sm btn-icon-only" aria-label="Switch to dark mode" title="Switch to dark mode">
+              <svg class="glyph"><use href="#i-theme-moon"/></svg>
+            </button>
             <button id="change-folder-btn" class="btn btn-sm">Change folder</button>
           </div>
 
@@ -132,6 +161,7 @@
                 id="search-input"
                 type="text"
                 placeholder="Search id, description, kind, owner, or tags"
+                aria-label="Search id, description, kind, owner, or tags"
               />
               <button id="add-new-btn" class="btn btn-primary">+ Add new</button>
             </div>
@@ -182,6 +212,7 @@
             class="mini-search tag-value-search"
             type="text"
             placeholder="Filter values&hellip;"
+            aria-label="Filter values"
             hidden
           />
           <div id="tags-list" class="tag-list-panel"></div>
@@ -234,6 +265,7 @@
                 class="mini-search"
                 type="text"
                 placeholder="Search within this folder&hellip;"
+                aria-label="Search within this folder"
               />
               <button id="tag-folder-pull-all-btn" class="btn btn-sm" hidden></button>
             </div>
@@ -273,7 +305,7 @@
         <!-- Detail -->
         <section id="view-detail" class="view" hidden>
           <button id="back-to-browse-btn" class="btn back-btn">&larr; Back to Browse</button>
-          <div class="card detail-card">
+          <div class="card">
             <div class="detail-header">
               <div class="detail-title-group">
                 <div id="detail-kind-icon" class="kind-swatch lg"></div>
@@ -517,7 +549,7 @@
              openComponentDetail in app.js. -->
         <section id="view-component-detail" class="view" hidden>
           <button id="back-to-component-grid-btn" class="btn back-btn">&larr; Back</button>
-          <div class="card detail-card">
+          <div class="card">
             <div class="detail-header">
               <div class="detail-title">
                 <span id="component-detail-name" class="name"></span>
@@ -793,7 +825,7 @@
         </div>
       </div>
 
-      <div id="toast-stack" class="toast-stack"></div>
+      <div id="toast-stack" class="toast-stack" role="status" aria-live="polite"></div>
     </div>
 
     <script src="sidecar.js"></script>

@@ -30,8 +30,13 @@ export function remotesCacheRoot(): string {
   return path.join(deliveryOsHome(), 'remotes');
 }
 
-/** Path to the local clone cache for a specific named remote. */
+/** Path to the local clone cache for a specific named remote. `name`
+ * ultimately comes from a `remote add --name` flag / RPC arg, not a fixed
+ * internal enum -- sanitized the same way `previewCachePath` below already
+ * sanitizes its own segments, so a value like `../../../SomeFolder` can't
+ * clone (or later, on `remote remove`, delete) outside `remotesCacheRoot()`. */
 export function remoteCachePath(name: string): string {
+  assertSafePathSegment(name, 'remote name');
   return path.join(remotesCacheRoot(), name);
 }
 
@@ -101,6 +106,23 @@ export function pristinePath(cwd: string, id: string): string {
  * same output pointlessly for every different project. */
 export function previewCacheRoot(): string {
   return path.join(deliveryOsHome(), 'preview-cache');
+}
+
+/** Resolves `candidate` against `root`, returning the absolute path only
+ * when it's genuinely contained within `root` -- `undefined` otherwise.
+ * Generalizes `wiring.ts`'s `resolveContainedTargetFile` (which does the
+ * same thing, just always rooted at a project's `cwd`) so the same
+ * containment check can guard any other untrusted manifest-supplied path
+ * -- `install_target`, `payload_path` -- against `../../..` or an absolute
+ * path escaping whichever root it's meant to stay inside (a project's
+ * `cwd` for `install_target`, a remote's cache clone for `payload_path`). */
+export function resolveContainedPath(root: string, candidate: string): string | undefined {
+  const resolvedRoot = path.resolve(root);
+  const resolved = path.resolve(resolvedRoot, candidate);
+  if (resolved !== resolvedRoot && !resolved.startsWith(resolvedRoot + path.sep)) {
+    return undefined;
+  }
+  return resolved;
 }
 
 /** Rejects any path segment that could escape `previewCacheRoot()` via

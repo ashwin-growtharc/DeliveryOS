@@ -157,7 +157,21 @@ export async function requestWiringMerge(
     return { mergedFile: null, reason: `"${targetFile}" no longer exists on disk.` };
   }
 
-  const existingFileContent = fs.readFileSync(fullPath, 'utf-8').slice(0, MAX_FILE_CHARS);
+  // Same real data-loss risk fixBuildFailure.ts's requestBuildFix guards
+  // against (see its own comment): silently truncating before asking for
+  // "the full merged file" would let applyWiringMerge write back a
+  // response that silently drops everything past the truncation point --
+  // the rebuild-verify safety net doesn't reliably catch a truncated
+  // result that still happens to compile. Refuses outright instead.
+  const existingFileContent = fs.readFileSync(fullPath, 'utf-8');
+  if (existingFileContent.length > MAX_FILE_CHARS) {
+    return {
+      mergedFile: null,
+      reason: `"${targetFile}" is too large (${existingFileContent.length} chars, max ${MAX_FILE_CHARS}) `
+        + `for this flow -- it asks for the file's full merged content, and a truncated view of it can't `
+        + `safely produce that without risking silent data loss past the truncation point.`,
+    };
+  }
   const prompt = buildWiringMergePrompt(existingFileContent, description, instructions, guidanceSnippet);
 
   let output: string;

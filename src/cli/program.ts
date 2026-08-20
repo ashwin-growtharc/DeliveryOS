@@ -6,6 +6,7 @@ import { registerPushCommand } from './commands/push';
 import { registerRemoveCommand } from './commands/remove';
 import { registerConfigCommand } from './commands/config';
 import { registerCheckUpdatesCommand } from './commands/checkUpdates';
+import { registerCheckPendingPushesCommand } from './commands/checkPendingPushes';
 import { registerCheckDriftCommand } from './commands/checkDrift';
 import { registerScanCommand } from './commands/scan';
 import { registerWiringCommand } from './commands/wiring';
@@ -25,6 +26,7 @@ export function buildProgram(): Command {
   registerRemoveCommand(program);
   registerConfigCommand(program);
   registerCheckUpdatesCommand(program);
+  registerCheckPendingPushesCommand(program);
   registerCheckDriftCommand(program);
   registerScanCommand(program);
   registerWiringCommand(program);

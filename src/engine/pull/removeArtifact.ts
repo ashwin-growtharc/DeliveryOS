@@ -1,10 +1,9 @@
 import * as fs from 'fs';
-import * as path from 'path';
 import { readLockfile, removeEntry } from '../lockfile/lockfile';
 import { resolveArtifact } from './pull';
 import { resolveContainedTargetFile, resolveWiringActions } from './wiring';
 import { readExistingEnvValues } from './installParams';
-import { pristinePath } from '../paths';
+import { pristinePath, resolveContainedPath } from '../paths';
 import { ArtifactNotPulledError } from '../errors';
 
 /** What `removeArtifact` actually did against a real project -- every field
@@ -54,9 +53,9 @@ export async function removeArtifact(cwd: string, id: string): Promise<RemoveRes
   // the manifest -- same function pull.ts itself uses. If that ALSO fails
   // (remote unregistered, artifact deleted from the catalog), fail loud and
   // honest rather than guess a path to delete.
-  let installTarget: string;
+  let rawInstallTarget: string;
   if (entry.installTarget) {
-    installTarget = entry.installTarget;
+    rawInstallTarget = entry.installTarget;
   } else {
     let resolved;
     try {
@@ -69,7 +68,25 @@ export async function removeArtifact(cwd: string, id: string): Promise<RemoveRes
           + `delete its installed files manually, then remove its lockfile entry by hand.`,
       );
     }
-    installTarget = path.resolve(cwd, resolved.manifest.install_target);
+    rawInstallTarget = resolved.manifest.install_target;
+  }
+
+  // Defense in depth, same posture as the wiredFiles re-validation just
+  // below: `lock.json` is a plain project-local JSON file a person could
+  // hand-edit (or, for the fallback branch above, a value freshly re-read
+  // from an untrusted manifest) -- never trusted blindly before a
+  // recursive delete, even though `entry.installTarget` is normally
+  // DeliveryOS's own prior write. Unlike wiredFiles (silently skipped when
+  // uncontained -- a minor, secondary part of the artifact), this is the
+  // PRIMARY thing being removed, so a failed containment check fails loud
+  // rather than quietly reporting "removed: false" for what looks like a
+  // normal, successful no-op.
+  const installTarget = resolveContainedPath(cwd, rawInstallTarget);
+  if (!installTarget) {
+    throw new ArtifactNotPulledError(
+      `"${id}"'s recorded install location ("${rawInstallTarget}") resolves outside this project -- `
+        + `refusing to delete it. Nothing was removed; check lock.json by hand before retrying.`,
+    );
   }
 
   let removedInstallTarget = false;

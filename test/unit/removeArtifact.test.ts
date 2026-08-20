@@ -192,6 +192,41 @@ describe('removeArtifact', () => {
     }
   });
 
+  it('refuses to remove (and deletes nothing) when the lockfile-recorded installTarget itself resolves outside cwd', async () => {
+    // The installTarget equivalent of the wiredFiles escape test above --
+    // lock.json is a plain project-local file a person (or a bug) could
+    // hand-edit; a recursive delete on its own primary target must be
+    // re-validated for containment, not just wiredFiles.
+    const trapRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'deliveryos-remove-installtarget-trap-'));
+    const nestedCwd = path.join(trapRoot, 'a', 'b', 'c', 'd', 'project');
+    fs.mkdirSync(nestedCwd, { recursive: true });
+    const outsideDir = path.resolve(nestedCwd, '..', '..', '..', '..', 'evil-install-target');
+    fs.mkdirSync(outsideDir, { recursive: true });
+    fs.writeFileSync(path.join(outsideDir, 'important.txt'), 'do not delete me', 'utf-8');
+
+    try {
+      await upsertEntry(nestedCwd, {
+        id: 'escaping-install-target-plugin',
+        version: '1.0.0',
+        remote: 'nonexistent-remote',
+        installTarget: outsideDir,
+      });
+
+      await expect(removeArtifact(nestedCwd, 'escaping-install-target-plugin')).rejects.toThrow(
+        ArtifactNotPulledError,
+      );
+      expect(fs.existsSync(outsideDir)).toBe(true);
+      expect(fs.readFileSync(path.join(outsideDir, 'important.txt'), 'utf-8')).toBe('do not delete me');
+
+      // Nothing was removed -- the lockfile entry must still be there for
+      // a person to inspect, not silently dropped by a failed removal.
+      const lockfile = readLockfile(nestedCwd);
+      expect(lockfile.entries.find((e) => e.id === 'escaping-install-target-plugin')).toBeDefined();
+    } finally {
+      fs.rmSync(trapRoot, { recursive: true, force: true });
+    }
+  });
+
   it('reports install_params keys still set in .env.local after removal, since .env.local is never touched', async () => {
     writeRegistry(['test-remote']);
     writeManifest('test-remote', {

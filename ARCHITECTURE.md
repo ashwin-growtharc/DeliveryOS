@@ -1,7 +1,24 @@
 # DeliveryOS — Organization Resource Sharing Platform
 
-**Status:** design draft, unratified. **Implementation:** Phase 0 (Engine MVP)
-built — see [PLAN.md](PLAN.md) and [README.md](README.md). **Name:** DeliveryOS (decided).
+**This document is the ORIGINAL design proposal, written before implementation
+started.** It's kept for the reasoning behind early decisions (§6, §9, §10),
+not as a live-updated description of the current system -- most of what's
+below (the 5-layer model, profiles/role-based routing, the `reference`/
+`dataset`/`snippet`/`config` kinds, "ArcOS as a remote") was the original
+plan and was **not** built as described, superseded by a different, simpler
+shape that emerged during actual implementation. **For what's actually true
+today, see [PLAN.md](PLAN.md)** (phase-by-phase status, current through
+Phase 14) **and [README.md](README.md)** (real CLI usage). §4.1 and §8 below
+have brief corrections pointing at that reality where the drift is most
+likely to mislead; the rest of this document is left as-written, historical
+context only.
+
+**Implementation status (real, current):** far past Phase 0 -- Phases 0
+through 14 are done (manifest engine, push/PR automation, the Tauri desktop
+app, Claude Code integration, backend-plugin/ui-component support, dark
+mode). See [PLAN.md](PLAN.md) for the actual phase list; §8's table below is
+the ORIGINAL 6-phase plan and stops at "Phase 5 — Polish," several phases
+short of where the project actually is. **Name:** DeliveryOS (decided).
 **Origin:** grew out of exploring ArcOS's catalog/distribution model; scoped out
 as its own project rather than an ArcOS extension.
 
@@ -134,6 +151,18 @@ LAYER 5 — HOW PEOPLE INTERACT (interfaces)
    update lands back in Shared Remotes, ready for the next person's Pull.
 
 ### 4.1 Artifact kinds in detail
+
+**Correction (real, current state):** the table below is the ORIGINAL
+proposed kind list and is now stale on several rows -- `manifest.kind` is an
+open `z.string()` field in the real schema (`src/engine/manifest/schema.ts`),
+not a closed enum, and the kinds actually shipped and heavily used today are
+`agent`, `skill`, `command`, `rule`, `template`, `doc`, `backend-plugin`
+(Phase 7), and `ui-component` (Phase 6/11) -- **`template` IS a real,
+DeliveryOS-managed kind** (the "not yet managed" status below is wrong), and
+`backend-plugin`/`ui-component` don't appear in this table at all since they
+were designed after this document was written. `dataset`/`snippet`/
+`config`/`reference` (below) were never built. See PLAN.md's Phase 6/7/11
+entries for what `backend-plugin`/`ui-component` actually do.
 
 Layer 1's `kind` list, expanded with what would actually populate each one:
 
@@ -313,6 +342,14 @@ review_required: true
 
 ## 8. Phased roadmap (detail — see 5.4 for the flow view)
 
+**Correction (real, current state):** this table is the ORIGINAL 6-phase
+plan (0 through 5) and is now badly out of date -- the real project has
+continued through Phase 14 (see [PLAN.md](PLAN.md) for the authoritative,
+current phase list: UI Components, Tier 0 hardening, backend plug-and-play
+artifacts, two rounds of Claude Code integration, a design-kit bundle, and
+dark mode all shipped after "Phase 5 — Polish" below). Left unedited past
+this note as the original plan's own record.
+
 **Phases 0–2 are the MVP/POC.** Single developer, no auth system, no UI —
 just proving the core loop (pull, edit, push, review, merge) works end to
 end against one real remote. Auth, profiles, and the desktop app are all
@@ -488,6 +525,13 @@ leans on with git as the storage backend and, per §10.1, `AGENTS.md` as the
 proprietary one wherever one already exists.
 
 ## 11. Next steps
+
+**Superseded -- see PLAN.md's own "What's next" section for the real,
+current list.** This section's own 3 items (below, left unedited as the
+original plan's record) were written when only Phase 0 was done; all three
+were completed long ago (Push shipped Phase 1, the app's distribution story
+was addressed well past Phase 3, and the kind vocabulary stayed
+intentionally open rather than being trimmed -- §4.1's correction above).
 
 Phase 0 is done (§8). Pick one to start next:
 1. Phase 1 — Push: GitHub API integration (branch + commit + PR) on top of the Phase 0 engine.

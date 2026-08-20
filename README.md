@@ -53,22 +53,45 @@ machine first (Node version, `gh` CLI, and — for the desktop app only — Rust
 
 ```
 deliveryos remote add <git-url> [--name <name>]   # register a git-backed remote
-deliveryos list [--remote <name>] [--json]         # list available artifacts
-deliveryos pull <id> [--remote <name>]             # pull an artifact locally
+deliveryos remote list [--json]                    # list registered remotes
+deliveryos remote remove <name>                    # unregister a remote and delete its local cache clone
+deliveryos list [--remote <name>] [--json]         # list available artifacts (localStatus included)
+deliveryos pull <id> [--remote <name>] [--set KEY=VALUE ...]  # pull an artifact locally
 deliveryos remove <id>                             # remove a previously-pulled artifact
 deliveryos config <id> [--remote <name>] --set KEY=VALUE  # rotate/configure install_params without a re-pull
 
-deliveryos push <id> [--remote <name>]             # push a local edit as a PR
+deliveryos push <id> [--remote <name>] [--bump patch|minor|major]  # push a local edit as a PR
+deliveryos push <id> --description <text> [--roles a,b] [--teams a,b] \
+  [--stacks a,b] [--component-types a,b]            # metadata-only edit (no --new, no payload touched)
 deliveryos push <id> --new --remote <name> --path <dir> --kind <kind> \
   --owner <owner> --description <text> [--install-target <path>] \
   [--artifact-version <semver>] [--review-required] \
   [--roles a,b] [--teams a,b] [--stacks a,b] \
   [--component-types a,b] [--post-install <cmd>]    # propose a new artifact as a PR
+
+deliveryos check-updates                           # check registered remotes for newer versions of pulled artifacts
+deliveryos check-pending-pushes                    # check GitHub for the real state of pushed edits still awaiting PR resolution
+deliveryos check-drift <id> -r <remote> -s <path>  # check whether an extracted artifact's real external source has changed
+deliveryos scan -r <remote>                        # find installable content not yet tracked, print a ready-to-edit push command per candidate
+deliveryos wiring <id> [--remote <name>] [--json]  # show an artifact's Tier-2 wiring suggestions, resolved against the current project
 ```
 
 `push` opens a real GitHub pull request (via `gh auth token` — run
 `gh auth login` once if you haven't) against the artifact's owning remote.
-Requires a GitHub-hosted remote.
+Requires a GitHub-hosted remote. Without `--new`, `push` edits an
+already-tracked artifact: give it real payload changes (pushes an edit,
+bumping the version — `--bump` only chooses a *bigger* bump than the
+default `patch`, a real payload change always bumps something) or just
+`--description`/`--roles`/`--teams`/`--stacks`/`--component-types` alone
+(a metadata-only edit — no payload touched, no version bump).
+
+`pull --set KEY=VALUE` (repeatable) provides a value for one of the
+artifact's declared `install_params` up front — written to `.env.local` at
+the project root, never into the artifact's own `install_target`. Anything
+still missing after that is reported, not a hard failure; `deliveryos
+config <id> --set KEY=VALUE` fills in the rest later without a re-pull
+(this does *not* re-run `wiring_actions` — only code that reads
+`process.env` at runtime sees the new value).
 
 `--post-install` (propose-new only) is whatever one-line shell command a
 fresh pull of this artifact should run afterward — `npm install`,

@@ -26,10 +26,22 @@ function utcTimestamp(date: Date): string {
  * `.` or end with `.lock`).
  */
 function slugifyForRef(id: string): string {
-  return id
+  const slug = id
     .toLowerCase()
     .replace(/[^a-z0-9._-]+/g, '-')
     .replace(/^[-.]+|[-.]+$/g, '');
+  // An id made entirely of characters this strips (e.g. "???", or an
+  // all-emoji id) slugifies to "" -- buildBranchName would then produce
+  // an invalid double-slash ref (`deliveryos//<timestamp>-<hex>`), failing
+  // deep inside createBranch with a cryptic git error instead of naming
+  // the real problem. Falls back to a short hash of the ORIGINAL id so
+  // the branch name stays a function of the id (two pushes for the same
+  // unslugifiable id still get visibly-related branch names), rather than
+  // a fixed placeholder that would look identical for every such id.
+  if (slug.length === 0) {
+    return `artifact-${crypto.createHash('sha256').update(id).digest('hex').slice(0, 8)}`;
+  }
+  return slug;
 }
 
 /**

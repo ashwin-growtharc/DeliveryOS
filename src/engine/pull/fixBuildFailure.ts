@@ -142,10 +142,32 @@ export async function requestBuildFix(cwd: string, filePath: string, buildError:
     return { fixedFile: null, reason: `"${filePath}" no longer exists on disk.` };
   }
 
-  const fileContent = fs.readFileSync(fullPath, 'utf-8').slice(0, MAX_FILE_CHARS);
+  // Real, confirmed data-loss risk this used to have: silently truncating
+  // the file to MAX_FILE_CHARS before asking for "the full corrected
+  // file," then applyBuildFix writing that response back as the file's
+  // ENTIRE new content -- for any file longer than the cap, the model
+  // never sees (and so can't reproduce) everything past the truncation
+  // point, and its "full file" response would silently delete it. The
+  // rebuild-verify safety net doesn't reliably catch this: a truncated
+  // result can still happen to compile. Refusing outright for an
+  // oversized file is the only safe option for a flow whose whole point
+  // is "propose the exact full file to overwrite" -- there's no partial/
+  // best-effort version of that which doesn't risk deleting real content.
+  const fileContent = fs.readFileSync(fullPath, 'utf-8');
+  if (fileContent.length > MAX_FILE_CHARS) {
+    return {
+      fixedFile: null,
+      reason: `"${filePath}" is too large (${fileContent.length} chars, max ${MAX_FILE_CHARS}) for this `
+        + `flow -- it asks for the file's full corrected content, and a truncated view of it can't safely `
+        + `produce that without risking silent data loss past the truncation point.`,
+    };
+  }
   // The actionable part of a real compiler/bundler error is almost always
   // at the end (a stack trace or a wall of preceding warnings comes
-  // first) -- keep the tail, not the head, when capping length.
+  // first) -- keep the tail, not the head, when capping length. (Only the
+  // build error is capped, never the file -- unlike the file, the error
+  // is never written back anywhere, so truncating it loses nothing but
+  // context for the model.)
   const cappedError = buildError.slice(-MAX_BUILD_ERROR_CHARS);
   const prompt = buildFixPrompt(fileContent, cappedError);
 
