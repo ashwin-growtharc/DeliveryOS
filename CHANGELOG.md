@@ -6,6 +6,25 @@ All notable changes to DeliveryOS are recorded here, newest first. See
 
 ---
 
+## Phase 16 — A real update-apply path
+
+- **`deliveryos check-updates --apply`** and a new sidecar
+  `artifact.applyUpdate` RPC actually apply an available update now,
+  instead of `check-updates` only ever reporting "installed -> available."
+  Deliberately conservative: only applies when the current install has
+  zero local edits (byte-for-byte identical to its pristine snapshot) --
+  an artifact with real local edits is reported, never guessed at or
+  silently skipped.
+- **Fixes a real bug** in the app's existing "Update" button (previously
+  just a plain re-pull under a friendlier label): a plain pull never
+  deletes a file a newer version actually removed, so it would silently
+  survive forever. The new path diffs the old pristine snapshot against
+  the new payload and deletes exactly those files. Both the single-artifact
+  "Update" button and the bulk "Pull all" action now use it for
+  already-pulled, no-wiring-declared artifacts.
+- Consolidated `pull.ts`/`verifyBuild.ts`'s duplicated `isExecError`/
+  `isToolNotFoundError` helpers into `src/engine/execHelpers.ts`.
+
 ## Phase 15 — Full-codebase audit and fix pass
 
 - **Dark-mode palette redesigned** after real visual review caught two

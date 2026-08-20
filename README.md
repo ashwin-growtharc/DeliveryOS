@@ -69,7 +69,7 @@ deliveryos push <id> --new --remote <name> --path <dir> --kind <kind> \
   [--roles a,b] [--teams a,b] [--stacks a,b] \
   [--component-types a,b] [--post-install <cmd>]    # propose a new artifact as a PR
 
-deliveryos check-updates                           # check registered remotes for newer versions of pulled artifacts
+deliveryos check-updates [--apply]                 # check for newer versions; --apply actually updates every eligible one
 deliveryos check-pending-pushes                    # check GitHub for the real state of pushed edits still awaiting PR resolution
 deliveryos check-drift <id> -r <remote> -s <path>  # check whether an extracted artifact's real external source has changed
 deliveryos scan -r <remote>                        # find installable content not yet tracked, print a ready-to-edit push command per candidate
@@ -92,6 +92,11 @@ still missing after that is reported, not a hard failure; `deliveryos
 config <id> --set KEY=VALUE` fills in the rest later without a re-pull
 (this does *not* re-run `wiring_actions` — only code that reads
 `process.env` at runtime sees the new value).
+
+`check-updates --apply` only ever updates an artifact whose current install
+is byte-for-byte identical to its pristine snapshot (no local edits) — one
+with real local edits is reported, never touched, since safely merging a
+local edit against a new upstream version isn't attempted here.
 
 `--post-install` (propose-new only) is whatever one-line shell command a
 fresh pull of this artifact should run afterward — `npm install`,

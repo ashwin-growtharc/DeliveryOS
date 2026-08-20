@@ -14,6 +14,7 @@ import {
   applyEnvExamplePlaceholders,
 } from './installParams';
 import { verifyArtifactSignature } from '../provenance/verify';
+import { isExecError, isToolNotFoundError } from '../execHelpers';
 
 export interface PullResult {
   manifest: Manifest;
@@ -46,12 +47,6 @@ export interface PullResult {
  */
 export type ProgressCallback = (stage: string, message: string) => void;
 
-function isExecError(
-  err: unknown,
-): err is Error & { stdout?: Buffer; stderr?: Buffer; code?: string } {
-  return err instanceof Error;
-}
-
 // post_install commands are commonly `npm install`-shaped: on a fresh
 // machine with a cold npm/pip cache, no local package cache, native
 // module builds, or just a slow network, this can legitimately take
@@ -59,19 +54,7 @@ function isExecError(
 // (`verifyBuild.ts`'s `BUILD_VERIFY_TIMEOUT_MS`) since this runs exactly
 // once per pull rather than repeatedly, and installs are typically
 // slower than a plain rebuild.
-const POST_INSTALL_TIMEOUT_MS = 10 * 60 * 1000;
-
-// Detects "the command's own tool isn't installed / isn't on PATH at all"
-// as distinct from "the tool ran and found a real problem" -- same
-// empirically-confirmed reasoning as `verifyBuild.ts`'s copy of this
-// check (see that file's doc comment): `execSync` runs through a shell,
-// so a missing tool surfaces as the shell's own non-zero exit with this
-// wording, never a Node-level ENOENT.
-function isToolNotFoundError(text: string): boolean {
-  return /is not recognized as an internal or external command/i.test(text)
-    || /command not found/i.test(text)
-    || /:\s*not found\s*$/im.test(text);
-}
+export const POST_INSTALL_TIMEOUT_MS = 10 * 60 * 1000;
 
 /**
  * Resolves which catalog entry `id` refers to. Throws

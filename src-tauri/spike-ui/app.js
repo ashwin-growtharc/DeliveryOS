@@ -2873,10 +2873,21 @@ ${bodyHtml}
       return { label: 'Push', action: 'push' };
     }
     if (status === 'update_available') {
-      // Pulling always overwrites install_target with current upstream
-      // content, so "Update" is just a pull under a friendlier label --
-      // no separate update codepath needed.
-      return { label: 'Update', action: 'pull' };
+      // A real, confirmed bug in the old "Update is just a pull under a
+      // friendlier label" shortcut: pull always OVERWRITES/ADDS files from
+      // the new payload, but never DELETES a file the new version actually
+      // REMOVED -- that stale file would silently survive in the project
+      // forever. artifact.applyUpdate (Phase 16) fixes this (diffs the old
+      // pristine snapshot against the new payload to find removed files)
+      // and re-verifies no local edit snuck in since the last check, rather
+      // than trusting this button's own client-side state. Artifacts that
+      // declare wiring_actions keep going through the existing
+      // pullAndAutoWire path instead (below) -- applyUpdate deliberately
+      // doesn't attempt to auto-apply a NEW wiring_action a version bump
+      // might have added, so the wiring-aware path stays how it already
+      // was rather than losing that behavior.
+      const hasWiring = entry.manifest.wiring_actions && entry.manifest.wiring_actions.length > 0;
+      return { label: 'Update', action: hasWiring ? 'pull' : 'applyUpdate' };
     }
     if (status === 'both_changed') {
       // No default one-click action: pulling here would silently discard
@@ -2941,15 +2952,32 @@ ${bodyHtml}
       let gitignoreWarning;
       for (let i = 0; i < pullable.length; i += 1) {
         const entry = pullable[i];
-        btn.textContent = `Pulling ${i + 1}/${pullable.length}: ${entry.manifest.id}`;
+        // Same real bug fix as the single-artifact "Update" button: an
+        // already-pulled entry here means displayStatus is 'update_available'
+        // (isBulkPullable's only other eligible status besides 'not_pulled'),
+        // and a plain pull never deletes a file the new version removed --
+        // applyUpdate does. Bulk pull already doesn't special-case
+        // wiring_actions even for 'not_pulled' entries (a deliberate existing
+        // simplification, not something this changes).
+        const isUpdate = displayStatus(entry) === 'update_available';
+        btn.textContent = `${isUpdate ? 'Updating' : 'Pulling'} ${i + 1}/${pullable.length}: ${entry.manifest.id}`;
         try {
-          const result = await call('artifact.pull', {
-            id: entry.manifest.id,
-            remote: entry.remoteName,
-            cwd: state.projectDir,
-          });
-          succeeded += 1;
-          gitignoreWarning = gitignoreWarning || result.gitignoreWarning;
+          if (isUpdate) {
+            const [result] = await call('artifact.applyUpdate', { id: entry.manifest.id, cwd: state.projectDir });
+            if (result && !result.applied) {
+              failures.push(`${entry.manifest.id}: ${result.reason}`);
+              continue;
+            }
+            succeeded += 1;
+          } else {
+            const result = await call('artifact.pull', {
+              id: entry.manifest.id,
+              remote: entry.remoteName,
+              cwd: state.projectDir,
+            });
+            succeeded += 1;
+            gitignoreWarning = gitignoreWarning || result.gitignoreWarning;
+          }
         } catch (err) {
           failures.push(`${entry.manifest.id}: ${err instanceof Error ? err.message : String(err)}`);
         }
@@ -2957,7 +2985,10 @@ ${bodyHtml}
       endProgress(failures.length === 0);
 
       if (succeeded > 0) {
-        toastSuccess(`Pulled ${succeeded} artifact${succeeded === 1 ? '' : 's'}`);
+        // "Pulled" (not "processed"/"handled") stays the right word even
+        // for the update_available entries in this batch -- pulling IS
+        // literally what applyUpdate does under the hood, just more safely.
+        toastSuccess(`Pulled/updated ${succeeded} artifact${succeeded === 1 ? '' : 's'}`);
       }
       if (gitignoreWarning) {
         toastError(new Error(gitignoreWarning));
@@ -3152,16 +3183,34 @@ ${bodyHtml}
     }
   }
 
-  /** Runs `action` ('pull' or 'push') for `entry`, driving the shared
-   * progress/log panel (see beginProgress/endProgress) around the call.
-   * The single call site for both actions everywhere they can be
-   * triggered one-at-a-time: Detail's action button, and a row's own
-   * inline button inside a Tag Folder view. */
+  /** Runs `action` ('pull', 'push', or 'applyUpdate') for `entry`, driving
+   * the shared progress/log panel (see beginProgress/endProgress) around
+   * the call. The single call site for all three actions everywhere they
+   * can be triggered one-at-a-time: Detail's action button, and a row's
+   * own inline button inside a Tag Folder view. */
   async function runArtifactAction(entry, action, button) {
     await withBusy(button, 'Working...', async () => {
       await beginProgress();
       try {
-        if (action === 'pull') {
+        if (action === 'applyUpdate') {
+          const [result] = await call('artifact.applyUpdate', {
+            id: entry.manifest.id,
+            cwd: state.projectDir,
+          });
+          if (!result) {
+            // Its own client-side availableVersion was stale (someone/
+            // something else already resolved it) -- nothing to report as
+            // an error, just nothing left to do.
+            toastSuccess(`"${entry.manifest.id}" is already up to date.`);
+          } else if (result.applied) {
+            toastSuccess(
+              `Updated "${entry.manifest.id}" ${result.previousVersion} -> ${result.availableVersion}.`
+                + (result.note ? ` ${result.note}` : ''),
+            );
+          } else {
+            toastError(new Error(result.reason));
+          }
+        } else if (action === 'pull') {
           // Phase 10 item 1: only artifacts that actually declare
           // wiring_actions opt into the auto-apply-and-test path -- every
           // other artifact (the overwhelming majority) keeps using the

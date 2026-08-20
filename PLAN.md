@@ -643,9 +643,69 @@ changed, not which tokens exist or where they're used.
   full parallel load (both confirmed pre-existing, re-verified in
   isolation each time).
 
+## Phase 16 — A real update-apply path — **Done**
+
+Goal: close Phase 13's biggest deferred gap. `checkForUpdates` had always
+only ever reported "installed -> available" -- nothing ever actually
+re-pulled or re-applied a newer version. Scoped deliberately conservative,
+not a full 3-way merge: only ever applies IF AND ONLY IF the current
+install is byte-for-byte identical to its pristine snapshot (no local
+edits at all); an artifact with real local edits is reported, never
+silently skipped and never guessed at -- a real per-file merge across a
+whole artifact's worth of files is the same hard problem
+`requestWiringMerge.ts`'s single-file AI-assisted merge already exists
+for, and extending that to whole-artifact updates is separate, future work.
+
+- New `applyAvailableUpdates(cwd, onProgress?, onlyId?)`
+  (`src/engine/sync/applyUpdate.ts`): fetches only the remotes actually
+  referenced (same shape `checkForUpdates` already uses), then for each
+  outdated entry either applies the update (copies the new payload,
+  re-runs `post_install`, resyncs the pristine snapshot, bumps the
+  lockfile version) or reports a clear, specific reason it refused to.
+  A single artifact's `post_install` failing never aborts the rest of a
+  batch -- same "one bad one doesn't block the others" posture
+  `refreshCatalog`/`resolvePendingPushes` already established.
+- **Fixes a real, confirmed bug the OLD "Update is just a pull under a
+  friendlier label" shortcut had**: `fs.cpSync` only adds/overwrites files
+  the new payload has -- it never deletes a file the new version actually
+  REMOVED, so that stale file would silently survive in the project
+  forever. `applyAvailableUpdates` diffs the OLD pristine snapshot against
+  the NEW payload to find exactly those removed files and deletes them for
+  real. Also re-verifies "no local edit" fresh at apply time rather than
+  trusting a UI's own cached `availableVersion`/`localStatus` snapshot.
+- **CLI**: `deliveryos check-updates --apply` -- applies every eligible
+  update in one pass, printing a clear per-artifact outcome (updated, or
+  not-updated-and-why).
+- **Sidecar**: new `artifact.applyUpdate` RPC, scoped to a single artifact
+  (`onlyId`) -- the app's own per-artifact "Update" action.
+- **App**: the existing Detail/Tag-Folder "Update" button and the bulk
+  "Pull all" action both now route an already-pulled, no-wiring-declared,
+  update-available artifact through `artifact.applyUpdate` instead of a
+  blind re-pull -- fixing the same file-deletion bug there too. An
+  artifact that DOES declare `wiring_actions` deliberately keeps going
+  through the existing `pullAndAutoWire` path unchanged (this feature
+  doesn't attempt to auto-apply a NEW wiring_action a version bump might
+  have added, so that flow's own established behavior isn't touched).
+  The explicit, confirm-gated "Overwrite with upstream (discards your
+  local edits)" escape hatch for `both_changed`/`edited_locally` entries
+  deliberately still uses a plain pull, unchanged -- that flow exists
+  specifically for the case `applyAvailableUpdates` refuses (a real local
+  edit), so routing it through the safer function would just always fail.
+- **Shared refactor along the way**: `pull.ts` and `verifyBuild.ts` each
+  had their own near-identical private `isExecError`/`isToolNotFoundError`
+  helpers (flagged, not yet fixed, by Phase 15's own audit) -- consolidated
+  into a new `src/engine/execHelpers.ts` once a third caller
+  (`applyUpdate.ts`) needed the same check.
+- **Tests**: new `test/e2e/applyUpdate.e2e.test.ts` (6 tests: safe update
+  applies cleanly, a removed file is actually deleted, `post_install`
+  re-runs and its output is reported, local edits correctly refuse and
+  touch nothing, an up-to-date project reports nothing, `onlyId` correctly
+  scopes a batch) and `test/e2e/checkUpdates.e2e.test.ts` (a CLI-wiring
+  smoke test via the real CLI subprocess).
+
 ## What's next
 
-- **Phase 13** (backend plug-and-play: basic hygiene) — in progress, 5 of 6 items done (uninstall, secrets safety net, timeouts, post-pull secret rotation, config-form reuse-existing-value autofill); real update-apply path not started, and config-form autofill's other two sub-cases (genuine local signal, neither) deliberately deferred/descoped, see above
+- **Phase 13** (backend plug-and-play: basic hygiene) — in progress, 5 of 6 items done (uninstall, secrets safety net, timeouts, post-pull secret rotation, config-form reuse-existing-value autofill); config-form autofill's other two sub-cases (genuine local signal, neither) deliberately deferred/descoped, see above
 - **Phase 12** — both scoped-in items done; the rest deferred/descoped, see above
 - **Phase 4** (team rollout: auth/SSO, profiles, multi-remote) — deferred until GrowthArc has real identity infrastructure
 - **Phase 3's installer** — a signed, packaged installer per OS is not started; not needed yet at this stage

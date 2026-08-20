@@ -46,6 +46,7 @@ import { requestAntiPatternFix, applyAntiPatternFix } from './engine/scan/fixAnt
 import { pushArtifact, PushOptions } from './engine/push/push';
 import { parseBumpKind } from './engine/manifest/version';
 import { checkForUpdates, resolvePendingPushes } from './engine/sync/sync';
+import { applyAvailableUpdates } from './engine/sync/applyUpdate';
 import { scanForNewArtifacts } from './engine/scan/scan';
 import { detectArtifactMetadata } from './engine/scan/detectArtifactMetadata';
 import { suggestMetadata } from './engine/scan/suggestMetadata';
@@ -415,6 +416,17 @@ const commands: Record<string, CommandHandler> = {
   'sync.resolvePendingPushes': (args, { onProgress }) => {
     const cwd = requireString(args, 'cwd');
     return resolvePendingPushes(cwd, onProgress);
+  },
+
+  // The real other half of sync.checkForUpdates, which only ever reported
+  // "installed -> available" and never actually re-pulled/re-applied
+  // anything. `id` scopes this to a single artifact (Detail's own
+  // "Update" action) -- refuses (reports, never guesses) when local edits
+  // are in the way; see applyAvailableUpdates's own doc comment.
+  'artifact.applyUpdate': (args, { onProgress }) => {
+    const cwd = requireString(args, 'cwd');
+    const id = requireString(args, 'id');
+    return applyAvailableUpdates(cwd, onProgress, id);
   },
 
   'scan.run': (args, { onProgress }) => {

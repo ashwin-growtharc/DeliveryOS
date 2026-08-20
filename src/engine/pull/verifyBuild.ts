@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { isExecError, isToolNotFoundError } from '../execHelpers';
 
 const execAsync = promisify(exec);
 
@@ -37,29 +38,6 @@ export interface BuildVerificationResult {
    * `output` still carries a clear human-readable explanation either
    * way. */
   toolNotFound?: boolean;
-}
-
-function isExecError(
-  err: unknown,
-): err is Error & { stdout?: Buffer; stderr?: Buffer; killed?: boolean } {
-  return err instanceof Error;
-}
-
-// Detects "the command's own tool isn't installed / isn't on PATH at all"
-// as distinct from "the tool ran and found a real problem." Confirmed
-// empirically (not assumed from Node's docs): `exec`/`execSync` always run
-// the command through a shell, so a missing tool never surfaces as a
-// Node-level ENOENT the way a shell-less `execFile` would -- it's the
-// shell itself reporting an ordinary-looking non-zero exit. On Windows
-// (verified directly here) that's cmd.exe emitting exactly the first
-// pattern below. POSIX shells report the same condition via exit code 127
-// and their own "command not found" / "<cmd>: not found" wording -- kept
-// here for parity even though only the Windows case was directly
-// exercised in this environment.
-function isToolNotFoundError(text: string): boolean {
-  return /is not recognized as an internal or external command/i.test(text)
-    || /command not found/i.test(text)
-    || /:\s*not found\s*$/im.test(text);
 }
 
 /**
