@@ -441,6 +441,34 @@ CLI+sidecar, frontend, tests+docs), followed by personal verification of
 every finding against the actual code (not trusted at face value) and a
 fix pass through everything confirmed real.
 
+**Follow-up: dark-mode palette redesigned after real visual review.**
+The dark tokens this phase originally shipped (see the security/frontend
+bullets below) were checked by reasoning about hex values, not by looking
+at them -- caught by direct user feedback ("dark mode colors are bad")
+once actually rendered. Two real, confirmed problems, found by serving
+`spike-ui/index.html` locally and inspecting it directly (a browser tab,
+not the packaged Tauri app -- static markup/CSS renders fine standalone,
+enough to judge color): (1) the neutral surface family (`surface`/`card`/
+`surface-tertiary`/`surface-inset`) was a warm brown-black derived from
+the same hue as light mode's cream background, which read as muddy brown
+across nearly every pixel (body, sidebar, cards, inputs) rather than the
+intended "warm accents on a neutral base" -- corrected to a cool,
+low-chroma charcoal, with only the deliberately-colorful accent tints
+(`sage-100`, `sand-100/200`, `sky-100`) keeping real hue, and only where
+they're actually meant to (small tinted panels/icons, never page chrome).
+(2) `card` was accidentally only marginally lighter than `surface`, while
+`surface-tertiary`/`surface-inset` ended up LIGHTER than `card` --
+inverted relative to light mode's own direction (there, `card`/white is
+the lightest of the four, `surface-tertiary`/`surface-inset` are
+progressively darker/recessed) -- meaning elevated cards and the sidebar
+barely stood out from the page, while "recessed" inset panels looked MORE
+prominent than real cards. Corrected to the right direction with clearly
+wider, more perceptible steps between each surface level. DESIGN_SYSTEM.md's
+dark-mode token table updated to match; every other dark-mode fix from
+this phase's original pass (icon-contrast tokens, the themed markdown
+iframe, etc.) is unaffected -- only the underlying neutral hex values
+changed, not which tokens exist or where they're used.
+
 - **Security (path traversal / arbitrary file ops) — fixed, 5 confirmed
   instances of the same bug class.** `manifest.install_target`/
   `payload_path` are untrusted (an artifact author's own manifest, not

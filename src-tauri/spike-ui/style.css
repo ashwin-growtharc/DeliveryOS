@@ -77,36 +77,36 @@
  * dilute the brand identity they exist to carry. */
 @media (prefers-color-scheme: dark) {
   :root {
-    --surface: #191510; --surface-secondary: #191510; --surface-tertiary: #241F18; --surface-inset: #2C2620;
-    --card: #211C15;
-    --border: #3A3226; --border-strong: #4A4133; --border-subtle: #2C2620;
-    --ink: #F0EAE0;
-    --text-secondary: #A79A87;
-    --sage-100: #26301C;
-    --sand-100: #2E2618; --sand-200: #3A2F1D;
-    --sky-100: #1B2733;
-    --icon-fg-warm: #D9B98A; --icon-fg-cool: #8FC0E3;
-    --success-100: #14311F; --success-600: #5FCB8B;
-    --warning-100: #362408; --warning-600: #E3A73F;
-    --danger-100: #3A1712; --danger-600: #F1795C;
-    --shadow-1: 0 1px 3px rgb(0 0 0/0.35); --shadow-2: 0 4px 14px rgb(0 0 0/0.5);
+    --surface: #15181B; --surface-secondary: #15181B; --surface-tertiary: #0F1214; --surface-inset: #0A0C0D;
+    --card: #1F2427;
+    --border: #343B3F; --border-strong: #454D51; --border-subtle: #0A0C0D;
+    --ink: #ECE9E2;
+    --text-secondary: #918F89;
+    --sage-100: #17261A;
+    --sand-100: #2C2013; --sand-200: #382A18;
+    --sky-100: #10202C;
+    --icon-fg-warm: #E3BD87; --icon-fg-cool: #9AC7EA;
+    --success-100: #163B22; --success-600: #6EE0A0;
+    --warning-100: #3D2907; --warning-600: #F2B24E;
+    --danger-100: #45170F; --danger-600: #FF8A66;
+    --shadow-1: 0 1px 3px rgb(0 0 0/0.4); --shadow-2: 0 4px 16px rgb(0 0 0/0.55);
   }
 }
 
 :root[data-theme="dark"] {
-  --surface: #191510; --surface-secondary: #191510; --surface-tertiary: #241F18; --surface-inset: #2C2620;
-  --card: #211C15;
-  --border: #3A3226; --border-strong: #4A4133; --border-subtle: #2C2620;
-  --ink: #F0EAE0;
-  --text-secondary: #A79A87;
-  --sage-100: #26301C;
-  --sand-100: #2E2618; --sand-200: #3A2F1D;
-  --sky-100: #1B2733;
-  --icon-fg-warm: #D9B98A; --icon-fg-cool: #8FC0E3;
-  --success-100: #14311F; --success-600: #5FCB8B;
-  --warning-100: #362408; --warning-600: #E3A73F;
-  --danger-100: #3A1712; --danger-600: #F1795C;
-  --shadow-1: 0 1px 3px rgb(0 0 0/0.35); --shadow-2: 0 4px 14px rgb(0 0 0/0.5);
+  --surface: #15181B; --surface-secondary: #15181B; --surface-tertiary: #0F1214; --surface-inset: #0A0C0D;
+  --card: #1F2427;
+  --border: #343B3F; --border-strong: #454D51; --border-subtle: #0A0C0D;
+  --ink: #ECE9E2;
+  --text-secondary: #918F89;
+  --sage-100: #17261A;
+  --sand-100: #2C2013; --sand-200: #382A18;
+  --sky-100: #10202C;
+  --icon-fg-warm: #E3BD87; --icon-fg-cool: #9AC7EA;
+  --success-100: #163B22; --success-600: #6EE0A0;
+  --warning-100: #3D2907; --warning-600: #F2B24E;
+  --danger-100: #45170F; --danger-600: #FF8A66;
+  --shadow-1: 0 1px 3px rgb(0 0 0/0.4); --shadow-2: 0 4px 16px rgb(0 0 0/0.55);
 }
 
 /* Forces light mode even when the OS prefers dark -- an explicit

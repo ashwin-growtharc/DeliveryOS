@@ -8,6 +8,13 @@ All notable changes to DeliveryOS are recorded here, newest first. See
 
 ## Phase 15 — Full-codebase audit and fix pass
 
+- **Dark-mode palette redesigned** after real visual review caught two
+  problems the original hex-value review missed: the neutral surfaces
+  read as muddy brown (now a cool charcoal, with only the deliberate
+  accent tints keeping real hue), and `card` was barely lighter than
+  `surface` while `surface-tertiary`/`surface-inset` were accidentally
+  LIGHTER than `card` -- backwards relative to light mode's own
+  direction. Corrected; DESIGN_SYSTEM.md's dark-mode table updated to match.
 - **Security fixes**: path-traversal via untrusted manifest
   `install_target`/`payload_path` closed in 4 places (`pull.ts`, `push.ts`,
   `payloadDir.ts`'s `resolvePayloadDir`, new shared `resolveContainedPath`

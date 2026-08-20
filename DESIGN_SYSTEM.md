@@ -124,24 +124,35 @@ tints get their own darkened panel colors instead of staying bright on a
 dark page, while brand-fill buttons/chips and a handful of already-vivid
 standalone accents stay fixed across both themes.
 
+**Neutral surfaces are a cool charcoal, deliberately NOT a warm brown/amber
+near-black** -- an earlier version of this palette derived the dark
+neutrals from the same warm hue as the light-mode cream background, which
+read as muddy brown across everything (body, sidebar, cards, inputs -- the
+one family of tokens touching nearly every pixel). Corrected: the neutral
+family below is cool and low-chroma; only the deliberately-colorful accent
+tints (`sage-100`, `sand-100/200`, `sky-100`, the status colors) carry real
+hue, and only where they're actually meant to -- small tinted panels/icons,
+never the page chrome itself. `ink` (text) keeps a touch of warm ivory,
+which reads as intentional since it's a text color, not a background.
+
 | Token | Light | Dark | Notes |
 |-------|-------|------|-------|
-| `surface` / `surface-secondary` | `#FFFCF2` | `#191510` | Page background |
-| `surface-tertiary` | `#F6F1E9` | `#241F18` | |
-| `surface-inset` | `#EDE6DA` | `#2C2620` | |
-| `card` | `#FFFFFF` | `#211C15` | |
-| `border` / `border-strong` / `border-subtle` | `#E0D9CE` / `#C9BFAF` / `#EDE6DA` | `#3A3226` / `#4A4133` / `#2C2620` | |
-| `ink` | `#1E3C53` | `#F0EAE0` | |
-| `text-secondary` | `#6E6455` | `#A79A87` | |
-| `sage-100` | `#EAF4DB` | `#26301C` | |
-| `sand-100` / `sand-200` | `#F6E8CC` / `#EDD9B3` | `#2E2618` / `#3A2F1D` | |
-| `sky-100` | `#DBE8F4` | `#1B2733` | |
-| `icon-fg-warm` (icon text on `sand-100`) | `#8A5A2B` | `#D9B98A` | |
-| `icon-fg-cool` (icon text on `sky-100`) | `#2E5E82` | `#8FC0E3` | |
-| `success-100` / `success-600` | `#DCF8E6` / `#236D40` | `#14311F` / `#5FCB8B` | |
-| `warning-100` / `warning-600` | `#FFF4E0` / `#9C5D00` | `#362408` / `#E3A73F` | |
-| `danger-100` / `danger-600` | `#FFE5E0` / `#A2341F` | `#3A1712` / `#F1795C` | |
-| `shadow-1` / `shadow-2` | `rgb(0 0 0/0.04)` / `rgb(0 0 0/0.08)` | `rgb(0 0 0/0.35)` / `rgb(0 0 0/0.5)` | Higher opacity in dark mode -- a light-mode shadow value is nearly invisible against a dark surface |
+| `surface` / `surface-secondary` | `#FFFCF2` | `#15181B` | Page background -- cool charcoal, not brown |
+| `surface-tertiary` | `#F6F1E9` | `#0F1214` | Darker than `surface` (recessed), same direction as light mode |
+| `surface-inset` | `#EDE6DA` | `#0A0C0D` | Darkest of the neutral family |
+| `card` | `#FFFFFF` | `#1F2427` | Lightest of the neutral family -- elevated panels (cards, sidebar) sit visibly ABOVE the page, same relationship as white-on-cream in light mode |
+| `border` / `border-strong` / `border-subtle` | `#E0D9CE` / `#C9BFAF` / `#EDE6DA` | `#343B3F` / `#454D51` / `#0A0C0D` | |
+| `ink` | `#1E3C53` | `#ECE9E2` | |
+| `text-secondary` | `#6E6455` | `#918F89` | |
+| `sage-100` | `#EAF4DB` | `#17261A` | Real dark green, not a neutral brown |
+| `sand-100` / `sand-200` | `#F6E8CC` / `#EDD9B3` | `#2C2013` / `#382A18` | Deliberately warm/amber -- this IS the "sand" accent, used only for small tinted panels (a skill/java icon bg, the push-status banner), never page chrome |
+| `sky-100` | `#DBE8F4` | `#10202C` | Real dark blue |
+| `icon-fg-warm` (icon text on `sand-100`) | `#8A5A2B` | `#E3BD87` | |
+| `icon-fg-cool` (icon text on `sky-100`) | `#2E5E82` | `#9AC7EA` | |
+| `success-100` / `success-600` | `#DCF8E6` / `#236D40` | `#163B22` / `#6EE0A0` | |
+| `warning-100` / `warning-600` | `#FFF4E0` / `#9C5D00` | `#3D2907` / `#F2B24E` | |
+| `danger-100` / `danger-600` | `#FFE5E0` / `#A2341F` | `#45170F` / `#FF8A66` | |
+| `shadow-1` / `shadow-2` | `rgb(0 0 0/0.04)` / `rgb(0 0 0/0.08)` | `rgb(0 0 0/0.4)` / `rgb(0 0 0/0.55)` | Higher opacity in dark mode -- a light-mode shadow value is nearly invisible against a dark surface, and `card` now sits clearly lighter than `surface`, so a stronger shadow reinforces that elevation |
 
 **Left fixed across both themes (unchanged in the dark block):**
 `primary-700/800/900`, `gold-500`, `danger-500`, `accent-500/600`,
