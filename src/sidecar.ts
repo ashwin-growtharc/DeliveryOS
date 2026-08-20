@@ -299,6 +299,30 @@ const commands: Record<string, CommandHandler> = {
     return { missingRequiredParams: resolved.missingRequired, gitignoreWarning };
   },
 
+  // Detail's Configuration tab pre-fills each install_param field on every
+  // render, so without this it kept showing param.default (or blank) even
+  // for a value a previous pull/applyInstallParams call already wrote for
+  // real into .env.local -- read-only/presentational, not a new engine
+  // concern, so no new engine-layer function: just readExistingEnvValues
+  // (the same "existing" resolveInstallParamValues already treats as more
+  // authoritative than a default) filtered down to the keys THIS artifact's
+  // OWN manifest actually declares, so a project with several configured
+  // artifacts never leaks one artifact's values into another's form.
+  'artifact.readInstallParamValues': (args) => {
+    const id = requireString(args, 'id');
+    const cwd = requireString(args, 'cwd');
+    const remote = optionalString(args, 'remote');
+    const entry = resolveArtifact(id, remote);
+    const existing = readExistingEnvValues(cwd);
+    const values = Object.fromEntries(
+      entry.manifest.install_params
+        .map((param) => param.key)
+        .filter((key) => key in existing)
+        .map((key) => [key, existing[key]]),
+    );
+    return { values };
+  },
+
   // Reads one file (e.g. README.md) directly out of an artifact's payload
   // in its remote's local cache -- lets Detail render real setup
   // documentation for a non-visual artifact (backend-plugin) before

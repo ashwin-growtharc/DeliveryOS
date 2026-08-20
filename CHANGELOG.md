@@ -8,6 +8,22 @@ All notable changes to DeliveryOS are recorded here, newest first. See
 
 ## Phase 13 — Backend plug-and-play: basic hygiene (in progress)
 
+- **Configuration tab reuses an already-existing value.**
+  `renderInstallParamsSection` (`app.js`) only ever pre-filled each field
+  from `param.default` -- reopening Configuration after filling in 2 of 3
+  required fields showed all 3 blank again, even though 2 were already
+  saved for real in `.env.local`. New read-only sidecar RPC
+  `artifact.readInstallParamValues` (`src/sidecar.ts`) resolves the same
+  manifest `artifact.applyInstallParams` already does, then filters
+  `readExistingEnvValues` down to only the keys THIS artifact's own
+  `install_params` declare, so one artifact's config can never leak into
+  another's form. `renderInstallParamsSection` is now async (with its own
+  `installParamsRequestId` request-token guard, matching the wiring/drift/
+  activity sections) and prefers a real existing value over `param.default`
+  when filling `input.value` -- same `provided > existing > default`
+  precedence `resolveInstallParamValues` already established. Degrades to
+  today's default-only prefill if the RPC call fails for any reason. New
+  sidecar e2e test covering both the reuse and the no-leak case.
 - **Post-pull secret rotation: `deliveryos config <id>`.** The engine-level
   `applyInstallParams` RPC (`src/sidecar.ts`) already existed, but nothing
   outside the sidecar could call it -- no CLI command wrapped it, and

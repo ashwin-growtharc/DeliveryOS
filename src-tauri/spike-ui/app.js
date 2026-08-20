@@ -1040,6 +1040,12 @@
   // trail for the wiring-merge log).
   let activityRequestId = 0;
 
+  // Same request-token-guard discipline, for renderInstallParamsSection's
+  // own async artifact.readInstallParamValues call (Phase 13: pre-filling
+  // the Configuration form from a REAL already-existing .env.local value,
+  // not just the manifest's own default).
+  let installParamsRequestId = 0;
+
   // Array-based counterpart to detailPreviewMessageHandler, for
   // renderMarkdownToSandboxedIframe's own iframes -- a single Documentation
   // tab can hold more than one (README.md AND GUIDELINES.md's own prose,
@@ -1257,10 +1263,36 @@
     }
   }
 
-  function renderInstallParamsSection(entry) {
+  async function renderInstallParamsSection(entry) {
     const { manifest } = entry;
-
+    const requestId = ++installParamsRequestId;
     const fieldsContainer = $('detail-install-params-fields');
+
+    // A REAL value already sitting in .env.local (from an earlier partial
+    // fill, or a prior pull) is more authoritative than the manifest
+    // author's own generic default -- same provided > existing > default
+    // precedence resolveInstallParamValues's own doc comment establishes,
+    // just applied to what the form DISPLAYS rather than what it writes.
+    // Skipped entirely when there are no install_params to prefill at all
+    // (e.g. an artifact with only wiring_actions) -- no point resolving
+    // the artifact and reading .env.local for nothing.
+    let existingValues = {};
+    if (manifest.install_params.length > 0) {
+      try {
+        const result = await call('artifact.readInstallParamValues', {
+          id: manifest.id,
+          remote: entry.remoteName,
+          cwd: state.projectDir,
+        });
+        existingValues = result.values ?? {};
+      } catch {
+        // Degrade to today's default-only prefill -- never let a failure
+        // to resolve the artifact/remote (or read .env.local) break the
+        // Configuration tab from rendering at all.
+      }
+      if (requestId !== installParamsRequestId) return; // superseded while awaiting
+    }
+
     fieldsContainer.innerHTML = '';
     for (const param of manifest.install_params) {
       const field = document.createElement('div');
@@ -1276,8 +1308,9 @@
       input.name = param.key;
       input.type = param.secret ? 'password' : 'text';
       input.placeholder = param.default ?? (param.secret ? '(secret -- never defaulted)' : '');
-      if (param.default !== undefined) {
-        input.value = param.default;
+      const prefill = existingValues[param.key] ?? param.default;
+      if (prefill !== undefined) {
+        input.value = prefill;
       }
       field.appendChild(label);
       field.appendChild(help);

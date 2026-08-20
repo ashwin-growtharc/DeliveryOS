@@ -236,7 +236,7 @@ backend-plugin surface before anyone outside the build team has used what
 already exists risks the exact thing Tier 0 exists to guard against:
 building more on an unproven foundation.
 
-## Phase 13 — Backend plug-and-play: basic hygiene — **In progress (4 of 5 items done)**
+## Phase 13 — Backend plug-and-play: basic hygiene — **In progress (5 of 6 items done)**
 
 Goal: close the bare-minimum operational gaps a real code audit found in
 the `backend-plugin` install path — none of these need AI, they're plain
@@ -324,12 +324,64 @@ actually needs. Ranked by risk, not by build order.
   NOT re-run `wiring_actions` — a rotated value only reaches code that reads
   `process.env` at runtime, since that's still the separate, bigger,
   deliberately-deferred "real update-apply path" item below.
+- **Configuration-form autofill/suggestions.** The Detail Configuration
+  tab's `install_params` form (rendered around `app.js`'s existing
+  `install_params` loop, ~line 1265/1837) is still a blank input per field
+  today — none of Phase 10 item 3's autofill discipline has been applied
+  to this, the *puller's* form (only the *author's* Add New form got it).
+  Found via a real example (`azure-msal-sso`'s 3 required
+  `VITE_APP_MSAL_*` fields) that these split into three real cases, not
+  one — reviewed and re-scoped (not treated as one unit, given how
+  differently sized/risky the three actually are):
+  - **Reuse an already-existing value — done.** Confirmed a real, concrete
+    bug: `renderInstallParamsSection` only ever pre-filled from
+    `param.default` (the manifest author's own hardcoded value), never
+    from a real value already sitting in `.env.local` from an earlier
+    partial fill or prior pull — `readExistingEnvValues(cwd)` already
+    existed and already powered this exact "don't re-ask for an
+    already-configured value" guarantee at *apply* time
+    (`resolveInstallParamValues`'s own doc comment), but the *form's own
+    display* never read it back. Reopening Configuration after filling in
+    2 of 3 required fields showed all 3 blank again, even though 2 were
+    already saved for real. Fixed with a new, deliberately minimal
+    read-only sidecar RPC, `artifact.readInstallParamValues`
+    (`src/sidecar.ts`) — resolves the same manifest `artifact.
+    applyInstallParams` already does, then filters `readExistingEnvValues`
+    down to only the keys THIS artifact's own `install_params` declare
+    (never leaking another artifact's config into this form). No new
+    engine-layer function: the filter is small and obvious enough to stay
+    inline, so it's covered by a real sidecar e2e test instead
+    (`test/e2e/sidecar.e2e.test.ts`) rather than a separate unit. Wired
+    into `renderInstallParamsSection` (`app.js`, now async, with its own
+    `installParamsRequestId` request-token guard matching the wiring/
+    drift/activity sections' established discipline): a real existing
+    value now wins over `param.default` when pre-filling `input.value`,
+    same `provided > existing > default` precedence
+    `resolveInstallParamValues` already established. Degrades to today's
+    default-only prefill if the RPC call fails for any reason — never
+    blocks the Configuration tab from rendering.
+  - **A genuine local signal** (e.g. `VITE_APP_MSAL_REDIRECT_URI` from the
+    target project's own `vite.config` dev-server port) — deliberately
+    deferred, not descoped. This needs real per-framework/per-key-shape
+    detection (Vite's port, Next's port, whatever convention the next real
+    example uses) that risks becoming an ever-growing pile of special
+    cases rather than one bounded feature — same "wait for a second real
+    example before generalizing" caution already applied to Phase 12's
+    deferred pre-flight-check and Phase 13's still-open update-path item.
+    Revisit once a second real backend-plugin artifact needs this kind of
+    signal.
+  - **Neither** (e.g. an Azure AD app registration's Client ID — lives
+    entirely outside the project, nothing to scan) — no new code needed.
+    `param.description` already exists and already CAN carry a "where to
+    find this" hint; `azure-msal-sso`'s own real descriptions today just
+    don't use it that way. An authoring-quality question for whoever
+    writes a manifest, not an engine gap.
 
 ---
 
 ## What's next
 
-- **Phase 13** (backend plug-and-play: basic hygiene) — in progress, 4 of 5 items done (uninstall, secrets safety net, timeouts, post-pull secret rotation), see above
+- **Phase 13** (backend plug-and-play: basic hygiene) — in progress, 5 of 6 items done (uninstall, secrets safety net, timeouts, post-pull secret rotation, config-form reuse-existing-value autofill); real update-apply path not started, and config-form autofill's other two sub-cases (genuine local signal, neither) deliberately deferred/descoped, see above
 - **Phase 12** — both scoped-in items done; the rest deferred/descoped, see above
 - **Phase 4** (team rollout: auth/SSO, profiles, multi-remote) — deferred until GrowthArc has real identity infrastructure
 - **Phase 3's installer** — a signed, packaged installer per OS is not started; not needed yet at this stage
