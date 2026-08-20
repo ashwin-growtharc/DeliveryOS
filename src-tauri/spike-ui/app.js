@@ -3093,8 +3093,16 @@ ${bodyHtml}
               // a new UI surface for this.
               appendProgressLine('build', build.output || 'Build failed.');
               // Phase 10 item 2: offer to try fixing one of the files this
-              // same pull just auto-wired -- never any other file.
-              renderBuildFixOffers(wiring.applied, build.output || '');
+              // same pull just auto-wired -- never any other file. Never
+              // offered for a timeout or a missing build tool (Phase 13's
+              // timeout work) -- neither is a real code problem an AI
+              // file-edit could fix (it can't repair a hung process or
+              // make a missing tool exist on this machine), so offering it
+              // here would just waste a real API call on something it
+              // fundamentally can't address.
+              if (!build.timedOut && !build.toolNotFound) {
+                renderBuildFixOffers(wiring.applied, build.output || '');
+              }
             }
           } else {
             const result = await call('artifact.pull', {

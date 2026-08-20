@@ -82,6 +82,17 @@ All notable changes to DeliveryOS are recorded here, newest first. See
   a timed-out command only terminates the immediate shell wrapper, not the
   grandchild process it actually spawned -- a "timed out" command can keep
   running in the background afterward.
+- **Follow-up found via review, not speculative**: the timeout work above
+  landed real `timedOut`/`toolNotFound` data, but nothing downstream
+  actually used it. The plain-language health narrator
+  (`buildPostInstallHealthSummary`, Phase 12) treated a timeout or a
+  missing build tool identically to a genuine compile failure --
+  misleading framing, since neither is "the code doesn't build." Worse:
+  Detail's "Want help fixing this?" AI button still got offered for both,
+  even though an AI code-fix can't repair a hung process or make a
+  missing tool exist. Both now get their own distinct, honest sentence in
+  the narrator, and the AI-fix offer is never shown for either case. 2 new
+  unit tests.
 
 ## Phase 12 — Backend plug-and-play, unlocked further
 
