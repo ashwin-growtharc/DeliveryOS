@@ -214,9 +214,12 @@ const commands: Record<string, CommandHandler> = {
 
   // Phase 10 item 1: "deterministic apply-and-test on Pull, no agent
   // involved yet." A separate command from artifact.pull, not a change to
-  // it -- the app's own Pull button opts into this explicitly (only for
-  // artifacts that declare wiring_actions); the CLI's `deliveryos pull`
-  // keeps using the plain command above, unchanged.
+  // it -- the app's own Pull button uses this one (only for artifacts
+  // that declare wiring_actions; a no-op otherwise). As of Phase 18 the
+  // CLI's `deliveryos pull` defaults to the same underlying
+  // pullAndAutoWire function too (see pull.ts), just called directly
+  // rather than through this RPC -- artifact.pull above is what backs the
+  // CLI's own `--no-wire` opt-out.
   'artifact.pullAndAutoWire': async (args, { onProgress }) => {
     const id = requireString(args, 'id');
     const cwd = requireString(args, 'cwd');

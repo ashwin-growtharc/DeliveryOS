@@ -6,6 +6,18 @@ All notable changes to DeliveryOS are recorded here, newest first. See
 
 ---
 
+## Phase 19 — `deliveryos pull` defaults to auto-wiring
+
+- **`deliveryos pull` now auto-wires a `backend-plugin`'s `wiring_actions`
+  by default** -- the same safe behavior the desktop app's Pull button
+  already had (new files written verbatim, existing files never touched,
+  build reverified afterward, one plain-language summary printed), just
+  not previously available from the CLI at all. `--no-wire` opts back
+  into the old plain-copy-only behavior for scripted/CI use. Prompted by
+  benchmarking DeliveryOS's own flow against shadcn/Clerk/Stripe-style
+  dev-tool UX and platform-team trust expectations -- the safety model
+  already matched best practice, the CLI just wasn't using it.
+
 ## Phase 18 — Template component-grid preview performance
 
 - **A `kind: template` artifact's Components grid (e.g. `kortix-design-kit`)

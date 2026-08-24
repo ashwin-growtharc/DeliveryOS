@@ -56,7 +56,7 @@ deliveryos remote add <git-url> [--name <name>]   # register a git-backed remote
 deliveryos remote list [--json]                    # list registered remotes
 deliveryos remote remove <name>                    # unregister a remote and delete its local cache clone
 deliveryos list [--remote <name>] [--json]         # list available artifacts (localStatus included)
-deliveryos pull <id> [--remote <name>] [--set KEY=VALUE ...]  # pull an artifact locally
+deliveryos pull <id> [--remote <name>] [--set KEY=VALUE ...] [--no-wire]  # pull an artifact locally
 deliveryos remove <id>                             # remove a previously-pulled artifact
 deliveryos config <id> [--remote <name>] --set KEY=VALUE  # rotate/configure install_params without a re-pull
 
@@ -85,6 +85,16 @@ bumping the version — `--bump` only chooses a *bigger* bump than the
 default `patch`, a real payload change always bumps something) or just
 `--description`/`--roles`/`--teams`/`--stacks`/`--component-types` alone
 (a metadata-only edit — no payload touched, no version bump).
+
+`pull` automatically wires a `backend-plugin`'s declared `wiring_actions`:
+a target file that doesn't exist yet is written verbatim; a target file
+that already exists is left completely untouched and named in the
+summary printed afterward (same safety rule the desktop app's Pull button
+already used -- `pull` just defaults to it too now). Also reruns the
+project's own build afterward to confirm nothing broke, and prints one
+plain-language summary of what happened. `--no-wire` skips all of this
+and goes back to the old plain copy-only behavior, for scripted/CI use
+where nothing else in the project should be touched.
 
 `pull --set KEY=VALUE` (repeatable) provides a value for one of the
 artifact's declared `install_params` up front — written to `.env.local` at

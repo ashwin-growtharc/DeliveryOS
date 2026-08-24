@@ -810,6 +810,40 @@ in this app rather than inventing new ones:
   New's Review step for a genuinely unpushed Scan candidate, which truly
   has no `(remote, id, version)` to key a cache on yet.
 
+## Phase 19 — `deliveryos pull` defaults to auto-wiring — **Done**
+
+Prompted by a benchmark against real dev-tool UX (shadcn/Clerk/Stripe) and
+platform-team trust practices: DeliveryOS's safety model for wiring
+already matched the field's own best practice (a new file is written
+verbatim, an existing file is never silently touched, only a human-gated
+"Merge with Claude" step edits one for real) -- but that whole path only
+ran behind the desktop app's Pull button. Plain CLI `deliveryos pull`
+copied the payload and wrote `install_params`, then stopped; a CLI-only
+user had to separately remember `deliveryos wiring <id>` just to see
+instructions, then copy every snippet by hand.
+
+- **`deliveryos pull` now defaults to the same `pullAndAutoWire` path the
+  app's Pull button already used** -- auto-writes any wiring target file
+  that doesn't exist yet, leaves an existing one untouched (named in the
+  summary), reruns the project's real build afterward, and prints one
+  plain-language health summary (the same `buildPostInstallHealthSummary`
+  text the app shows) instead of the old bare "Pulled X -> Y" line.
+- **`--no-wire`** opts back into the exact old plain-copy-only behavior,
+  for scripted/CI use that shouldn't touch anything else in the project.
+- An artifact with no `wiring_actions` (every kind except `backend-plugin`
+  today) behaves identically either way -- this default change is
+  invisible to everything except the one kind it's actually for.
+- Dogfooded against the real `nextauth-credentials` artifact: one plain
+  `pull` now writes `auth.ts`, `middleware.ts`, and the route handler for
+  real (the 3 targets that didn't exist yet), reports `layout.tsx` (the
+  one that already exists) needs a manual look, and confirms no build
+  command was found to verify -- matching the exact plain-language
+  summary the app already shows.
+- `test/e2e/pull.e2e.test.ts` updated for the new default output and
+  extended with a dedicated `--no-wire` regression test proving it still
+  takes the old code path, not just a differently-worded version of the
+  new one.
+
 ## What's next
 
 - **Phase 13** (backend plug-and-play: basic hygiene) — in progress, 5 of 6 items done (uninstall, secrets safety net, timeouts, post-pull secret rotation, config-form reuse-existing-value autofill); config-form autofill's other two sub-cases (genuine local signal, neither) deliberately deferred/descoped, see above

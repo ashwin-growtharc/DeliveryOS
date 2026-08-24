@@ -331,7 +331,15 @@ describe('pull e2e', () => {
 
       expect(result.stderr).toBe('');
       expect(result.status).toBe(0);
-      expect(result.stdout).not.toContain('Still needs configuration');
+      expect(result.stdout).not.toContain('still needed for');
+
+      // Phase 18: pull now defaults to auto-wiring -- this fixture's two
+      // wiring_actions both target files that don't exist yet in this fresh
+      // cwd, so both get written automatically, and the health summary
+      // says so.
+      expect(result.stdout).toContain('Wiring was applied automatically to 2 files.');
+      expect(fs.existsSync(path.join(paramsCwd, 'auth.ts'))).toBe(true);
+      expect(fs.existsSync(path.join(paramsCwd, 'middleware.ts'))).toBe(true);
 
       const envContent = fs.readFileSync(path.join(paramsCwd, '.env.local'), 'utf-8');
       expect(envContent).toContain('AUTH_SECRET=real-secret-value');
@@ -390,7 +398,7 @@ describe('pull e2e', () => {
 
         expect(result.status).toBe(0);
         expect(result.stdout).toContain(`Pulled "${INSTALL_PARAMS_ARTIFACT.id}"`);
-        expect(result.stdout).toContain('Still needs configuration');
+        expect(result.stdout).toContain('still needed for');
         expect(result.stdout).toContain('AUTH_SECRET');
         expect(result.stdout).toContain('DATABASE_URL');
 
@@ -398,6 +406,40 @@ describe('pull e2e', () => {
         // else was configured.
         const envContent = fs.readFileSync(path.join(cwd, '.env.local'), 'utf-8');
         expect(envContent).toBe('AUTH_URL=http://localhost:3000\n');
+      } finally {
+        fs.rmSync(cwd, { recursive: true, force: true });
+      }
+    });
+
+    it('--no-wire skips auto-wiring entirely, matching every DeliveryOS version before Phase 19 -- for scripted/CI use', () => {
+      const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'deliveryos-e2e-install-params-nowire-'));
+      try {
+        const addResult = runCli(
+          ['remote', 'add', paramsRemoteDir, '--name', 'install-params-remote-nowire'],
+          cwd,
+          deliveryOsHome,
+        );
+        expect(addResult.status).toBe(0);
+
+        const result = runCli(
+          [
+            'pull', INSTALL_PARAMS_ARTIFACT.id,
+            '--remote', 'install-params-remote-nowire',
+            '--no-wire',
+            '--set', 'AUTH_SECRET=x', '--set', 'DATABASE_URL=y',
+          ],
+          cwd,
+          deliveryOsHome,
+        );
+
+        expect(result.status).toBe(0);
+        expect(result.stdout).toContain(`Pulled "${INSTALL_PARAMS_ARTIFACT.id}"`);
+        // The old plain message, not the health-summary sentence -- proves
+        // --no-wire really takes the old pullArtifact-only path, not just a
+        // differently-worded version of the new one.
+        expect(result.stdout).not.toContain('Wiring was applied automatically');
+        expect(fs.existsSync(path.join(cwd, 'auth.ts'))).toBe(false);
+        expect(fs.existsSync(path.join(cwd, 'middleware.ts'))).toBe(false);
       } finally {
         fs.rmSync(cwd, { recursive: true, force: true });
       }

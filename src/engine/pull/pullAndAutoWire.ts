@@ -13,14 +13,20 @@ export interface AutoWireResult {
 /**
  * Phase 10 item 1: "deterministic apply-and-test on Pull, no agent
  * involved yet." Deliberately a separate function, not a change to
- * `pullArtifact` itself -- that function's own default behavior (Tier 2
- * wiring never auto-applied) stays exactly as Phase 7 left it, since the
- * CLI's `deliveryos pull` and every existing test depend on that. This
- * wraps it: pulls exactly as before, then (only when the artifact
- * declares `wiring_actions`) applies whatever's safely auto-appliable and
- * runs the target project's own real build to confirm it still works --
- * the app's own Pull button is the one thing that opts into this, via a
- * dedicated sidecar command, never the default path.
+ * `pullArtifact` itself -- that function's own behavior (Tier 2 wiring
+ * never auto-applied) stays exactly as Phase 7 left it, so every existing
+ * test and the plain `pullArtifact` call underneath `--no-wire` keep
+ * working unchanged. This wraps it: pulls exactly as before, then (only
+ * when the artifact declares `wiring_actions`) applies whatever's safely
+ * auto-appliable and runs the target project's own real build to confirm
+ * it still works.
+ *
+ * Phase 18: this is now the CLI's own DEFAULT `deliveryos pull` path too,
+ * not just the app's Pull button -- `--no-wire` is the opt-out for
+ * scripted/CI use that wants the old plain-copy-only behavior. An artifact
+ * with no `wiring_actions` behaves identically either way (the early
+ * return below is a no-op), so this default change is invisible to every
+ * artifact kind except `backend-plugin`.
  */
 export async function pullAndAutoWire(
   id: string,
