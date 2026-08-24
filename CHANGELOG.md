@@ -6,6 +6,19 @@ All notable changes to DeliveryOS are recorded here, newest first. See
 
 ---
 
+## Phase 17 — Backend-plugin scaffolding assistant
+
+- **New `deliveryos scaffold-backend-plugin --path <dir> --consumer-file
+  <file> [...]`** -- scaffolds a draft `wiring_actions`/`install_params`
+  YAML for a backend-plugin manifest. Not "extraction": mechanical
+  detection where it's safe (`install_params`, via the existing
+  `detectInstallParams.ts`), an AI-suggested draft where it's judgment
+  (`wiring_actions`, via new `suggestWiringActions.ts`), always
+  human-reviewed -- never writes to a real manifest. Validated by hand
+  against the real `nextauth-credentials` artifact before shipping: 3
+  correct integration points suggested, 0 false positives on a
+  deliberate distractor file.
+
 ## Phase 16 — A real update-apply path
 
 - **`deliveryos check-updates --apply`** and a new sidecar

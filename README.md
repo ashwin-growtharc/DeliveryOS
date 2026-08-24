@@ -74,6 +74,7 @@ deliveryos check-pending-pushes                    # check GitHub for the real s
 deliveryos check-drift <id> -r <remote> -s <path>  # check whether an extracted artifact's real external source has changed
 deliveryos scan -r <remote>                        # find installable content not yet tracked, print a ready-to-edit push command per candidate
 deliveryos wiring <id> [--remote <name>] [--json]  # show an artifact's Tier-2 wiring suggestions, resolved against the current project
+deliveryos scaffold-backend-plugin --path <dir> --consumer-file <file> [...] [--out <path>]  # draft install_params/wiring_actions for a new backend-plugin, for you to review
 ```
 
 `push` opens a real GitHub pull request (via `gh auth token` — run
@@ -97,6 +98,12 @@ config <id> --set KEY=VALUE` fills in the rest later without a re-pull
 is byte-for-byte identical to its pristine snapshot (no local edits) — one
 with real local edits is reported, never touched, since safely merging a
 local edit against a new upstream version isn't attempted here.
+
+`scaffold-backend-plugin` is scaffolding, not extraction: `--consumer-file`
+should point at real file(s) in your OWN project that already wire the
+payload in today (e.g. `auth.ts`), since the wiring suggestion generalizes
+from that real example rather than guessing. Writes a draft YAML to review
+and copy from by hand — never touches a real `manifest.yaml`.
 
 `--post-install` (propose-new only) is whatever one-line shell command a
 fresh pull of this artifact should run afterward — `npm install`,

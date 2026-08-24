@@ -10,6 +10,7 @@ import { registerCheckPendingPushesCommand } from './commands/checkPendingPushes
 import { registerCheckDriftCommand } from './commands/checkDrift';
 import { registerScanCommand } from './commands/scan';
 import { registerWiringCommand } from './commands/wiring';
+import { registerScaffoldBackendPluginCommand } from './commands/scaffoldBackendPlugin';
 
 export function buildProgram(): Command {
   const program = new Command();
@@ -30,6 +31,7 @@ export function buildProgram(): Command {
   registerCheckDriftCommand(program);
   registerScanCommand(program);
   registerWiringCommand(program);
+  registerScaffoldBackendPluginCommand(program);
 
   return program;
 }

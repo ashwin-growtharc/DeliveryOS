@@ -703,6 +703,62 @@ for, and extending that to whole-artifact updates is separate, future work.
   scopes a batch) and `test/e2e/checkUpdates.e2e.test.ts` (a CLI-wiring
   smoke test via the real CLI subprocess).
 
+## Phase 17 — Backend-plugin scaffolding assistant — **Done**
+
+Goal: `backend-plugin` is the hardest kind to author today -- `wiring_actions`
+have to be hand-written from scratch, with zero tooling support, unlike
+every other kind. Explicitly **not** "extraction": wiring is a judgment
+call (where does this go in a project the tool has never seen?), not a
+mechanical pattern match, and there's only one real backend-plugin
+(`nextauth-credentials`) to generalize from. Scoped instead as
+**scaffolding** -- mechanical detection where it's genuinely safe, an
+AI-suggested *draft* where it's judgment, always human-reviewed before
+anything touches a real manifest.
+
+- **Validated the core risk by hand before writing any production
+  code.** A throwaway script fed the real `nextauth-credentials` payload
+  plus independently-written consumer files (a deliberately different
+  middleware matcher than the real manifest's own, plus a "distractor"
+  file that just calls `auth()` without doing new integration) to a real
+  `claude -p` call. It proposed the same 3 real integration points the
+  hand-authored manifest already has, generalized the matcher using the
+  given project's own actual values, and correctly generated nothing for
+  the distractor file. Confirmed again afterward through the REAL CLI
+  command (not the throwaway script) with the same inputs: 3 correct
+  wiring_actions, 0 skipped, 0 distractor false positives, clean pasteable
+  YAML.
+- **Real limitation found and stated plainly, not glossed over**:
+  `detectInstallParams.ts`'s own doc comment already documents that it
+  was tested against the real `nextauth-credentials` artifact and
+  detects nothing there -- `AUTH_SECRET`/`AUTH_URL` are read implicitly
+  by Auth.js's own library internals (never referenced in the payload's
+  own source), and `DATABASE_URL` lives in the CONSUMING project's own
+  `prisma/schema.prisma`, never the payload. Still wired up as-is (it
+  helps for payloads that DO reference `process.env.X` directly), but
+  the flagship real example is exactly the case it can't help with.
+- New `suggestWiringActions` (`src/engine/scan/suggestWiringActions.ts`)
+  mirrors `suggestMetadata.ts`'s exact established shape (pure
+  `build*Prompt`/`parse*Response`, plus an async orchestrator calling
+  `runClaudeSubprocess`) -- reuses `readPayloadSource` as-is, adds a new
+  `readConsumerFilesSource` (containment-checked via `resolveContainedPath`,
+  so a typo'd path fails clearly instead of wasting a real API call).
+  Every proposed action is validated against the real `WiringActionSchema`
+  before being trusted -- an invalid entry is collected into `skipped`
+  (visible, not silently dropped), never crashes the rest.
+- **`deliveryos scaffold-backend-plugin --path <dir> --consumer-file <file>
+  [...] [--out <path>]`** -- writes a draft YAML (`install_params:` +
+  `wiring_actions:`, shaped to paste directly into a real `manifest.yaml`)
+  to review by hand. Never writes to a real manifest anywhere. No app/Add
+  New wizard integration yet (deliberately CLI-first, same pattern every
+  other phase in this project shipped) and no automatic candidate
+  *discovery* (the author already knows what they're packaging) --
+  both explicitly out of scope for v1.
+- New `test/unit/suggestWiringActions.test.ts` (16 tests) mirrors
+  `suggestMetadata.test.ts`'s exact structure -- same bar `suggestMetadata`'s
+  own orchestrator is held to (its live subprocess call has zero
+  automated test coverage; only the prompt/parse halves are unit tested,
+  confirmed by checking first) plus 3 new tests for `readConsumerFilesSource`.
+
 ## What's next
 
 - **Phase 13** (backend plug-and-play: basic hygiene) — in progress, 5 of 6 items done (uninstall, secrets safety net, timeouts, post-pull secret rotation, config-form reuse-existing-value autofill); config-form autofill's other two sub-cases (genuine local signal, neither) deliberately deferred/descoped, see above
