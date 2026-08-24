@@ -205,7 +205,58 @@ failure (unresolved import, syntax error) — fix step 2 if it's `react`,
 otherwise decide whether the underlying dependency is worth resolving for
 real or is acceptable to leave failing for Review to see.
 
-### 6. Record source-drift tracking (optional, but do it whenever the real source is available locally)
+### 6. Verify real interactivity/animation for real (when the component has any)
+
+Compiling clean and looking right in a static screenshot is not the same
+as actually working — this step exists specifically because it wasn't
+here before and should have been: `starter-kit-extractor` already has an
+equivalent step for a whole assembled app (its own step 6), but nothing
+here previously called out the same need at the single-component level,
+even though plenty of real UI-kit components have exactly this kind of
+behavior (a scroll-triggered reveal, a stacking-on-scroll layout, a hover/
+click state machine, a `framer-motion` `AnimatePresence` transition).
+
+Skip this step entirely for a component with no real interactive/animated
+behavior (a plain Dropdown that only opens on click still needs this —
+"click" is an interaction; a component that's pure static markup with no
+state and no animation does not). For everything else:
+
+1. Compile the real preview via `compileLocalPreview(payloadDir)`
+   (`src/engine/preview/resolveArtifactPreview.ts`) — the same function
+   `deliveryos scan`'s own Review-step live preview already uses, so this
+   checks the actual compiled output, not a hand-rolled substitute.
+2. Load the compiled HTML in a real headless browser via `playwright-core`
+   (`chromium.launch({ channel: 'msedge', headless: true })`, falling back
+   to `'chrome'` — the exact same real, already-working technique
+   `renderPreviewImage.ts` and `starter-kit-extractor`'s own step 6 already
+   use; no new setup needed).
+3. Drive the REAL interaction and assert on the REAL resulting DOM/class
+   state, not just that the animation library's import resolved:
+   - **Scroll-triggered** (an `IntersectionObserver`-driven reveal, a
+     stacking-on-scroll layout, a "takes over once you scroll past X"
+     pill/nav): actually scroll the page (`page.mouse.wheel(...)` or
+     `element.scrollIntoView()`), then check the class/style/DOM change
+     that's supposed to happen actually did — not just that scrolling
+     didn't throw.
+   - **Click/hover state**: actually click/hover the real element, check
+     the resulting state (an open menu, a toggled class, revealed content)
+     appeared in the DOM.
+   - **`framer-motion`/CSS-transition**: trigger the real interaction that
+     starts it, then check the animated element's computed style/class
+     actually changed, not just that the component rendered before the
+     interaction.
+4. If the real behavior doesn't fire (an `IntersectionObserver` needing a
+   real viewport/threshold the sandboxed preview iframe doesn't provide, a
+   scroll container that needs to be the actual page rather than the
+   compiled preview's own root, an animation gated on a real timer/media
+   query) — that's real, useful signal for Review, the same as an
+   unresolved import. Don't silently strip the interactive behavior to
+   make the static preview look "clean"; note what doesn't fire in a real
+   browser and why, so Review can decide whether it's an acceptable
+   preview-only limitation or a real bug to fix before pulling this
+   component into any real project.
+
+### 7. Record source-drift tracking (optional, but do it whenever the real source is available locally)
 
 If the component's real source project is sitting on this machine (not a
 scratch clone about to be deleted), record a `SOURCES.json` at the
