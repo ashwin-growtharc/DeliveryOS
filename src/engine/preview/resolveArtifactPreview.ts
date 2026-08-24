@@ -65,3 +65,30 @@ export async function compileLocalPreview(payloadDir: string): Promise<CompiledP
   const previewEntryPath = findPreviewEntryFile(payloadDir);
   return compilePreviewHtml(previewEntryPath);
 }
+
+/**
+ * Resolves and compiles (with caching) the live preview for ONE component
+ * inside an already-pulled/pushed `kind: template` artifact's own
+ * `components/<Name>/` folder -- e.g. one card in kortix-design-kit's
+ * component grid.
+ *
+ * Unlike the Scan-candidate case `compileLocalPreview` exists for, this
+ * content DOES have a stable identity: `componentDir` sits inside a real
+ * remote's real artifact at a real version, it just wasn't wired up to the
+ * cache `compileArtifactPreview` already uses for a whole artifact's own
+ * top-level preview. Confirmed the real cost of skipping it: opening a
+ * ~30-component design kit's grid fired that many concurrent uncached
+ * compiles, each esbuild + Tailwind JIT + docgen from scratch, every time
+ * the tab was opened -- this is what actually made the grid slow to load.
+ * `subKey` is the component's own folder name, so two components in the
+ * same template version never share a cache slot.
+ */
+export async function compileTemplateComponentPreview(
+  remoteName: string,
+  id: string,
+  componentDir: string,
+): Promise<CompiledPreview> {
+  const { manifest } = resolveArtifact(id, remoteName);
+  const previewEntryPath = findPreviewEntryFile(componentDir);
+  return getOrCompilePreview(remoteName, id, manifest.version, previewEntryPath, path.basename(componentDir));
+}

@@ -759,6 +759,57 @@ anything touches a real manifest.
   automated test coverage; only the prompt/parse halves are unit tested,
   confirmed by checking first) plus 3 new tests for `readConsumerFilesSource`.
 
+## Phase 18 — Template component-grid preview performance — **Done**
+
+A `kind: template` artifact's own Detail-view Components grid (e.g.
+`kortix-design-kit`, now ~32 components) took noticeably longer to open
+than the main UI Components list. Root cause, confirmed by tracing the
+actual call path: the grid compiled every component's preview eagerly on
+tab open (`Promise.all` over all of them at once) via
+`preview.compilePayloadComponent` -> `compileLocalPreview` -- the SAME
+uncached path used for a genuinely-unpushed Scan candidate, even though a
+pulled template's own sub-components have a real, stable identity
+(remote + template id + version + component name) and belong in the same
+disk cache `compileArtifactPreview` already uses for a whole artifact's
+own top-level preview. With no persistent sidecar process (a fresh one is
+spawned per RPC call, per `lib.rs`), opening the grid meant N concurrent
+cold process spawns, each redoing a full esbuild bundle + Tailwind JIT
+pass + docgen from scratch, every single time.
+
+Two independent fixes, both extending patterns already proven elsewhere
+in this app rather than inventing new ones:
+
+- **Caching.** `previewCachePath` (`src/engine/paths.ts`) gained an
+  optional `subKey` segment, and `getOrCompilePreview`
+  (`src/engine/preview/compile.ts`) threads it through -- so multiple
+  previews sharing one `(remoteName, id, version)` (every component in
+  the same design-kit version) get distinct cache slots instead of
+  colliding. New `compileTemplateComponentPreview`
+  (`src/engine/preview/resolveArtifactPreview.ts`) resolves the
+  template's real version and calls `getOrCompilePreview` with the
+  component's own folder name as `subKey`; the `preview.compilePayloadComponent`
+  sidecar handler now calls this instead of `compileLocalPreview`.
+  Measured against the real `kortix-design-kit` payload: ~1.6s cold
+  compile vs. ~0.2s on a cache hit, per component.
+- **Laziness.** The grid's card-building was split into a sync
+  `buildTemplateComponentCard` (shell + "Loading preview…" placeholder,
+  appended immediately) and an async `mountTemplateComponentPreview`
+  (the actual compile + iframe mount), wired together with an
+  `IntersectionObserver` -- the exact same lazy-on-scroll pattern the
+  main UI Components list (`uiComponentsListObserver`) already used, just
+  not yet applied to the template grid. A card's preview now only
+  compiles once it actually scrolls into view, so opening a 32-component
+  grid no longer fires 32 concurrent compiles regardless of cache state.
+- New tests in `test/unit/resolveArtifactPreview.test.ts`: compiles a
+  template's own component correctly, a real cache-hit test (edits the
+  source between calls, confirms the second call returns the FIRST
+  compile's stale output), and a no-collision test across two different
+  components in the same template version.
+- `compileLocalPreview` itself is untouched and still deliberately
+  uncached -- it remains correct for its one real remaining caller, Add
+  New's Review step for a genuinely unpushed Scan candidate, which truly
+  has no `(remote, id, version)` to key a cache on yet.
+
 ## What's next
 
 - **Phase 13** (backend plug-and-play: basic hygiene) — in progress, 5 of 6 items done (uninstall, secrets safety net, timeouts, post-pull secret rotation, config-form reuse-existing-value autofill); config-form autofill's other two sub-cases (genuine local signal, neither) deliberately deferred/descoped, see above

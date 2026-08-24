@@ -1115,6 +1115,14 @@
   // toggle can broadcast `setTheme` to every currently-mounted one without
   // needing to re-query the DOM.
   let detailTemplateIframes = [];
+  // Lazy-loads the grid the same way uiComponentsListObserver already does
+  // for the main UI Components list: a card's own compile call only fires
+  // once it actually scrolls into view, instead of every component in the
+  // design kit compiling at once the moment the tab opens. Re-created (via
+  // clearDetailTemplateListeners) each time the grid is rebuilt, same
+  // "disconnect the old one before observing a new set of cards" discipline
+  // as uiComponentsListObserver.
+  let detailTemplateObserver = null;
 
   // The template grid's currently-selected theme ('light' or 'dark') --
   // read by each card's handler on the harness's own 'ready' message (see
@@ -1164,6 +1172,10 @@
     }
     detailTemplateMessageHandlers = [];
     detailTemplateIframes = [];
+    if (detailTemplateObserver) {
+      detailTemplateObserver.disconnect();
+      detailTemplateObserver = null;
+    }
   }
 
   /** Detail view's live, INTERACTIVE preview (Phase C): variant tabs +
@@ -2268,12 +2280,37 @@ ${bodyHtml}
     }
     if (requestId !== detailTemplateRequestId) return; // superseded while awaiting
 
-    await Promise.all(
-      components.map((component) =>
-        loadTemplateComponentPreview(grid, entry, component, requestId, guidelines.usageRules || {}),
-      ),
-    );
-    if (requestId !== detailTemplateRequestId) return; // superseded while awaiting
+    // Lazy, same as the main UI Components list: build every card's shell
+    // now (so the grid lays out immediately), but only actually compile a
+    // component's preview once its card scrolls into view -- opening a
+    // ~30-component design kit no longer fires that many concurrent
+    // compiles at once just because the tab was opened.
+    if (detailTemplateObserver) {
+      detailTemplateObserver.disconnect();
+    }
+    const contextByFrame = new Map();
+    const observer = new IntersectionObserver((observedEntries) => {
+      for (const observedEntry of observedEntries) {
+        if (!observedEntry.isIntersecting) {
+          continue;
+        }
+        const frame = observedEntry.target;
+        observer.unobserve(frame);
+        const ctx = contextByFrame.get(frame);
+        if (ctx) {
+          void mountTemplateComponentPreview(frame, ctx.entry, ctx.component, ctx.requestId);
+        }
+      }
+    });
+    detailTemplateObserver = observer;
+
+    for (const component of components) {
+      const frame = buildTemplateComponentCard(grid, entry, component, requestId, guidelines.usageRules || {});
+      if (!frame) continue; // superseded while building
+      contextByFrame.set(frame, { entry, component, requestId });
+      observer.observe(frame);
+    }
+    if (requestId !== detailTemplateRequestId) return; // superseded while building
 
     renderTemplateLayoutRules(guidelines.layoutRules);
   }
@@ -2496,16 +2533,15 @@ ${bodyHtml}
     });
   }
 
-  /** Compiles and mounts ONE component's live preview inside the template
-   * grid -- clones loadUiComponentPreview's own per-card iframe pattern
-   * (own contentHeight resize handler scoped via event.source, no
-   * innerHTML for artifact-controlled text) rather than a single shared
-   * listener, since the grid hosts N of these at once. Also applies the
-   * template section's currently-active theme on the harness's own
-   * 'ready' message (see compile.ts's setTheme handling) -- this is what
-   * makes a card that finishes loading AFTER the toggle was already
-   * flipped self-sync correctly. */
-  async function loadTemplateComponentPreview(grid, entry, component, requestId, usageRules) {
+  /** Builds and appends ONE component's card shell -- header, "View
+   * details" button, usage-rule caption, and an empty "Loading preview…"
+   * frame -- WITHOUT compiling or mounting its preview yet. Split out of
+   * what used to be loadTemplateComponentPreview so the grid can lay out
+   * and show every card's shell immediately while deferring the actual
+   * compile (mountTemplateComponentPreview) until each card scrolls into
+   * view. Returns the frame element to observe, or null if superseded
+   * before attaching. */
+  function buildTemplateComponentCard(grid, entry, component, requestId, usageRules) {
     const card = document.createElement('div');
     card.className = 'wiring-action-card template-component-card';
 
@@ -2541,9 +2577,22 @@ ${bodyHtml}
       card.appendChild(captionEl);
     }
 
-    if (requestId !== detailTemplateRequestId) return; // superseded before attaching
+    if (requestId !== detailTemplateRequestId) return null; // superseded before attaching
     grid.appendChild(card);
+    return frame;
+  }
 
+  /** Compiles and mounts ONE component's live preview into an already-built
+   * card's frame (see buildTemplateComponentCard) once it has actually
+   * scrolled into view -- clones loadUiComponentPreview's own per-card
+   * iframe pattern (own contentHeight resize handler scoped via
+   * event.source, no innerHTML for artifact-controlled text) rather than a
+   * single shared listener, since the grid hosts N of these at once. Also
+   * applies the template section's currently-active theme on the harness's
+   * own 'ready' message (see compile.ts's setTheme handling) -- this is
+   * what makes a card that finishes loading AFTER the toggle was already
+   * flipped self-sync correctly. */
+  async function mountTemplateComponentPreview(frame, entry, component, requestId) {
     try {
       const result = await call('preview.compilePayloadComponent', {
         remote: entry.remoteName,

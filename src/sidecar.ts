@@ -62,7 +62,11 @@ import {
 import { cloneRemote, cachePath } from './engine/remote/remoteCache';
 import * as fs from 'fs';
 import { RemoteRegistryError } from './engine/errors';
-import { compileArtifactPreview, compileLocalPreview } from './engine/preview/resolveArtifactPreview';
+import {
+  compileArtifactPreview,
+  compileLocalPreview,
+  compileTemplateComponentPreview,
+} from './engine/preview/resolveArtifactPreview';
 import { readArtifactPayloadFile } from './engine/payload/readPayloadFile';
 import { resolvePayloadDir, resolveWithinPayloadDir } from './engine/payload/payloadDir';
 import { listArtifactPayloadComponents } from './engine/payload/listPayloadComponents';
@@ -597,18 +601,21 @@ const commands: Record<string, CommandHandler> = {
   // Phase 11 Detail-view task: compiles ONE component's live preview out
   // of a design-kit-shaped payload's components/<Name> subdirectory, for
   // Detail's grid (one call per component, run in parallel by the app).
-  // Modeled on preview.compileLocal above, NOT a preview.compile variant --
-  // unlike preview.compileLocal (only ever called with the user's OWN
-  // project path during Add New), `relativeDir` here is resolved and
-  // sandboxed against the artifact's real payload dir server-side, since
-  // the caller only supplies a remote/id/relativeDir, never a raw path.
+  // Cached via compileTemplateComponentPreview -- unlike preview.compileLocal
+  // (only ever called with the user's OWN, genuinely unpushed project path
+  // during Add New), this artifact has a real (remote, id, version) already,
+  // so a repeat visit to the same design kit's grid skips esbuild/Tailwind/
+  // docgen entirely instead of recompiling every component from scratch on
+  // every tab open. `relativeDir` here is resolved and sandboxed against the
+  // artifact's real payload dir server-side, since the caller only supplies
+  // a remote/id/relativeDir, never a raw path.
   'preview.compilePayloadComponent': (args) => {
     const remote = requireString(args, 'remote');
     const id = requireString(args, 'id');
     const relativeDir = requireString(args, 'relativeDir');
     const payloadDir = resolvePayloadDir(remote, id);
     const componentDir = resolveWithinPayloadDir(payloadDir, relativeDir);
-    return compileLocalPreview(componentDir);
+    return compileTemplateComponentPreview(remote, id, componentDir);
   },
 
   // Source-drift-detection: checks whether the real external project an

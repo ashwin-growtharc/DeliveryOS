@@ -1119,14 +1119,20 @@ function injectContentHeightReporter(html: string): string {
  * build artifact, never pushed or pulled (see `previewCachePath`'s own
  * doc comment) -- a version bump naturally invalidates it by changing the
  * cache key, nothing is ever explicitly deleted.
+ *
+ * `subKey`, when given, distinguishes multiple previews sharing the same
+ * `(remoteName, id, version)` -- a `kind: template` artifact's own
+ * `components/<Name>/` previews, one cache slot per component name,
+ * instead of every component in the same design kit colliding on one file.
  */
 export async function getOrCompilePreview(
   remoteName: string,
   id: string,
   version: string,
   previewEntryPath: string,
+  subKey?: string,
 ): Promise<CompiledPreview> {
-  const cachePath = previewCachePath(remoteName, id, version, PREVIEW_COMPILER_VERSION);
+  const cachePath = previewCachePath(remoteName, id, version, PREVIEW_COMPILER_VERSION, subKey);
   if (fs.existsSync(cachePath)) {
     return JSON.parse(fs.readFileSync(cachePath, 'utf-8')) as CompiledPreview;
   }

@@ -6,6 +6,21 @@ All notable changes to DeliveryOS are recorded here, newest first. See
 
 ---
 
+## Phase 18 — Template component-grid preview performance
+
+- **A `kind: template` artifact's Components grid (e.g. `kortix-design-kit`)
+  is now cached and lazy**, matching what the main UI Components list
+  already did. Root cause: every component's preview compiled uncached, all
+  at once, on every tab open. `previewCachePath`/`getOrCompilePreview`
+  gained an optional `subKey` so multiple previews can share one
+  `(remoteName, id, version)` cache root without colliding; new
+  `compileTemplateComponentPreview` wires the `preview.compilePayloadComponent`
+  RPC to it; the grid now builds card shells immediately but only compiles
+  a component's preview once it scrolls into view (`IntersectionObserver`,
+  same pattern `uiComponentsListObserver` already used). Measured against
+  the real `kortix-design-kit` payload: ~1.6s cold vs. ~0.2s cached, per
+  component.
+
 ## Phase 17 — Backend-plugin scaffolding assistant
 
 - **New `deliveryos scaffold-backend-plugin --path <dir> --consumer-file

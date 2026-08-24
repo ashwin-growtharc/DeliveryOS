@@ -163,12 +163,28 @@ function assertSafePathSegment(segment: string, label: string): void {
  * previously-cached preview across every remote/artifact/version stop
  * being looked up in one move, with no manual cache-clearing step for
  * anyone to remember. */
-export function previewCachePath(remoteName: string, id: string, version: string, compilerVersion: string): string {
+/** `subKey`, when given, adds one more path segment before `compiled.json`
+ * -- for a `kind: template` artifact's own `components/<Name>/` preview,
+ * where a single (remoteName, id, version) covers MANY distinct previews,
+ * one per component, that would otherwise collide on the same cache file. */
+export function previewCachePath(
+  remoteName: string,
+  id: string,
+  version: string,
+  compilerVersion: string,
+  subKey?: string,
+): string {
   assertSafePathSegment(remoteName, 'remote name');
   assertSafePathSegment(id, 'artifact id');
   assertSafePathSegment(version, 'version');
   assertSafePathSegment(compilerVersion, 'compiler version');
-  return path.join(previewCacheRoot(), remoteName, id, version, `compiler-v${compilerVersion}`, 'compiled.json');
+  const segments = [previewCacheRoot(), remoteName, id, version, `compiler-v${compilerVersion}`];
+  if (subKey !== undefined) {
+    assertSafePathSegment(subKey, 'preview sub-key');
+    segments.push(subKey);
+  }
+  segments.push('compiled.json');
+  return path.join(...segments);
 }
 
 /** Project-local (cwd-scoped) staging directory for one `scan` run's
