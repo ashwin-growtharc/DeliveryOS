@@ -1394,6 +1394,59 @@ input, textarea, select {
   color: var(--warning-600);
 }
 
+/* Detail's "Connection status" panel (Phase 21) -- a row of at-a-glance
+ * chips (signed, configured, wired, build) plus the "Verify build" button,
+ * always visible for a pulled backend-plugin-shaped artifact so the
+ * question "is this actually connected and working" has an answer any
+ * time Detail is reopened, not just right after a pull. See
+ * renderConnectionStatusPanel in app.js. */
+.connection-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 14px;
+}
+
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .2px;
+  padding: 4px 10px;
+  border-radius: var(--radius-md);
+}
+
+.status-chip.ok {
+  background: var(--success-100);
+  color: var(--success-600);
+}
+
+.status-chip.warn {
+  background: var(--warning-100);
+  color: var(--warning-600);
+}
+
+.status-chip.neutral {
+  background: var(--surface-tertiary);
+  border: 1px solid var(--border);
+  color: var(--ink);
+  opacity: .85;
+}
+
+/* A chip rendered as a real <button> (something needs review, and has a
+ * real place to jump to) -- same chip look, but obviously interactive. */
+.status-chip.clickable {
+  border: none;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.status-chip.clickable:hover {
+  filter: brightness(1.12);
+}
+
 /* Holds one real, sandboxed markdown iframe (see
  * renderMarkdownToSandboxedIframe in app.js) -- no text styling of its
  * own; the rendered document's own <style> (inside the iframe) owns
@@ -1600,6 +1653,11 @@ input, textarea, select {
 .wiring-action-status.exists {
   background: var(--warning-100);
   color: var(--warning-600);
+}
+
+.wiring-action-status.ok {
+  background: var(--success-100);
+  color: var(--success-600);
 }
 
 .wiring-action-description {

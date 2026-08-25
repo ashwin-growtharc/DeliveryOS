@@ -39,6 +39,7 @@ import { removeArtifact } from './engine/pull/removeArtifact';
 import { resolveInstallParamValues, applyInstallParams, readExistingEnvValues } from './engine/pull/installParams';
 import { resolveWiringActions } from './engine/pull/wiring';
 import { pullAndAutoWire } from './engine/pull/pullAndAutoWire';
+import { runProjectBuild } from './engine/pull/verifyBuild';
 import { buildPostInstallHealthSummary } from './engine/pull/postInstallHealthSummary';
 import { requestBuildFix, applyBuildFix } from './engine/pull/fixBuildFailure';
 import { requestWiringMerge, applyWiringMerge, readWiringMergeLog } from './engine/pull/requestWiringMerge';
@@ -381,6 +382,18 @@ const commands: Record<string, CommandHandler> = {
     const remote = optionalString(args, 'remote');
     const entry = resolveArtifact(id, remote);
     return resolveWiringActions(entry.manifest.wiring_actions, cwd);
+  },
+
+  // Detail's "Connection status" panel (Phase 21): an on-demand, standalone
+  // way to check "does the project still build" any time the artifact's
+  // Detail view is open -- not just right after a pull/merge/fix, which is
+  // the only time this ever ran before. Deliberately never run automatically
+  // on Detail open (a real build isn't free); a person clicks "Verify build"
+  // when they actually want the answer. Same runProjectBuild every other
+  // build-verify step already uses -- no new detection/timeout logic.
+  'artifact.verifyBuild': (args) => {
+    const cwd = requireString(args, 'cwd');
+    return runProjectBuild(cwd);
   },
 
   'artifact.push': async (args, { onProgress }) => {

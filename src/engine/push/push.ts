@@ -451,7 +451,20 @@ export async function pushArtifact(
   } else {
     const entry = resolveArtifact(id, remoteName);
     const { manifest } = entry;
-    const installTarget = path.resolve(cwd, manifest.install_target);
+    // manifest.install_target is untrusted (the artifact author's own
+    // manifest, not something DeliveryOS controls) -- same containment
+    // check pull.ts already applies before ever writing there, and the
+    // same reasoning this file's own payload_path check below already
+    // documents: an unchecked value here would let a crafted manifest
+    // point a routine edit-mode push's diff/pristine-comparison at a
+    // location outside the project entirely.
+    const installTarget = resolveContainedPath(cwd, manifest.install_target);
+    if (!installTarget) {
+      throw new ManifestValidationError(
+        `Artifact "${id}"'s install_target ("${manifest.install_target}") resolves outside the project -- `
+          + `refusing to push.`,
+      );
+    }
     const pristine = pristinePath(cwd, id);
 
     onProgress?.('diff', `Diffing "${id}" against its pristine snapshot...`);

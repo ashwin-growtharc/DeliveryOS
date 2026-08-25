@@ -844,6 +844,218 @@ instructions, then copy every snippet by hand.
   takes the old code path, not just a differently-worded version of the
   new one.
 
+## Phase 20 — "Merge all with Claude" — **Done**
+
+The per-file "Merge with Claude" button (Phase 7) worked well but didn't
+scale to an artifact with several existing-file wiring actions at once --
+`nextauth-credentials` has four, and clicking through each individually is
+real friction for exactly the case (multiple files needing review) where
+it matters most.
+
+- **`renderWiringMergeRow`** (`src-tauri/spike-ui/app.js`) now returns a
+  small controller (`{ row, askForMerge, hasProposal, applyProposal }`)
+  instead of just a DOM element -- the exact same ask/apply logic the
+  single-file button already used, just also callable from outside the
+  row. No new engine or sidecar code was needed: both
+  `artifact.requestWiringMerge` and `artifact.applyWiringMerge` already
+  operated on one file at a time, which turned out to be exactly the
+  right shape to batch.
+- **New "Merge all with Claude" control** (`renderMergeAllControls`),
+  shown only when 2+ wiring actions target an already-existing file:
+  proposes a merge for every one of them, sequentially (one real `claude`
+  subprocess call at a time, never concurrent -- both to avoid the
+  concurrent-heavy-process cost Phase 18 already moved away from, and
+  because a shared build-verify step can't race reliably), then a
+  separate "Apply all proposed merges" button applies every real proposal
+  -- still sequential, since each apply reruns the WHOLE project's build to
+  verify itself. One artifact's honest "can't merge this" never blocks
+  proposing or applying the others -- same "one failure doesn't abort the
+  batch" rule `applyAvailableUpdates` (Phase 16) already established.
+  Still exactly one human confirmation click before anything is written,
+  same as the single-file flow -- it just now covers every file that
+  click applies to.
+- Dogfooded for real against `nextauth-credentials`'s real 4 wiring
+  actions: 3 came back with an honest, specific refusal ("there is nothing
+  actionable to add... merging without that information risks fabricating
+  an integration"), 1 got a real proposed merge, applied cleanly, logged
+  to the existing audit log with no new log format needed.
+- No engine/sidecar changes, no new tests -- this is a pure
+  frontend-orchestration feature over two already-tested engine
+  functions, consistent with this app's existing "frontend has no
+  automated test coverage, verify by hand" bar (see Development section,
+  README.md).
+
+## Phase 21 — A persistent "Connection status" panel — **Done**
+
+The post-install health summary (Phase 12) only ever answers "is this
+connected and working" in the moment right after a pull, apply, or merge —
+its own `lastAutoWireSummary` is a session-scoped in-memory value, gone
+the instant you navigate away and back, let alone reopen the app. There
+was no way to ask "is this still actually wired up" the next day without
+re-pulling or re-triggering an action just to see a status message again.
+
+- **New Detail-view panel** (`renderConnectionStatusPanel`, `app.js`),
+  always visible for a pulled artifact with `install_params` and/or
+  `wiring_actions`: real chips for **Configured (N/M)** (from
+  `artifact.readInstallParamValues`, the same RPC the Configuration form
+  already uses) and **Wired (N/M, K need review)** (from
+  `artifact.resolveWiringActions`, same as the Wiring section) --
+  recomputed fresh from the real project every time Detail opens, not a
+  memory of a past action.
+- **New `artifact.verifyBuild` sidecar RPC** (`src/sidecar.ts`) and
+  **Verify build** button: deliberately NOT run automatically on Detail
+  open (a real build isn't free, and this view can be opened far more
+  often than a pull happens) -- starts at "not checked yet," and only
+  calls `runProjectBuild` (the exact same function every other
+  build-verify step already uses) on an explicit click.
+- The existing "Signed" provenance badge is left as the one thing NOT
+  repeated in this new panel -- it already covers every artifact
+  regardless of kind or pulled state; this panel only adds what that
+  badge doesn't already show.
+- Dogfooded live against the real `nextauth-credentials` artifact via a
+  real running instance of the app (WebView2's own remote-debugging port,
+  driven with `playwright-core` over CDP) -- caught and fixed a real
+  process error along the way: the new sidecar RPC didn't take effect
+  after `npm run build:sidecar` alone, because that command bundles from
+  `dist/`, and only a real `npm run build` (not `tsc --noEmit`) actually
+  regenerates it -- a real gap in the local dev loop, not a bug in the
+  RPC itself.
+- **Two real usability bugs found via direct user testing of this same
+  panel, fixed same-day:**
+  - The "Wired (N/M, K need review)" chip named a count with no way to
+    actually get to what it was talking about -- the panel sits above
+    Detail's own tabs, visible from Documentation same as any other, so
+    "4 need review" left a real person unable to find the 4 things. Fixed:
+    a chip with somewhere real to jump to now renders as a real button
+    (`goToDetailTab`, a small shared helper the tab buttons themselves now
+    also use) that switches to Configuration and scrolls straight to the
+    relevant section.
+  - **Verify build**'s own button always reverts to its own idle label
+    ("Verify build") once done, same text as before clicking -- someone
+    watching the BUTTON rather than the chip beside it reasonably reads
+    that as "I clicked it and nothing happened." Fixed: the real result
+    now also fires a toast (the same "something just happened" signal
+    every other action in this app already uses), in addition to the
+    persistent chip update.
+- **Found a real, separate bug in the `nextauth-credentials` artifact
+  itself** while investigating: its `layout.tsx` wiring action's
+  `whenAbsent.snippet` was written as guidance text (a comment + one bare
+  JSX line), not a complete, valid file -- violating the engine's own
+  contract that `whenAbsent.snippet` is written verbatim as a brand-new
+  file. Caught by "Merge with Claude" itself, which correctly refused to
+  merge into it ("the existing file provided is just the wiring guidance
+  snippet itself, not an actual root layout file"). Fixed at the source:
+  the manifest now declares a real, minimal, complete Next.js root layout
+  component, version bumped to 1.0.1, pushed to `ai-helpers`.
+
+## Phase 22 — A full codebase swarm, and 7 real bugs fixed — **Done**
+
+Prompted by two real usability bugs a person found by hand in the new
+Connection-status panel (Phase 21). Rather than fix just those two, ran a
+full swarm: a security-focused review of every uncommitted change, an
+independent deep review of everything built in Phases 18-21, and a broad
+sweep of the wider engine for pre-existing bugs -- three parallel passes,
+each with its own verification step, per the project's own established
+"don't invent a finding just to have one" bar. Found and fixed 7 real
+bugs, all with new regression tests:
+
+- **CLI `pull`'s new default falsely reported "no build command found"
+  for most artifacts.** `pullAndAutoWire` skips the build check entirely
+  when there are no `wiring_actions` -- correct for the app (which only
+  ever called it when `hasWiring`), wrong once the CLI started calling it
+  for every pull regardless. Fixed by having the CLI check
+  `wiring_actions.length` up front and only take the auto-wire path when
+  there's actually something to wire, matching the app's own gate --
+  restores the "invisible to non-backend-plugin kinds" claim to being
+  true.
+- **Preview cache-key collision.** `compileTemplateComponentPreview`'s
+  cache key was just the component folder's own basename -- two
+  components with the same leaf name in different category subfolders
+  (`components/forms/Input`, `components/data/Input`) collided and
+  silently served each other's compiled HTML. Fixed: the subKey is now
+  the full path relative to the payload root.
+- **Connection-status panel's stale-render guard had a gap.** Its
+  `not_pulled` early return skipped incrementing the request counter, so
+  a slow in-flight request for a previously-viewed PULLED artifact could
+  render onto whatever not-pulled artifact you'd since navigated to.
+  Fixed: the counter now increments on every path, including that one.
+- **"Apply all proposed merges" allowed a duplicate concurrent apply.**
+  A row's own Apply button stayed clickable during a batch apply, so
+  clicking both fired two concurrent `applyWiringMerge` calls for the
+  same file. Fixed with an in-flight guard inside `applyProposal` itself
+  (shared by both callers, not just the row's own button). Also fixed: a
+  re-run of "Merge all" mid-sweep could batch-apply a stale, pre-refresh
+  proposal -- "Apply all" now hides itself for the whole re-ask sweep.
+- **`install_target` resolved with no path-containment check in two
+  places** (`push.ts`'s edit-mode diff, `catalog.ts`'s per-entry
+  annotation) -- inconsistent with `pull.ts`'s own check and with this
+  same `push.ts` file's own check for `payload_path` thirty lines later.
+  `checkDrift.ts` had the same gap for `SOURCES.json`'s `sourcePath`. All
+  three now go through `resolveContainedPath`, same as everywhere else a
+  manifest/payload-declared path reaches the filesystem.
+- **Re-pulling an already-installed artifact silently wiped its
+  `pendingPr`/`wiredFiles`.** The lockfile write built a bare
+  `{id, version, remote, installTarget}` instead of spreading the
+  existing entry first, unlike every other call site
+  (`sync.ts`/`applyUpdate.ts`/`push.ts`/`pullAndAutoWire.ts`). Broke PR
+  tracking and the uninstall-safety guarantee on a completely normal,
+  supported action.
+- **Untrusted `wiring_actions` could auto-write to real auto-run
+  locations** (`.git/hooks/`, `.github/workflows/`, `.vscode/`,
+  `.husky/`) with no confirmation for an unsigned artifact (the common
+  case -- and even a real signature only covers the payload's own
+  content-digest, never `wiring_actions`). Since `pull` now auto-writes
+  any wiring target that doesn't already exist by default, this was real,
+  newly-exposed surface, not just a theoretical gap. Fixed with a
+  denylist in `resolveWiringActions` -- a target inside one of these
+  locations is now reported the same way an out-of-bounds path already
+  was ("exists," refused, never auto-applied), reusing the exact
+  established pattern rather than a second code path.
+
+All seven fixes shipped with new tests proving the actual bug (not just
+the fix's own happy path) -- a nested-folder cache-collision test, a
+sensitive-path-per-location test suite, a re-pull-preserves-fields test,
+containment-escape tests for all three newly-checked paths, and a
+plain-non-backend-plugin-pull regression for the build-message fix. Full
+project typecheck/lint clean; full test suite run twice, both times with
+the same 3 known-flaky failures (2 Playwright timeouts under full
+parallel load, 1 pre-existing GitHub-auth-boundary case) that pass
+individually in isolation -- confirmed not regressions.
+
+## Phase 23 — "Already wired" detection — **Done**
+
+Found via direct user testing of "Merge all with Claude" against the real
+`nextauth-credentials` artifact: 3 of its 4 wiring targets had already
+been correctly auto-wired by an earlier pull, yet the Wiring section
+still offered "Merge with Claude" for all three, and clicking it just
+burned a real `claude` call to correctly conclude there was nothing to
+change. `resolveWiringActions` only ever checked whether the target file
+*existed*, never whether its real content already matched what this
+artifact would have written.
+
+- `resolveWiringActions` now reads the target file's real content when it
+  exists and compares it (trimmed) against `whenAbsent.snippet` -- the
+  exact content a fresh auto-wire would have produced. An exact match sets
+  a new `alreadyWired: true` on the resolved action, checked BEFORE the
+  `whenPresent`/no-`whenPresent` branching below it (an action with no
+  `whenPresent.snippet` at all, like the real `auth.ts` case, used to
+  always read as "review before touching it," even when already correct).
+- Detail's Wiring section shows a green **"Already wired ✓"** badge for
+  these instead of the amber "EXISTS" one, and no longer offers "Merge
+  with Claude" for them at all -- both the per-file button and "Merge
+  all"'s own batch no longer include them. The Connection-status panel's
+  "Wired (N/M, K need review)" chip excludes them from the review count
+  too.
+- Dogfooded live against the real `nextauth-credentials` project: went
+  from "Wired (0/4, 4 need review)" to the correct "Wired (3/4, 1 needs
+  review)," with `auth.ts`/`middleware.ts`/`route.ts` showing "Already
+  wired ✓" and only the genuinely-broken `layout.tsx` (Phase 22's own
+  manifest-content bug, in a project pulled before that fix landed)
+  still offering a real merge.
+- New tests: exact-match detection, a tolerant-of-whitespace variant, and
+  a "genuinely differs, still offers review" negative case, all in
+  `test/unit/wiring.test.ts`.
+
 ## What's next
 
 - **Phase 13** (backend plug-and-play: basic hygiene) — in progress, 5 of 6 items done (uninstall, secrets safety net, timeouts, post-pull secret rotation, config-form reuse-existing-value autofill); config-form autofill's other two sub-cases (genuine local signal, neither) deliberately deferred/descoped, see above

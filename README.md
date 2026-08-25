@@ -217,6 +217,8 @@ The frontend (`src-tauri/spike-ui/*.js`) has no automated test coverage
 | [docs/demo-script.md](docs/demo-script.md) | Step-by-step live demo script (what to click, what to say, anticipated Q&A) |
 | [docs/growtharc-brand-guidelines.md](docs/growtharc-brand-guidelines.md) | Color palette, typography, and component patterns already applied to the desktop app UI |
 | [docs/manual-smoke-test-push.md](docs/manual-smoke-test-push.md) | How to verify `push` against a real GitHub repo by hand |
+| [docs/backend-plugin-walkthrough.md](docs/backend-plugin-walkthrough.md) | Real screenshots of the full `backend-plugin` flow in the desktop app, start to finish |
+| [docs/backend-plugin-lifecycle.md](docs/backend-plugin-lifecycle.md) | Every `backend-plugin` stage explained: install, wire in, build breaks, merge, audit, uninstall, secrets, rotate, reconfigure, update, timeouts |
 | [docs/manual-ui-clickthrough.md](docs/manual-ui-clickthrough.md) | How to verify the desktop app by hand (no automated GUI test suite exists) |
 | [docs/phase-2-retro.md](docs/phase-2-retro.md) | What broke proving the engine against real ArcOS catalog content |
 | [docs/artifact-arcos-cli-retro.md](docs/artifact-arcos-cli-retro.md) | Adding a whole-repo, Pull-only artifact (`arcos-cli`) |

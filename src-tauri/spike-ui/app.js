@@ -1075,6 +1075,11 @@
   // not just the manifest's own default).
   let installParamsRequestId = 0;
 
+  // Same request-token-guard discipline, for renderConnectionStatusPanel's
+  // own async artifact.readInstallParamValues/resolveWiringActions calls
+  // (Phase 21).
+  let connectionStatusRequestId = 0;
+
   // Array-based counterpart to detailPreviewMessageHandler, for
   // renderMarkdownToSandboxedIframe's own iframes -- a single Documentation
   // tab can hold more than one (README.md AND GUIDELINES.md's own prose,
@@ -1304,6 +1309,176 @@
       banner.hidden = true;
       banner.textContent = '';
     }
+  }
+
+  /** Phase 21: "is this thing actually connected and working" at a glance,
+   * any time Detail is reopened -- not just in the moment right after a
+   * pull/merge/fix, which is the only time renderPostInstallHealthBanner
+   * above ever has anything to show (it's keyed off an in-memory value
+   * from THIS session's last action, gone the moment the app restarts or
+   * a different artifact was viewed in between). This recomputes the real
+   * current state from scratch every time: signed status straight off the
+   * manifest already in hand, install_params fulfillment and wiring
+   * resolution via the same RPCs the Configuration/Wiring sections already
+   * call. Only shown for a PULLED artifact that actually has
+   * install_params or wiring_actions to report on -- see renderDetail.
+   *
+   * Deliberately does NOT run the project's build automatically on every
+   * Detail open (a real build isn't free, and this can be reopened far
+   * more often than a pull happens) -- "Verify build" is an explicit,
+   * on-demand action via the new artifact.verifyBuild RPC, same
+   * runProjectBuild every other build-verify step already uses. */
+  async function renderConnectionStatusPanel(entry) {
+    const { manifest } = entry;
+    const panel = $('detail-connection-status');
+
+    if (entry.localStatus === 'not_pulled') {
+      // Bumps the counter too, not just hides the panel -- found by review:
+      // without this, a slow in-flight request for a previously-viewed
+      // PULLED artifact isn't caught by the stale-response check below (its
+      // captured requestId still matches the live counter), so it can
+      // render stale chips onto whatever not-pulled artifact the user has
+      // since navigated to, even though this exact branch just hid the
+      // panel for it.
+      ++connectionStatusRequestId;
+      panel.hidden = true;
+      panel.innerHTML = '';
+      return;
+    }
+
+    const requestId = ++connectionStatusRequestId;
+    const chips = [];
+
+    // Signed/unsigned is deliberately NOT repeated here -- detail-provenance-badge
+    // right above already shows it, for every artifact regardless of kind
+    // or pulled state; this panel only adds what that badge doesn't cover.
+    if (manifest.install_params && manifest.install_params.length > 0) {
+      let configuredChip = { ok: null, label: 'Configuration -- could not check' };
+      try {
+        const { values } = await call('artifact.readInstallParamValues', {
+          id: manifest.id,
+          remote: entry.remoteName,
+          cwd: state.projectDir,
+        });
+        const filled = manifest.install_params.filter((p) => values[p.key]).length;
+        const total = manifest.install_params.length;
+        configuredChip = {
+          ok: filled === total,
+          label: `Configured (${filled}/${total})`,
+          // Only actionable when something's actually missing -- a fully
+          // configured chip has nowhere useful to jump to.
+          goTo: filled < total ? { tab: 'configuration', scrollTo: 'detail-install-params-fields' } : null,
+        };
+      } catch {
+        // Keep the "could not check" chip rather than silently omitting it.
+      }
+      if (requestId !== connectionStatusRequestId) return; // superseded while awaiting
+      chips.push(configuredChip);
+    }
+
+    if (manifest.wiring_actions && manifest.wiring_actions.length > 0) {
+      let wiredChip = { ok: null, label: 'Wiring -- could not check' };
+      try {
+        const resolved = await call('artifact.resolveWiringActions', {
+          id: manifest.id,
+          remote: entry.remoteName,
+          cwd: state.projectDir,
+        });
+        const total = resolved.length;
+        // alreadyWired excluded from "needs review" -- its real content
+        // already matches what this artifact would have written, so
+        // there's genuinely nothing to look at, same reasoning as why the
+        // Wiring section itself no longer offers "Merge with Claude" for it.
+        const needsReview = resolved.filter((a) => a.targetFileExists && !a.alreadyWired).length;
+        wiredChip = needsReview === 0
+          ? { ok: true, label: `Wired (${total}/${total})`, goTo: null }
+          : {
+            ok: false,
+            label: `Wired (${total - needsReview}/${total}, ${needsReview} need${needsReview === 1 ? 's' : ''} review) →`,
+            goTo: { tab: 'configuration', scrollTo: 'detail-wiring-actions' },
+          };
+      } catch {
+        // Keep the "could not check" chip rather than silently omitting it.
+      }
+      if (requestId !== connectionStatusRequestId) return; // superseded while awaiting
+      chips.push(wiredChip);
+    }
+
+    panel.innerHTML = '';
+    panel.hidden = false;
+    for (const chip of chips) {
+      // A chip with somewhere real to jump to is a real button, not just
+      // text -- found by direct user feedback: naming "4 need review"
+      // with no way to get there from this panel (which sits above the
+      // tabs, visible from Documentation same as any other tab) left
+      // people unable to find what it was talking about.
+      const el = document.createElement(chip.goTo ? 'button' : 'span');
+      if (chip.goTo) el.type = 'button';
+      el.className = `status-chip ${chip.ok === true ? 'ok' : chip.ok === false ? 'warn' : 'neutral'}${chip.goTo ? ' clickable' : ''}`;
+      el.textContent = chip.label;
+      if (chip.goTo) {
+        el.title = 'View details';
+        el.addEventListener('click', () => {
+          goToDetailTab(chip.goTo.tab);
+          // The tab switch above is synchronous DOM work; scrollIntoView
+          // needs the target's section to already be un-hidden, which it
+          // is by the time this next line runs.
+          $(chip.goTo.scrollTo)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+      }
+      panel.appendChild(el);
+    }
+
+    const buildChip = document.createElement('span');
+    buildChip.className = 'status-chip neutral';
+    buildChip.textContent = 'Build -- not checked yet';
+    panel.appendChild(buildChip);
+
+    const verifyBtn = document.createElement('button');
+    verifyBtn.type = 'button';
+    verifyBtn.className = 'btn btn-sm btn-ghost';
+    verifyBtn.textContent = 'Verify build';
+    verifyBtn.addEventListener('click', () => {
+      void withBusy(verifyBtn, 'Checking…', async () => {
+        // A chip that quietly changes text, next to a button whose own
+        // label goes right back to "Verify build" once it's done, reads
+        // as "I clicked it and nothing happened" if you were watching the
+        // button rather than the chip beside it -- direct user feedback.
+        // The toast is the same "something just happened" signal every
+        // other action in this app already uses; the chip stays too, as
+        // the persistent record for next time.
+        try {
+          const build = await call('artifact.verifyBuild', { cwd: state.projectDir });
+          if (!build.ran) {
+            buildChip.className = 'status-chip neutral';
+            buildChip.textContent = 'Build -- no build command found';
+            showToast('success', 'No build command was found for this project -- nothing to verify.');
+          } else if (build.success) {
+            buildChip.className = 'status-chip ok';
+            buildChip.textContent = 'Build passing';
+            showToast('success', 'Build passing.');
+          } else if (build.timedOut) {
+            buildChip.className = 'status-chip warn';
+            buildChip.textContent = 'Build timed out (may just be slow)';
+            showToast('error', 'The build was killed for running too long -- it may just be slow, or genuinely stuck.');
+          } else if (build.toolNotFound) {
+            buildChip.className = 'status-chip warn';
+            buildChip.textContent = 'Build tool not found on PATH';
+            showToast('error', "The build tool this project needs isn't installed or on PATH.");
+          } else {
+            buildChip.className = 'status-chip warn';
+            buildChip.textContent = 'Build failing';
+            showToast('error', `Build failing${build.output ? `: ${build.output.slice(0, 200)}` : '.'}`);
+          }
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          buildChip.className = 'status-chip warn';
+          buildChip.textContent = `Could not check -- ${message}`;
+          showToast('error', `Could not check the build -- ${message}`);
+        }
+      });
+    });
+    panel.appendChild(verifyBtn);
   }
 
   async function renderInstallParamsSection(entry) {
@@ -2008,6 +2183,7 @@ ${bodyHtml}
 
     section.hidden = false;
     container.innerHTML = '';
+    const mergeControllers = [];
     for (const action of resolved) {
       const card = document.createElement('div');
       card.className = 'wiring-action-card';
@@ -2017,8 +2193,8 @@ ${bodyHtml}
       const fileEl = document.createElement('code');
       fileEl.textContent = action.targetFile;
       const statusEl = document.createElement('span');
-      statusEl.className = `wiring-action-status ${action.targetFileExists ? 'exists' : 'absent'}`;
-      statusEl.textContent = action.targetFileExists ? 'exists' : 'not found';
+      statusEl.className = `wiring-action-status ${action.alreadyWired ? 'ok' : action.targetFileExists ? 'exists' : 'absent'}`;
+      statusEl.textContent = action.alreadyWired ? 'already wired ✓' : action.targetFileExists ? 'exists' : 'not found';
       header.appendChild(fileEl);
       header.appendChild(statusEl);
 
@@ -2046,20 +2222,35 @@ ${bodyHtml}
       // a real, opt-in "Merge with Claude" row for exactly this case
       // (never for a fresh file, which already got a safe, deterministic
       // full-content whenAbsent.snippet with no ambiguity to resolve).
-      if (action.targetFileExists) {
-        card.appendChild(
-          renderWiringMergeRow(
-            action.targetFile,
-            action.description,
-            action.instructions,
-            action.snippet,
-            entry.remoteName,
-            entry.manifest.id,
-          ),
+      // Also never for a file that's already wired correctly (its real
+      // content already matches what this artifact would have written) --
+      // found via direct user testing: offering the button here just meant
+      // a wasted click and a wasted `claude` call for an outcome
+      // resolveWiringActions already knew in advance.
+      if (action.targetFileExists && !action.alreadyWired) {
+        const controller = renderWiringMergeRow(
+          action.targetFile,
+          action.description,
+          action.instructions,
+          action.snippet,
+          entry.remoteName,
+          entry.manifest.id,
         );
+        card.appendChild(controller.row);
+        mergeControllers.push(controller);
       }
 
       container.appendChild(card);
+    }
+
+    // "Merge all with Claude" only earns its own row once there's more
+    // than one file to merge -- for exactly one, the per-file button
+    // above is already the whole interaction, and a second identical
+    // button next to it would just be noise.
+    const mergeAllContainer = $('detail-wiring-merge-all');
+    mergeAllContainer.innerHTML = '';
+    if (mergeControllers.length > 1) {
+      mergeAllContainer.appendChild(renderMergeAllControls(mergeControllers));
     }
   }
 
@@ -2068,7 +2259,15 @@ ${bodyHtml}
    * propose a merge, then either its own honest "can't determine a
    * merge" reason, or the proposed full file content plus Apply/Discard.
    * Mirrors renderBuildFixRow's exact ask/apply/discard shape. Nothing
-   * is written to disk, and nothing is logged, unless Apply is clicked. */
+   * is written to disk, and nothing is logged, unless Apply is clicked.
+   *
+   * Returns a controller, not just the row element -- `renderMergeAllControls`
+   * drives `askForMerge`/`applyProposal` on every row in a batch, reusing
+   * this exact same ask/apply logic (same prompt, same audit-log entry,
+   * same rebuild-and-rollback) rather than a second, parallel code path
+   * that could drift from the single-file one. Clicking the row's own
+   * buttons and the batch controls calling these functions are genuinely
+   * the same call, not two implementations of the same idea. */
   function renderWiringMergeRow(targetFile, description, instructions, guidanceSnippet, remoteName, artifactId) {
     const row = document.createElement('div');
     row.className = 'build-fix-row';
@@ -2077,6 +2276,19 @@ ${bodyHtml}
     // shared-counter removal) -- guards only against this row's own second
     // click superseding its first in-flight request, never a different row.
     let wiringMergeRequestId = 0;
+    // The most recent successfully-proposed merge, if any -- what
+    // `applyProposal` (whether triggered by this row's own Apply button or
+    // by "Apply all") actually writes. Cleared on Discard or once applied.
+    let pendingMerge = null;
+    // Found by review: this row's own Apply button and "Apply all"
+    // (renderMergeAllControls) can both call `applyProposal` -- the
+    // button's own click handler disables ITSELF for the duration via
+    // `withBusy`, but a batch call bypasses that entirely, so without this
+    // flag a click on the row's own Apply button while a batch apply for
+    // the SAME row is still in flight would fire a second, concurrent
+    // `applyWiringMerge` for the same file (two racing build-verify runs,
+    // two audit-log entries for one real change).
+    let applyInFlight = false;
 
     const askBtn = document.createElement('button');
     askBtn.type = 'button';
@@ -2089,8 +2301,11 @@ ${bodyHtml}
     resultEl.hidden = true;
     row.appendChild(resultEl);
 
-    askBtn.addEventListener('click', () => {
-      void withBusy(askBtn, 'Asking…', async () => {
+    let applyBtn = null;
+    let discardBtn = null;
+
+    async function askForMerge() {
+      await withBusy(askBtn, 'Asking…', async () => {
         const requestId = ++wiringMergeRequestId;
         let merge;
         try {
@@ -2113,11 +2328,14 @@ ${bodyHtml}
         resultEl.innerHTML = '';
 
         if (!merge.mergedFile) {
+          pendingMerge = null;
           const reasonEl = document.createElement('div');
           reasonEl.textContent = merge.reason || 'Claude could not determine a merge for this file.';
           resultEl.appendChild(reasonEl);
           return;
         }
+
+        pendingMerge = merge;
 
         const snippetEl = document.createElement('pre');
         snippetEl.className = 'wiring-action-snippet';
@@ -2126,11 +2344,11 @@ ${bodyHtml}
 
         const actionsEl = document.createElement('div');
         actionsEl.className = 'build-fix-actions';
-        const applyBtn = document.createElement('button');
+        applyBtn = document.createElement('button');
         applyBtn.type = 'button';
         applyBtn.className = 'btn btn-sm';
         applyBtn.textContent = 'Apply';
-        const discardBtn = document.createElement('button');
+        discardBtn = document.createElement('button');
         discardBtn.type = 'button';
         discardBtn.className = 'btn btn-sm btn-ghost';
         discardBtn.textContent = 'Discard';
@@ -2142,47 +2360,157 @@ ${bodyHtml}
         discardBtn.addEventListener('click', () => {
           // Nothing written, nothing logged -- just clears the offer back
           // to its starting state so it can be asked again if wanted.
+          pendingMerge = null;
           resultEl.hidden = true;
           resultEl.innerHTML = '';
           askBtn.hidden = false;
         });
 
-        applyBtn.addEventListener('click', () => {
-          void withBusy(applyBtn, 'Applying…', async () => {
-            discardBtn.disabled = true;
-            try {
-              const outcome = await call('artifact.applyWiringMerge', {
-                cwd: state.projectDir,
-                targetFile,
-                mergedFile: merge.mergedFile,
-                description,
-                remote: remoteName,
-                id: artifactId,
-                costUsd: merge.costUsd,
-                durationMs: merge.durationMs,
-              });
-              const outcomeEl = document.createElement('div');
-              if (outcome.rolledBack) {
-                outcomeEl.textContent = `The merge didn't actually keep the project building -- your original file was restored.${outcome.build.output ? ` (${outcome.build.output})` : ''}`;
-              } else if (outcome.build.ran) {
-                outcomeEl.textContent = 'Merge applied -- the build still passes.';
-              } else {
-                outcomeEl.textContent = 'Merge applied (no build command detected to verify it).';
-              }
-              resultEl.innerHTML = '';
-              resultEl.appendChild(outcomeEl);
-            } catch (err) {
-              const errEl = document.createElement('div');
-              errEl.textContent = `Could not apply the merge -- ${err instanceof Error ? err.message : String(err)}`;
-              resultEl.innerHTML = '';
-              resultEl.appendChild(errEl);
-            }
-          });
+        applyBtn.addEventListener('click', () => void withBusy(applyBtn, 'Applying…', applyProposal));
+      });
+    }
+
+    async function applyProposal() {
+      // Returns `null` (not an error) when there's nothing to do OR when
+      // another call is already applying this exact row -- the caller
+      // (this row's own click handler, or a batch loop) treats `null` as
+      // "skip, no outcome to count," never as a failure.
+      if (!pendingMerge || !pendingMerge.mergedFile || applyInFlight) return null;
+      applyInFlight = true;
+      const merge = pendingMerge;
+      if (discardBtn) discardBtn.disabled = true;
+      try {
+        const outcome = await call('artifact.applyWiringMerge', {
+          cwd: state.projectDir,
+          targetFile,
+          mergedFile: merge.mergedFile,
+          description,
+          remote: remoteName,
+          id: artifactId,
+          costUsd: merge.costUsd,
+          durationMs: merge.durationMs,
         });
+        pendingMerge = null;
+        const outcomeEl = document.createElement('div');
+        if (outcome.rolledBack) {
+          outcomeEl.textContent = `The merge didn't actually keep the project building -- your original file was restored.${outcome.build.output ? ` (${outcome.build.output})` : ''}`;
+        } else if (outcome.build.ran) {
+          outcomeEl.textContent = 'Merge applied -- the build still passes.';
+        } else {
+          outcomeEl.textContent = 'Merge applied (no build command detected to verify it).';
+        }
+        resultEl.innerHTML = '';
+        resultEl.appendChild(outcomeEl);
+        return outcome;
+      } catch (err) {
+        const errEl = document.createElement('div');
+        errEl.textContent = `Could not apply the merge -- ${err instanceof Error ? err.message : String(err)}`;
+        resultEl.innerHTML = '';
+        resultEl.appendChild(errEl);
+        throw err;
+      } finally {
+        applyInFlight = false;
+      }
+    }
+
+    askBtn.addEventListener('click', () => void askForMerge());
+
+    return {
+      row,
+      targetFile,
+      askForMerge,
+      hasProposal: () => Boolean(pendingMerge && pendingMerge.mergedFile),
+      applyProposal,
+    };
+  }
+
+  /** "Merge all with Claude": batches the exact same ask/apply calls every
+   * per-file row already makes, just orchestrated across all of them from
+   * one button instead of N. Proposals are requested SEQUENTIALLY, not in
+   * parallel -- each is a real `claude` subprocess call, and running many
+   * at once is the same avoidable concurrent-heavy-process cost this app
+   * already moved away from for the template preview grid (Phase 18).
+   * Applying is sequential for a second, load-bearing reason: each
+   * `applyWiringMerge` reruns the WHOLE project's build to verify itself,
+   * and two of those racing at once against the same project would give
+   * an unreliable verify/rollback signal for both. One failure never stops
+   * the rest -- same "one artifact's failure doesn't abort the batch"
+   * rule `applyAvailableUpdates` already uses -- so a merge Claude can't
+   * figure out for one file doesn't block proposing or applying the
+   * others. Still requires exactly one human click before ANYTHING is
+   * written, same as the single-file flow; it just covers every file that
+   * click applies to. */
+  function renderMergeAllControls(controllers) {
+    const wrap = document.createElement('div');
+    wrap.className = 'build-fix-row';
+
+    const askAllBtn = document.createElement('button');
+    askAllBtn.type = 'button';
+    askAllBtn.className = 'btn btn-sm btn-ghost';
+    askAllBtn.textContent = `Merge all with Claude ✨ (${controllers.length} files)`;
+    wrap.appendChild(askAllBtn);
+
+    const statusEl = document.createElement('div');
+    statusEl.className = 'build-fix-result';
+    statusEl.hidden = true;
+    wrap.appendChild(statusEl);
+
+    const applyAllBtn = document.createElement('button');
+    applyAllBtn.type = 'button';
+    applyAllBtn.className = 'btn btn-sm';
+    applyAllBtn.textContent = 'Apply all proposed merges';
+    applyAllBtn.hidden = true;
+    wrap.appendChild(applyAllBtn);
+
+    askAllBtn.addEventListener('click', () => {
+      void withBusy(askAllBtn, 'Asking…', async () => {
+        // Hidden for the whole re-ask sweep, not just while genuinely
+        // empty -- found by review: re-running "Merge all" while a
+        // PREVIOUS sweep's "Apply all" was still showing left it clickable
+        // throughout the new sweep, so it could batch-apply a stale,
+        // pre-refresh proposal for a row the new sweep hadn't reached yet.
+        applyAllBtn.hidden = true;
+        statusEl.hidden = false;
+        let asked = 0;
+        for (const controller of controllers) {
+          statusEl.textContent = `Asking for ${controller.targetFile} (${asked + 1}/${controllers.length})…`;
+          await controller.askForMerge();
+          asked += 1;
+        }
+        const proposedCount = controllers.filter((c) => c.hasProposal()).length;
+        statusEl.textContent = `${proposedCount} of ${controllers.length} file${controllers.length === 1 ? '' : 's'} got a real proposed merge -- review each below.`;
+        applyAllBtn.hidden = proposedCount === 0;
       });
     });
 
-    return row;
+    applyAllBtn.addEventListener('click', () => {
+      void withBusy(applyAllBtn, 'Applying…', async () => {
+        let applied = 0;
+        let rolledBack = 0;
+        let failed = 0;
+        for (const controller of controllers) {
+          if (!controller.hasProposal()) continue;
+          try {
+            const outcome = await controller.applyProposal();
+            // null means "already being applied elsewhere" (this row's own
+            // Apply button, most likely) -- not counted here at all; the
+            // call that's actually doing the work reports the real outcome
+            // on that row itself.
+            if (!outcome) continue;
+            if (outcome.rolledBack) rolledBack += 1;
+            else applied += 1;
+          } catch {
+            failed += 1;
+          }
+        }
+        statusEl.textContent =
+          `${applied} merge${applied === 1 ? '' : 's'} applied, ${rolledBack} rolled back `
+          + `(broke the build), ${failed} failed to apply -- see each file's own result above.`;
+        applyAllBtn.hidden = true;
+      });
+    });
+
+    return wrap;
   }
 
   /** Phase 11 Detail-view task: renders design-kit's color tokens/type
@@ -3857,13 +4185,21 @@ ${bodyHtml}
       const tab = document.createElement('button');
       tab.className = `tab${def.key === displayKey ? ' active' : ''}`;
       tab.textContent = def.label;
-      tab.addEventListener('click', () => {
-        detailActiveTabKey = def.key;
-        detailActiveTabIsUserChosen = true;
-        refreshDetailTabs();
-      });
+      tab.addEventListener('click', () => goToDetailTab(def.key));
       tabsRow.appendChild(tab);
     }
+  }
+
+  /** Switches Detail to a specific tab programmatically -- the same
+   * click-a-tab-button path (a real user preference, sticky across
+   * re-renders), just reachable from code too. Used by the tab buttons
+   * themselves and by renderConnectionStatusPanel's "needs review" chips,
+   * which jump straight to Configuration rather than just naming a count
+   * and leaving you to go find it yourself. */
+  function goToDetailTab(key) {
+    detailActiveTabKey = key;
+    detailActiveTabIsUserChosen = true;
+    refreshDetailTabs();
   }
 
   function renderDetail(entry) {
@@ -3957,6 +4293,7 @@ ${bodyHtml}
       void renderInstallParamsSection(entry);
       void renderWiringSection(entry);
     }
+    void renderConnectionStatusPanel(entry);
 
     refreshDetailTabs();
 

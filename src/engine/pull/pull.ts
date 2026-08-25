@@ -3,7 +3,7 @@ import * as path from 'path';
 import { execSync } from 'child_process';
 import { buildCatalog, CatalogEntry } from '../catalog/catalog';
 import { cachePath } from '../remote/remoteCache';
-import { upsertEntry } from '../lockfile/lockfile';
+import { upsertEntry, readLockfile } from '../lockfile/lockfile';
 import { pristinePath, resolveContainedPath } from '../paths';
 import { ArtifactResolutionError, ManifestValidationError, PostInstallError } from '../errors';
 import { Manifest } from '../manifest/schema';
@@ -259,7 +259,18 @@ export async function pullArtifact(
   applyEnvExamplePlaceholders(cwd, manifest.install_params);
 
   onProgress?.('lockfile', 'Updating lockfile...');
+  // Spreads any existing entry first (not a bare {id, version, remote,
+  // installTarget}) -- a real, confirmed bug found via review: re-pulling
+  // an already-installed artifact (a normal, supported action -- see the
+  // "re-pulling upserts instead of duplicating" test) silently wiped that
+  // entry's `pendingPr`/`wiredFiles`, breaking PR tracking and the
+  // uninstall-safety guarantee (removeArtifact.ts reads `wiredFiles` to
+  // know which files it's safe to delete). Same spread-the-existing-entry
+  // pattern sync.ts/applyUpdate.ts/push.ts/pullAndAutoWire.ts already use
+  // for this exact reason.
+  const existingEntry = readLockfile(cwd).entries.find((e) => e.id === manifest.id);
   await upsertEntry(cwd, {
+    ...existingEntry,
     id: manifest.id,
     version: manifest.version,
     remote: resolvedRemoteName,

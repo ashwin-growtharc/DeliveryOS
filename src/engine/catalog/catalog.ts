@@ -1,4 +1,3 @@
-import * as path from 'path';
 import { listRemotes } from '../remote/remoteRegistry';
 import { cachePath } from '../remote/remoteCache';
 import { discoverManifests } from '../manifest/parser';
@@ -6,7 +5,7 @@ import { Manifest } from '../manifest/schema';
 import { fetchAndReset } from '../git/git';
 import { readLockfile } from '../lockfile/lockfile';
 import { computeChangedFiles } from '../push/diff';
-import { pristinePath } from '../paths';
+import { pristinePath, resolveContainedPath } from '../paths';
 
 export interface CatalogEntry {
   manifest: Manifest;
@@ -110,11 +109,23 @@ export function annotateCatalog(
 
   return filtered.map((entry) => {
     const { manifest, remoteName } = entry;
-    const installTarget = path.resolve(cwd, manifest.install_target);
+    // manifest.install_target is untrusted (the artifact author's own
+    // manifest) -- same containment check pull.ts already applies before
+    // ever writing there. This function only ever READS via
+    // computeChangedFiles below, but its `installTarget` is also handed
+    // back to callers (the app's "Open folder"/Detail "installs to"
+    // display) -- a crafted value shouldn't silently resolve to something
+    // outside the project just because this ran across every remote's
+    // catalog, not just artifacts the user chose to pull. One bad manifest
+    // degrades to `not_pulled` for that entry alone; it never breaks
+    // listing the rest of the catalog.
+    const installTarget = resolveContainedPath(cwd, manifest.install_target);
     const lockEntry = lockfile.entries.find((e) => e.id === manifest.id);
 
     let localStatus: LocalStatus;
-    if (!lockEntry) {
+    if (!installTarget) {
+      localStatus = 'not_pulled';
+    } else if (!lockEntry) {
       localStatus = 'not_pulled';
     } else {
       try {
@@ -125,6 +136,12 @@ export function annotateCatalog(
       }
     }
 
-    return { manifest, remoteName, localStatus, installTarget, pendingPr: lockEntry?.pendingPr };
+    return {
+      manifest,
+      remoteName,
+      localStatus,
+      installTarget: installTarget ?? manifest.install_target,
+      pendingPr: lockEntry?.pendingPr,
+    };
   });
 }

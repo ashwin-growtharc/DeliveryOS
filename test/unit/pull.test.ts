@@ -5,7 +5,7 @@ import * as path from 'path';
 import { pullArtifact } from '../../src/engine/pull/pull';
 import { ArtifactResolutionError, ManifestValidationError, PostInstallError } from '../../src/engine/errors';
 import { remotesRegistryPath, remoteCachePath } from '../../src/engine/paths';
-import { readLockfile } from '../../src/engine/lockfile/lockfile';
+import { readLockfile, upsertEntry } from '../../src/engine/lockfile/lockfile';
 
 // Same lightweight "fake a registered remote + cache directly on disk"
 // pattern as test/unit/pullPayloadComponent.test.ts -- pullArtifact reads
@@ -238,5 +238,27 @@ describe('pullArtifact lockfile recording (Phase 13 uninstall groundwork)', () =
     const entry = lockfile.entries.find((e) => e.id === 'records-install-target');
     expect(entry?.installTarget).toBe(result.installTarget);
     expect(entry?.installTarget).toBe(path.resolve(cwd, 'installed'));
+  }, 30_000);
+
+  it('re-pulling an already-installed artifact preserves its wiredFiles/pendingPr -- a real bug found via review: the lockfile write used to construct a bare {id,version,remote,installTarget} instead of spreading the existing entry, silently wiping both fields on any re-pull', async () => {
+    writeRegistry(['test-remote']);
+    writeArtifact('preserves-lockfile-fields', 'node -e "process.exit(0)"');
+
+    await pullArtifact('preserves-lockfile-fields', undefined, cwd);
+
+    // Simulates what pullAndAutoWire (wiredFiles) and a real pushed edit
+    // (pendingPr) would have already recorded before this second pull.
+    const entryBefore = readLockfile(cwd).entries.find((e) => e.id === 'preserves-lockfile-fields')!;
+    await upsertEntry(cwd, {
+      ...entryBefore,
+      wiredFiles: ['src/auth.ts', 'src/middleware.ts'],
+      pendingPr: { url: 'https://github.com/example/repo/pull/1', number: 1 },
+    });
+
+    await pullArtifact('preserves-lockfile-fields', undefined, cwd);
+
+    const entryAfter = readLockfile(cwd).entries.find((e) => e.id === 'preserves-lockfile-fields');
+    expect(entryAfter?.wiredFiles).toEqual(['src/auth.ts', 'src/middleware.ts']);
+    expect(entryAfter?.pendingPr).toEqual({ url: 'https://github.com/example/repo/pull/1', number: 1 });
   }, 30_000);
 });

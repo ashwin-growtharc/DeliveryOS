@@ -196,6 +196,69 @@ describe('compileTemplateComponentPreview', () => {
     expect(badge.html).toContain('New');
     expect(badge.html).not.toContain('Step one');
   });
+
+  it('does not collide across two components with the SAME leaf folder name in different category subfolders -- a real bug found via review, not a hypothetical', async () => {
+    writeRegistry(['test-remote']);
+    const remoteDir = remoteCachePath('test-remote');
+    const templateDir = path.join(remoteDir, 'artifacts', 'my-design-kit');
+    fs.mkdirSync(templateDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(templateDir, 'manifest.yaml'),
+      [
+        'id: my-design-kit',
+        'kind: template',
+        'description: Test design kit',
+        'owner: team-x',
+        'version: 1.0.0',
+        'source_repo: https://example.invalid/repo',
+        'install_target: some/target',
+        'review_required: false',
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    // listArtifactPayloadComponents already supports nested category
+    // folders (components/forms/Input, components/data/Input) -- the
+    // subKey used to be just the leaf folder's own basename ("Input"),
+    // so these two genuinely different components collided on the same
+    // cache slot and silently served each other's compiled HTML. Two
+    // separate component IDENTIFIERS (FormsInput/DataInput) so the
+    // generated .tsx content itself stays valid, independent of the
+    // folder path each one lives at.
+    function writeNestedComponent(categoryPath: string, componentName: string, label: string): string {
+      const componentDir = path.join(templateDir, 'payload', 'components', ...categoryPath.split('/'));
+      fs.mkdirSync(componentDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(componentDir, `${componentName}.tsx`),
+        `export function ${componentName}() { return <button>${label}</button>; }\n`,
+        'utf-8',
+      );
+      fs.writeFileSync(
+        path.join(componentDir, 'preview.tsx'),
+        `import { ${componentName} } from './${componentName}';\nexport const Default = () => <${componentName} />;\n`,
+        'utf-8',
+      );
+      return componentDir;
+    }
+
+    const formsInputDir = writeNestedComponent('forms/Input', 'FormsInput', 'Forms input');
+    const dataInputDir = writeNestedComponent('data/Input', 'DataInput', 'Data input');
+
+    const formsInput = await compileTemplateComponentPreview('test-remote', 'my-design-kit', formsInputDir);
+    const dataInput = await compileTemplateComponentPreview('test-remote', 'my-design-kit', dataInputDir);
+
+    expect(formsInput.html).toContain('Forms input');
+    expect(formsInput.html).not.toContain('Data input');
+    expect(dataInput.html).toContain('Data input');
+    expect(dataInput.html).not.toContain('Forms input');
+
+    // Re-fetching (a real cache hit) must still return each one's OWN
+    // content, not whichever of the two happened to compile last.
+    const formsInputAgain = await compileTemplateComponentPreview('test-remote', 'my-design-kit', formsInputDir);
+    expect(formsInputAgain.html).toContain('Forms input');
+    expect(formsInputAgain.html).not.toContain('Data input');
+  });
 });
 
 describe('compileLocalPreview (Phase D)', () => {

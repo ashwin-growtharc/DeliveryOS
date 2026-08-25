@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { pullArtifact } from '../../engine/pull/pull';
+import { pullArtifact, resolveArtifact } from '../../engine/pull/pull';
 import { pullAndAutoWire } from '../../engine/pull/pullAndAutoWire';
 import { buildPostInstallHealthSummary } from '../../engine/pull/postInstallHealthSummary';
 
@@ -39,7 +39,22 @@ export function registerPullCommand(program: Command): void {
         + 'changed. For scripted/CI use where nothing else in the project should be touched.',
     )
     .action(async (id: string, options: { remote?: string; set: Record<string, string>; wire: boolean }) => {
-      if (!options.wire) {
+      // Resolved once up front (cheap -- reads the already-cloned remote,
+      // no network) purely to decide WHICH path to take: pullAndAutoWire
+      // is worth its extra build-verify step only when there's actually
+      // something to wire. Without this check, an artifact with no
+      // wiring_actions (every kind except backend-plugin, and even some
+      // backend-plugins) would still go through pullAndAutoWire, which
+      // skips running the build at all in that case (nothing to verify
+      // against, by its own design) -- but the health summary can't tell
+      // "skipped" apart from "no build script exists", so it would print
+      // the latter even for a project with a perfectly real build script.
+      // Matches the app's own established `hasWiring` gate for the exact
+      // same reason (see app.js's Pull-button dispatch).
+      const { manifest } = resolveArtifact(id, options.remote);
+      const hasWiring = manifest.wiring_actions.length > 0;
+
+      if (!options.wire || !hasWiring) {
         const result = await pullArtifact(id, options.remote, process.cwd(), undefined, options.set);
         if (result.postInstallOutput && result.postInstallOutput.trim().length > 0) {
           console.log(result.postInstallOutput.trimEnd());

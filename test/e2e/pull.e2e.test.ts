@@ -125,6 +125,15 @@ describe('pull e2e', () => {
     // locks in that the capture-and-resurface path actually works, not just
     // that the side-effecting marker file got written.
     expect(result.stdout).toContain(`post_install ran for ${artifact.id}`);
+    // Real regression test: this artifact declares no wiring_actions, so
+    // pull must take the plain pullArtifact path, never pullAndAutoWire --
+    // which would otherwise skip the build check (nothing to verify
+    // against, by its own design when there's no wiring to apply) and
+    // print a FALSE "no build command was found" for a project that might
+    // have a perfectly real one, since the health summary can't tell
+    // "we didn't check" apart from "there's genuinely nothing to check."
+    expect(result.stdout).not.toContain('no build command');
+    expect(result.stdout).not.toContain('Wiring was applied');
 
     const lockfile = JSON.parse(
       fs.readFileSync(path.join(scratchCwd, '.deliveryos', 'lock.json'), 'utf-8'),
