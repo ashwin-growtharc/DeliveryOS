@@ -6,6 +6,25 @@ All notable changes to DeliveryOS are recorded here, newest first. See
 
 ---
 
+## Phase 24 — A plain-language "How installing this works" panel, and a merged audit trail
+
+- **Detail now shows a plain-language walkthrough of the whole install
+  lifecycle** -- 11 rows (install, auto-wiring, build-break recovery,
+  file-exists merge, the after-install summary, audit, uninstall, secrets,
+  rotating a secret, reconfiguring, updating), open by default above the
+  existing Connection-status chips, gated on real presence rather than a
+  `kind` check, with "View →" links jumping straight to the live section
+  for anything that has one.
+- **Found while building it: the Activity tab's "every AI proposal is
+  logged and viewable" claim wasn't fully true.** The build-fix log
+  (`.deliveryos/build-fix-log.jsonl`, existing since Phase 10) had no
+  reader and was never shown anywhere -- only file-exists merges reached
+  the Activity tab. Fixed: `BuildFixLogEntry` now carries
+  `remoteName`/`artifactId`, a new `readBuildFixLog` reader + sidecar RPC
+  were added, and the Activity tab now merges both logs into one
+  chronological feed, each entry labeled `MERGE` or `BUILD FIX`.
+- Verified live via CDP against the real `nextauth-credentials` artifact.
+
 ## Phase 23 — "Already wired" detection
 
 - **The Wiring section no longer offers "Merge with Claude" for a file

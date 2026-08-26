@@ -1056,6 +1056,47 @@ artifact would have written.
   a "genuinely differs, still offers review" negative case, all in
   `test/unit/wiring.test.ts`.
 
+## Phase 24 — A plain-language "How installing this works" panel, and a merged audit trail — **Done**
+
+Direct user feedback on the whole backend-plugin lifecycle table (install →
+wire in → build-breaks recovery → file-exists merge → after-install summary
+→ audit → uninstall → secrets → rotate → reconfigure → update): every stage
+already had real engine support and *some* reactive UI (a toast, a badge, a
+button), but nothing explained the whole story up front, in plain language,
+for someone who's never used DeliveryOS before.
+
+- New "How installing this works" panel in Detail, above the existing
+  Connection-status chips, open by default: 11 plain-language rows (no
+  `install_params`/`wiring_actions` jargon) covering the full lifecycle,
+  each gated on real presence (install params / wiring actions / secrets /
+  `post_install`) rather than a `kind` check. Rows with somewhere real to
+  jump to carry a "View →" link (`goToDetailTab` + `scrollIntoView`, same
+  pattern Phase 21's chips already established). Deliberately static/no
+  RPC calls of its own -- the LIVE numbers stay on the chips panel right
+  below it; this one only explains what those numbers mean.
+- **Found while building it: the "Audit" row's promise wasn't actually
+  true.** `fixBuildFailure.ts`'s build-fix log
+  (`.deliveryos/build-fix-log.jsonl`) has existed since Phase 10, but had
+  no reader function and was never shown anywhere in the UI -- only
+  `wiring-merge-log.jsonl` (file-already-exists merges) ever reached the
+  Activity tab. A build-fix proposal/apply/rollback was genuinely logged
+  but genuinely invisible.
+- Fixed: `BuildFixLogEntry` gained `remoteName`/`artifactId` (mirroring
+  `WiringMergeLogEntry`'s own fields exactly), threaded through
+  `applyBuildFix`'s `meta` param from the real `entry` already in scope at
+  its one UI call site. New `readBuildFixLog` reader, new
+  `artifact.readBuildFixLog` sidecar RPC. `renderActivitySection` now
+  reads both logs and merges them into one chronological feed, each entry
+  labeled `MERGE` or `BUILD FIX`.
+- New tests: `readBuildFixLog` filtering by artifact and returning
+  newest-first, a rolled-back entry's rebuild output, and
+  `applyBuildFix` actually writing the new `remoteName`/`artifactId`
+  fields onto its log entry.
+- Verified live via CDP against the real `nextauth-credentials` artifact:
+  the panel renders all 11 gated rows correctly, and clicking "View →" on
+  "New files get added for you" correctly jumped to Configuration and
+  scrolled to the wiring actions section (all 4 showing "Already wired ✓").
+
 ## What's next
 
 - **Phase 13** (backend plug-and-play: basic hygiene) — in progress, 5 of 6 items done (uninstall, secrets safety net, timeouts, post-pull secret rotation, config-form reuse-existing-value autofill); config-form autofill's other two sub-cases (genuine local signal, neither) deliberately deferred/descoped, see above

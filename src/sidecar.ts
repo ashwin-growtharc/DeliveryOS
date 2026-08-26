@@ -41,7 +41,7 @@ import { resolveWiringActions } from './engine/pull/wiring';
 import { pullAndAutoWire } from './engine/pull/pullAndAutoWire';
 import { runProjectBuild } from './engine/pull/verifyBuild';
 import { buildPostInstallHealthSummary } from './engine/pull/postInstallHealthSummary';
-import { requestBuildFix, applyBuildFix } from './engine/pull/fixBuildFailure';
+import { requestBuildFix, applyBuildFix, readBuildFixLog } from './engine/pull/fixBuildFailure';
 import { requestWiringMerge, applyWiringMerge, readWiringMergeLog } from './engine/pull/requestWiringMerge';
 import { requestAntiPatternFix, applyAntiPatternFix } from './engine/scan/fixAntiPattern';
 import { pushArtifact, PushOptions } from './engine/push/push';
@@ -521,7 +521,9 @@ const commands: Record<string, CommandHandler> = {
     const buildError = requireString(args, 'buildError');
     const costUsd = typeof args.costUsd === 'number' ? args.costUsd : undefined;
     const durationMs = typeof args.durationMs === 'number' ? args.durationMs : undefined;
-    return applyBuildFix(cwd, filePath, fixedFile, buildError, { costUsd, durationMs });
+    const remoteName = optionalString(args, 'remote');
+    const artifactId = optionalString(args, 'id');
+    return applyBuildFix(cwd, filePath, fixedFile, buildError, { costUsd, durationMs, remoteName, artifactId });
   },
 
   // Backend plug-and-play: the "ask" half of the Tier-2 "AI wiring
@@ -565,6 +567,16 @@ const commands: Record<string, CommandHandler> = {
     const remote = requireString(args, 'remote');
     const id = requireString(args, 'id');
     return { entries: readWiringMergeLog(cwd, remote, id) };
+  },
+
+  // Activity tab: the build-fix counterpart to readWiringMergeLog above,
+  // read separately (own log file, own record shape) and merged
+  // client-side into one chronological feed -- see renderActivitySection.
+  'artifact.readBuildFixLog': (args) => {
+    const cwd = requireString(args, 'cwd');
+    const remote = requireString(args, 'remote');
+    const id = requireString(args, 'id');
+    return { entries: readBuildFixLog(cwd, remote, id) };
   },
 
   // Phase 11 item 4: the "ask" half of the fix step for a design

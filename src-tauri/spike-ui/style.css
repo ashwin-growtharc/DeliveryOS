@@ -1394,6 +1394,81 @@ input, textarea, select {
   color: var(--warning-600);
 }
 
+/* Detail's "How this works" explainer -- a plain-language, always-static
+ * walkthrough of the install lifecycle, sitting above the live
+ * "Connection status" chips below it. A native <details> (open by
+ * default) rather than custom show/hide JS, matching the Activity tab's
+ * own before/after disclosures -- free keyboard/accessibility behavior,
+ * no extra state to manage. See renderLifecycleExplainer in app.js. */
+.lifecycle-explainer {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-tertiary);
+  padding: 10px 14px;
+  margin: 0 0 14px;
+}
+
+.lifecycle-explainer summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 13px;
+  padding: 2px 0;
+}
+
+.lifecycle-explainer[open] summary {
+  margin-bottom: 8px;
+}
+
+.lifecycle-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.lifecycle-step {
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.lifecycle-step:first-child {
+  padding-top: 0;
+  border-top: none;
+}
+
+.lifecycle-step-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 12.5px;
+}
+
+.lifecycle-step-description {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+  line-height: 1.45;
+}
+
+.lifecycle-step-link {
+  flex-shrink: 0;
+  border: none;
+  background: none;
+  color: var(--accent-600);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+}
+
+.lifecycle-step-link:hover {
+  text-decoration: underline;
+}
+
 /* Detail's "Connection status" panel (Phase 21) -- a row of at-a-glance
  * chips (signed, configured, wired, build) plus the "Verify build" button,
  * always visible for a pulled backend-plugin-shaped artifact so the
@@ -1643,6 +1718,17 @@ input, textarea, select {
   text-transform: uppercase;
   padding: 2px 7px;
   border-radius: var(--radius-md);
+}
+
+/* Activity tab only: which of the two underlying logs (merge vs.
+   build-fix) this entry came from -- a category, never a status, so it
+   stays visually quieter than .wiring-action-status's colored pills. */
+.wiring-action-kind {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .2px;
+  text-transform: uppercase;
+  color: var(--text-secondary);
 }
 
 .wiring-action-status.absent {

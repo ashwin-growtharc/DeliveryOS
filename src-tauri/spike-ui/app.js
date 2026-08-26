@@ -1328,6 +1328,143 @@
    * more often than a pull happens) -- "Verify build" is an explicit,
    * on-demand action via the new artifact.verifyBuild RPC, same
    * runProjectBuild every other build-verify step already uses. */
+  /**
+   * "How this works": a plain-language, always-the-same-shape walkthrough
+   * of the install lifecycle, written for someone who has never used
+   * DeliveryOS before and doesn't know what a chip reading "Wired (0/4)"
+   * even means. Deliberately separate from renderConnectionStatusPanel
+   * right below it: that panel is the LIVE, numeric status ("3/3
+   * configured"); this one is the static, always-true explanation of
+   * what those numbers are even about. Keeping them apart means this
+   * function needs no RPC calls at all -- every row is either always true
+   * for an artifact with this shape, or true-when-it-happens (a build
+   * break, a file that already existed), never something that needs a
+   * live check to phrase correctly.
+   *
+   * Gated on real presence (install_params/wiring_actions/post_install),
+   * same "data, not kind" convention as every other Detail section --
+   * a plain `ui-component`/`template` pull has none of this lifecycle at
+   * all, so the panel simply doesn't apply.
+   */
+  function renderLifecycleExplainer(entry) {
+    const { manifest } = entry;
+    const panel = $('detail-lifecycle-explainer');
+    const hasInstallParams = manifest.install_params && manifest.install_params.length > 0;
+    const hasWiringActions = manifest.wiring_actions && manifest.wiring_actions.length > 0;
+    const hasSecrets = hasInstallParams && manifest.install_params.some((p) => p.secret);
+    const hasLifecycle = hasInstallParams || hasWiringActions || !!manifest.post_install;
+
+    if (!hasLifecycle) {
+      panel.hidden = true;
+      return;
+    }
+    panel.hidden = false;
+
+    const jump = (tab, scrollTo) => () => {
+      goToDetailTab(tab);
+      $(scrollTo)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+
+    // Plain language throughout -- no "install_params"/"wiring_actions"/
+    // "manifest," the same words a non-technical reader would use for
+    // what's actually happening, not this codebase's own internal names
+    // for it.
+    const steps = [
+      {
+        show: hasInstallParams || !!manifest.signature,
+        title: 'Before anything is copied in',
+        description: manifest.signature
+          ? "Its signature is checked first -- if it's been tampered with, nothing lands. Then you're asked for anything it needs (like a password or a URL) through a plain form, not a config file you have to hand-edit."
+          : "You're asked for anything it needs (like a password or a URL) through a plain form, not a config file you have to hand-edit.",
+        goTo: hasInstallParams ? jump('configuration', 'detail-install-params-fields') : null,
+      },
+      {
+        show: hasWiringActions,
+        title: 'New files get added for you',
+        description: 'Any new file this needs gets created automatically. If it changes how your project builds, that gets checked right away.',
+        goTo: jump('configuration', 'detail-wiring-actions'),
+      },
+      {
+        show: hasWiringActions,
+        title: "If a change breaks your build",
+        description: "You'll be shown a suggested fix in plain text. Nothing is applied until you say so, and if the fix doesn't actually fix it, your original file comes right back automatically.",
+        goTo: null,
+      },
+      {
+        show: hasWiringActions,
+        title: 'If a file already exists',
+        description: "It's never silently overwritten -- you're shown a suggested merge to review first, with the same automatic undo if it doesn't work out.",
+        goTo: jump('configuration', 'detail-wiring-actions'),
+      },
+      {
+        show: hasInstallParams || hasWiringActions,
+        title: 'A plain summary afterward',
+        description: "You'll see one summary of what worked and what's still on you -- not a wall of logs to decode.",
+        goTo: null,
+      },
+      {
+        show: hasWiringActions,
+        title: 'Everything is recorded',
+        description: 'Every suggested fix or merge -- applied or not -- is saved, so you can look back later at exactly what happened and why.',
+        goTo: jump('activity', 'detail-activity-entries'),
+      },
+      {
+        show: true,
+        title: 'Removing it later',
+        description: 'One click cleanly removes what this added -- it never leaves orphaned files behind.',
+        goTo: null,
+      },
+      {
+        show: hasSecrets,
+        title: 'Your secrets stay yours',
+        description: "If a value you type isn't excluded from git yet, you're warned immediately -- it's never silently left exposed.",
+        goTo: null,
+      },
+      {
+        show: hasInstallParams,
+        title: 'Changing a value later',
+        description: 'Go to Configuration any time to update what you typed in -- no need to remove and pull again.',
+        goTo: jump('configuration', 'detail-install-params-fields'),
+      },
+      {
+        show: hasInstallParams,
+        title: 'Reopening this form',
+        description: "It remembers what you already filled in -- you won't have to retype anything that's already set.",
+        goTo: jump('configuration', 'detail-install-params-fields'),
+      },
+      {
+        show: true,
+        title: 'When a new version comes out',
+        description: "Updating applies the real changes -- including removing files the new version no longer needs -- and refuses instead of guessing if you've edited something yourself.",
+        goTo: null,
+      },
+    ];
+
+    const list = $('detail-lifecycle-steps');
+    list.innerHTML = '';
+    for (const step of steps.filter((s) => s.show)) {
+      const li = document.createElement('li');
+      li.className = 'lifecycle-step';
+      const titleRow = document.createElement('div');
+      titleRow.className = 'lifecycle-step-title';
+      titleRow.textContent = step.title;
+      if (step.goTo) {
+        const link = document.createElement('button');
+        link.type = 'button';
+        link.className = 'lifecycle-step-link';
+        link.textContent = 'View →';
+        link.addEventListener('click', step.goTo);
+        titleRow.appendChild(link);
+      }
+      const descEl = document.createElement('div');
+      descEl.className = 'lifecycle-step-description';
+      descEl.textContent = step.description;
+      li.appendChild(titleRow);
+      li.appendChild(descEl);
+      list.appendChild(li);
+    }
+  }
+
   async function renderConnectionStatusPanel(entry) {
     const { manifest } = entry;
     const panel = $('detail-connection-status');
@@ -1997,17 +2134,27 @@ ${bodyHtml}
     }
 
     const requestId = ++activityRequestId;
-    let entries;
-    try {
-      ({ entries } = await call('artifact.readWiringMergeLog', {
-        cwd: state.projectDir,
-        remote: entry.remoteName,
-        id: entry.manifest.id,
-      }));
-    } catch {
-      entries = [];
-    }
+    // Two separate log files (merges vs. build-fixes -- see
+    // fixBuildFailure.ts/requestWiringMerge.ts's own doc comments for why
+    // they're not one), each read independently and merged here into one
+    // chronological feed -- a person watching this tab shouldn't need to
+    // know DeliveryOS happens to keep two files internally. One failing
+    // independently of the other still shows whatever the other one has,
+    // rather than losing the whole tab.
+    const [mergeEntries, buildFixEntries] = await Promise.all([
+      call('artifact.readWiringMergeLog', { cwd: state.projectDir, remote: entry.remoteName, id: entry.manifest.id })
+        .then((r) => r.entries)
+        .catch(() => []),
+      call('artifact.readBuildFixLog', { cwd: state.projectDir, remote: entry.remoteName, id: entry.manifest.id })
+        .then((r) => r.entries)
+        .catch(() => []),
+    ]);
     if (requestId !== activityRequestId) return; // superseded while awaiting
+
+    const entries = [
+      ...mergeEntries.map((r) => ({ kind: 'merge', ...r })),
+      ...buildFixEntries.map((r) => ({ kind: 'build-fix', ...r })),
+    ].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
     detailTabState.activity = entries.length > 0;
     refreshDetailTabs();
@@ -2025,14 +2172,24 @@ ${bodyHtml}
    * real <details>/<summary> disclosure rather than more custom
    * click-to-expand JS -- nothing like it exists yet in this codebase and
    * it's the correct minimal-JS way to do this. */
+  /** `record.kind` is 'merge' (an existing file's AI-proposed merge,
+   * `.targetFile`/`.description`) or 'build-fix' (an AI-proposed fix for
+   * a build a plain auto-write just broke, `.filePath`/`.buildError`) --
+   * see renderActivitySection's merge of the two log files above. Same
+   * card shape either way; only the file-name field and the "why this
+   * happened" line differ. */
   function renderActivityEntry(record) {
+    const isBuildFix = record.kind === 'build-fix';
     const card = document.createElement('div');
     card.className = 'wiring-action-card';
 
     const header = document.createElement('div');
     header.className = 'wiring-action-header';
+    const kindEl = document.createElement('span');
+    kindEl.className = 'wiring-action-kind';
+    kindEl.textContent = isBuildFix ? 'Build fix' : 'Merge';
     const fileEl = document.createElement('code');
-    fileEl.textContent = record.targetFile;
+    fileEl.textContent = isBuildFix ? record.filePath : record.targetFile;
     const statusEl = document.createElement('span');
     // No dedicated success/failure pill exists yet -- .exists/.absent are
     // the closest read: "rolled back" is the one worth flagging (a real
@@ -2041,6 +2198,7 @@ ${bodyHtml}
     // neutral tone .absent already carries.
     statusEl.className = `wiring-action-status ${record.rolledBack ? 'exists' : 'absent'}`;
     statusEl.textContent = record.rolledBack ? 'rolled back' : 'applied';
+    header.appendChild(kindEl);
     header.appendChild(fileEl);
     header.appendChild(statusEl);
 
@@ -2050,7 +2208,11 @@ ${bodyHtml}
 
     const descEl = document.createElement('div');
     descEl.className = 'wiring-action-description';
-    descEl.textContent = record.description;
+    // A build-fix record's "why" is the real build error it was reacting
+    // to; a merge record's is the wiring_action's own plain-language
+    // description -- both are the honest answer to "why did this happen,"
+    // just sourced from different places.
+    descEl.textContent = isBuildFix ? `Build error: ${record.buildError}` : record.description;
 
     card.appendChild(header);
     card.appendChild(timeEl);
@@ -2982,7 +3144,7 @@ ${bodyHtml}
    * first, never to expand the candidate set to some other file guessed
    * from the error text. Falls back to showing every applied file if
    * none of their paths/basenames are mentioned in the error at all. */
-  function renderBuildFixOffers(appliedFiles, buildErrorText) {
+  function renderBuildFixOffers(appliedFiles, buildErrorText, entry) {
     const container = $('build-fix-offers');
     container.innerHTML = '';
 
@@ -2998,15 +3160,18 @@ ${bodyHtml}
 
     container.hidden = false;
     for (const filePath of candidates) {
-      container.appendChild(renderBuildFixRow(filePath, buildErrorText));
+      container.appendChild(renderBuildFixRow(filePath, buildErrorText, entry));
     }
   }
 
   /** Builds one row's DOM for a single candidate file: a button that asks
    * for a fix, then either the model's own honest "can't determine a
    * fix" reason, or the proposed content plus Apply/Discard. Nothing is
-   * written to disk, and nothing is logged, unless Apply is clicked. */
-  function renderBuildFixRow(filePath, buildErrorText) {
+   * written to disk, and nothing is logged, unless Apply is clicked.
+   * `entry` (the artifact this fix offer came from) is threaded through
+   * only so Apply can attribute the resulting audit-log entry to it --
+   * same reasoning as applyWiringMerge's own remote/id params. */
+  function renderBuildFixRow(filePath, buildErrorText, entry) {
     const row = document.createElement('div');
     row.className = 'build-fix-row';
 
@@ -3097,6 +3262,8 @@ ${bodyHtml}
                 buildError: buildErrorText,
                 costUsd: fix.costUsd,
                 durationMs: fix.durationMs,
+                remote: entry ? entry.remoteName : undefined,
+                id: entry ? entry.manifest.id : undefined,
               });
               const outcomeEl = document.createElement('div');
               if (outcome.rolledBack) {
@@ -3630,7 +3797,7 @@ ${bodyHtml}
               // here would just waste a real API call on something it
               // fundamentally can't address.
               if (!build.timedOut && !build.toolNotFound) {
-                renderBuildFixOffers(wiring.applied, build.output || '');
+                renderBuildFixOffers(wiring.applied, build.output || '', entry);
               }
             }
           } else {
@@ -4293,6 +4460,7 @@ ${bodyHtml}
       void renderInstallParamsSection(entry);
       void renderWiringSection(entry);
     }
+    renderLifecycleExplainer(entry);
     void renderConnectionStatusPanel(entry);
 
     refreshDetailTabs();

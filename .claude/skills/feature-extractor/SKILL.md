@@ -84,6 +84,29 @@ rewriting is expected and central here -- but only along one axis:
 
 ## Process
 
+### 0. Check the target remote for overlap before extracting anything
+
+`IdCollisionError` (push.ts) and Scan's own same-batch id disambiguation
+(`detectUiComponentCandidates`'s `groupsById` grouping) only ever protect
+the artifact's own *id* -- nothing stops the same generic CONTENT (a
+`Button`/`Input` stand-in, a `StepHeader`-shaped primitive, a code-input
+widget) from being independently re-authored under a different id every
+time this skill runs, silently drifting into several near-duplicate
+artifacts that each need their own fixes later.
+
+Before writing a single new file, run `deliveryos list --json --remote
+<name>` (same command `deliveryos-check-first` already uses) and read
+through existing `kind: template`/`kind: ui-feature`/`kind: ui-component`
+entries for genuinely reusable pieces this feature slice would otherwise
+recreate -- the same real precedent `starter-kit-extractor` already
+established (`growtharc-react-vite-starter` reused `azure-msal-sso`'s
+auth payload and `react-vite-lint-scaffold`'s tooling configs verbatim
+rather than re-deriving either). If a design-kit-shaped artifact already
+has a generic `Button`/`Input`, depend on it (note the dependency in the
+README's "assumed shared dependencies" section) instead of writing
+another one. Only author a new generic primitive when nothing already
+covers it.
+
 ### 1. Find the real feature boundary
 
 Don't start from "everything with 'auth' in the name." Read the actual

@@ -319,6 +319,19 @@
             </div>
             <p id="detail-description" class="detail-description"></p>
             <div id="detail-provenance-badge" class="provenance-badge"></div>
+
+            <!-- "How this works": a plain-language walkthrough of the
+                 whole install lifecycle for an artifact that actually has
+                 one (install_params/wiring_actions/post_install) -- filled
+                 in by renderLifecycleExplainer(entry) in app.js. Sits
+                 ABOVE the live status chips below, open by default, since
+                 it's written for someone seeing this for the first time
+                 and not yet sure what any of the chips below even mean. -->
+            <details id="detail-lifecycle-explainer" class="lifecycle-explainer" hidden open>
+              <summary>How installing this works</summary>
+              <ol id="detail-lifecycle-steps" class="lifecycle-steps"></ol>
+            </details>
+
             <div id="detail-connection-status" class="connection-status" hidden></div>
 
             <!-- Top-level content tabs -- built dynamically per artifact
