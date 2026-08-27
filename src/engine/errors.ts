@@ -139,3 +139,12 @@ export class LockfileCorruptError extends DeliveryOsError {}
  * but doesn't actually keep the project building -- that's a real,
  * reported rollback, not an error. */
 export class WiringMergeError extends DeliveryOsError {}
+
+/** Thrown when the AI-assisted wiring-placement fallback
+ * (`suggestWiringPlacement`) fails outright: the real `claude` CLI
+ * subprocess call fails, or returns something that can't be parsed as
+ * the requested JSON shape. Never thrown for an honest "I can't
+ * determine where this goes" response (`suggested_path: null` is a
+ * valid, expected outcome) -- same posture as `WiringMergeError`/
+ * `BuildFixError`. */
+export class WiringPlacementError extends DeliveryOsError {}

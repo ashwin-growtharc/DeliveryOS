@@ -159,13 +159,20 @@ For each integration point from step 2:
 ### 4. Apply the mechanical react-import fix
 
 Identical to `ui-component-extractor` step 2 (reused verbatim, not
-reinvented): swap `import React, { ... } from 'react'` for the vendored-
-runtime destructure, convert any `React.FC<Props>` value-level annotation
-to a plain typed function declaration, leave every other import (Tailwind
-classes, `framer-motion`, `clsx`, an allow-listed `@radix-ui/react-*`
-primitive) untouched. Do this AFTER genericizing (step 3), not before --
-genericizing often removes imports (the backend SDK itself) that would
-otherwise need the same treatment for nothing.
+reinvented): **leave a real `import { ... } from 'react'` exactly as
+it is** -- it resolves fine both in DeliveryOS's own preview and once
+genuinely pulled into a real project (confirmed directly against
+`compile.ts`'s own `REACT_EXTERNAL_NAMES` fix). Never write the old
+`window.__DeliveryOSReactRuntime.React` destructure -- that global
+doesn't exist in a real consuming project and a component/feature file
+written that way crashes the instant it's actually used outside
+DeliveryOS's own Detail preview tab. Convert any `React.FC<Props>`
+value-level annotation to a plain typed function declaration, leave
+every other import (Tailwind classes, `framer-motion`, `clsx`, an
+allow-listed `@radix-ui/react-*` primitive) untouched. Do this AFTER
+genericizing (step 3), not before -- genericizing often removes imports
+(the backend SDK itself) that would otherwise need the same treatment
+for nothing.
 
 Two feature-slice-specific mechanical fixes, beyond `ui-component-extractor`'s
 own list, both confirmed as real (not theoretical) against the worked

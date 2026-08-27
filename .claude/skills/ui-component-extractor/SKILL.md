@@ -26,27 +26,31 @@ Two failure modes show up constantly with real-world component source, and
 both are silent — nothing errors until someone actually tries to preview or
 scan the result:
 
-1. **The pipeline vendors React itself.** DeliveryOS's preview compiler
-   (`compile.ts`) bundles with esbuild against a custom `jsxFactory` that
-   reads `window.__DeliveryOSReactRuntime.React` — there is no real `react`
-   package on disk at preview-compile time. A completely normal
-   `import React, { useState } from 'react'` fails to bundle with
-   `Could not resolve "react"`. A short, explicit allow-list of common
-   UI-kit dependencies is ALSO vendored the same way (see
+1. **The pipeline vendors React itself, but a real `import { useState }
+   from 'react'`/`'react-dom'` already resolves fine as of the fix
+   documented directly above `REACT_EXTERNAL_NAMES` in `compile.ts`
+   (found via DeliveryOS's own Phase 8 adoption test, after several
+   real, already-pushed components using the OLD
+   `window.__DeliveryOSReactRuntime.React` destructure turned out to
+   crash the instant they were actually pulled into a real consuming
+   project, where that global never exists).** Step 2 below is now a
+   genuine no-op for React itself — write the component with a real,
+   portable `import` the same way you would in any other project, never
+   the destructure. A short, explicit allow-list of common UI-kit
+   dependencies is ALSO vendored the same way (see
    `VENDORED_LIBRARY_NAMES` in `compile.ts`): **`framer-motion`, `clsx`,
    `tailwind-merge`, `class-variance-authority`, `lucide-react`, and a
    starter set of `@radix-ui/react-*` primitives (`slot`, `dialog`,
    `dropdown-menu`, `popover`, `select`, `tooltip`, `tabs`, `checkbox`,
    `switch`, `label`, `accordion`, `avatar`, `radio-group`, `separator`,
    `alert-dialog`, `toast`)** — a component that imports any of these
-   needs no workaround at all, step 2 below is a no-op for them. Any
-   OTHER third-party import (a date picker, a charting library, a Radix
-   primitive not in this list, anything not on it) is left completely
-   untouched and will fail with a real, honest
-   `Could not resolve "..."` error for Review to see — don't try to route
-   around it; if it comes up repeatedly, that's a signal to add it to the
-   allow-list instead (see `scripts/generate-vendored-libraries.mjs`'s
-   own `LIBRARIES` array).
+   needs no workaround at all either. Any OTHER third-party import (a
+   date picker, a charting library, a Radix primitive not in this list,
+   anything not on it) is left completely untouched and will fail with a
+   real, honest `Could not resolve "..."` error for Review to see —
+   don't try to route around it; if it comes up repeatedly, that's a
+   signal to add it to the allow-list instead (see
+   `scripts/generate-vendored-libraries.mjs`'s own `LIBRARIES` array).
 
 2. **Scan's detector requires an EXPORTED component with a non-empty props
    map.** `detectUiComponentCandidates` (`src/engine/scan/detectUiComponents.ts`)
@@ -84,23 +88,19 @@ wrapper — is the actual reusable artifact. Promote it:
 If the pasted file already exports its real, props-bearing component
 directly, skip this step.
 
-### 2. Apply the mechanical react-import fix
+### 2. Leave the React import alone -- it already just works
 
-Replace the file's React import with the vendored-runtime destructure,
-keeping only the hooks/APIs actually used, plus a type-only import so
-`React.FC`/`React.ComponentType`/etc. type positions still resolve (erased
-entirely by esbuild, so it costs nothing at bundle time):
-
-```tsx
-declare const window: any;
-const { useState, useRef, useEffect } = window.__DeliveryOSReactRuntime.React;
-import type React from 'react';
-```
-
-(List only the hooks the file actually calls — `useState`, `useEffect`,
-`useRef`, `useMemo`, `useCallback`, whatever's present. Drop the
-`import type React from 'react'` line if the file never references the
-`React` namespace in a type position.)
+A real `import { useState, useRef, useEffect } from 'react'` (whichever
+hooks the file actually calls) resolves fine both inside DeliveryOS's own
+preview AND once genuinely pulled into a real project -- the SAME import,
+no dual-mode workaround needed. **Never write the old
+`window.__DeliveryOSReactRuntime.React` destructure** -- that global only
+exists inside DeliveryOS's own preview sandbox; a real consuming project
+has no such thing, and a component written that way crashes the instant
+it's actually used outside Detail's preview tab. If you find an EXISTING
+payload still using that destructure (an older extraction, from before
+this was fixed), converting it back to a plain import is a genuine bug
+fix, not a style change -- do it.
 
 **If the component is typed as `const X: React.FC<XProps> = (...) => {}`,
 convert it to a plain typed function declaration:**
@@ -350,13 +350,11 @@ export default function Dropdown({ options, defaultValue, onChange }: DropdownPr
 ```
 
 This one already exports the real, props-bearing component directly, so
-step 1 is a no-op. `src/ui/Dropdown/Dropdown.tsx`, with only step 2
-applied:
+step 1 is a no-op, and its React import needs no change at all (step 2):
+`src/ui/Dropdown/Dropdown.tsx`, unchanged from the pasted source:
 
 ```tsx
-declare const window: any;
-const { useState } = window.__DeliveryOSReactRuntime.React;
-import type React from 'react';
+import { useState } from 'react';
 
 interface DropdownOption {
   value: string;

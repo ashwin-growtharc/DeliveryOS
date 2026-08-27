@@ -5,7 +5,8 @@
 // triggers one is disabled with a "Working..." label for the duration.
 (function () {
   const call = window.DeliveryOS.call;
-  const { open: openDialog } = window.__TAURI__.dialog;
+  const { invoke } = window.__TAURI__.core;
+  const { open: openDialog, confirm: confirmDialog } = window.__TAURI__.dialog;
   const { revealItemInDir, openUrl } = window.__TAURI__.opener;
   const { listen } = window.__TAURI__.event;
   const { check } = window.__TAURI__.updater;
@@ -2324,6 +2325,8 @@ ${bodyHtml}
       return;
     }
 
+    renderWireWithClaudeLauncher(entry);
+
     let resolved;
     try {
       resolved = await call('artifact.resolveWiringActions', {
@@ -2355,8 +2358,12 @@ ${bodyHtml}
       const fileEl = document.createElement('code');
       fileEl.textContent = action.targetFile;
       const statusEl = document.createElement('span');
-      statusEl.className = `wiring-action-status ${action.alreadyWired ? 'ok' : action.targetFileExists ? 'exists' : 'absent'}`;
-      statusEl.textContent = action.alreadyWired ? 'already wired ✓' : action.targetFileExists ? 'exists' : 'not found';
+      statusEl.className = `wiring-action-status ${action.alreadyWired ? 'ok' : action.placementAmbiguous ? 'ambiguous' : action.targetFileExists ? 'exists' : 'absent'}`;
+      statusEl.textContent = action.alreadyWired
+        ? 'already wired ✓'
+        : action.placementAmbiguous
+          ? 'placement ambiguous'
+          : action.targetFileExists ? 'exists' : 'not found';
       header.appendChild(fileEl);
       header.appendChild(statusEl);
 
@@ -2400,6 +2407,19 @@ ${bodyHtml}
         );
         card.appendChild(controller.row);
         mergeControllers.push(controller);
+      }
+
+      // adaptSrcDirPath's own deterministic check (src/ vs. not) already
+      // resolved every OTHER case -- this is only reached when neither a
+      // root app/pages nor a src/app/src/pages exists yet to check
+      // against, a genuinely ambiguous placement no heuristic should
+      // silently guess at. `action.snippet` is still the real, fully-known
+      // whenAbsent content (see resolveWiringActions's own doc comment on
+      // why that's safe here) -- only the DESTINATION path is undecided.
+      if (action.placementAmbiguous) {
+        card.appendChild(
+          renderWiringPlacementRow(action.targetFile, action.description, action.snippet, entry.remoteName, entry.manifest.id),
+        );
       }
 
       container.appendChild(card);
@@ -2586,6 +2606,139 @@ ${bodyHtml}
     };
   }
 
+  /** Builds one row's DOM for a single Tier-2 wiring_action reporting
+   * `placementAmbiguous` -- a button that asks Claude where this specific
+   * file should really go in THIS project, then either its own honest
+   * "no signal either way" reasoning, or the proposed path plus
+   * Apply/Discard. Mirrors `renderWiringMergeRow`'s exact ask/apply/discard
+   * shape, adapted for "decide a destination" instead of "propose a
+   * merge" -- `snippet` is already fully known (the manifest's own
+   * `whenAbsent.snippet`, never AI-generated here), so Apply only ever
+   * writes it to wherever Claude suggested, it never asks Claude to
+   * reproduce file content itself. Nothing is written to disk, and
+   * nothing is logged, unless Apply is clicked. */
+  function renderWiringPlacementRow(declaredPath, description, snippet, remoteName, artifactId) {
+    const row = document.createElement('div');
+    row.className = 'build-fix-row';
+
+    let placementRequestId = 0;
+    let pendingPlacement = null;
+
+    const askBtn = document.createElement('button');
+    askBtn.type = 'button';
+    askBtn.className = 'btn btn-sm btn-ghost';
+    askBtn.textContent = 'Ask Claude where this goes ✨';
+    row.appendChild(askBtn);
+
+    const resultEl = document.createElement('div');
+    resultEl.className = 'build-fix-result';
+    resultEl.hidden = true;
+    row.appendChild(resultEl);
+
+    askBtn.addEventListener('click', () => void withBusy(askBtn, 'Asking…', async () => {
+      const requestId = ++placementRequestId;
+      let placement;
+      try {
+        placement = await call('artifact.requestWiringPlacement', {
+          cwd: state.projectDir,
+          declaredPath,
+          description,
+        });
+      } catch (err) {
+        if (requestId !== placementRequestId) return; // superseded while awaiting
+        resultEl.hidden = false;
+        resultEl.textContent = `Could not get a placement suggestion -- ${err instanceof Error ? err.message : String(err)}`;
+        return;
+      }
+      if (requestId !== placementRequestId) return; // superseded while awaiting
+
+      resultEl.hidden = false;
+      resultEl.innerHTML = '';
+
+      if (!placement.suggestedPath) {
+        pendingPlacement = null;
+        const reasonEl = document.createElement('div');
+        reasonEl.textContent = placement.reasoning || 'Claude could not determine where this file should go.';
+        resultEl.appendChild(reasonEl);
+        return;
+      }
+
+      pendingPlacement = placement;
+
+      const pathEl = document.createElement('code');
+      pathEl.textContent = placement.suggestedPath;
+      resultEl.appendChild(pathEl);
+      if (placement.reasoning) {
+        const reasoningEl = document.createElement('div');
+        reasoningEl.className = 'wiring-action-instructions';
+        reasoningEl.textContent = placement.reasoning;
+        resultEl.appendChild(reasoningEl);
+      }
+
+      const actionsEl = document.createElement('div');
+      actionsEl.className = 'build-fix-actions';
+      const applyBtn = document.createElement('button');
+      applyBtn.type = 'button';
+      applyBtn.className = 'btn btn-sm';
+      applyBtn.textContent = 'Apply';
+      const discardBtn = document.createElement('button');
+      discardBtn.type = 'button';
+      discardBtn.className = 'btn btn-sm btn-ghost';
+      discardBtn.textContent = 'Discard';
+      actionsEl.appendChild(applyBtn);
+      actionsEl.appendChild(discardBtn);
+      resultEl.appendChild(actionsEl);
+      askBtn.hidden = true;
+
+      discardBtn.addEventListener('click', () => {
+        // Nothing written, nothing logged -- just clears the offer back
+        // to its starting state so it can be asked again if wanted.
+        pendingPlacement = null;
+        resultEl.hidden = true;
+        resultEl.innerHTML = '';
+        askBtn.hidden = false;
+      });
+
+      applyBtn.addEventListener('click', () => void withBusy(applyBtn, 'Applying…', async () => {
+        if (!pendingPlacement || !pendingPlacement.suggestedPath) return;
+        const placementToApply = pendingPlacement;
+        discardBtn.disabled = true;
+        try {
+          const outcome = await call('artifact.applyWiringPlacement', {
+            cwd: state.projectDir,
+            declaredPath,
+            suggestedPath: placementToApply.suggestedPath,
+            snippet,
+            description,
+            remote: remoteName,
+            id: artifactId,
+            reasoning: placementToApply.reasoning,
+            costUsd: placementToApply.costUsd,
+            durationMs: placementToApply.durationMs,
+          });
+          pendingPlacement = null;
+          const outcomeEl = document.createElement('div');
+          if (outcome.rolledBack) {
+            outcomeEl.textContent = `That placement didn't actually keep the project building -- the file was removed again.${outcome.build.output ? ` (${outcome.build.output})` : ''}`;
+          } else if (outcome.build.ran) {
+            outcomeEl.textContent = `Written to ${placementToApply.suggestedPath} -- the build still passes.`;
+          } else {
+            outcomeEl.textContent = `Written to ${placementToApply.suggestedPath} (no build command detected to verify it).`;
+          }
+          resultEl.innerHTML = '';
+          resultEl.appendChild(outcomeEl);
+        } catch (err) {
+          const errEl = document.createElement('div');
+          errEl.textContent = `Could not write the file -- ${err instanceof Error ? err.message : String(err)}`;
+          resultEl.innerHTML = '';
+          resultEl.appendChild(errEl);
+        }
+      }));
+    }));
+
+    return row;
+  }
+
   /** "Merge all with Claude": batches the exact same ask/apply calls every
    * per-file row already makes, just orchestrated across all of them from
    * one button instead of N. Proposals are requested SEQUENTIALLY, not in
@@ -2673,6 +2826,173 @@ ${bodyHtml}
     });
 
     return wrap;
+  }
+
+  // --- Embedded terminal ("Wire with Claude") ---------------------------
+  //
+  // Hands off to a REAL interactive `claude` session, rendered inside the
+  // app's own window via xterm.js + a real PTY (src-tauri/src/pty.rs) --
+  // the in-app counterpart to `deliveryos wire-with-claude <id>`, which
+  // this literally runs: the Rust side knows nothing about DeliveryOS,
+  // Claude, or wiring at all, it just streams whatever command is asked
+  // to run in a real pseudo-terminal. See pty.rs's own doc comments for
+  // why this hands off to claude's own normal, already-trusted
+  // interactive permission model rather than a restricted, tool-granted
+  // subprocess (that was already tried once for a different feature and
+  // walked back after finding real security problems with it).
+  //
+  // v1 scope: one session at a time, matching pty.rs's own PtyState
+  // invariant -- opening a new one while another is running kills the
+  // old one first (the same thing a second `pty_spawn` call already does
+  // on the Rust side; wireTerminalState mirrors that on the JS side so
+  // the UI can't get out of sync with it).
+  let wireTerminalState = null; // { term, fitAddon, resizeObserver, unlistenOutput, unlistenExit, sessionActive }
+
+  function uint8ToBase64(bytes) {
+    let binary = '';
+    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    return btoa(binary);
+  }
+
+  function base64ToUint8(b64) {
+    const binary = atob(b64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+  }
+
+  /** Builds the artifact-level "Wire with Claude" launcher -- not tied to
+   * any single resolved wiring_action (unlike the merge/placement rows
+   * above), so rendered once per artifact rather than once per action. */
+  function renderWireWithClaudeLauncher(entry) {
+    const container = $('detail-wiring-terminal-launcher');
+    container.innerHTML = '';
+
+    const row = document.createElement('div');
+    row.className = 'build-fix-row';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn btn-sm';
+    btn.textContent = 'Wire with Claude →';
+    row.appendChild(btn);
+    container.appendChild(row);
+
+    btn.addEventListener('click', () => void withBusy(btn, 'Opening…', () => openWireTerminal(entry)));
+  }
+
+  /** Confirms, then opens the terminal overlay and starts a real PTY
+   * session running `deliveryos wire-with-claude <id>` in the real
+   * project. Nothing is spawned until the user explicitly confirms --
+   * same "one human click before anything real happens" rule every
+   * other AI-assist flow in this app already follows, just phrased as a
+   * native dialog here since this hands off to a session with real write
+   * access, not a single bounded proposal to review afterward. */
+  async function openWireTerminal(entry) {
+    const proceed = await confirmDialog(
+      'This hands off to a real, interactive claude session with real write access to '
+        + `"${state.projectDir}". Make sure any work you care about is committed or backed up first.`,
+      { title: 'Wire with Claude', kind: 'warning', okLabel: 'Continue', cancelLabel: 'Cancel' },
+    );
+    if (!proceed) return;
+
+    if (wireTerminalState) {
+      await closeWireTerminal({ silent: true });
+    }
+
+    const overlay = $('wire-terminal-overlay');
+    const statusEl = $('wire-terminal-status');
+    const container = $('wire-terminal-container');
+    container.innerHTML = '';
+    overlay.hidden = false;
+    statusEl.textContent = 'Starting…';
+
+    const term = new Terminal({
+      // A fixed dark theme, not synced to the app's own light/dark mode
+      // -- every mainstream embedded-terminal UI does this; simpler than
+      // keeping a second theme system in sync, and not what this feature
+      // is about.
+      theme: { background: '#181a20', foreground: '#e6e6e6' },
+      fontFamily: '"JetBrains Mono", monospace',
+      fontSize: 13,
+      cursorBlink: true,
+      allowProposedApi: true,
+    });
+    const fitAddon = new FitAddon.FitAddon();
+    term.loadAddon(fitAddon);
+    term.open(container);
+    fitAddon.fit();
+
+    const unlistenOutput = await listen('pty-output', (event) => {
+      term.write(base64ToUint8(event.payload));
+    });
+    const unlistenExit = await listen('pty-exit', () => {
+      if (!wireTerminalState) return;
+      wireTerminalState.sessionActive = false;
+      statusEl.textContent = 'Session ended';
+    });
+
+    const resizeObserver = new ResizeObserver(() => {
+      fitAddon.fit();
+      void invoke('pty_resize', { rows: term.rows, cols: term.cols }).catch(() => {});
+    });
+    resizeObserver.observe(container);
+
+    term.onData((data) => {
+      const bytes = new TextEncoder().encode(data);
+      void invoke('pty_write', { data: uint8ToBase64(bytes) }).catch(() => {});
+    });
+
+    wireTerminalState = { term, fitAddon, resizeObserver, unlistenOutput, unlistenExit, sessionActive: true };
+
+    const args = ['wire-with-claude', entry.manifest.id];
+    if (entry.remoteName) args.push('--remote', entry.remoteName);
+
+    try {
+      await invoke('pty_spawn', {
+        cwd: state.projectDir,
+        command: 'deliveryos',
+        args,
+        rows: term.rows,
+        cols: term.cols,
+      });
+      statusEl.textContent = 'Running';
+      term.focus();
+    } catch (err) {
+      statusEl.textContent = 'Could not start';
+      term.write(`\r\nCould not start: ${err instanceof Error ? err.message : String(err)}\r\n`);
+      wireTerminalState.sessionActive = false;
+    }
+  }
+
+  /** Tears down the terminal overlay -- confirms first if a session is
+   * still genuinely running (closing mid-session kills a real process,
+   * same "confirm before a real, hard-to-undo action" rule as opening
+   * one). `silent` skips both the confirm and the fade-out, used when
+   * `openWireTerminal` replaces an already-finished/already-confirmed
+   * previous session rather than the user explicitly closing one. */
+  async function closeWireTerminal(opts = {}) {
+    if (!wireTerminalState) return;
+    if (wireTerminalState.sessionActive && !opts.silent) {
+      const proceed = await confirmDialog('A claude session is still running. Close it and end the session?', {
+        title: 'Wire with Claude',
+        kind: 'warning',
+        okLabel: 'End session',
+        cancelLabel: 'Keep it open',
+      });
+      if (!proceed) return;
+    }
+
+    const { term, resizeObserver, unlistenOutput, unlistenExit } = wireTerminalState;
+    resizeObserver.disconnect();
+    unlistenOutput();
+    unlistenExit();
+    term.dispose();
+    wireTerminalState = null;
+
+    await invoke('pty_kill', {}).catch(() => {});
+
+    $('wire-terminal-overlay').hidden = true;
+    $('wire-terminal-container').innerHTML = '';
   }
 
   /** Phase 11 Detail-view task: renders design-kit's color tokens/type
@@ -6244,6 +6564,7 @@ ${bodyHtml}
       btn.addEventListener('click', () => showView(btn.dataset.view));
     }
 
+    $('wire-terminal-close').addEventListener('click', () => void closeWireTerminal());
     $('theme-toggle-btn').addEventListener('click', () => toggleTheme());
     $('change-folder-btn').addEventListener('click', () => void changeFolder());
     $('refresh-btn').addEventListener('click', () => void refreshCatalogFromRemotes());

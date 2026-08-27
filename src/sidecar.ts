@@ -43,6 +43,7 @@ import { runProjectBuild } from './engine/pull/verifyBuild';
 import { buildPostInstallHealthSummary } from './engine/pull/postInstallHealthSummary';
 import { requestBuildFix, applyBuildFix, readBuildFixLog } from './engine/pull/fixBuildFailure';
 import { requestWiringMerge, applyWiringMerge, readWiringMergeLog } from './engine/pull/requestWiringMerge';
+import { suggestWiringPlacement, applyWiringPlacement } from './engine/scan/suggestWiringPlacement';
 import { requestAntiPatternFix, applyAntiPatternFix } from './engine/scan/fixAntiPattern';
 import { pushArtifact, PushOptions } from './engine/push/push';
 import { parseBumpKind } from './engine/manifest/version';
@@ -556,6 +557,44 @@ const commands: Record<string, CommandHandler> = {
     const costUsd = typeof args.costUsd === 'number' ? args.costUsd : undefined;
     const durationMs = typeof args.durationMs === 'number' ? args.durationMs : undefined;
     return applyWiringMerge(cwd, targetFile, mergedFile, description, remote, id, { costUsd, durationMs });
+  },
+
+  // Backend plug-and-play: the "ask" half of the AI-assisted wiring-
+  // placement fallback -- only ever offered by Detail's wiring section
+  // for a resolved wiring_action reporting placementAmbiguous (the
+  // deterministic adaptSrcDirPath fast path already returned undefined:
+  // neither a root app/pages nor a src/app/src/pages exists yet to check
+  // against). No write, no audit-log entry -- same "ask, then a human
+  // confirms" shape as artifact.requestWiringMerge above.
+  'artifact.requestWiringPlacement': (args) => {
+    const cwd = requireString(args, 'cwd');
+    const declaredPath = requireString(args, 'declaredPath');
+    const description = requireString(args, 'description');
+    return suggestWiringPlacement(cwd, declaredPath, description);
+  },
+
+  // Backend plug-and-play: the "apply" half -- writes the wiring_action's
+  // own (already fully known, never AI-generated) snippet to the
+  // suggested path for real, re-runs the real build to confirm it, rolls
+  // back automatically if it doesn't, and appends exactly one audit-log
+  // entry either way. Only reached after an explicit human confirmation
+  // click; never automatic.
+  'artifact.applyWiringPlacement': (args) => {
+    const cwd = requireString(args, 'cwd');
+    const declaredPath = requireString(args, 'declaredPath');
+    const suggestedPath = requireString(args, 'suggestedPath');
+    const snippet = requireString(args, 'snippet');
+    const description = requireString(args, 'description');
+    const remote = requireString(args, 'remote');
+    const id = requireString(args, 'id');
+    const reasoning = optionalString(args, 'reasoning');
+    const costUsd = typeof args.costUsd === 'number' ? args.costUsd : undefined;
+    const durationMs = typeof args.durationMs === 'number' ? args.durationMs : undefined;
+    return applyWiringPlacement(cwd, declaredPath, suggestedPath, snippet, description, remote, id, {
+      costUsd,
+      durationMs,
+      reasoning,
+    });
   },
 
   // Activity tab (Phase 12): reads back the wiring-merge audit log,

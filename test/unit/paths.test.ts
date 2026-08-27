@@ -1,6 +1,13 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
-import { resolveContainedPath, remoteCachePath, remotesCacheRoot } from '../../src/engine/paths';
+import {
+  resolveContainedPath,
+  remoteCachePath,
+  remotesCacheRoot,
+  adaptSrcDirPath,
+} from '../../src/engine/paths';
 
 describe('resolveContainedPath', () => {
   it('resolves an ordinary relative path inside root', () => {
@@ -49,5 +56,60 @@ describe('remoteCachePath', () => {
     expect(() => remoteCachePath('.')).toThrow(/Invalid remote name/);
     expect(() => remoteCachePath('..')).toThrow(/Invalid remote name/);
     expect(() => remoteCachePath('')).toThrow(/Invalid remote name/);
+  });
+});
+
+describe('adaptSrcDirPath', () => {
+  let cwd: string;
+
+  beforeEach(() => {
+    cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'deliveryos-adapt-src-dir-test-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  });
+
+  it('leaves a path with no src/ prefix untouched, regardless of project layout', () => {
+    expect(adaptSrcDirPath(cwd, 'auth.ts')).toBe('auth.ts');
+    expect(adaptSrcDirPath(cwd, 'middleware.ts')).toBe('middleware.ts');
+  });
+
+  it('strips the src/ prefix when the project has a root app/ directory', () => {
+    fs.mkdirSync(path.join(cwd, 'app'), { recursive: true });
+    expect(adaptSrcDirPath(cwd, 'src/app/api/auth/[...nextauth]/route.ts')).toBe(
+      'app/api/auth/[...nextauth]/route.ts',
+    );
+    expect(adaptSrcDirPath(cwd, 'src/lib/auth')).toBe('lib/auth');
+  });
+
+  it('strips the src/ prefix when the project has a root pages/ directory', () => {
+    fs.mkdirSync(path.join(cwd, 'pages'), { recursive: true });
+    expect(adaptSrcDirPath(cwd, 'src/app/api/auth/[...nextauth]/route.ts')).toBe(
+      'app/api/auth/[...nextauth]/route.ts',
+    );
+  });
+
+  it('keeps the src/ prefix as-is when the project has a src/app directory', () => {
+    fs.mkdirSync(path.join(cwd, 'src', 'app'), { recursive: true });
+    expect(adaptSrcDirPath(cwd, 'src/app/api/auth/[...nextauth]/route.ts')).toBe(
+      'src/app/api/auth/[...nextauth]/route.ts',
+    );
+  });
+
+  it('keeps the src/ prefix as-is when the project has a src/pages directory', () => {
+    fs.mkdirSync(path.join(cwd, 'src', 'pages'), { recursive: true });
+    expect(adaptSrcDirPath(cwd, 'src/lib/auth')).toBe('src/lib/auth');
+  });
+
+  it('prefers root app/ over src/app when a project genuinely has both', () => {
+    fs.mkdirSync(path.join(cwd, 'app'), { recursive: true });
+    fs.mkdirSync(path.join(cwd, 'src', 'app'), { recursive: true });
+    expect(adaptSrcDirPath(cwd, 'src/lib/auth')).toBe('lib/auth');
+  });
+
+  it('returns undefined when neither convention is detectable yet', () => {
+    expect(adaptSrcDirPath(cwd, 'src/lib/auth')).toBeUndefined();
+    expect(adaptSrcDirPath(cwd, 'src/app/api/auth/[...nextauth]/route.ts')).toBeUndefined();
   });
 });

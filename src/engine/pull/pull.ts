@@ -4,7 +4,7 @@ import { execSync } from 'child_process';
 import { buildCatalog, CatalogEntry } from '../catalog/catalog';
 import { cachePath } from '../remote/remoteCache';
 import { upsertEntry, readLockfile } from '../lockfile/lockfile';
-import { pristinePath, resolveContainedPath } from '../paths';
+import { pristinePath, resolveContainedPath, adaptSrcDirPath } from '../paths';
 import { ArtifactResolutionError, ManifestValidationError, PostInstallError } from '../errors';
 import { Manifest } from '../manifest/schema';
 import {
@@ -151,7 +151,15 @@ export async function pullArtifact(
         + `the remote may be out of date, or payload_path may be wrong. Try refreshing the catalog.`,
     );
   }
-  const installTarget = resolveContainedPath(cwd, manifest.install_target);
+  // Adapts an install_target that assumes the `src/` convention (e.g.
+  // `src/lib/auth`) to whichever convention this REAL project actually
+  // uses -- see adaptSrcDirPath's own doc comment for why. Falls back to
+  // the manifest's own literal value when neither convention is yet
+  // detectable (a genuinely fresh project): resolving that ambiguity
+  // for real is a judgment call for the Wiring section's own AI-assist
+  // flow, not something the synchronous pull path guesses at.
+  const effectiveInstallTarget = adaptSrcDirPath(cwd, manifest.install_target) ?? manifest.install_target;
+  const installTarget = resolveContainedPath(cwd, effectiveInstallTarget);
   if (!installTarget) {
     throw new ManifestValidationError(
       `Artifact "${manifest.id}"'s install_target ("${manifest.install_target}") resolves outside the `

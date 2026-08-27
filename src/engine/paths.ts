@@ -1,3 +1,4 @@
+import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
@@ -83,6 +84,30 @@ export function wiringMergeLogPath(cwd: string): string {
   return path.join(projectDeliveryOsDir(cwd), 'wiring-merge-log.jsonl');
 }
 
+/** Project-local (cwd-scoped) audit log for the AI-assisted wiring-
+ * placement fallback's own "apply" half (`applyWiringPlacement`) -- same
+ * append-only, apply-only-not-request-or-discard shape as
+ * `wiringMergeLogPath` above, in its own file for the same reason: a
+ * placement decision (which relative path a brand-new file landed at) is
+ * a distinct kind of event from a merge into an already-existing file. */
+export function wiringPlacementLogPath(cwd: string): string {
+  return path.join(projectDeliveryOsDir(cwd), 'wiring-placement-log.jsonl');
+}
+
+/** Project-local (cwd-scoped) context file `deliveryos wire-with-claude`
+ * writes for a real interactive `claude` session to read -- see
+ * `buildWireContextMarkdown`'s own doc comment for why this is a file
+ * the agent reads itself (via its own already-permissioned Read tool)
+ * rather than text interpolated into the process's own argv. `id` comes
+ * from a CLI argument already validated against a real lockfile entry by
+ * the time this is called, but sanitized the same way `remoteCachePath`
+ * sanitizes its own segments regardless -- defense in depth, not because
+ * a specific exploit is known here. */
+export function wireContextPath(cwd: string, id: string): string {
+  assertSafePathSegment(id, 'artifact id');
+  return path.join(projectDeliveryOsDir(cwd), `wire-context-${id}.md`);
+}
+
 /** Project-local (cwd-scoped) directory holding pristine (as-pulled)
  * snapshots of every pulled artifact's payload, keyed by id. Used by
  * `push` to diff a local edit against what was actually pulled. */
@@ -123,6 +148,61 @@ export function resolveContainedPath(root: string, candidate: string): string | 
     return undefined;
   }
   return resolved;
+}
+
+/**
+ * Adapts a manifest-declared path that assumes the `src/` directory
+ * convention (`src/app/...`, `src/lib/...`, an `install_target` of
+ * `src/lib/auth`) to whichever convention the REAL consuming project
+ * actually uses. Every existing `wiring_actions`/`install_target` in
+ * this catalog assumes `src/` by default (matching how `nextauth-
+ * credentials`/`email-code-auth` were authored) -- silently wrong for a
+ * project that doesn't use it, confirmed the hard way: a real pull
+ * wrote `email-code-auth`'s API route to `src/app/api/auth/[...nextauth]/
+ * route.ts` in a project whose real pages live under root `app/`, and
+ * Next.js never served it from there at all.
+ *
+ * Detection mirrors Next.js's own real rule, confirmed directly against
+ * its source (`node_modules/next/dist/lib/find-pages-dir.js`):
+ * ```js
+ * function findDir(dir, name) {
+ *   // prioritize ./${name} over ./src/${name}
+ *   ...
+ * }
+ * ```
+ * Root `app/`/`pages/` wins whenever it exists; `src/app`/`src/pages`
+ * is only ever checked when neither root one does. This function
+ * mirrors exactly that precedence, but only ever adjusts a path that
+ * actually starts with a literal `src/` segment -- never adds one, and
+ * never touches a path that doesn't start with it.
+ *
+ * Returns the ORIGINAL `manifestPath` unchanged when the project
+ * genuinely uses the `src/` convention (safe, backward-compatible --
+ * matches every existing test/artifact's own assumption). Returns
+ * `undefined` -- not a guess -- when NEITHER convention is yet
+ * detectable (a genuinely fresh project, or a non-Next stack this
+ * heuristic doesn't apply to at all): resolving that case is a real
+ * judgment call, not this function's job.
+ */
+export function adaptSrcDirPath(cwd: string, manifestPath: string): string | undefined {
+  const normalized = manifestPath.split(path.sep).join('/');
+  if (!normalized.startsWith('src/')) {
+    return manifestPath;
+  }
+
+  const hasRootAppOrPages =
+    fs.existsSync(path.join(cwd, 'app')) || fs.existsSync(path.join(cwd, 'pages'));
+  if (hasRootAppOrPages) {
+    return normalized.slice('src/'.length);
+  }
+
+  const hasSrcAppOrPages =
+    fs.existsSync(path.join(cwd, 'src', 'app')) || fs.existsSync(path.join(cwd, 'src', 'pages'));
+  if (hasSrcAppOrPages) {
+    return manifestPath;
+  }
+
+  return undefined;
 }
 
 /** Rejects any path segment that could escape `previewCacheRoot()` via

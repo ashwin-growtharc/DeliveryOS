@@ -227,6 +227,60 @@ describe('pullArtifact containment checks (install_target / payload_path)', () =
   });
 });
 
+function writeArtifactWithInstallTarget(id: string, installTarget: string): void {
+  const remoteCacheDir = remoteCachePath('test-remote');
+  const payloadDir = path.join(remoteCacheDir, 'artifacts', id, 'payload');
+  fs.mkdirSync(payloadDir, { recursive: true });
+  fs.writeFileSync(path.join(payloadDir, 'README.md'), `# ${id}\n`, 'utf-8');
+  fs.writeFileSync(
+    path.join(remoteCacheDir, 'artifacts', id, 'manifest.yaml'),
+    [
+      `id: ${id}`,
+      `kind: template`,
+      `description: Test artifact for install_target src/ adaptation`,
+      `owner: team-x`,
+      `version: 1.0.0`,
+      `source_repo: https://example.invalid/repo`,
+      `install_target: ${installTarget}`,
+      `review_required: false`,
+      `post_install: node -e "process.exit(0)"`,
+      '',
+    ].join('\n'),
+    'utf-8',
+  );
+}
+
+describe('pullArtifact install_target src/ convention adaptation', () => {
+  it('strips the src/ prefix from install_target when the real project uses a root app/ directory', async () => {
+    writeRegistry(['test-remote']);
+    writeArtifactWithInstallTarget('src-install-target', 'src/lib/auth');
+    fs.mkdirSync(path.join(cwd, 'app'), { recursive: true });
+
+    const result = await pullArtifact('src-install-target', undefined, cwd);
+
+    expect(result.installTarget).toBe(path.resolve(cwd, 'lib', 'auth'));
+  }, 30_000);
+
+  it('keeps the src/ prefix on install_target when the real project uses src/app', async () => {
+    writeRegistry(['test-remote']);
+    writeArtifactWithInstallTarget('src-install-target-kept', 'src/lib/auth');
+    fs.mkdirSync(path.join(cwd, 'src', 'app'), { recursive: true });
+
+    const result = await pullArtifact('src-install-target-kept', undefined, cwd);
+
+    expect(result.installTarget).toBe(path.resolve(cwd, 'src', 'lib', 'auth'));
+  }, 30_000);
+
+  it('falls back to the raw manifest install_target when placement is genuinely ambiguous', async () => {
+    writeRegistry(['test-remote']);
+    writeArtifactWithInstallTarget('src-install-target-ambiguous', 'src/lib/auth');
+
+    const result = await pullArtifact('src-install-target-ambiguous', undefined, cwd);
+
+    expect(result.installTarget).toBe(path.resolve(cwd, 'src', 'lib', 'auth'));
+  }, 30_000);
+});
+
 describe('pullArtifact lockfile recording (Phase 13 uninstall groundwork)', () => {
   it('records the real resolved installTarget on the lockfile entry it writes', async () => {
     writeRegistry(['test-remote']);

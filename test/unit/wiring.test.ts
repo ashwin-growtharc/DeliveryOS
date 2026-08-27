@@ -143,6 +143,46 @@ describe('resolveWiringActions', () => {
     expect(fs.readdirSync(cwd)).toEqual([]);
   });
 
+  describe('src/ convention adaptation', () => {
+    const SRC_ROUTE_ACTION: WiringAction = {
+      type: 'suggest_snippet',
+      description: 'Wire up the NextAuth API route',
+      targetFile: 'src/app/api/auth/[...nextauth]/route.ts',
+      whenAbsent: {
+        instructions: 'Create the NextAuth route handler.',
+        snippet: 'export { GET, POST } from "@/auth";',
+      },
+    };
+
+    it('strips the src/ prefix when the real project uses a root app/ directory', () => {
+      fs.mkdirSync(path.join(cwd, 'app'), { recursive: true });
+      const [resolved] = resolveWiringActions([SRC_ROUTE_ACTION], cwd);
+      expect(resolved.targetFile).toBe('app/api/auth/[...nextauth]/route.ts');
+      expect(resolved.placementAmbiguous).toBeUndefined();
+    });
+
+    it('keeps the src/ prefix when the real project uses src/app', () => {
+      fs.mkdirSync(path.join(cwd, 'src', 'app'), { recursive: true });
+      const [resolved] = resolveWiringActions([SRC_ROUTE_ACTION], cwd);
+      expect(resolved.targetFile).toBe('src/app/api/auth/[...nextauth]/route.ts');
+    });
+
+    it('reports placementAmbiguous, still with the whenAbsent snippet (provably absent under either interpretation), when neither convention is detectable yet', () => {
+      const [resolved] = resolveWiringActions([SRC_ROUTE_ACTION], cwd);
+      expect(resolved.placementAmbiguous).toBe(true);
+      expect(resolved.targetFileExists).toBe(false);
+      expect(resolved.snippet).toBe('export { GET, POST } from "@/auth";');
+      // Raw, unadapted value -- there's nothing more specific to show yet.
+      expect(resolved.targetFile).toBe('src/app/api/auth/[...nextauth]/route.ts');
+    });
+
+    it('does not affect a targetFile with no src/ prefix at all, even when ambiguous', () => {
+      const [resolved] = resolveWiringActions([AUTH_TS_ACTION], cwd);
+      expect(resolved.placementAmbiguous).toBeUndefined();
+      expect(resolved.targetFile).toBe('auth.ts');
+    });
+  });
+
   describe('resolveContainedTargetFile (path traversal fix)', () => {
     it('resolves a real, ordinary relative path inside cwd', () => {
       expect(resolveContainedTargetFile(cwd, 'src/auth.ts')).toBe(path.join(cwd, 'src', 'auth.ts'));

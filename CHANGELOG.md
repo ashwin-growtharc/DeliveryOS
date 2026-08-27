@@ -6,6 +6,83 @@ All notable changes to DeliveryOS are recorded here, newest first. See
 
 ---
 
+## Phase 27 — `deliveryos wire-with-claude`: the wiring step stays in DeliveryOS
+
+- New `deliveryos wire-with-claude <id>` -- reads an already-pulled
+  backend-plugin's real lockfile paths, writes a real context file, and
+  hands off to a REAL interactive `claude` session (not a restricted,
+  headless subprocess) to connect it to the rest of your project. No
+  more manually opening a separate editor and pasting a hand-written
+  prompt.
+- Considered and rejected giving DeliveryOS's own restricted AI
+  subprocess real write access instead -- that exact design was already
+  tried and walked back once (see Phase 10) after finding a real
+  Windows command-injection risk and confirming Claude Code's own
+  tool-restriction flags aren't reliably enforced. This command avoids
+  reopening that: it launches the already-trusted interactive `claude`
+  binary under its own normal permission model, not a flag-granted one.
+- Found and fixed a real bug while dogfooding: the interactive starting
+  message got silently truncated by shell word-splitting on Windows;
+  `JSON.stringify`-quoting the argv element fixed it.
+- `docs/backend-plugin-demo-script.md`'s existing-project path rewritten
+  around the new command.
+
+## Phase 26 — Two real bugs found by the user's own rehearsal, fixed
+
+- **The demo prompt undersold "actually wire it"**: an agent following it
+  correctly avoided a fake mock but stopped at a well-documented,
+  unimplemented seam. `docs/backend-plugin-demo-script.md`'s combined
+  prompt now says explicitly: don't stop at a documented seam, actually
+  call the real functions in this same turn, and confirm the login flow
+  end to end before finishing.
+- **`wiring_actions`/`install_target` hardcoded a `src/`-prefixed path**,
+  silently assuming `--src-dir` -- confirmed dead on a real root-`app/`
+  project (Next.js's own routing never looks under `src/app` once a
+  root `app/` exists). Fixed with a hybrid: a new deterministic
+  `adaptSrcDirPath` (`src/engine/paths.ts`) handles the mechanically-
+  certain case for free; a new AI-assisted fallback
+  (`suggestWiringPlacement.ts`, a new "Ask Claude where this goes ✨"
+  button, mirroring the existing "Merge with Claude" ask/apply/rollback
+  pattern) only for genuine ambiguity, never a silent guess.
+- Verified for real: full test suite green, real dogfood against a
+  fresh root-`app/` project and a genuinely ambiguous one (including a
+  real `claude` subprocess call through the actual sidecar RPC), and
+  `examples/backend-plugin-demo` (`src/`-dir) reconfirmed unaffected.
+- `DOS backend test` (the user's own rehearsal project) fixed live:
+  both artifacts re-pulled to their correct root-relative locations, its
+  `tsconfig.json` alias corrected to match, `auth-seam.ts`/
+  `auth-actions.ts` wired for real, and the whole login flow (real
+  email, real code, real session, real sign-out) verified in a real
+  browser.
+- Engine-only change -- the already-open PRs (#67, #68, #69) on
+  `growtharc-ai-helpers` are unaffected and remain open.
+
+## Phase 25 — A second real backend-plugin (`email-code-auth`), and a stakeholder demo runbook
+
+- **`email-code-auth`**: passwordless email login built for a stakeholder
+  demo that needed something simpler than `nextauth-credentials` (no
+  Prisma, no bcrypt, no database) -- a stateless 6-digit code instead of
+  Auth.js's built-in Email provider, which turns out to require a
+  database adapter. Two real bugs found and fixed while verifying: Node's
+  `crypto` module doesn't run in the Edge Runtime reachable from
+  `middleware.ts` (fixed with `crypto.subtle`); a missing
+  `callbacks.authorized` meant `middleware.ts` never actually blocked an
+  unauthenticated request despite being wired up.
+- **Paired with `kortix-auth-shell`** on one sample app -- a UI-component
+  pull and a backend-plugin pull connected by a few real lines, proving
+  the two pull types cooperate on one real feature.
+- **Fixed a real, separate bug found in the process**: `kortix-auth-shell`
+  (and the `ui-component-extractor`/`feature-extractor` skills) used a
+  vendored-runtime React-import workaround that an earlier engine fix
+  already made both unnecessary and actively harmful (it crashes once
+  genuinely pulled into a real project). Fixed the payload and both
+  skill docs.
+- Every lifecycle row dry-run for real against `email-code-auth` through
+  the actual `deliveryos` CLI/engine, not manual file copying.
+- New: `docs/backend-plugin-demo-script.md`, a presenter's runbook.
+- Not pushed to `growtharc-ai-helpers` yet -- verified against a local
+  test remote only, pending the user's own rehearsal.
+
 ## Phase 24 — A plain-language "How installing this works" panel, and a merged audit trail
 
 - **Detail now shows a plain-language walkthrough of the whole install

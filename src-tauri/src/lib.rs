@@ -4,6 +4,9 @@ use tauri::{Emitter, Manager};
 use tauri_plugin_shell::process::CommandEvent;
 use tauri_plugin_shell::ShellExt;
 
+mod pty;
+use pty::PtyState;
+
 /// Shape of a single response line the sidecar (`src/sidecar.ts`) writes to
 /// its stdout: either
 ///   { "id": "...", "ok": true,  "result": <value> }
@@ -183,6 +186,7 @@ pub fn run() {
     .plugin(tauri_plugin_opener::init())
     .plugin(tauri_plugin_updater::Builder::new().build())
     .plugin(tauri_plugin_process::init())
+    .manage(PtyState::default())
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(
@@ -211,7 +215,26 @@ pub fn run() {
 
       Ok(())
     })
-    .invoke_handler(tauri::generate_handler![sidecar_call])
-    .run(tauri::generate_context!())
-    .expect("error while running tauri application");
+    .invoke_handler(tauri::generate_handler![
+      sidecar_call,
+      pty::pty_spawn,
+      pty::pty_write,
+      pty::pty_resize,
+      pty::pty_kill,
+    ])
+    .build(tauri::generate_context!())
+    .expect("error while building tauri application")
+    .run(|app_handle, event| {
+      // The embedded-terminal feature (pty.rs) can leave a real,
+      // long-lived `claude`/`deliveryos` process running -- unlike
+      // `sidecar_call`'s own per-request spawn-and-kill, nothing else
+      // guarantees this gets torn down when the app quits. Confirmed
+      // the hard way this needed an explicit hook: a plain
+      // `.run(tauri::generate_context!())` (the previous shape of this
+      // call) has no way to intercept shutdown at all.
+      if let tauri::RunEvent::ExitRequested { .. } = event {
+        let state = app_handle.state::<PtyState>();
+        pty::kill_running_session(&state);
+      }
+    });
 }

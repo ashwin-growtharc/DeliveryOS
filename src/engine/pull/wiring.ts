@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { WiringAction } from '../manifest/schema';
+import { adaptSrcDirPath } from '../paths';
 
 /**
  * A manifest's `target_file` is untrusted input -- it comes from whatever
@@ -80,6 +81,21 @@ export interface ResolvedWiringAction {
    * against yet) or the two safety-refusal cases above (out-of-bounds /
    * sensitive path) -- those are never "already correct," they're refused. */
   alreadyWired?: boolean;
+  /** True when `targetFile` assumes the `src/` convention (`adaptSrcDirPath`'s
+   * own doc comment) and this project's real convention isn't yet
+   * detectable -- neither a root `app/`/`pages/` nor a `src/app`/`src/pages`
+   * exists to check against. `targetFile` is still the manifest's raw,
+   * UNADAPTED value in this case (there's nothing more specific to show),
+   * and `targetFileExists` is always `false` -- deciding WHERE it goes is
+   * a real judgment call for a human (or the "Ask Claude where this goes"
+   * flow) to resolve, never something to guess and auto-write. `snippet`
+   * IS still populated here (from `whenAbsent`, same as the normal
+   * absent-file case): whichever of the two conventions actually turns
+   * out to be right, its parent directory (`app/` or `src/app`) is
+   * PROVABLY absent right now too (that's the only way this branch is
+   * ever reached at all -- see `adaptSrcDirPath`), so the target file
+   * itself can't already exist under either interpretation either. */
+  placementAmbiguous?: boolean;
 }
 
 /**
@@ -105,7 +121,23 @@ export function resolveWiringActions(
   cwd: string,
 ): ResolvedWiringAction[] {
   return wiringActions.map((action) => {
-    const containedPath = resolveContainedTargetFile(cwd, action.targetFile);
+    // Adapts a `src/`-assuming targetFile to whichever convention this
+    // REAL project actually uses (adaptSrcDirPath's own doc comment) --
+    // `undefined` means neither convention is detectable yet, a real
+    // judgment call this function refuses to guess at.
+    const effectiveTargetFile = adaptSrcDirPath(cwd, action.targetFile);
+    if (effectiveTargetFile === undefined) {
+      return {
+        description: action.description,
+        targetFile: action.targetFile,
+        targetFileExists: false,
+        placementAmbiguous: true,
+        snippet: action.whenAbsent.snippet,
+        instructions: `"${action.targetFile}" assumes a project layout (src/ vs. not) this project doesn't clearly have yet -- neither a root app/pages directory nor a src/app or src/pages one exists to check against. Use "Ask Claude where this goes" to resolve it, or place it yourself.`,
+      };
+    }
+
+    const containedPath = resolveContainedTargetFile(cwd, effectiveTargetFile);
 
     if (!containedPath) {
       // A target_file that resolves outside cwd is never safe to touch,
@@ -116,9 +148,9 @@ export function resolveWiringActions(
       // needing its own separate "unsafe path" case to remember.
       return {
         description: action.description,
-        targetFile: action.targetFile,
+        targetFile: effectiveTargetFile,
         targetFileExists: true,
-        instructions: `"${action.targetFile}" resolves outside this project and was refused for safety -- this artifact's manifest is misconfigured or untrustworthy; review it manually before doing anything with it.`,
+        instructions: `"${effectiveTargetFile}" resolves outside this project and was refused for safety -- this artifact's manifest is misconfigured or untrustworthy; review it manually before doing anything with it.`,
       };
     }
 
@@ -129,9 +161,9 @@ export function resolveWiringActions(
       // review, regardless of whether one happens to exist there yet.
       return {
         description: action.description,
-        targetFile: action.targetFile,
+        targetFile: effectiveTargetFile,
         targetFileExists: true,
-        instructions: `"${action.targetFile}" is inside a location that can run on its own (a git hook, CI workflow, or editor auto-run task) and was refused for safety -- review it manually before doing anything with it.`,
+        instructions: `"${effectiveTargetFile}" is inside a location that can run on its own (a git hook, CI workflow, or editor auto-run task) and was refused for safety -- review it manually before doing anything with it.`,
       };
     }
 
@@ -154,10 +186,10 @@ export function resolveWiringActions(
       if (currentContent !== undefined && currentContent.trim() === action.whenAbsent.snippet.trim()) {
         return {
           description: action.description,
-          targetFile: action.targetFile,
+          targetFile: effectiveTargetFile,
           targetFileExists: true,
           alreadyWired: true,
-          instructions: `"${action.targetFile}" already matches exactly what this artifact would have written -- nothing to do here.`,
+          instructions: `"${effectiveTargetFile}" already matches exactly what this artifact would have written -- nothing to do here.`,
         };
       }
     }
@@ -170,15 +202,15 @@ export function resolveWiringActions(
       // it," with no snippet to offer at all.
       return {
         description: action.description,
-        targetFile: action.targetFile,
+        targetFile: effectiveTargetFile,
         targetFileExists,
-        instructions: `"${action.targetFile}" already exists -- review it before making any changes; this artifact expects to own this file.`,
+        instructions: `"${effectiveTargetFile}" already exists -- review it before making any changes; this artifact expects to own this file.`,
       };
     }
 
     return {
       description: action.description,
-      targetFile: action.targetFile,
+      targetFile: effectiveTargetFile,
       targetFileExists,
       instructions: variant.instructions,
       snippet: variant.snippet,

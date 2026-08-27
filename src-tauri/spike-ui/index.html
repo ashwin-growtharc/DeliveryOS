@@ -11,6 +11,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="vendor/xterm.css" />
     <script>
       // Applied synchronously, before body/CSS paint, so a saved dark-mode
       // choice doesn't show a flash of the light theme while app.js (which
@@ -391,6 +392,10 @@
                      auto-applied edit. See renderWiringSection in app.js. -->
                 <div id="detail-wiring-section" hidden>
                   <div class="wiring-section-label">Wiring</div>
+                  <!-- Artifact-level (not per-action) -- hands off to a
+                       real interactive claude session via a real PTY.
+                       See openWireTerminal in app.js. -->
+                  <div id="detail-wiring-terminal-launcher"></div>
                   <div id="detail-wiring-merge-all"></div>
                   <div id="detail-wiring-actions"></div>
                 </div>
@@ -841,10 +846,25 @@
       </div>
 
       <div id="toast-stack" class="toast-stack" role="status" aria-live="polite"></div>
+
+      <!-- The embedded-terminal feature: a real, interactive claude
+           session running inside a real PTY (src-tauri/src/pty.rs),
+           rendered here via xterm.js. See openWireTerminal in app.js. -->
+      <div id="wire-terminal-overlay" class="wire-terminal-overlay" hidden>
+        <div class="wire-terminal-panel">
+          <div class="wire-terminal-header">
+            <span class="wire-terminal-title">Wire with Claude</span>
+            <span id="wire-terminal-status" class="wire-terminal-status"></span>
+            <button type="button" id="wire-terminal-close" class="btn btn-sm btn-ghost" aria-label="Close terminal">✕</button>
+          </div>
+          <div id="wire-terminal-container" class="wire-terminal-container"></div>
+        </div>
+      </div>
     </div>
 
     <script src="sidecar.js"></script>
     <script src="vendor/marked.min.js"></script>
+    <script src="vendor/xterm.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

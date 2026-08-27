@@ -1097,6 +1097,184 @@ for someone who's never used DeliveryOS before.
   "New files get added for you" correctly jumped to Configuration and
   scrolled to the wiring actions section (all 4 showing "Already wired ✓").
 
+## Phase 25 — A second real backend-plugin (`email-code-auth`), and a stakeholder demo runbook — **Done, pending the user's own rehearsal**
+
+Built specifically because `nextauth-credentials` was judged too heavy
+for a stakeholder demo (Prisma, bcrypt, a real database) -- needed a
+second real backend-plugin, deliberately simple, to prove the lifecycle
+table isn't special-cased to one artifact.
+
+- **`email-code-auth`**: passwordless email login, a stateless 6-digit
+  code (`HMAC(AUTH_SECRET, email + 5-minute window)`, verified by
+  recomputing it) instead of Auth.js's built-in Email provider, which
+  turns out to require a database adapter to persist a verification
+  token -- exactly the dependency this artifact exists to avoid. Two
+  real, confirmed bugs fixed while verifying, not assumed: Node's
+  `crypto` module doesn't run in the Edge Runtime reachable from
+  `middleware.ts` (fixed with Web Crypto's `crypto.subtle`, a global in
+  both runtimes); and a missing `callbacks.authorized` meant
+  `middleware.ts` never actually blocked an unauthenticated request
+  despite being wired up (confirmed by hand with a fresh, cookie-less
+  browser context loading `/dashboard` freely).
+- **Paired with `kortix-auth-shell`** (this session's own earlier UI
+  extraction) on one real sample app -- a UI-component pull and a
+  backend-plugin pull, connected by a few real lines in
+  `src/app/auth-actions.ts`, proving the two pull types actually
+  cooperate on one feature, not just two separate demos.
+- **A real, separate bug found in the process**: `kortix-auth-shell`'s
+  files (and the `ui-component-extractor`/`feature-extractor` skills
+  that produced them) used the `window.__DeliveryOSReactRuntime.React`
+  destructure -- a workaround `compile.ts`'s own `REACT_EXTERNAL_NAMES`
+  fix (an earlier phase this same session) already made unnecessary,
+  and which actively breaks a component the moment it's genuinely
+  pulled into a real project (that global doesn't exist there). Fixed
+  all 5 affected files plus both skill docs, so the fix doesn't get
+  silently un-done by the next extraction.
+- Every lifecycle row -- install, auto-wire, build-break recovery, merge,
+  after-install summary, audit, uninstall, secrets warning, rotate,
+  reconfigure, update, timeouts -- dry-run for real against
+  `email-code-auth` through the actual `deliveryos` CLI/engine (a local
+  git test remote, not manual file copying): a genuinely broken
+  `auth.ts` fixed and rebuilt, a genuinely conflicting `middleware.ts`
+  merged and rebuilt, a real update from 1.0.0 to 1.0.1 detected and
+  applied, a real "tool not found" build failure, a real uninstall
+  leaving an honest "needs your attention" note about leftover secrets.
+- New: `docs/backend-plugin-demo-script.md`, a presenter's runbook
+  (not a report) -- pre-demo checklist, a stage-by-stage script pairing
+  the real command/click with a one-sentence non-technical translation,
+  a fallback screenshot section, and a CLI cheat-sheet.
+- **Not yet done, deliberately**: `email-code-auth` has not been pushed
+  to `growtharc-ai-helpers` -- it's built and verified against a local
+  test remote only. The user's own live rehearsal is the actual
+  acceptance test; pushing for real is a separate, later step.
+
+## Phase 26 — Fixing two real bugs the user's own rehearsal found — **Done**
+
+The user rehearsed the Phase 25 demo script themselves, from scratch, in
+a real project (`DOS backend test`) using root `app/` (not `--src-dir`)
+-- and hit two real, distinct bugs neither prior review nor the sample
+app (which happens to use `src/`) had surfaced.
+
+- **Bug 1 -- the prompt undersold "actually wire it."** The agent
+  correctly avoided a fake mock, but stopped at a well-documented,
+  honest, *unimplemented* seam (`auth-seam.ts` returning a fail-closed
+  `NOT_WIRED` result) instead of actually calling the real functions.
+  Fixed with one explicit sentence in `docs/backend-plugin-demo-script.md`'s
+  combined prompt: don't stop at a documented seam, actually call the
+  real functions in this same turn, and confirm the login flow works
+  end to end before finishing.
+- **Bug 2 -- `wiring_actions`/`install_target` hardcode a `src/`-prefixed
+  path, silently assuming every consuming project uses `--src-dir`.**
+  Confirmed directly against Next.js's own source
+  (`find-pages-dir.js`): root `app/`/`pages/` wins whenever it exists,
+  and Next then looks *only* there -- so `email-code-auth`'s API route
+  landed at `src/app/api/auth/[...nextauth]/route.ts`, completely dead
+  in a project using root `app/`. `nextauth-credentials` carries the
+  identical latent bug (same wiring shape).
+- **Fixed with a hybrid, decided with the user directly** (a plain
+  deterministic check for the one mechanically-certain case, an
+  AI-assisted fallback only for genuine ambiguity -- never a silent
+  guess either way):
+  - **`adaptSrcDirPath`** (`src/engine/paths.ts`): mirrors Next's own
+    precedence exactly -- strips a manifest's `src/` prefix when a root
+    `app/`/`pages/` exists, keeps it when `src/app`/`src/pages` exists,
+    returns `undefined` (not a guess) when neither does yet. Wired into
+    both `pull.ts`'s `install_target` resolution and `wiring.ts`'s
+    `resolveWiringActions` (which also now reports a new
+    `placementAmbiguous` state on the undetectable case, still carrying
+    the real `whenAbsent.snippet` -- provably safe, since neither
+    candidate parent directory existing yet means the file can't already
+    exist under either interpretation).
+  - **`suggestWiringPlacement`** (`src/engine/scan/suggestWiringPlacement.ts`):
+    the AI-assisted fallback, only ever called after `adaptSrcDirPath`
+    returns `undefined`. Mirrors `suggestWiringActions`'s exact shape;
+    given the manifest's declared path, the artifact's description, and
+    a real shallow project file listing, asks where the file should
+    really go and why. Never silently applied -- same "draft, then a
+    human confirms" pattern as `requestWiringMerge`/`applyWiringMerge`:
+    a new "Ask Claude where this goes ✨" button (same visual slot),
+    two new sidecar RPCs, an `applyWiringPlacement` apply-half with the
+    same rebuild-and-verify/rollback safety net and its own audit log
+    (`wiring-placement-log.jsonl`).
+- **Verified for real, not simulated**, at every layer: full existing
+  test suite green (2 unrelated pre-existing flakes confirmed
+  independent by reproducing them with this change stashed out) plus
+  58+19 new unit tests; a real `deliveryos wiring` dogfood in a fresh
+  root-`app/` scratch project (route correctly adapts) and a genuinely
+  ambiguous scratch project (reports `placementAmbiguous`); a real
+  sidecar RPC round-trip through an actual `claude` subprocess call
+  (real, sensible reasoning, real cost/duration) followed by a real
+  file write and a real passing rebuild; `examples/backend-plugin-demo`
+  (the `src/`-dir case) re-confirmed byte-for-byte unaffected.
+- **`DOS backend test` fixed live, not just in the abstract**: both
+  artifacts removed and re-pulled fresh (landing at `lib/auth` and
+  `features/kortix-auth-shell`, not under `src/`); the project's own
+  `tsconfig.json` `@/*` alias corrected to match (it was still pointing
+  at `./src/*` from before this project had a root `app/` convention);
+  `auth-seam.ts`/`auth-actions.ts` implemented for real (the same proven
+  `generateLoginCode`/`sendCodeEmail`/`signIn('credentials', ...)`/
+  `signOut` calls already verified in `examples/backend-plugin-demo`);
+  the duplicate `middleware.ts` reconciled with the project's own
+  Next-16 `proxy.ts`. Verified live end to end in a real browser: a real
+  Resend API call (including a real 403 from testing-mode restrictions,
+  correctly surfaced to the UI, then a real send to the account's
+  verified address), a real code verified via the real Credentials
+  provider, a real session reaching `/dashboard` with no preview badge,
+  and sign-out that actually ends the session (confirmed by re-hitting
+  `/dashboard` and being redirected again).
+- This is a delivery-os core engine change, not an artifact-manifest
+  change -- the already-open PRs (#67 `kortix-auth-shell`, #68
+  `email-code-auth`, #69 `kortix-design-kit` post_install fix) on
+  `growtharc-ai-helpers` are unaffected by it and remain open, pending
+  the user's own review.
+
+## Phase 27 — `deliveryos wire-with-claude`: the wiring step stays in DeliveryOS — **Done**
+
+The user wanted their demo "fully using deliveryos" -- pull and configure
+already happen in the app; the UI-to-backend wiring step (Phase 25/26's
+own "one prompt" step) still meant a context switch to a separate
+editor/Claude Code session with a hand-typed prompt. First investigated
+whether DeliveryOS could grant an AI subprocess real write access itself
+(an autonomous headless agent) -- found this was already designed and
+explicitly rejected once (`docs/product-roadmap-vision.md`'s own design
+note, walked back per this PLAN's own Phase 10 changelog after finding a
+real Windows command-injection risk and confirming Claude Code's own
+tool-restriction flags aren't reliably enforced). Every one of
+`runClaudeSubprocess`'s 8 real callers relies on that restricted,
+no-tool-access pattern for exactly that reason -- re-attempting it would
+resurrect a risk this team already found and moved away from.
+
+- **New command: `deliveryos wire-with-claude <id> [--remote <name>]`**
+  -- reads the artifact's REAL lockfile entry (the already-resolved
+  paths this exact pull produced, after Phase 26's `adaptSrcDirPath`
+  fix -- never a hand-typed guess), writes them to a real context file
+  (`.deliveryos/wire-context-<id>.md`), then hands off to a REAL,
+  interactive `claude` session (`stdio: 'inherit'`, no `-p`, no
+  `--disallowedTools`) -- the exact same trust/permission model the
+  user already has running Claude Code by hand, avoiding the
+  already-rejected headless-tool-bypass design entirely. After the
+  session ends, re-runs the real build and prints a plain pass/fail
+  summary.
+- **A real, confirmed bug found and fixed while dogfooding this**:
+  the interactive starting message, passed via `spawn(..., {shell:
+  true})`, got silently split into separate shell words on Windows
+  (Claude received only a fragment: "It looks like your message got cut
+  off"). `JSON.stringify`-quoting the single argv element fixed it,
+  confirmed against a real `claude -p` call before and after.
+- **The prompt's own untrusted content (a manifest's `description`) is
+  never passed via argv** -- only ever written to the context file
+  Claude reads with its own already-permissioned Read tool, avoiding
+  the exact class of Windows shell-injection risk `runClaudeSubprocess.ts`
+  already identified once for a different subprocess shape.
+- App-side launcher explicitly out of scope this pass (confirmed with
+  the user) -- embedding a live interactive TTY session inside the
+  Tauri webview is a materially bigger, separate feature; pull/configure
+  stay in the app, this new step is a CLI command run in the same
+  terminal.
+- `docs/backend-plugin-demo-script.md`'s existing-project section
+  rewritten around the new command -- no more hand-written prompt to
+  copy-paste, no more risk of it referencing a stale path.
+
 ## What's next
 
 - **Phase 13** (backend plug-and-play: basic hygiene) — in progress, 5 of 6 items done (uninstall, secrets safety net, timeouts, post-pull secret rotation, config-form reuse-existing-value autofill); config-form autofill's other two sub-cases (genuine local signal, neither) deliberately deferred/descoped, see above

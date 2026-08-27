@@ -1746,6 +1746,11 @@ input, textarea, select {
   color: var(--success-600);
 }
 
+.wiring-action-status.ambiguous {
+  background: var(--danger-100);
+  color: var(--danger-600);
+}
+
 .wiring-action-description {
   font-size: 13px;
   font-weight: 500;
@@ -2548,4 +2553,66 @@ input, textarea, select {
   .btn {
     transition: none;
   }
+}
+
+/* Embedded terminal ("Wire with Claude") -- a real xterm.js instance
+   streaming a real PTY session (src-tauri/src/pty.rs). Fixed dark theme
+   throughout, deliberately not tied to --surface/light-dark tokens --
+   see openWireTerminal's own comment on why (every mainstream embedded-
+   terminal UI is dark regardless of the host app's own theme). */
+.wire-terminal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(10, 12, 13, 0.55);
+  padding: 32px;
+}
+
+.wire-terminal-panel {
+  width: min(960px, 100%);
+  height: min(560px, 85vh);
+  display: flex;
+  flex-direction: column;
+  background: #181a20;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.45);
+}
+
+.wire-terminal-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: #10121600;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.wire-terminal-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e6e6e6;
+}
+
+.wire-terminal-status {
+  font-size: 12px;
+  color: #8a8f98;
+  margin-right: auto;
+}
+
+.wire-terminal-header .btn {
+  color: #e6e6e6;
+}
+
+.wire-terminal-container {
+  flex: 1;
+  min-height: 0;
+  padding: 8px 10px;
+}
+
+.wire-terminal-container .xterm {
+  height: 100%;
 }
