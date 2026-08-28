@@ -1,4 +1,4 @@
-import { CatalogEntry } from '../engine/catalog/catalog';
+import { CatalogListEntry } from '../engine/catalog/catalog';
 import { ResolvedWiringAction } from '../engine/pull/wiring';
 
 /**
@@ -10,8 +10,13 @@ import { ResolvedWiringAction } from '../engine/pull/wiring';
  * whether a candidate match actually fits, per Phase 8 item 1) can judge
  * fit and trust without needing to pull first just to inspect the
  * manifest.
+ *
+ * `entries` carries `localStatus` (not_pulled/pulled/edited_locally) --
+ * added so `deliveryos list` shows the same pulled/edited state the app's
+ * own Browse view has always shown over this same catalog data, a real
+ * CLI/sidecar parity gap this closes.
  */
-export function printCatalog(entries: CatalogEntry[], json: boolean): void {
+export function printCatalog(entries: CatalogListEntry[], json: boolean): void {
   if (json) {
     const plain = entries.map((entry) => ({
       id: entry.manifest.id,
@@ -28,6 +33,7 @@ export function printCatalog(entries: CatalogEntry[], json: boolean): void {
         hasDefault: param.default !== undefined,
       })),
       signed: entry.manifest.signature !== undefined,
+      localStatus: entry.localStatus,
     }));
     console.log(JSON.stringify(plain));
     return;
@@ -38,12 +44,13 @@ export function printCatalog(entries: CatalogEntry[], json: boolean): void {
     return;
   }
 
-  const headers = ['id', 'kind', 'version', 'remote', 'description'];
+  const headers = ['id', 'kind', 'version', 'remote', 'status', 'description'];
   const rows = entries.map((entry) => [
     entry.manifest.id,
     entry.manifest.kind,
     entry.manifest.version,
     entry.remoteName,
+    entry.localStatus,
     entry.manifest.description,
   ]);
 

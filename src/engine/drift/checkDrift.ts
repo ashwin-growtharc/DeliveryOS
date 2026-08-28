@@ -3,6 +3,7 @@ import * as path from 'path';
 import { SourcesFileMissingError } from '../errors';
 import { hashFile } from './hashFile';
 import { SourcesFile } from './types';
+import { resolveContainedPath } from '../paths';
 
 export interface DriftResult {
   payloadPath: string;
@@ -32,8 +33,17 @@ export function checkSourceDrift(payloadDir: string, sourceRootAbsolutePath: str
   const sourcesFile: SourcesFile = JSON.parse(fs.readFileSync(sourcesFilePath, 'utf-8'));
 
   return sourcesFile.entries.map((entry) => {
-    const sourceAbsolutePath = path.join(sourceRootAbsolutePath, entry.sourcePath);
-    if (!fs.existsSync(sourceAbsolutePath)) {
+    // entry.sourcePath comes from the ARTIFACT's own SOURCES.json --
+    // author-controlled, not something DeliveryOS wrote, unlike
+    // `sourceRootAbsolutePath` itself (a real local folder the user picked
+    // via a native dialog). Same containment check pull.ts/push.ts already
+    // apply to other manifest/payload-declared paths: an unchecked
+    // "../../../../etc/passwd"-shaped entry would otherwise let a crafted
+    // SOURCES.json read and hash an arbitrary file outside the folder the
+    // user actually pointed this at. Treated the same as a genuinely
+    // missing source file -- there's nothing safe to check it against.
+    const sourceAbsolutePath = resolveContainedPath(sourceRootAbsolutePath, entry.sourcePath);
+    if (!sourceAbsolutePath || !fs.existsSync(sourceAbsolutePath)) {
       return { payloadPath: entry.payloadPath, sourcePath: entry.sourcePath, status: 'source-missing' as const };
     }
     const currentHash = hashFile(sourceAbsolutePath);

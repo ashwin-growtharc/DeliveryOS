@@ -11,6 +11,23 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="vendor/xterm.css" />
+    <script>
+      // Applied synchronously, before body/CSS paint, so a saved dark-mode
+      // choice doesn't show a flash of the light theme while app.js (which
+      // loads at the end of body) is still parsing.
+      (function () {
+        try {
+          var saved = localStorage.getItem('deliveryos.theme');
+          if (saved === 'dark' || saved === 'light') {
+            document.documentElement.setAttribute('data-theme', saved);
+          }
+        } catch (e) {
+          // localStorage unavailable (e.g. disabled) -- fall back to
+          // prefers-color-scheme, same as if nothing were saved.
+        }
+      })();
+    </script>
   </head>
   <body>
     <!-- Icon defs used throughout via <svg><use href="#i-..."/></svg> --
@@ -47,6 +64,11 @@
           <path d="M4.8 2.2 H12 L15.3 5.5 V17.3 H4.8 Z" />
           <path d="M12 2.2 V5.5 H15.3" />
           <path d="M7.2 9.5 H12.8 M7.2 12.6 H12.8" />
+        </symbol>
+        <symbol id="i-kind-backend-plugin" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M7 2.5v4.3M13 2.5v4.3" />
+          <path d="M5.3 6.8h9.4v3a4.7 4.7 0 0 1-9.4 0z" />
+          <path d="M10 14.5v3" />
         </symbol>
         <symbol id="i-kind-default" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round">
           <path d="M10 2.5 L17.5 10 L10 17.5 L2.5 10 Z" />
@@ -94,6 +116,16 @@
           <circle cx="10" cy="10" r="1.1" fill="currentColor" stroke="none" />
           <path d="M10 3.5v1.4M10 15.1v1.4M16.5 10h-1.4M4.9 10H3.5M14.6 5.4l-1 1M6.4 13.6l-1 1M14.6 14.6l-1-1M6.4 6.4l-1-1" />
         </symbol>
+        <!-- Theme toggle: sun shown while in dark mode ("switch to light"),
+             moon shown while in light mode ("switch to dark") -- app.js
+             swaps the <use> href, same convention as kindIcon(). -->
+        <symbol id="i-theme-sun" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+          <circle cx="10" cy="10" r="3.4" />
+          <path d="M10 2.3v2M10 15.7v2M17.7 10h-2M4.3 10h-2M15.4 4.6l-1.4 1.4M6 14l-1.4 1.4M15.4 15.4l-1.4-1.4M6 6l-1.4-1.4" />
+        </symbol>
+        <symbol id="i-theme-moon" viewBox="0 0 20 20" fill="currentColor">
+          <path d="M15.5 12.9A6.8 6.8 0 0 1 7.1 4.5a6.8 6.8 0 1 0 8.4 8.4Z" />
+        </symbol>
       </defs>
     </svg>
 
@@ -105,6 +137,8 @@
             <button class="sidebar-item" data-view="browse"><svg class="glyph"><use href="#i-folder"/></svg>Browse</button>
             <button class="sidebar-item" data-view="tags"><svg class="glyph"><use href="#i-tag"/></svg>Browse by tag</button>
             <button class="sidebar-item" data-view="ui-components"><svg class="glyph"><use href="#i-components"/></svg>UI Components</button>
+            <button class="sidebar-item" data-view="starter-kits"><svg class="glyph"><use href="#i-kind-template"/></svg>Starter Kits</button>
+            <button class="sidebar-item" data-view="backend-plugins"><svg class="glyph"><use href="#i-kind-backend-plugin"/></svg>Backend Plugins</button>
             <button class="sidebar-item" data-view="settings"><svg class="glyph"><use href="#i-settings"/></svg>Settings</button>
             <div class="sidebar-divider"></div>
             <button class="sidebar-item" data-view="scan"><svg class="glyph"><use href="#i-scan"/></svg>Scan</button>
@@ -117,6 +151,9 @@
             <span class="folder-label">Project</span>
             <span id="folder-path" class="folder-path">No folder selected</span>
             <span class="context-strip-spacer"></span>
+            <button id="theme-toggle-btn" class="btn btn-ghost btn-sm btn-icon-only" aria-label="Switch to dark mode" title="Switch to dark mode">
+              <svg class="glyph"><use href="#i-theme-moon"/></svg>
+            </button>
             <button id="change-folder-btn" class="btn btn-sm">Change folder</button>
           </div>
 
@@ -132,6 +169,7 @@
                 id="search-input"
                 type="text"
                 placeholder="Search id, description, kind, owner, or tags"
+                aria-label="Search id, description, kind, owner, or tags"
               />
               <button id="add-new-btn" class="btn btn-primary">+ Add new</button>
             </div>
@@ -182,6 +220,7 @@
             class="mini-search tag-value-search"
             type="text"
             placeholder="Filter values&hellip;"
+            aria-label="Filter values"
             hidden
           />
           <div id="tags-list" class="tag-list-panel"></div>
@@ -218,6 +257,48 @@
           <p id="ui-components-empty" class="empty-state" hidden>No UI components yet -- Add New or Scan to propose one.</p>
         </section>
 
+        <!-- Starter Kits (kind: template) and Backend Plugins
+             (kind: backend-plugin): single-kind slices of the same catalog
+             Browse already shows, their own sidebar destinations for the
+             same reason "Browse by tag" and "UI Components" are -- someone
+             who already knows what they want ("give me every backend
+             plugin") shouldn't have to land on the full unfiltered grid
+             and manually toggle a Kind chip first. Unlike UI Components,
+             neither kind here has a live-preview story or a sub-dimension
+             worth its own tab row, so this stays a plain grid reusing
+             Browse's own card markup (buildResCard) -- no chips, no
+             search box; kind is implicitly fixed by which sidebar item
+             got you here. See renderKindListPage in app.js. -->
+        <section id="view-starter-kits" class="view" hidden>
+          <div id="starter-kits-no-folder" class="hint-banner" hidden>
+            Select a project folder to browse starter kits.
+          </div>
+          <div class="page-head">
+            <h2 class="section-title">Starter Kits</h2>
+            <div class="page-head-actions">
+              <span id="starter-kits-count" class="count"></span>
+              <button id="starter-kits-pull-all-btn" class="btn btn-sm" hidden></button>
+            </div>
+          </div>
+          <div id="starter-kits-grid" class="grid"></div>
+          <p id="starter-kits-empty" class="empty-state" hidden>No starter kits match.</p>
+        </section>
+
+        <section id="view-backend-plugins" class="view" hidden>
+          <div id="backend-plugins-no-folder" class="hint-banner" hidden>
+            Select a project folder to browse backend plugins.
+          </div>
+          <div class="page-head">
+            <h2 class="section-title">Backend Plugins</h2>
+            <div class="page-head-actions">
+              <span id="backend-plugins-count" class="count"></span>
+              <button id="backend-plugins-pull-all-btn" class="btn btn-sm" hidden></button>
+            </div>
+          </div>
+          <div id="backend-plugins-grid" class="grid"></div>
+          <p id="backend-plugins-empty" class="empty-state" hidden>No backend plugins match.</p>
+        </section>
+
         <!-- Tag folder: opened by picking a tag VALUE (e.g. "stack: python")
              from Browse by tag -- its own navigable view (back button, like
              Detail), not an inline filter of Browse's own grid. Lists every
@@ -234,6 +315,7 @@
                 class="mini-search"
                 type="text"
                 placeholder="Search within this folder&hellip;"
+                aria-label="Search within this folder"
               />
               <button id="tag-folder-pull-all-btn" class="btn btn-sm" hidden></button>
             </div>
@@ -273,7 +355,7 @@
         <!-- Detail -->
         <section id="view-detail" class="view" hidden>
           <button id="back-to-browse-btn" class="btn back-btn">&larr; Back to Browse</button>
-          <div class="card detail-card">
+          <div class="card">
             <div class="detail-header">
               <div class="detail-title-group">
                 <div id="detail-kind-icon" class="kind-swatch lg"></div>
@@ -287,6 +369,21 @@
             </div>
             <p id="detail-description" class="detail-description"></p>
             <div id="detail-provenance-badge" class="provenance-badge"></div>
+
+            <div id="detail-connection-status" class="connection-status" hidden></div>
+
+            <!-- "How this works": a plain-language walkthrough of the
+                 whole install lifecycle for an artifact that actually has
+                 one (install_params/wiring_actions/post_install) -- filled
+                 in by renderLifecycleExplainer(entry) in app.js. Sits
+                 BELOW the live status chips above, collapsed by default,
+                 since it's reference/educational material -- the live
+                 status is the more actionable thing to see first, and this
+                 is one click away via its own <summary>. -->
+            <details id="detail-lifecycle-explainer" class="lifecycle-explainer" hidden>
+              <summary>How installing this works</summary>
+              <ol id="detail-lifecycle-steps" class="lifecycle-steps"></ol>
+            </details>
 
             <!-- Top-level content tabs -- built dynamically per artifact
                  by refreshDetailTabs() in app.js, one tab per section that
@@ -345,6 +442,11 @@
                      auto-applied edit. See renderWiringSection in app.js. -->
                 <div id="detail-wiring-section" hidden>
                   <div class="wiring-section-label">Wiring</div>
+                  <!-- Artifact-level (not per-action) -- hands off to a
+                       real interactive claude session via a real PTY.
+                       See openWireTerminal in app.js. -->
+                  <div id="detail-wiring-terminal-launcher"></div>
+                  <div id="detail-wiring-merge-all"></div>
                   <div id="detail-wiring-actions"></div>
                 </div>
               </div>
@@ -462,6 +564,7 @@
             <div class="detail-secondary-actions">
               <button id="detail-open-folder-btn" class="btn btn-ghost btn-sm" hidden>Open folder</button>
               <button id="detail-edit-btn" class="btn btn-ghost btn-sm" hidden>Edit</button>
+              <button id="detail-remove-btn" class="btn btn-danger-ghost btn-sm" hidden>Remove</button>
             </div>
 
             <form id="detail-edit-form" class="edit-form" hidden>
@@ -516,7 +619,7 @@
              openComponentDetail in app.js. -->
         <section id="view-component-detail" class="view" hidden>
           <button id="back-to-component-grid-btn" class="btn back-btn">&larr; Back</button>
-          <div class="card detail-card">
+          <div class="card">
             <div class="detail-header">
               <div class="detail-title">
                 <span id="component-detail-name" class="name"></span>
@@ -792,11 +895,26 @@
         </div>
       </div>
 
-      <div id="toast-stack" class="toast-stack"></div>
+      <div id="toast-stack" class="toast-stack" role="status" aria-live="polite"></div>
+
+      <!-- The embedded-terminal feature: a real, interactive claude
+           session running inside a real PTY (src-tauri/src/pty.rs),
+           rendered here via xterm.js. See openWireTerminal in app.js. -->
+      <div id="wire-terminal-overlay" class="wire-terminal-overlay" hidden>
+        <div class="wire-terminal-panel">
+          <div class="wire-terminal-header">
+            <span class="wire-terminal-title">Wire with Claude</span>
+            <span id="wire-terminal-status" class="wire-terminal-status"></span>
+            <button type="button" id="wire-terminal-close" class="btn btn-sm btn-ghost" aria-label="Close terminal">✕</button>
+          </div>
+          <div id="wire-terminal-container" class="wire-terminal-container"></div>
+        </div>
+      </div>
     </div>
 
     <script src="sidecar.js"></script>
     <script src="vendor/marked.min.js"></script>
+    <script src="vendor/xterm.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

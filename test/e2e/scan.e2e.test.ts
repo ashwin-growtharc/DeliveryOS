@@ -31,7 +31,7 @@ describe('scan e2e', () => {
   });
 
   async function registerAndClone(name: string): Promise<void> {
-    addRemoteEntry({ name, url: fixtureRemoteDir, addedAt: new Date().toISOString() });
+    await addRemoteEntry({ name, url: fixtureRemoteDir, addedAt: new Date().toISOString() });
     await cloneRemote(name, fixtureRemoteDir);
   }
 

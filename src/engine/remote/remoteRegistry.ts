@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import * as properLockfile from 'proper-lockfile';
 import { remotesRegistryPath, deliveryOsHome } from '../paths';
 import { RemoteRegistryError } from '../errors';
 
@@ -71,16 +72,36 @@ export function deriveNameFromUrl(url: string): string {
  * Adds a new remote entry to the registry. Throws RemoteRegistryError
  * (without mutating the existing registry) if `name` is already
  * registered.
+ *
+ * Wrapped in a real inter-process lock (`proper-lockfile`, same `mkdir`-
+ * based advisory lock and reasoning as `lockfile.ts`'s `upsertEntry`) --
+ * without it, this was a genuine read-modify-write race: two `remote add`
+ * calls racing (a script adding several remotes back to back, or the app
+ * and a terminal command at the same moment) could each read the same
+ * pre-race registry, each compute a "new" registry in memory from it, and
+ * the second writer's rename would silently clobber the first writer's
+ * already-added entry -- a lost remote, not a crash, so nothing would
+ * ever surface it as an error.
  */
-export function addRemoteEntry(entry: RemoteEntry): void {
-  const registry = readRegistry();
-  if (registry.remotes.some((r) => r.name === entry.name)) {
-    throw new RemoteRegistryError(
-      `A remote named "${entry.name}" is already registered`,
-    );
+export async function addRemoteEntry(entry: RemoteEntry): Promise<void> {
+  ensureHomeDir();
+  const registryPath = remotesRegistryPath();
+  const release = await properLockfile.lock(registryPath, {
+    realpath: false,
+    retries: { retries: 20, minTimeout: 25, maxTimeout: 500 },
+  });
+  try {
+    const registry = readRegistry();
+    if (registry.remotes.some((r) => r.name === entry.name)) {
+      throw new RemoteRegistryError(
+        `A remote named "${entry.name}" is already registered`,
+      );
+    }
+    registry.remotes.push(entry);
+    writeRegistry(registry);
+  } finally {
+    await release();
   }
-  registry.remotes.push(entry);
-  writeRegistry(registry);
 }
 
 export function listRemotes(): RemoteEntry[] {
@@ -94,12 +115,25 @@ export function listRemotes(): RemoteEntry[] {
  * cache clone (`cachePath(name)`), the same layering `remote add` already
  * uses (clone + registry-write are two separate calls at the call site,
  * not bundled into one function).
+ *
+ * Same real inter-process lock as `addRemoteEntry` above, and for the same
+ * reason -- the read-modify-write race applies just as much to a delete.
  */
-export function removeRemoteEntry(name: string): void {
-  const registry = readRegistry();
-  if (!registry.remotes.some((r) => r.name === name)) {
-    throw new RemoteRegistryError(`No remote named "${name}" is registered`);
+export async function removeRemoteEntry(name: string): Promise<void> {
+  ensureHomeDir();
+  const registryPath = remotesRegistryPath();
+  const release = await properLockfile.lock(registryPath, {
+    realpath: false,
+    retries: { retries: 20, minTimeout: 25, maxTimeout: 500 },
+  });
+  try {
+    const registry = readRegistry();
+    if (!registry.remotes.some((r) => r.name === name)) {
+      throw new RemoteRegistryError(`No remote named "${name}" is registered`);
+    }
+    registry.remotes = registry.remotes.filter((r) => r.name !== name);
+    writeRegistry(registry);
+  } finally {
+    await release();
   }
-  registry.remotes = registry.remotes.filter((r) => r.name !== name);
-  writeRegistry(registry);
 }

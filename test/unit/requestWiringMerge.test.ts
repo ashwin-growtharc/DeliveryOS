@@ -138,6 +138,21 @@ describe('requestWiringMerge (no subprocess needed for these cases)', () => {
     expect(result.mergedFile).toBeNull();
     expect(result.reason).toContain('no longer exists');
   });
+
+  it('refuses a file larger than MAX_FILE_CHARS, without ever calling the subprocess -- the real data-loss risk this closes', async () => {
+    // Same real bug requestBuildFix's own equivalent test guards against:
+    // silently truncating an oversized file before asking for "the full
+    // merged file" let applyWiringMerge later write back a response that
+    // only ever covered the first 8000 chars, silently deleting the rest.
+    const targetFile = 'huge-file.ts';
+    fs.writeFileSync(path.join(cwd, targetFile), 'x'.repeat(8001), 'utf-8');
+
+    const result = await requestWiringMerge(cwd, targetFile, 'desc', 'instructions');
+
+    expect(result.mergedFile).toBeNull();
+    expect(result.reason).toContain('too large');
+    expect(result.reason).toContain('8001');
+  });
 });
 
 describe('applyWiringMerge', () => {

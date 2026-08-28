@@ -73,6 +73,41 @@ describe('buildPostInstallHealthSummary (Phase 12: post-install health narrator)
     expect(summary).toContain('API_KEY');
   });
 
+  it('a genuine timeout is reported distinctly -- never phrased as "the build failed" (a real compile problem)', () => {
+    const summary = buildPostInstallHealthSummary(makeResult({
+      build: {
+        ran: true,
+        command: 'npm run build',
+        success: false,
+        timedOut: true,
+        output: 'Build command timed out after 300000ms (still running/hung, no compile result was produced)',
+      },
+    }));
+
+    expect(summary.toLowerCase()).not.toContain('the build failed');
+    expect(summary.toLowerCase()).toContain('killed for running too long');
+    // Explicitly says this is NOT a real compile problem -- the correct,
+    // clear message; "compile problem" appearing as part of that negation
+    // is fine, this just confirms the sentence isn't the plain generic
+    // failure message from the base (non-timeout) branch.
+    expect(summary.toLowerCase()).not.toMatch(/^the build failed/);
+  });
+
+  it('a genuine missing build tool is reported distinctly -- never phrased as "the build failed" (a real compile problem)', () => {
+    const summary = buildPostInstallHealthSummary(makeResult({
+      build: {
+        ran: true,
+        command: 'npm run build',
+        success: false,
+        toolNotFound: true,
+        output: 'Build command\'s tool was not found on this machine\'s PATH',
+      },
+    }));
+
+    expect(summary.toLowerCase()).not.toContain('the build failed');
+    expect(summary.toLowerCase()).toContain('isn\'t installed or on this machine\'s path');
+  });
+
   it('caps a huge build output excerpt rather than dumping it whole', () => {
     const hugeLine = 'x'.repeat(5000);
     const summary = buildPostInstallHealthSummary(makeResult({

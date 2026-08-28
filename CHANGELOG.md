@@ -6,6 +6,488 @@ All notable changes to DeliveryOS are recorded here, newest first. See
 
 ---
 
+## Phase 32 — "Merge with Claude" had no reference for a file's own canonical content
+
+- Found by direct testing: a one-character typo in a freshly-wired
+  `auth.ts` made "Merge with Claude" refuse outright, with nothing to
+  review. Root cause: the merge only ever had `whenPresent.snippet` to
+  offer as reference content, which is `undefined` for the common case
+  (a file the artifact fully owns, `whenPresent` is prose-only).
+- Fixed: falls back to `whenAbsent.snippet` -- the artifact's own real,
+  known-good standalone content -- whenever `whenPresent` doesn't supply
+  its own, whether or not `whenPresent` was declared at all.
+- `docs/backend-plugin-lifecycle.md` brought up to date: a new "Connect
+  it to your app" stage for `wire-with-claude` (previously missing
+  entirely), `post_install`/`post_remove`/`DELIVERYOS_PROJECT_ROOT`
+  properly explained, and an overclaiming line in the doc's own summary
+  corrected.
+
+## Phase 31 — Two more sidebar destinations: Starter Kits and Backend Plugins
+
+- New sidebar items **Starter Kits** (kind: `template`) and **Backend
+  Plugins** (kind: `backend-plugin`), each a single-kind grid reusing
+  Browse's own card rendering (now shared via a new `buildResCard`
+  helper) -- the same shortcut-into-one-kind idea `UI Components`
+  already had, without needing that page's live-preview machinery.
+- Backend-plugin artifacts now get a real plug-shaped icon everywhere a
+  kind icon shows up (Browse, Detail, Tag Folder) instead of the
+  generic fallback diamond -- no `KIND_ICON` entry existed for this
+  kind until now.
+
+## Phase 30 — A `backend-plugin-authoring` skill, for both human and AI authors
+
+- New `.claude/skills/backend-plugin-authoring/SKILL.md` documenting how
+  to correctly author a `kind: backend-plugin` manifest -- the three-tier
+  wiring model, `post_install`/`post_remove` conventions including
+  `DELIVERYOS_PROJECT_ROOT`, dependency-version-pinning discipline, and
+  the `.env`/`.env.local` gotcha -- built on top of (not duplicating)
+  `deliveryos scaffold-backend-plugin`, and grounded entirely in real
+  bugs found this phase and the one before it, not hypotheticals.
+
+## Phase 29 — `post_remove`, and a real dogfood of a genuinely large backend-plugin
+
+- New `post_remove` manifest field, symmetric with `post_install` --
+  runs before the install target is deleted, but never blocks removal
+  on failure (reported as a warning instead), since `removeArtifact`
+  exists specifically so nobody gets stuck mid-removal.
+- Fixed a second, distinct Windows EPERM race: a killed `post_remove`
+  command's grandchild process could still hold a lock on the install
+  target right as it was being deleted. Fixed with a retrying delete
+  helper, in production code, not just test cleanup.
+- **Found and fixed a critical, real filesystem-pollution bug in
+  already-shipped manifests**: a fixed-depth relative `cd ../../..` in
+  `post_install` silently overshot into the *parent* of the real
+  project once Phase 26's own `adaptSrcDirPath` fix shortened
+  `install_target`'s effective depth for root-`app/` projects. Found
+  real evidence of this on the user's own Desktop folder; deleted only
+  after explicit confirmation. Root-fixed with a new
+  `DELIVERYOS_PROJECT_ROOT` absolute-path env var passed to both
+  `post_install` and `post_remove`, replacing every depth-counted
+  relative `cd` across all affected manifests.
+- Dogfooded a real, already-published, genuinely large artifact
+  (`nextauth-credentials` -- Prisma + bcrypt + Postgres) and found it
+  was missing `post_install` entirely, an unpinned `prisma` dependency
+  that can grab an incompatible major version, and a real Prisma-CLI
+  `.env`-vs-`.env.local` gotcha. A local-test copy now starts/stops a
+  real Postgres container via Docker through `post_install`/
+  `post_remove`, verified end to end.
+
+## Phase 28 — An embedded terminal for "Wire with Claude", and a Detail-view UI/UX pass
+
+- "Wire with Claude" now runs in a real terminal embedded inside the
+  DeliveryOS window itself (via a new Rust PTY module and vendored
+  `xterm.js`), instead of requiring a separate system terminal.
+- Fixed a real Windows-only bug where the embedded terminal couldn't
+  launch npm-shimmed CLIs at all (`CreateProcessW` error 193) --
+  routed through `cmd.exe /C` on Windows, verified with a standalone
+  Rust example rather than only through the full GUI.
+- Fixed a real wiring bug where the new PTY Tauri commands were
+  incorrectly routed through the sidecar RPC helper instead of called
+  directly.
+- Detail view: Configuration tab now leads (was last); Connection
+  Status panel moved above the installation explainer and given real
+  visual weight; both Connection Status and Wiring now show an
+  immediate loading state instead of a blank gap.
+- **Follow-up, found by re-reviewing the same Detail view**: the
+  Configuration tab's own install-params form was the one loading
+  region that never got the spinner+"Loading…" treatment its two
+  siblings did — fixed to match. Also found and fixed the real reason
+  it looked inconsistent even where it *was* present: `.spinner` had no
+  `display` set, so it only rendered as a proper 14px ring inside an
+  already-flex parent (Connection Status) — dropped into a plain div
+  (Wiring, Install params), it collapsed to a sliver. Fixed once, at
+  the component level (`display: inline-flex` on `.spinner` itself),
+  rather than requiring every call site to remember to wrap it.
+
+## Phase 27 — `deliveryos wire-with-claude`: the wiring step stays in DeliveryOS
+
+- New `deliveryos wire-with-claude <id>` -- reads an already-pulled
+  backend-plugin's real lockfile paths, writes a real context file, and
+  hands off to a REAL interactive `claude` session (not a restricted,
+  headless subprocess) to connect it to the rest of your project. No
+  more manually opening a separate editor and pasting a hand-written
+  prompt.
+- Considered and rejected giving DeliveryOS's own restricted AI
+  subprocess real write access instead -- that exact design was already
+  tried and walked back once (see Phase 10) after finding a real
+  Windows command-injection risk and confirming Claude Code's own
+  tool-restriction flags aren't reliably enforced. This command avoids
+  reopening that: it launches the already-trusted interactive `claude`
+  binary under its own normal permission model, not a flag-granted one.
+- Found and fixed a real bug while dogfooding: the interactive starting
+  message got silently truncated by shell word-splitting on Windows;
+  `JSON.stringify`-quoting the argv element fixed it.
+- `docs/backend-plugin-demo-script.md`'s existing-project path rewritten
+  around the new command.
+
+## Phase 26 — Two real bugs found by the user's own rehearsal, fixed
+
+- **The demo prompt undersold "actually wire it"**: an agent following it
+  correctly avoided a fake mock but stopped at a well-documented,
+  unimplemented seam. `docs/backend-plugin-demo-script.md`'s combined
+  prompt now says explicitly: don't stop at a documented seam, actually
+  call the real functions in this same turn, and confirm the login flow
+  end to end before finishing.
+- **`wiring_actions`/`install_target` hardcoded a `src/`-prefixed path**,
+  silently assuming `--src-dir` -- confirmed dead on a real root-`app/`
+  project (Next.js's own routing never looks under `src/app` once a
+  root `app/` exists). Fixed with a hybrid: a new deterministic
+  `adaptSrcDirPath` (`src/engine/paths.ts`) handles the mechanically-
+  certain case for free; a new AI-assisted fallback
+  (`suggestWiringPlacement.ts`, a new "Ask Claude where this goes ✨"
+  button, mirroring the existing "Merge with Claude" ask/apply/rollback
+  pattern) only for genuine ambiguity, never a silent guess.
+- Verified for real: full test suite green, real dogfood against a
+  fresh root-`app/` project and a genuinely ambiguous one (including a
+  real `claude` subprocess call through the actual sidecar RPC), and
+  `examples/backend-plugin-demo` (`src/`-dir) reconfirmed unaffected.
+- `DOS backend test` (the user's own rehearsal project) fixed live:
+  both artifacts re-pulled to their correct root-relative locations, its
+  `tsconfig.json` alias corrected to match, `auth-seam.ts`/
+  `auth-actions.ts` wired for real, and the whole login flow (real
+  email, real code, real session, real sign-out) verified in a real
+  browser.
+- Engine-only change -- the already-open PRs (#67, #68, #69) on
+  `growtharc-ai-helpers` are unaffected and remain open.
+
+## Phase 25 — A second real backend-plugin (`email-code-auth`), and a stakeholder demo runbook
+
+- **`email-code-auth`**: passwordless email login built for a stakeholder
+  demo that needed something simpler than `nextauth-credentials` (no
+  Prisma, no bcrypt, no database) -- a stateless 6-digit code instead of
+  Auth.js's built-in Email provider, which turns out to require a
+  database adapter. Two real bugs found and fixed while verifying: Node's
+  `crypto` module doesn't run in the Edge Runtime reachable from
+  `middleware.ts` (fixed with `crypto.subtle`); a missing
+  `callbacks.authorized` meant `middleware.ts` never actually blocked an
+  unauthenticated request despite being wired up.
+- **Paired with `kortix-auth-shell`** on one sample app -- a UI-component
+  pull and a backend-plugin pull connected by a few real lines, proving
+  the two pull types cooperate on one real feature.
+- **Fixed a real, separate bug found in the process**: `kortix-auth-shell`
+  (and the `ui-component-extractor`/`feature-extractor` skills) used a
+  vendored-runtime React-import workaround that an earlier engine fix
+  already made both unnecessary and actively harmful (it crashes once
+  genuinely pulled into a real project). Fixed the payload and both
+  skill docs.
+- Every lifecycle row dry-run for real against `email-code-auth` through
+  the actual `deliveryos` CLI/engine, not manual file copying.
+- New: `docs/backend-plugin-demo-script.md`, a presenter's runbook.
+- Not pushed to `growtharc-ai-helpers` yet -- verified against a local
+  test remote only, pending the user's own rehearsal.
+
+## Phase 24 — A plain-language "How installing this works" panel, and a merged audit trail
+
+- **Detail now shows a plain-language walkthrough of the whole install
+  lifecycle** -- 11 rows (install, auto-wiring, build-break recovery,
+  file-exists merge, the after-install summary, audit, uninstall, secrets,
+  rotating a secret, reconfiguring, updating), open by default above the
+  existing Connection-status chips, gated on real presence rather than a
+  `kind` check, with "View →" links jumping straight to the live section
+  for anything that has one.
+- **Found while building it: the Activity tab's "every AI proposal is
+  logged and viewable" claim wasn't fully true.** The build-fix log
+  (`.deliveryos/build-fix-log.jsonl`, existing since Phase 10) had no
+  reader and was never shown anywhere -- only file-exists merges reached
+  the Activity tab. Fixed: `BuildFixLogEntry` now carries
+  `remoteName`/`artifactId`, a new `readBuildFixLog` reader + sidecar RPC
+  were added, and the Activity tab now merges both logs into one
+  chronological feed, each entry labeled `MERGE` or `BUILD FIX`.
+- Verified live via CDP against the real `nextauth-credentials` artifact.
+
+## Phase 23 — "Already wired" detection
+
+- **The Wiring section no longer offers "Merge with Claude" for a file
+  that's already correctly wired.** `resolveWiringActions` now compares a
+  target file's real content against `whenAbsent.snippet` and marks an
+  exact match `alreadyWired: true` -- shown as a green "Already wired ✓"
+  badge instead of "EXISTS," excluded from "Merge all" and from the
+  Connection-status panel's review count. Found via direct testing: 3 of
+  4 real wiring targets for `nextauth-credentials` were already correct
+  from an earlier pull, but the button still offered itself, wasting a
+  click and a real `claude` call each time.
+
+## Phase 22 — A full codebase swarm, and 7 real bugs fixed
+
+- Three parallel review passes (security-focused, deep review of
+  Phases 18-21's own new code, broad engine-wide sweep) found and fixed 7
+  real bugs, each with a new regression test: `pull`'s new default
+  falsely reporting "no build command found" for non-backend-plugin
+  artifacts; a preview cache-key collision serving the wrong component's
+  HTML for same-named components in different category folders; a
+  request-guard gap letting the Connection-status panel render stale
+  data; a duplicate-concurrent-apply race in "Apply all proposed
+  merges"; missing path-containment checks on `install_target`
+  (`push.ts`, `catalog.ts`) and `sourcePath` (`checkDrift.ts`);
+  `pendingPr`/`wiredFiles` silently dropped on re-pull; and untrusted
+  `wiring_actions` able to auto-write to `.git/`, `.github/workflows/`,
+  `.vscode/`, `.husky/` with no confirmation for unsigned artifacts.
+
+## Phase 21 — A persistent "Connection status" panel
+
+- **Detail now shows a persistent "is this actually connected?" panel**
+  for any pulled artifact with `install_params`/`wiring_actions` --
+  real-time chips for Configured (N/M) and Wired (N/M, K need review),
+  recomputed fresh every time Detail opens, plus a new `artifact.verifyBuild`
+  RPC behind an explicit **Verify build** button (never run automatically,
+  since a real build isn't free). Replaces relying on the old post-pull
+  toast/banner, which only ever answered this question in the moment
+  right after an action and forgot the instant you navigated away.
+- Two real usability bugs found via direct user testing, fixed same-day:
+  a "needs review" chip with no way to actually reach what it was
+  naming (now a real button that jumps straight to it), and **Verify
+  build** giving no visible confirmation to someone watching the button
+  rather than the chip (now also fires a toast).
+- Also found and fixed, in the real `nextauth-credentials` artifact
+  itself: its `layout.tsx` wiring action declared guidance text as if it
+  were a complete file, caught by "Merge with Claude" correctly refusing
+  to guess -- fixed at the source, version 1.0.1, pushed.
+
+## Phase 20 — "Merge all with Claude"
+
+- **The Detail view's per-file "Merge with Claude" button now has a batch
+  counterpart**: when 2+ wiring actions target files that already exist,
+  a "Merge all with Claude" control proposes a merge for every one of
+  them (sequentially, never concurrent) and a follow-up "Apply all
+  proposed merges" applies every real proposal (also sequential, each
+  with its own build-verify/rollback/audit-log entry) -- one honest
+  refusal never blocks the rest. No engine/sidecar changes needed; it's
+  the same `requestWiringMerge`/`applyWiringMerge` calls, just
+  orchestrated across every file from one button. Dogfooded against
+  `nextauth-credentials`'s real 4 wiring actions: 3 honest refusals, 1
+  real merge applied and logged.
+
+## Phase 19 — `deliveryos pull` defaults to auto-wiring
+
+- **`deliveryos pull` now auto-wires a `backend-plugin`'s `wiring_actions`
+  by default** -- the same safe behavior the desktop app's Pull button
+  already had (new files written verbatim, existing files never touched,
+  build reverified afterward, one plain-language summary printed), just
+  not previously available from the CLI at all. `--no-wire` opts back
+  into the old plain-copy-only behavior for scripted/CI use. Prompted by
+  benchmarking DeliveryOS's own flow against shadcn/Clerk/Stripe-style
+  dev-tool UX and platform-team trust expectations -- the safety model
+  already matched best practice, the CLI just wasn't using it.
+
+## Phase 18 — Template component-grid preview performance
+
+- **A `kind: template` artifact's Components grid (e.g. `kortix-design-kit`)
+  is now cached and lazy**, matching what the main UI Components list
+  already did. Root cause: every component's preview compiled uncached, all
+  at once, on every tab open. `previewCachePath`/`getOrCompilePreview`
+  gained an optional `subKey` so multiple previews can share one
+  `(remoteName, id, version)` cache root without colliding; new
+  `compileTemplateComponentPreview` wires the `preview.compilePayloadComponent`
+  RPC to it; the grid now builds card shells immediately but only compiles
+  a component's preview once it scrolls into view (`IntersectionObserver`,
+  same pattern `uiComponentsListObserver` already used). Measured against
+  the real `kortix-design-kit` payload: ~1.6s cold vs. ~0.2s cached, per
+  component.
+
+## Phase 17 — Backend-plugin scaffolding assistant
+
+- **New `deliveryos scaffold-backend-plugin --path <dir> --consumer-file
+  <file> [...]`** -- scaffolds a draft `wiring_actions`/`install_params`
+  YAML for a backend-plugin manifest. Not "extraction": mechanical
+  detection where it's safe (`install_params`, via the existing
+  `detectInstallParams.ts`), an AI-suggested draft where it's judgment
+  (`wiring_actions`, via new `suggestWiringActions.ts`), always
+  human-reviewed -- never writes to a real manifest. Validated by hand
+  against the real `nextauth-credentials` artifact before shipping: 3
+  correct integration points suggested, 0 false positives on a
+  deliberate distractor file.
+
+## Phase 16 — A real update-apply path
+
+- **`deliveryos check-updates --apply`** and a new sidecar
+  `artifact.applyUpdate` RPC actually apply an available update now,
+  instead of `check-updates` only ever reporting "installed -> available."
+  Deliberately conservative: only applies when the current install has
+  zero local edits (byte-for-byte identical to its pristine snapshot) --
+  an artifact with real local edits is reported, never guessed at or
+  silently skipped.
+- **Fixes a real bug** in the app's existing "Update" button (previously
+  just a plain re-pull under a friendlier label): a plain pull never
+  deletes a file a newer version actually removed, so it would silently
+  survive forever. The new path diffs the old pristine snapshot against
+  the new payload and deletes exactly those files. Both the single-artifact
+  "Update" button and the bulk "Pull all" action now use it for
+  already-pulled, no-wiring-declared artifacts.
+- Consolidated `pull.ts`/`verifyBuild.ts`'s duplicated `isExecError`/
+  `isToolNotFoundError` helpers into `src/engine/execHelpers.ts`.
+
+## Phase 15 — Full-codebase audit and fix pass
+
+- **Dark-mode palette redesigned** after real visual review caught two
+  problems the original hex-value review missed: the neutral surfaces
+  read as muddy brown (now a cool charcoal, with only the deliberate
+  accent tints keeping real hue), and `card` was barely lighter than
+  `surface` while `surface-tertiary`/`surface-inset` were accidentally
+  LIGHTER than `card` -- backwards relative to light mode's own
+  direction. Corrected; DESIGN_SYSTEM.md's dark-mode table updated to match.
+- **Security fixes**: path-traversal via untrusted manifest
+  `install_target`/`payload_path` closed in 4 places (`pull.ts`, `push.ts`,
+  `payloadDir.ts`'s `resolvePayloadDir`, new shared `resolveContainedPath`
+  in `paths.ts`); `removeArtifact.ts`'s primary delete target re-validated
+  for containment (previously only `wiredFiles` was); `remoteCachePath`
+  now sanitizes `name` (matching its sibling `previewCachePath`); a
+  case-sensitive filename exclusion in `pullPayloadComponent.ts` fixed.
+- **Data-loss fixes**: `fixBuildFailure.ts`/`requestWiringMerge.ts` now
+  refuse (rather than silently truncate-and-overwrite) a file over 8000
+  chars; `bumpVersion` gained a `default` case instead of silently
+  returning `undefined`; `branchName.ts` no longer produces an invalid
+  double-slash ref for an unslugifiable id; `sync.ts`'s merged-PR branch
+  no longer drops `installTarget`/`wiredFiles`; `lockfile.ts` throws a
+  clear `LockfileCorruptError` instead of a raw `SyntaxError` on corrupt
+  `lock.json`; `runClaudeSubprocess.ts` gained a real `maxBuffer`.
+- **Frontend fixes**: per-row (not shared module-level) request-token
+  guards for the build-fix/wiring-merge/design-fix rows, fixing a
+  cross-row response collision; Add New's Enter-key handler no longer
+  hijacks Enter on a focused button; `--font-mono` now defined; new
+  adaptive `--icon-fg-warm`/`--icon-fg-cool` tokens fix dark-mode icon
+  contrast; the Documentation tab's markdown iframe is now theme-aware;
+  `loadUiComponentPreview` checks `row.isConnected` before acting on a
+  stale resolution; `beginProgress`'s internal `listen()` call can no
+  longer leave the progress panel stuck; dead `.detail-card` CSS class
+  removed; toast stack gained `aria-live`, 3 search inputs gained
+  `aria-label`.
+- **Concurrency**: `remoteRegistry.ts`'s add/remove now use the same
+  `proper-lockfile` pattern as `lockfile.ts`. (A separate, real
+  cross-command git-sequence race in the sidecar was found but
+  deliberately not fixed this pass -- see PLAN.md's Phase 15 entry.)
+- **CLI/sidecar parity**: added `deliveryos remote list` and
+  `deliveryos check-pending-pushes`; `deliveryos list` now reports
+  `localStatus`; sidecar's `artifact.push` now validates `bump`;
+  `artifact.applyInstallParams` now returns the same "doesn't re-run
+  wiring_actions" note the CLI already printed.
+- **Docs**: ARCHITECTURE.md/DESIGN_SYSTEM.md corrected in place (both had
+  drifted badly -- fictional nav/AI-component sections, a stuck-at-Phase-0
+  header); README.md's CLI section filled in with every previously-missing
+  command and flag.
+- **Tests**: 5 new previously-zero-coverage files
+  (`paths.test.ts`, `remoteRegistry.test.ts`, `runClaudeSubprocess.test.ts`,
+  `githubAuth.test.ts`, `output.test.ts`), plus regression tests added to
+  8 existing suites for every fix above.
+
+## Phase 14 — Dark mode
+
+- **Dark mode toggle in the desktop app.** New `--ink` token replaces 28
+  text-role usages of `--primary-700`/`--primary-800` (kept, unchanged,
+  for their other role: the 5 solid-fill button/chip backgrounds paired
+  with white text). Pale accent tints (`sage-100`, `sand-100/200`,
+  `sky-100`, `success/warning/danger-100`) get real darkened dark-mode
+  equivalents, with `success/warning/danger-600` lightened to match, so
+  badges/banners don't render as bright light-mode patches on a dark
+  page. Defaults to `prefers-color-scheme`, overridden either direction
+  once the user makes an explicit choice via a new toggle button in the
+  context strip (new `i-theme-sun`/`i-theme-moon` icons, persisted to
+  `localStorage`). A small inline head script in `index.html` applies a
+  saved choice before first paint to avoid a flash of the wrong theme.
+
+## Phase 13 — Backend plug-and-play: basic hygiene (in progress)
+
+- **Configuration tab reuses an already-existing value.**
+  `renderInstallParamsSection` (`app.js`) only ever pre-filled each field
+  from `param.default` -- reopening Configuration after filling in 2 of 3
+  required fields showed all 3 blank again, even though 2 were already
+  saved for real in `.env.local`. New read-only sidecar RPC
+  `artifact.readInstallParamValues` (`src/sidecar.ts`) resolves the same
+  manifest `artifact.applyInstallParams` already does, then filters
+  `readExistingEnvValues` down to only the keys THIS artifact's own
+  `install_params` declare, so one artifact's config can never leak into
+  another's form. `renderInstallParamsSection` is now async (with its own
+  `installParamsRequestId` request-token guard, matching the wiring/drift/
+  activity sections) and prefers a real existing value over `param.default`
+  when filling `input.value` -- same `provided > existing > default`
+  precedence `resolveInstallParamValues` already established. Degrades to
+  today's default-only prefill if the RPC call fails for any reason. New
+  sidecar e2e test covering both the reuse and the no-leak case.
+- **Post-pull secret rotation: `deliveryos config <id>`.** The engine-level
+  `applyInstallParams` RPC (`src/sidecar.ts`) already existed, but nothing
+  outside the sidecar could call it -- no CLI command wrapped it, and
+  `cli/commands/pull.ts` told CLI-only users to "edit `.env.local` directly"
+  instead. New `deliveryos config <id> [--remote <name>] --set KEY=VALUE`
+  (`src/cli/commands/config.ts`) wraps the exact same real sequence the
+  sidecar handler already used (`resolveArtifact` -> `resolveInstallParamValues`
+  against `readExistingEnvValues` -> `applyInstallParams`), and reports the
+  same `missingRequiredParams`/`gitignoreWarning` output `pull.ts` already
+  does. Also prints its own honest, undecorated note that it does NOT
+  re-run `wiring_actions` -- a rotated value only reaches code that reads
+  `process.env` at runtime, since a real re-wire path is still the
+  separate, deferred "A real update-apply path" item below.
+- **Uninstall: `deliveryos remove <id>`.** There was no way to cleanly back
+  out a pulled artifact at all -- `removeRemoteEntry` only unregisters a
+  git remote, never a pulled artifact's own files, and nothing recorded
+  which files a pull's wiring had created fresh vs. which already existed
+  in the project. `LockEntry` gains two additive fields: `installTarget`
+  (the real resolved path `pullArtifact` copied a payload to) and
+  `wiredFiles` (`applyDeterministicWiring`'s own `applied` list, recorded
+  by `pullAndAutoWire` via a second `upsertEntry` call right after wiring
+  runs, only when it created something). New `removeEntry`
+  (`src/engine/lockfile/lockfile.ts`) mirrors `upsertEntry`'s real
+  inter-process lock. New `removeArtifact`
+  (`src/engine/pull/removeArtifact.ts`) deletes the install directory
+  (falling back to resolving it via the manifest for an old-shape entry
+  with no recorded path), deletes every real `wiredFiles` entry
+  (re-validated for containment, never trusted blindly), deletes the
+  pristine snapshot, then drops the lockfile entry last -- and reports,
+  never auto-touches, anything that predates the pull or went through the
+  AI wiring-merge flow (`filesNeedingManualReview`) or is still sitting in
+  `.env.local` (`envParamsStillSet`). Wired up as a CLI command, the
+  `artifact.remove` sidecar command, and a confirm-gated Remove button in
+  Detail. 11 new unit tests plus an updated e2e assertion for the
+  lockfile's new shape.
+- **Secrets safety net for `.env.local`.** `applyInstallParams` writes
+  real secret values into `.env.local` with zero check anywhere that the
+  file is actually gitignored -- a real path to committing a secret to a
+  shared remote. New `checkEnvLocalGitignoreCoverage` (same `ignore`-
+  package pattern as `push/diff.ts`'s `loadIgnoreFilter`) warns clearly
+  when it isn't covered, whether by no `.gitignore` at all or one that
+  just doesn't happen to include it -- never auto-edits `.gitignore`,
+  only warns. Only checked when a call actually wrote something (mirrors
+  `upsertEnvFile`'s own no-op-on-empty gate), so the overwhelming
+  majority of artifacts with no `install_params` never trigger a
+  pointless check. Surfaced as its own distinct toast -- never folded
+  into the calm post-install health summary -- everywhere a real
+  pull/configure can write a secret: plain pull, `pullAndAutoWire`, the
+  Configuration tab's apply button, and bulk pull (aggregated once,
+  since every artifact in one run shares the same `.gitignore`). 11 new
+  unit tests.
+- **Timeouts on build/install commands.** Neither the build check
+  (`runProjectBuild`/`execAsync` in `src/engine/pull/verifyBuild.ts`) nor
+  the post-install command (`execSync` in `src/engine/pull/pull.ts`) had a
+  timeout at all -- a hung/interactive command blocked indefinitely.
+  Both now carry a real one (`BUILD_VERIFY_TIMEOUT_MS` = 5min,
+  `POST_INSTALL_TIMEOUT_MS` = 10min). Also closed a real, confirmed gap
+  where "the tool to run this isn't on PATH" looked identical to "the
+  code doesn't compile": both call sites now report a genuine timeout and
+  a genuine missing-tool case as their own distinct, honest outcome
+  (`BuildVerificationResult`'s new additive `timedOut`/`toolNotFound`
+  fields; `PostInstallError`'s message text gains distinct prefixes for
+  the same two cases). The "tool not found" detection was verified
+  empirically first, not assumed from docs: on Windows, `exec`/`execSync`
+  route through cmd.exe, so a missing tool never throws a Node-level
+  ENOENT -- it's the shell reporting an ordinary-looking non-zero exit
+  with its own "not recognized"/"not found" wording. 6 new unit tests
+  (`test/unit/verifyBuild.test.ts`, `test/unit/pull.test.ts`) exercise
+  real hung/missing-tool commands with test-only timeout overrides, not
+  mocks. One real, confirmed limitation found along the way, deliberately
+  left as a known gap (bigger than this item's scope): on Windows, killing
+  a timed-out command only terminates the immediate shell wrapper, not the
+  grandchild process it actually spawned -- a "timed out" command can keep
+  running in the background afterward.
+- **Follow-up found via review, not speculative**: the timeout work above
+  landed real `timedOut`/`toolNotFound` data, but nothing downstream
+  actually used it. The plain-language health narrator
+  (`buildPostInstallHealthSummary`, Phase 12) treated a timeout or a
+  missing build tool identically to a genuine compile failure --
+  misleading framing, since neither is "the code doesn't build." Worse:
+  Detail's "Want help fixing this?" AI button still got offered for both,
+  even though an AI code-fix can't repair a hung process or make a
+  missing tool exist. Both now get their own distinct, honest sentence in
+  the narrator, and the AI-fix offer is never shown for either case. 2 new
+  unit tests.
+
 ## Phase 12 — Backend plug-and-play, unlocked further
 
 - **A visible audit trail for the wiring-merge log.** Each

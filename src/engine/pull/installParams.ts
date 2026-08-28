@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import ignore from 'ignore';
 import { InstallParam } from '../manifest/schema';
 
 /** Which of a manifest's declared install_params actually got a real value
@@ -140,6 +141,41 @@ export function upsertEnvFile(filePath: string, values: Record<string, string>):
 }
 
 /**
+ * Checks whether `<cwd>/.env.local` -- the file `applyInstallParams` is
+ * about to write real secret values into -- is actually covered by
+ * `<cwd>/.gitignore`. Same library/pattern as `loadIgnoreFilter` in
+ * `../push/diff.ts` (read the `.gitignore` if present, build an `ignore()`
+ * instance, ask it), but rooted at the PROJECT root's own `.gitignore`
+ * against one specific fixed path, not an artifact's `installTarget`
+ * against arbitrary payload files -- a different question with the same
+ * underlying tool.
+ *
+ * Returns `undefined` when `.env.local` is safely covered -- the expected
+ * case for any reasonably-configured project (most `.gitignore` templates
+ * already exclude `.env.local`/`.env*.local`). Returns a plain, actionable
+ * warning string otherwise, whether that's because no `.gitignore` exists
+ * at `cwd` at all, or one exists but simply doesn't happen to cover this
+ * file. Never throws: this is an advisory check, not a hard failure -- a
+ * project with no gitignore setup at all still needs to keep working, just
+ * warned clearly, since the real secret value has already been written by
+ * the time this is called either way.
+ */
+export function checkEnvLocalGitignoreCoverage(cwd: string): string | undefined {
+  const gitignorePath = path.join(cwd, '.gitignore');
+  const warning =
+    'DeliveryOS just wrote a real secret value into .env.local, but it does not look like '
+      + '.gitignore covers that file -- if this project is committed to git, that secret could '
+      + 'get pushed to a shared remote. Add ".env.local" (or ".env*.local") to .gitignore.';
+
+  if (!fs.existsSync(gitignorePath)) {
+    return warning;
+  }
+
+  const ig = ignore().add(fs.readFileSync(gitignorePath, 'utf-8'));
+  return ig.ignores('.env.local') ? undefined : warning;
+}
+
+/**
  * Writes resolved install-time values into `<cwd>/.env.local` -- a
  * project-ROOT file, deliberately never anything under an artifact's own
  * `install_target`. This is the real reason it lives in its own module
@@ -157,8 +193,31 @@ export function upsertEnvFile(filePath: string, values: Record<string, string>):
  * required-config checklist, or a follow-up `--set`), rather than losing an
  * otherwise-successful pull over one missing value.
  */
-export function applyInstallParams(cwd: string, values: Record<string, string>): void {
+export interface ApplyInstallParamsResult {
+  /** Set only when this call actually wrote a real secret value AND that
+   * value doesn't look covered by the project's own .gitignore -- see
+   * `checkEnvLocalGitignoreCoverage`. Absent (not just falsy) whenever
+   * nothing was written this call, so a caller can `if (result.gitignoreWarning)`
+   * without needing to separately track "did we even attempt the check". */
+  gitignoreWarning?: string;
+}
+
+export function applyInstallParams(
+  cwd: string,
+  values: Record<string, string>,
+): ApplyInstallParamsResult {
   upsertEnvFile(path.join(cwd, '.env.local'), values);
+
+  // Only worth checking when something was actually written THIS call --
+  // `upsertEnvFile` itself no-ops entirely (never touches the file) when
+  // `values` is empty, which is true for the overwhelming majority of
+  // artifacts (no install_params declared at all). Checking unconditionally
+  // would mean every plain pull ever gets a pointless gitignore nag even
+  // when nothing was written.
+  if (Object.keys(values).length === 0) {
+    return {};
+  }
+  return { gitignoreWarning: checkEnvLocalGitignoreCoverage(cwd) };
 }
 
 /**

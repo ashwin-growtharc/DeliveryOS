@@ -27,22 +27,28 @@
  * the final `{ok, result}` / `{ok:false, error}` line, which remains the
  * actual completion signal.
  */
-import * as path from 'path';
 import * as readline from 'readline';
-import { buildCatalog, refreshCatalog, CatalogEntry } from './engine/catalog/catalog';
-import { readLockfile } from './engine/lockfile/lockfile';
-import { computeChangedFiles } from './engine/push/diff';
-import { pristinePath } from './engine/paths';
+import {
+  buildCatalog,
+  refreshCatalog,
+  annotateCatalog,
+  CatalogListEntry,
+} from './engine/catalog/catalog';
 import { pullArtifact, resolveArtifact, ProgressCallback } from './engine/pull/pull';
+import { removeArtifact } from './engine/pull/removeArtifact';
 import { resolveInstallParamValues, applyInstallParams, readExistingEnvValues } from './engine/pull/installParams';
 import { resolveWiringActions } from './engine/pull/wiring';
 import { pullAndAutoWire } from './engine/pull/pullAndAutoWire';
+import { runProjectBuild } from './engine/pull/verifyBuild';
 import { buildPostInstallHealthSummary } from './engine/pull/postInstallHealthSummary';
-import { requestBuildFix, applyBuildFix } from './engine/pull/fixBuildFailure';
+import { requestBuildFix, applyBuildFix, readBuildFixLog } from './engine/pull/fixBuildFailure';
 import { requestWiringMerge, applyWiringMerge, readWiringMergeLog } from './engine/pull/requestWiringMerge';
+import { suggestWiringPlacement, applyWiringPlacement } from './engine/scan/suggestWiringPlacement';
 import { requestAntiPatternFix, applyAntiPatternFix } from './engine/scan/fixAntiPattern';
 import { pushArtifact, PushOptions } from './engine/push/push';
+import { parseBumpKind } from './engine/manifest/version';
 import { checkForUpdates, resolvePendingPushes } from './engine/sync/sync';
+import { applyAvailableUpdates } from './engine/sync/applyUpdate';
 import { scanForNewArtifacts } from './engine/scan/scan';
 import { detectArtifactMetadata } from './engine/scan/detectArtifactMetadata';
 import { suggestMetadata } from './engine/scan/suggestMetadata';
@@ -58,8 +64,11 @@ import {
 import { cloneRemote, cachePath } from './engine/remote/remoteCache';
 import * as fs from 'fs';
 import { RemoteRegistryError } from './engine/errors';
-import { Manifest } from './engine/manifest/schema';
-import { compileArtifactPreview, compileLocalPreview } from './engine/preview/resolveArtifactPreview';
+import {
+  compileArtifactPreview,
+  compileLocalPreview,
+  compileTemplateComponentPreview,
+} from './engine/preview/resolveArtifactPreview';
 import { readArtifactPayloadFile } from './engine/payload/readPayloadFile';
 import { resolvePayloadDir, resolveWithinPayloadDir } from './engine/payload/payloadDir';
 import { listArtifactPayloadComponents } from './engine/payload/listPayloadComponents';
@@ -106,20 +115,6 @@ type CommandHandler = (
   ctx: { onProgress: ProgressCallback },
 ) => unknown | Promise<unknown>;
 
-type LocalStatus = 'not_pulled' | 'pulled' | 'edited_locally';
-
-export interface CatalogListEntry {
-  manifest: Manifest;
-  remoteName: string;
-  localStatus: LocalStatus;
-  installTarget: string;
-  /** Set when a previous push opened a PR for this artifact that hasn't
-   * been resolved yet (see `resolvePendingPushes`) -- lets the UI show real
-   * transparency about a push's outcome without a separate network call
-   * just to display it, since this is already-known local lockfile data. */
-  pendingPr?: { number: number; url: string };
-}
-
 function requireString(args: Record<string, unknown>, key: string): string {
   const value = args[key];
   if (typeof value !== 'string' || value.length === 0) {
@@ -149,46 +144,6 @@ function optionalStringRecord(args: Record<string, unknown>, key: string): Recor
     }
   }
   return result;
-}
-
-/**
- * Computes each catalog entry's status relative to the cwd-scoped
- * lockfile/pristine snapshot:
- *  - no lockfile entry -> 'not_pulled'
- *  - lockfile entry, no diff against the pristine snapshot -> 'pulled'
- *  - lockfile entry, diff detected -> 'edited_locally'
- *  - lockfile entry, but the diff can't be computed (e.g. a missing
- *    pristine snapshot, `PristineSnapshotMissingError`) -> falls back to
- *    'pulled' rather than throwing, so one bad entry never breaks Browse
- *    for every other artifact in the same `catalog.list` call.
- */
-function annotateCatalog(
-  entries: CatalogEntry[],
-  cwd: string,
-  remote: string | undefined,
-): CatalogListEntry[] {
-  const filtered = remote ? entries.filter((entry) => entry.remoteName === remote) : entries;
-  const lockfile = readLockfile(cwd);
-
-  return filtered.map((entry) => {
-    const { manifest, remoteName } = entry;
-    const installTarget = path.resolve(cwd, manifest.install_target);
-    const lockEntry = lockfile.entries.find((e) => e.id === manifest.id);
-
-    let localStatus: LocalStatus;
-    if (!lockEntry) {
-      localStatus = 'not_pulled';
-    } else {
-      try {
-        const changedFiles = computeChangedFiles(installTarget, pristinePath(cwd, manifest.id));
-        localStatus = changedFiles.length === 0 ? 'pulled' : 'edited_locally';
-      } catch {
-        localStatus = 'pulled';
-      }
-    }
-
-    return { manifest, remoteName, localStatus, installTarget, pendingPr: lockEntry?.pendingPr };
-  });
 }
 
 function catalogList(args: Record<string, unknown>): CatalogListEntry[] {
@@ -226,7 +181,7 @@ async function remoteAdd(
   }
 
   const dest = await cloneRemote(name, url);
-  addRemoteEntry({ name, url, addedAt: new Date().toISOString() });
+  await addRemoteEntry({ name, url, addedAt: new Date().toISOString() });
 
   return { name, url, dest };
 }
@@ -235,9 +190,9 @@ async function remoteAdd(
  * `runRemoteRemove`'s order exactly (src/cli/commands/remoteAdd.ts).
  * Doesn't touch any project's lockfile/pulled files, only this remote's
  * own registration + cache. */
-function remoteRemove(args: Record<string, unknown>): { name: string } {
+async function remoteRemove(args: Record<string, unknown>): Promise<{ name: string }> {
   const name = requireString(args, 'name');
-  removeRemoteEntry(name); // throws RemoteRegistryError if not registered
+  await removeRemoteEntry(name); // throws RemoteRegistryError if not registered
   const dest = cachePath(name);
   if (fs.existsSync(dest)) {
     fs.rmSync(dest, { recursive: true, force: true });
@@ -261,9 +216,12 @@ const commands: Record<string, CommandHandler> = {
 
   // Phase 10 item 1: "deterministic apply-and-test on Pull, no agent
   // involved yet." A separate command from artifact.pull, not a change to
-  // it -- the app's own Pull button opts into this explicitly (only for
-  // artifacts that declare wiring_actions); the CLI's `deliveryos pull`
-  // keeps using the plain command above, unchanged.
+  // it -- the app's own Pull button uses this one (only for artifacts
+  // that declare wiring_actions; a no-op otherwise). As of Phase 18 the
+  // CLI's `deliveryos pull` defaults to the same underlying
+  // pullAndAutoWire function too (see pull.ts), just called directly
+  // rather than through this RPC -- artifact.pull above is what backs the
+  // CLI's own `--no-wire` opt-out.
   'artifact.pullAndAutoWire': async (args, { onProgress }) => {
     const id = requireString(args, 'id');
     const cwd = requireString(args, 'cwd');
@@ -294,8 +252,42 @@ const commands: Record<string, CommandHandler> = {
       values,
       readExistingEnvValues(cwd),
     );
-    applyInstallParams(cwd, resolved.values);
-    return { missingRequiredParams: resolved.missingRequired };
+    const { gitignoreWarning } = applyInstallParams(cwd, resolved.values);
+    return {
+      missingRequiredParams: resolved.missingRequired,
+      gitignoreWarning,
+      // Same real scope boundary the CLI's own `config` command has always
+      // printed on every call (src/cli/commands/config.ts) -- this only
+      // rotates the value sitting in .env.local, never re-running
+      // wiring_actions, so the app's own Configuration tab had no way to
+      // tell a person the same thing the CLI already did.
+      note: 'This does not re-run wiring_actions -- only code that reads process.env at runtime will '
+        + 'see the new value.',
+    };
+  },
+
+  // Detail's Configuration tab pre-fills each install_param field on every
+  // render, so without this it kept showing param.default (or blank) even
+  // for a value a previous pull/applyInstallParams call already wrote for
+  // real into .env.local -- read-only/presentational, not a new engine
+  // concern, so no new engine-layer function: just readExistingEnvValues
+  // (the same "existing" resolveInstallParamValues already treats as more
+  // authoritative than a default) filtered down to the keys THIS artifact's
+  // OWN manifest actually declares, so a project with several configured
+  // artifacts never leaks one artifact's values into another's form.
+  'artifact.readInstallParamValues': (args) => {
+    const id = requireString(args, 'id');
+    const cwd = requireString(args, 'cwd');
+    const remote = optionalString(args, 'remote');
+    const entry = resolveArtifact(id, remote);
+    const existing = readExistingEnvValues(cwd);
+    const values = Object.fromEntries(
+      entry.manifest.install_params
+        .map((param) => param.key)
+        .filter((key) => key in existing)
+        .map((key) => [key, existing[key]]),
+    );
+    return { values };
   },
 
   // Reads one file (e.g. README.md) directly out of an artifact's payload
@@ -393,11 +385,42 @@ const commands: Record<string, CommandHandler> = {
     return resolveWiringActions(entry.manifest.wiring_actions, cwd);
   },
 
+  // Detail's "Connection status" panel (Phase 21): an on-demand, standalone
+  // way to check "does the project still build" any time the artifact's
+  // Detail view is open -- not just right after a pull/merge/fix, which is
+  // the only time this ever ran before. Deliberately never run automatically
+  // on Detail open (a real build isn't free); a person clicks "Verify build"
+  // when they actually want the answer. Same runProjectBuild every other
+  // build-verify step already uses -- no new detection/timeout logic.
+  'artifact.verifyBuild': (args) => {
+    const cwd = requireString(args, 'cwd');
+    return runProjectBuild(cwd);
+  },
+
   'artifact.push': async (args, { onProgress }) => {
     const id = requireString(args, 'id');
     const cwd = requireString(args, 'cwd');
     const options = (args.options ?? {}) as PushOptions;
+    // Unlike every other field on `options` (already narrow, engine-typed
+    // shapes coming from the app's own UI, not free-text), `bump` arrives
+    // as a plain string the app could in principle send anything for --
+    // validated here the same way the CLI's own `parseBumpKind` already
+    // validates `--bump`, so a bad value fails clearly right here instead
+    // of reaching `bumpVersion` at runtime and surfacing many calls later
+    // as an unrelated "version: Required" manifest-validation error.
+    options.bump = parseBumpKind(options.bump);
     return await pushArtifact(id, options, cwd, undefined, onProgress);
+  },
+
+  // Phase 13's uninstall: backs out a previously-pulled artifact (install
+  // directory, any files applyDeterministicWiring created fresh for it, its
+  // pristine snapshot, and its lockfile entry). No `remote` arg needed --
+  // the lockfile entry already records which remote this artifact came
+  // from, same as every other lockfile-driven command in this file.
+  'artifact.remove': async (args) => {
+    const id = requireString(args, 'id');
+    const cwd = requireString(args, 'cwd');
+    return await removeArtifact(cwd, id);
   },
 
   'remote.list': () => listRemotes(),
@@ -414,6 +437,17 @@ const commands: Record<string, CommandHandler> = {
   'sync.resolvePendingPushes': (args, { onProgress }) => {
     const cwd = requireString(args, 'cwd');
     return resolvePendingPushes(cwd, onProgress);
+  },
+
+  // The real other half of sync.checkForUpdates, which only ever reported
+  // "installed -> available" and never actually re-pulled/re-applied
+  // anything. `id` scopes this to a single artifact (Detail's own
+  // "Update" action) -- refuses (reports, never guesses) when local edits
+  // are in the way; see applyAvailableUpdates's own doc comment.
+  'artifact.applyUpdate': (args, { onProgress }) => {
+    const cwd = requireString(args, 'cwd');
+    const id = requireString(args, 'id');
+    return applyAvailableUpdates(cwd, onProgress, id);
   },
 
   'scan.run': (args, { onProgress }) => {
@@ -488,7 +522,9 @@ const commands: Record<string, CommandHandler> = {
     const buildError = requireString(args, 'buildError');
     const costUsd = typeof args.costUsd === 'number' ? args.costUsd : undefined;
     const durationMs = typeof args.durationMs === 'number' ? args.durationMs : undefined;
-    return applyBuildFix(cwd, filePath, fixedFile, buildError, { costUsd, durationMs });
+    const remoteName = optionalString(args, 'remote');
+    const artifactId = optionalString(args, 'id');
+    return applyBuildFix(cwd, filePath, fixedFile, buildError, { costUsd, durationMs, remoteName, artifactId });
   },
 
   // Backend plug-and-play: the "ask" half of the Tier-2 "AI wiring
@@ -503,7 +539,8 @@ const commands: Record<string, CommandHandler> = {
     const description = requireString(args, 'description');
     const instructions = requireString(args, 'instructions');
     const guidanceSnippet = optionalString(args, 'guidanceSnippet');
-    return requestWiringMerge(cwd, targetFile, description, instructions, guidanceSnippet);
+    const guidanceSnippetIsFullFile = args.guidanceSnippetIsFullFile === true;
+    return requestWiringMerge(cwd, targetFile, description, instructions, guidanceSnippet, guidanceSnippetIsFullFile);
   },
 
   // Backend plug-and-play: the "apply" half -- writes the merge for
@@ -523,6 +560,44 @@ const commands: Record<string, CommandHandler> = {
     return applyWiringMerge(cwd, targetFile, mergedFile, description, remote, id, { costUsd, durationMs });
   },
 
+  // Backend plug-and-play: the "ask" half of the AI-assisted wiring-
+  // placement fallback -- only ever offered by Detail's wiring section
+  // for a resolved wiring_action reporting placementAmbiguous (the
+  // deterministic adaptSrcDirPath fast path already returned undefined:
+  // neither a root app/pages nor a src/app/src/pages exists yet to check
+  // against). No write, no audit-log entry -- same "ask, then a human
+  // confirms" shape as artifact.requestWiringMerge above.
+  'artifact.requestWiringPlacement': (args) => {
+    const cwd = requireString(args, 'cwd');
+    const declaredPath = requireString(args, 'declaredPath');
+    const description = requireString(args, 'description');
+    return suggestWiringPlacement(cwd, declaredPath, description);
+  },
+
+  // Backend plug-and-play: the "apply" half -- writes the wiring_action's
+  // own (already fully known, never AI-generated) snippet to the
+  // suggested path for real, re-runs the real build to confirm it, rolls
+  // back automatically if it doesn't, and appends exactly one audit-log
+  // entry either way. Only reached after an explicit human confirmation
+  // click; never automatic.
+  'artifact.applyWiringPlacement': (args) => {
+    const cwd = requireString(args, 'cwd');
+    const declaredPath = requireString(args, 'declaredPath');
+    const suggestedPath = requireString(args, 'suggestedPath');
+    const snippet = requireString(args, 'snippet');
+    const description = requireString(args, 'description');
+    const remote = requireString(args, 'remote');
+    const id = requireString(args, 'id');
+    const reasoning = optionalString(args, 'reasoning');
+    const costUsd = typeof args.costUsd === 'number' ? args.costUsd : undefined;
+    const durationMs = typeof args.durationMs === 'number' ? args.durationMs : undefined;
+    return applyWiringPlacement(cwd, declaredPath, suggestedPath, snippet, description, remote, id, {
+      costUsd,
+      durationMs,
+      reasoning,
+    });
+  },
+
   // Activity tab (Phase 12): reads back the wiring-merge audit log,
   // filtered to exactly this artifact's own entries -- the log file is
   // per-project, not per-artifact, so filtering matters the moment a
@@ -532,6 +607,16 @@ const commands: Record<string, CommandHandler> = {
     const remote = requireString(args, 'remote');
     const id = requireString(args, 'id');
     return { entries: readWiringMergeLog(cwd, remote, id) };
+  },
+
+  // Activity tab: the build-fix counterpart to readWiringMergeLog above,
+  // read separately (own log file, own record shape) and merged
+  // client-side into one chronological feed -- see renderActivitySection.
+  'artifact.readBuildFixLog': (args) => {
+    const cwd = requireString(args, 'cwd');
+    const remote = requireString(args, 'remote');
+    const id = requireString(args, 'id');
+    return { entries: readBuildFixLog(cwd, remote, id) };
   },
 
   // Phase 11 item 4: the "ask" half of the fix step for a design
@@ -584,18 +669,21 @@ const commands: Record<string, CommandHandler> = {
   // Phase 11 Detail-view task: compiles ONE component's live preview out
   // of a design-kit-shaped payload's components/<Name> subdirectory, for
   // Detail's grid (one call per component, run in parallel by the app).
-  // Modeled on preview.compileLocal above, NOT a preview.compile variant --
-  // unlike preview.compileLocal (only ever called with the user's OWN
-  // project path during Add New), `relativeDir` here is resolved and
-  // sandboxed against the artifact's real payload dir server-side, since
-  // the caller only supplies a remote/id/relativeDir, never a raw path.
+  // Cached via compileTemplateComponentPreview -- unlike preview.compileLocal
+  // (only ever called with the user's OWN, genuinely unpushed project path
+  // during Add New), this artifact has a real (remote, id, version) already,
+  // so a repeat visit to the same design kit's grid skips esbuild/Tailwind/
+  // docgen entirely instead of recompiling every component from scratch on
+  // every tab open. `relativeDir` here is resolved and sandboxed against the
+  // artifact's real payload dir server-side, since the caller only supplies
+  // a remote/id/relativeDir, never a raw path.
   'preview.compilePayloadComponent': (args) => {
     const remote = requireString(args, 'remote');
     const id = requireString(args, 'id');
     const relativeDir = requireString(args, 'relativeDir');
     const payloadDir = resolvePayloadDir(remote, id);
     const componentDir = resolveWithinPayloadDir(payloadDir, relativeDir);
-    return compileLocalPreview(componentDir);
+    return compileTemplateComponentPreview(remote, id, componentDir);
   },
 
   // Source-drift-detection: checks whether the real external project an

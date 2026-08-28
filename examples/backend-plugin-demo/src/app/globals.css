@@ -1,0 +1,8 @@
+@import "tailwindcss";
+@import "../../kortix-design-kit/tokens/kortix-tokens.css";
+@import "../../kortix-design-kit/tokens/kortix-component-css.css";
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+}

@@ -2,8 +2,18 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { isExecError, isToolNotFoundError } from '../execHelpers';
 
 const execAsync = promisify(exec);
+
+// Real Next.js/webpack-shaped builds commonly finish in low tens of
+// seconds to a couple of minutes even cold; 5 minutes gives genuine
+// headroom above that without letting a truly stuck command (waiting on
+// interactive stdin, an infinite loop, a hung network call) tie up this
+// process indefinitely -- see `runProjectBuild`'s own doc comment for why
+// a hang here is worse than in a normal terminal (it blocks the sidecar's
+// event loop for every other in-flight command too).
+export const BUILD_VERIFY_TIMEOUT_MS = 5 * 60 * 1000;
 
 export interface BuildVerificationResult {
   /** False when no build command could be detected at all -- not a
@@ -13,10 +23,21 @@ export interface BuildVerificationResult {
   command?: string;
   success?: boolean;
   output?: string;
-}
-
-function isExecError(err: unknown): err is Error & { stdout?: Buffer; stderr?: Buffer } {
-  return err instanceof Error;
+  /** True when the command was killed for running past the timeout
+   * (`BUILD_VERIFY_TIMEOUT_MS`, or a caller-supplied override) rather than
+   * genuinely finishing and reporting a real compile problem -- lets a
+   * caller tell "this looks stuck/hung" apart from "the code doesn't
+   * build." `success` is still `false` alongside this, and `output` still
+   * carries a clear human-readable explanation either way. */
+  timedOut?: boolean;
+  /** True when the detected build command's own underlying tool (e.g.
+   * `npm`) isn't installed or isn't on this machine's PATH at all, as
+   * opposed to the tool running and finding a real compile error -- lets a
+   * caller tell "this machine can't run the check" apart from "the code
+   * doesn't build." `success` is still `false` alongside this, and
+   * `output` still carries a clear human-readable explanation either
+   * way. */
+  toolNotFound?: boolean;
 }
 
 /**
@@ -80,20 +101,48 @@ export function detectBuildCommand(cwd: string): string | undefined {
  * the same effective behavior `execSync`'s explicit `stdio: 'pipe'` had
  * to spell out.
  */
-export async function runProjectBuild(cwd: string): Promise<BuildVerificationResult> {
+export async function runProjectBuild(
+  cwd: string,
+  timeoutMs: number = BUILD_VERIFY_TIMEOUT_MS,
+): Promise<BuildVerificationResult> {
   const command = detectBuildCommand(cwd);
   if (!command) {
     return { ran: false };
   }
 
   try {
-    const { stdout } = await execAsync(command, { cwd });
+    const { stdout } = await execAsync(command, { cwd, timeout: timeoutMs });
     return { ran: true, command, success: true, output: stdout };
   } catch (err) {
     const stdout = isExecError(err) ? err.stdout?.toString('utf-8') ?? '' : '';
     const stderr = isExecError(err) ? err.stderr?.toString('utf-8') ?? '' : '';
     const detail = err instanceof Error ? err.message : String(err);
     const output = [stdout, stderr].filter((s) => s.trim().length > 0).join('\n') || detail;
+
+    // Confirmed empirically: a promisified `exec` killed for exceeding its
+    // `timeout` reports no distinct error code (`err.code` is `null`) --
+    // `killed: true` is the only reliable signal it was Node's own timeout
+    // that ended the process, not the command exiting on its own.
+    if (isExecError(err) && err.killed) {
+      return {
+        ran: true,
+        command,
+        success: false,
+        timedOut: true,
+        output: `Build command timed out after ${timeoutMs}ms (still running/hung, no compile result was produced)\n${output}`,
+      };
+    }
+
+    if (isToolNotFoundError(output)) {
+      return {
+        ran: true,
+        command,
+        success: false,
+        toolNotFound: true,
+        output: `Build command's tool was not found on this machine's PATH:\n${output}`,
+      };
+    }
+
     return { ran: true, command, success: false, output };
   }
 }

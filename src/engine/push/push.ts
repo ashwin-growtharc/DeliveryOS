@@ -10,7 +10,7 @@ import { ManifestSchema, Manifest, InstallParam } from '../manifest/schema';
 import { bumpVersion, VersionBumpKind } from '../manifest/version';
 import { renderPreviewImage } from '../preview/renderPreviewImage';
 import { findPreviewEntryFile } from '../preview/resolveArtifactPreview';
-import { pristinePath } from '../paths';
+import { pristinePath, resolveContainedPath } from '../paths';
 import { computeChangedFiles, listPayloadFiles } from './diff';
 import { buildBranchName } from './branchName';
 import {
@@ -451,7 +451,20 @@ export async function pushArtifact(
   } else {
     const entry = resolveArtifact(id, remoteName);
     const { manifest } = entry;
-    const installTarget = path.resolve(cwd, manifest.install_target);
+    // manifest.install_target is untrusted (the artifact author's own
+    // manifest, not something DeliveryOS controls) -- same containment
+    // check pull.ts already applies before ever writing there, and the
+    // same reasoning this file's own payload_path check below already
+    // documents: an unchecked value here would let a crafted manifest
+    // point a routine edit-mode push's diff/pristine-comparison at a
+    // location outside the project entirely.
+    const installTarget = resolveContainedPath(cwd, manifest.install_target);
+    if (!installTarget) {
+      throw new ManifestValidationError(
+        `Artifact "${id}"'s install_target ("${manifest.install_target}") resolves outside the project -- `
+          + `refusing to push.`,
+      );
+    }
     const pristine = pristinePath(cwd, id);
 
     onProgress?.('diff', `Diffing "${id}" against its pristine snapshot...`);
@@ -473,9 +486,26 @@ export async function pushArtifact(
     // artifacts/<id>/payload/ -- write the diff back to that same real
     // location so the resulting git diff lands on the real file, not a
     // shadow copy. Absent: unchanged (artifacts/<id>/payload/).
-    const payloadDestDir = manifest.payload_path
-      ? path.join(cacheDir, manifest.payload_path)
-      : path.join(cacheDir, 'artifacts', id, 'payload');
+    //
+    // `payload_path` is untrusted (the manifest's own author wrote it, not
+    // something DeliveryOS controls) -- containment-checked against
+    // `cacheDir` for the same reason `pull.ts` checks it before reading:
+    // an unchecked value here would let a crafted manifest turn a routine
+    // edit-mode push into writes/deletes (a few lines below) anywhere
+    // `fs.rmSync`/`copyFileInto` can reach outside the remote's own clone.
+    let payloadDestDir: string;
+    if (manifest.payload_path) {
+      const contained = resolveContainedPath(cacheDir, manifest.payload_path);
+      if (!contained) {
+        throw new ManifestValidationError(
+          `Artifact "${id}"'s payload_path ("${manifest.payload_path}") resolves outside the remote's `
+            + `own directory -- refusing to push.`,
+        );
+      }
+      payloadDestDir = contained;
+    } else {
+      payloadDestDir = path.join(cacheDir, 'artifacts', id, 'payload');
+    }
     const payloadDestGitRoot = manifest.payload_path ?? `artifacts/${id}/payload`;
     onProgress?.('stage', `Staging ${changedFiles.length} changed file(s) for "${id}"...`);
     for (const change of changedFiles) {

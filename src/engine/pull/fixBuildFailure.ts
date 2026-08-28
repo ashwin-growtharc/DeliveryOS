@@ -142,10 +142,32 @@ export async function requestBuildFix(cwd: string, filePath: string, buildError:
     return { fixedFile: null, reason: `"${filePath}" no longer exists on disk.` };
   }
 
-  const fileContent = fs.readFileSync(fullPath, 'utf-8').slice(0, MAX_FILE_CHARS);
+  // Real, confirmed data-loss risk this used to have: silently truncating
+  // the file to MAX_FILE_CHARS before asking for "the full corrected
+  // file," then applyBuildFix writing that response back as the file's
+  // ENTIRE new content -- for any file longer than the cap, the model
+  // never sees (and so can't reproduce) everything past the truncation
+  // point, and its "full file" response would silently delete it. The
+  // rebuild-verify safety net doesn't reliably catch this: a truncated
+  // result can still happen to compile. Refusing outright for an
+  // oversized file is the only safe option for a flow whose whole point
+  // is "propose the exact full file to overwrite" -- there's no partial/
+  // best-effort version of that which doesn't risk deleting real content.
+  const fileContent = fs.readFileSync(fullPath, 'utf-8');
+  if (fileContent.length > MAX_FILE_CHARS) {
+    return {
+      fixedFile: null,
+      reason: `"${filePath}" is too large (${fileContent.length} chars, max ${MAX_FILE_CHARS}) for this `
+        + `flow -- it asks for the file's full corrected content, and a truncated view of it can't safely `
+        + `produce that without risking silent data loss past the truncation point.`,
+    };
+  }
   // The actionable part of a real compiler/bundler error is almost always
   // at the end (a stack trace or a wall of preceding warnings comes
-  // first) -- keep the tail, not the head, when capping length.
+  // first) -- keep the tail, not the head, when capping length. (Only the
+  // build error is capped, never the file -- unlike the file, the error
+  // is never written back anywhere, so truncating it loses nothing but
+  // context for the model.)
   const cappedError = buildError.slice(-MAX_BUILD_ERROR_CHARS);
   const prompt = buildFixPrompt(fileContent, cappedError);
 
@@ -172,6 +194,18 @@ export interface ApplyBuildFixResult {
 
 interface BuildFixLogEntry {
   timestamp: string;
+  // Which artifact's pull triggered this build failure, if any -- optional
+  // because a build-fix offer could in principle be requested with no
+  // specific artifact in mind, but in practice the UI only ever offers
+  // this right after a specific artifact's own auto-wired pull broke the
+  // build (see renderBuildFixOffers's call site), so this is filled in
+  // for every real entry today. Mirrors WiringMergeLogEntry's own
+  // remoteName/artifactId exactly, for the same reason: the log file is
+  // per-PROJECT, not per-artifact, so without these a project with more
+  // than one pulled backend-plugin artifact has no way to scope "show me
+  // THIS artifact's build-fix history."
+  remoteName?: string;
+  artifactId?: string;
   filePath: string;
   buildError: string;
   before: string;
@@ -221,7 +255,7 @@ export async function applyBuildFix(
   filePath: string,
   fixedFile: string,
   buildError: string,
-  meta: { costUsd?: number; durationMs?: number } = {},
+  meta: { costUsd?: number; durationMs?: number; remoteName?: string; artifactId?: string } = {},
 ): Promise<ApplyBuildFixResult> {
   const fullPath = resolveContainedTargetFile(cwd, filePath);
   if (!fullPath) {
@@ -242,6 +276,8 @@ export async function applyBuildFix(
 
   appendBuildFixLog(cwd, {
     timestamp: new Date().toISOString(),
+    remoteName: meta.remoteName,
+    artifactId: meta.artifactId,
     filePath,
     buildError,
     before,
@@ -254,4 +290,56 @@ export async function applyBuildFix(
   });
 
   return { applied: !rolledBack, rolledBack, build };
+}
+
+export interface BuildFixLogRecord {
+  timestamp: string;
+  filePath: string;
+  buildError: string;
+  before: string;
+  after: string;
+  rebuildSuccess?: boolean;
+  rebuildOutput?: string;
+  rolledBack: boolean;
+}
+
+/**
+ * Reads back `.deliveryos/build-fix-log.jsonl`'s entries for exactly one
+ * artifact, newest first -- mirrors `readWiringMergeLog`'s own shape and
+ * reasoning exactly, so the UI's Activity tab can merge both logs into one
+ * chronological feed. Missing file is the normal case (most pulls never
+ * hit a build failure), not an error. An entry written before this field
+ * existed (or with no artifact in mind) has no `remoteName`/`artifactId`
+ * at all -- those are never matched by a specific-artifact query, so they
+ * simply don't appear in any artifact's Activity tab; they were never
+ * attributable to one in the first place.
+ */
+export function readBuildFixLog(cwd: string, remoteName: string, artifactId: string): BuildFixLogRecord[] {
+  const logPath = buildFixLogPath(cwd);
+  if (!fs.existsSync(logPath)) {
+    return [];
+  }
+
+  const lines = fs.readFileSync(logPath, 'utf-8').split('\n').filter((line) => line.trim().length > 0);
+  const records: BuildFixLogRecord[] = [];
+  for (const line of lines) {
+    const entry = JSON.parse(line) as BuildFixLogEntry;
+    if (entry.remoteName !== remoteName || entry.artifactId !== artifactId) {
+      continue;
+    }
+    records.push({
+      timestamp: entry.timestamp,
+      filePath: entry.filePath,
+      buildError: entry.buildError,
+      before: entry.before,
+      after: entry.after,
+      rebuildSuccess: entry.rebuildSuccess,
+      rebuildOutput: entry.rebuildOutput,
+      rolledBack: entry.rolledBack,
+    });
+  }
+  // Newest first -- matches readWiringMergeLog's own ordering and the
+  // Activity tab's existing expectation.
+  records.reverse();
+  return records;
 }

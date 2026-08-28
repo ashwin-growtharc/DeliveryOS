@@ -1,3 +1,4 @@
+import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
@@ -30,8 +31,13 @@ export function remotesCacheRoot(): string {
   return path.join(deliveryOsHome(), 'remotes');
 }
 
-/** Path to the local clone cache for a specific named remote. */
+/** Path to the local clone cache for a specific named remote. `name`
+ * ultimately comes from a `remote add --name` flag / RPC arg, not a fixed
+ * internal enum -- sanitized the same way `previewCachePath` below already
+ * sanitizes its own segments, so a value like `../../../SomeFolder` can't
+ * clone (or later, on `remote remove`, delete) outside `remotesCacheRoot()`. */
 export function remoteCachePath(name: string): string {
+  assertSafePathSegment(name, 'remote name');
   return path.join(remotesCacheRoot(), name);
 }
 
@@ -78,6 +84,30 @@ export function wiringMergeLogPath(cwd: string): string {
   return path.join(projectDeliveryOsDir(cwd), 'wiring-merge-log.jsonl');
 }
 
+/** Project-local (cwd-scoped) audit log for the AI-assisted wiring-
+ * placement fallback's own "apply" half (`applyWiringPlacement`) -- same
+ * append-only, apply-only-not-request-or-discard shape as
+ * `wiringMergeLogPath` above, in its own file for the same reason: a
+ * placement decision (which relative path a brand-new file landed at) is
+ * a distinct kind of event from a merge into an already-existing file. */
+export function wiringPlacementLogPath(cwd: string): string {
+  return path.join(projectDeliveryOsDir(cwd), 'wiring-placement-log.jsonl');
+}
+
+/** Project-local (cwd-scoped) context file `deliveryos wire-with-claude`
+ * writes for a real interactive `claude` session to read -- see
+ * `buildWireContextMarkdown`'s own doc comment for why this is a file
+ * the agent reads itself (via its own already-permissioned Read tool)
+ * rather than text interpolated into the process's own argv. `id` comes
+ * from a CLI argument already validated against a real lockfile entry by
+ * the time this is called, but sanitized the same way `remoteCachePath`
+ * sanitizes its own segments regardless -- defense in depth, not because
+ * a specific exploit is known here. */
+export function wireContextPath(cwd: string, id: string): string {
+  assertSafePathSegment(id, 'artifact id');
+  return path.join(projectDeliveryOsDir(cwd), `wire-context-${id}.md`);
+}
+
 /** Project-local (cwd-scoped) directory holding pristine (as-pulled)
  * snapshots of every pulled artifact's payload, keyed by id. Used by
  * `push` to diff a local edit against what was actually pulled. */
@@ -101,6 +131,78 @@ export function pristinePath(cwd: string, id: string): string {
  * same output pointlessly for every different project. */
 export function previewCacheRoot(): string {
   return path.join(deliveryOsHome(), 'preview-cache');
+}
+
+/** Resolves `candidate` against `root`, returning the absolute path only
+ * when it's genuinely contained within `root` -- `undefined` otherwise.
+ * Generalizes `wiring.ts`'s `resolveContainedTargetFile` (which does the
+ * same thing, just always rooted at a project's `cwd`) so the same
+ * containment check can guard any other untrusted manifest-supplied path
+ * -- `install_target`, `payload_path` -- against `../../..` or an absolute
+ * path escaping whichever root it's meant to stay inside (a project's
+ * `cwd` for `install_target`, a remote's cache clone for `payload_path`). */
+export function resolveContainedPath(root: string, candidate: string): string | undefined {
+  const resolvedRoot = path.resolve(root);
+  const resolved = path.resolve(resolvedRoot, candidate);
+  if (resolved !== resolvedRoot && !resolved.startsWith(resolvedRoot + path.sep)) {
+    return undefined;
+  }
+  return resolved;
+}
+
+/**
+ * Adapts a manifest-declared path that assumes the `src/` directory
+ * convention (`src/app/...`, `src/lib/...`, an `install_target` of
+ * `src/lib/auth`) to whichever convention the REAL consuming project
+ * actually uses. Every existing `wiring_actions`/`install_target` in
+ * this catalog assumes `src/` by default (matching how `nextauth-
+ * credentials`/`email-code-auth` were authored) -- silently wrong for a
+ * project that doesn't use it, confirmed the hard way: a real pull
+ * wrote `email-code-auth`'s API route to `src/app/api/auth/[...nextauth]/
+ * route.ts` in a project whose real pages live under root `app/`, and
+ * Next.js never served it from there at all.
+ *
+ * Detection mirrors Next.js's own real rule, confirmed directly against
+ * its source (`node_modules/next/dist/lib/find-pages-dir.js`):
+ * ```js
+ * function findDir(dir, name) {
+ *   // prioritize ./${name} over ./src/${name}
+ *   ...
+ * }
+ * ```
+ * Root `app/`/`pages/` wins whenever it exists; `src/app`/`src/pages`
+ * is only ever checked when neither root one does. This function
+ * mirrors exactly that precedence, but only ever adjusts a path that
+ * actually starts with a literal `src/` segment -- never adds one, and
+ * never touches a path that doesn't start with it.
+ *
+ * Returns the ORIGINAL `manifestPath` unchanged when the project
+ * genuinely uses the `src/` convention (safe, backward-compatible --
+ * matches every existing test/artifact's own assumption). Returns
+ * `undefined` -- not a guess -- when NEITHER convention is yet
+ * detectable (a genuinely fresh project, or a non-Next stack this
+ * heuristic doesn't apply to at all): resolving that case is a real
+ * judgment call, not this function's job.
+ */
+export function adaptSrcDirPath(cwd: string, manifestPath: string): string | undefined {
+  const normalized = manifestPath.split(path.sep).join('/');
+  if (!normalized.startsWith('src/')) {
+    return manifestPath;
+  }
+
+  const hasRootAppOrPages =
+    fs.existsSync(path.join(cwd, 'app')) || fs.existsSync(path.join(cwd, 'pages'));
+  if (hasRootAppOrPages) {
+    return normalized.slice('src/'.length);
+  }
+
+  const hasSrcAppOrPages =
+    fs.existsSync(path.join(cwd, 'src', 'app')) || fs.existsSync(path.join(cwd, 'src', 'pages'));
+  if (hasSrcAppOrPages) {
+    return manifestPath;
+  }
+
+  return undefined;
 }
 
 /** Rejects any path segment that could escape `previewCacheRoot()` via
@@ -141,12 +243,28 @@ function assertSafePathSegment(segment: string, label: string): void {
  * previously-cached preview across every remote/artifact/version stop
  * being looked up in one move, with no manual cache-clearing step for
  * anyone to remember. */
-export function previewCachePath(remoteName: string, id: string, version: string, compilerVersion: string): string {
+/** `subKey`, when given, adds one more path segment before `compiled.json`
+ * -- for a `kind: template` artifact's own `components/<Name>/` preview,
+ * where a single (remoteName, id, version) covers MANY distinct previews,
+ * one per component, that would otherwise collide on the same cache file. */
+export function previewCachePath(
+  remoteName: string,
+  id: string,
+  version: string,
+  compilerVersion: string,
+  subKey?: string,
+): string {
   assertSafePathSegment(remoteName, 'remote name');
   assertSafePathSegment(id, 'artifact id');
   assertSafePathSegment(version, 'version');
   assertSafePathSegment(compilerVersion, 'compiler version');
-  return path.join(previewCacheRoot(), remoteName, id, version, `compiler-v${compilerVersion}`, 'compiled.json');
+  const segments = [previewCacheRoot(), remoteName, id, version, `compiler-v${compilerVersion}`];
+  if (subKey !== undefined) {
+    assertSafePathSegment(subKey, 'preview sub-key');
+    segments.push(subKey);
+  }
+  segments.push('compiled.json');
+  return path.join(...segments);
 }
 
 /** Project-local (cwd-scoped) staging directory for one `scan` run's

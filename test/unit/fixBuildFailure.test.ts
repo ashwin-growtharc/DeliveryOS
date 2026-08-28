@@ -7,6 +7,7 @@ import {
   parseFixResponse,
   requestBuildFix,
   applyBuildFix,
+  readBuildFixLog,
 } from '../../src/engine/pull/fixBuildFailure';
 import { buildFixLogPath } from '../../src/engine/paths';
 import { BuildFixError } from '../../src/engine/errors';
@@ -127,6 +128,21 @@ describe('requestBuildFix (Phase 10 item 2, no subprocess needed for these cases
     expect(result.fixedFile).toBeNull();
     expect(result.reason).toContain('no longer exists');
   });
+
+  it('refuses a file larger than MAX_FILE_CHARS, without ever calling the subprocess -- the real data-loss risk this closes', async () => {
+    // Real, confirmed bug this guards against: silently truncating an
+    // oversized file before asking for "the full corrected file" let
+    // applyBuildFix later write back a response that only ever covered
+    // the first 8000 chars, silently deleting everything past that point.
+    const filePath = 'huge-file.ts';
+    fs.writeFileSync(path.join(cwd, filePath), 'x'.repeat(8001), 'utf-8');
+
+    const result = await requestBuildFix(cwd, filePath, 'some error');
+
+    expect(result.fixedFile).toBeNull();
+    expect(result.reason).toContain('too large');
+    expect(result.reason).toContain('8001');
+  });
 });
 
 describe('applyBuildFix (Phase 10 item 2)', () => {
@@ -232,4 +248,78 @@ describe('applyBuildFix (Phase 10 item 2)', () => {
       applyBuildFix(cwd, 'does-not-exist.ts', 'fixed content', 'some error'),
     ).rejects.toThrow(BuildFixError);
   });
+
+  it('appends remoteName/artifactId onto the log entry when meta supplies them, so a later per-artifact read can find it', async () => {
+    fs.writeFileSync(path.join(cwd, 'auth.ts'), 'export const original = 1;', 'utf-8');
+
+    await applyBuildFix(cwd, 'auth.ts', 'export const fixed = 1;', 'real build error', {
+      remoteName: 'ai-helpers',
+      artifactId: 'nextauth-credentials',
+    });
+
+    const logLines = fs.readFileSync(buildFixLogPath(cwd), 'utf-8').trim().split('\n');
+    const entry = JSON.parse(logLines[0]);
+    expect(entry.remoteName).toBe('ai-helpers');
+    expect(entry.artifactId).toBe('nextauth-credentials');
+  });
+});
+
+describe('readBuildFixLog (Activity tab)', () => {
+  let cwd: string;
+
+  beforeEach(() => {
+    cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'deliveryos-read-buildfix-log-test-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  });
+
+  it('returns an empty array when the log file does not exist yet -- the normal case', () => {
+    expect(readBuildFixLog(cwd, 'ai-helpers', 'nextauth-credentials')).toEqual([]);
+  });
+
+  it('filters out entries belonging to a different artifact, and returns matches newest first', async () => {
+    fs.writeFileSync(path.join(cwd, 'a.ts'), 'export const a = 1;', 'utf-8');
+    fs.writeFileSync(path.join(cwd, 'b.ts'), 'export const b = 1;', 'utf-8');
+
+    await applyBuildFix(cwd, 'a.ts', 'export const a = 2;', 'error A', {
+      remoteName: 'ai-helpers',
+      artifactId: 'nextauth-credentials',
+    });
+    await applyBuildFix(cwd, 'b.ts', 'export const b = 2;', 'error B', {
+      remoteName: 'ai-helpers',
+      artifactId: 'some-other-plugin',
+    });
+    fs.writeFileSync(path.join(cwd, 'a.ts'), 'export const a = 2;', 'utf-8');
+    await applyBuildFix(cwd, 'a.ts', 'export const a = 3;', 'error A again', {
+      remoteName: 'ai-helpers',
+      artifactId: 'nextauth-credentials',
+    });
+
+    const entries = readBuildFixLog(cwd, 'ai-helpers', 'nextauth-credentials');
+    expect(entries).toHaveLength(2);
+    // Newest first.
+    expect(entries[0].buildError).toBe('error A again');
+    expect(entries[1].buildError).toBe('error A');
+  });
+
+  it('includes a rolled-back entry with its rebuild output', async () => {
+    fs.writeFileSync(path.join(cwd, 'auth.ts'), 'export const original = 1;', 'utf-8');
+    fs.writeFileSync(
+      path.join(cwd, 'package.json'),
+      JSON.stringify({ name: 'x', scripts: { build: 'node -e "process.exit(1)"' } }),
+      'utf-8',
+    );
+
+    await applyBuildFix(cwd, 'auth.ts', 'export const stillBroken = 1;', 'real build error', {
+      remoteName: 'ai-helpers',
+      artifactId: 'nextauth-credentials',
+    });
+
+    const [entry] = readBuildFixLog(cwd, 'ai-helpers', 'nextauth-credentials');
+    expect(entry.rolledBack).toBe(true);
+    expect(entry.rebuildSuccess).toBe(false);
+    expect(entry.filePath).toBe('auth.ts');
+  }, 30_000);
 });

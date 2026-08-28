@@ -51,7 +51,29 @@ export function buildPostInstallHealthSummary(result: AutoWireResult): string {
   // Leads the whole summary when true -- a failed build is the single
   // most actionable fact here, so it's never buried behind wiring trivia
   // the way a plain concatenation would leave to chance.
-  if (buildFailed) {
+  //
+  // A timeout or a missing build tool (Phase 13's timeout work,
+  // verifyBuild.ts's `timedOut`/`toolNotFound`) is NOT the same fact as
+  // "the code doesn't compile" -- conflating them here would (1) mislead
+  // whoever reads this plain-language summary into thinking their code is
+  // broken when the real problem is an environment/hang issue, and (2)
+  // matters even more downstream: app.js only offers the "Want help fixing
+  // this?" AI button when this summary's caller sees a genuine compile
+  // failure, never a timeout/missing-tool case (an AI code-fix can't
+  // repair a hung process or make a missing tool exist) -- so this
+  // distinction has to be real and explicit here, not just buried in the
+  // tail of a truncated output excerpt.
+  if (buildFailed && build.timedOut) {
+    sentences.push(
+      `The build was killed for running too long after this pull, not because of a real compile `
+      + `problem -- it may just be slow, or genuinely stuck.`,
+    );
+  } else if (buildFailed && build.toolNotFound) {
+    sentences.push(
+      `The build could not run at all after this pull -- the tool it needs isn't installed or on `
+      + `this machine's PATH.`,
+    );
+  } else if (buildFailed) {
     const excerpt = buildOutputExcerpt(build.output);
     // Always ends with its own period, even when an excerpt is embedded --
     // without it, the next sentence below would visibly run straight into

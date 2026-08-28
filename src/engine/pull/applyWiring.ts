@@ -21,11 +21,11 @@ export interface AppliedWiringResult {
  * snippet is merge GUIDANCE for a person to apply by hand (e.g. "wrap
  * {children} in <SessionProvider>"), not the file's own full content;
  * blindly overwriting a real, already-existing file with just that
- * fragment would destroy the rest of it. This is a NEW, separate,
- * explicitly-opt-in mechanism (Phase 10 item 1) -- it does not change
- * `pullArtifact`'s own default behavior, which stays exactly as Phase 7
- * left it (Tier 2 never auto-applied unless a caller explicitly asks for
- * this).
+ * fragment would destroy the rest of it. A separate mechanism from
+ * `pullArtifact` itself (Phase 10 item 1) -- that function's own behavior
+ * (Tier 2 never auto-applied) is unchanged; this is what both the app's
+ * Pull button and, as of Phase 18, the CLI's default `deliveryos pull`
+ * call on top of it (see `pullAndAutoWire.ts`).
  */
 export function applyDeterministicWiring(
   resolved: ResolvedWiringAction[],

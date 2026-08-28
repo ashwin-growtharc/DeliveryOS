@@ -3,9 +3,9 @@ import * as path from 'path';
 import { execSync } from 'child_process';
 import { buildCatalog, CatalogEntry } from '../catalog/catalog';
 import { cachePath } from '../remote/remoteCache';
-import { upsertEntry } from '../lockfile/lockfile';
-import { pristinePath } from '../paths';
-import { ArtifactResolutionError, PostInstallError } from '../errors';
+import { upsertEntry, readLockfile } from '../lockfile/lockfile';
+import { pristinePath, resolveContainedPath, adaptSrcDirPath } from '../paths';
+import { ArtifactResolutionError, ManifestValidationError, PostInstallError } from '../errors';
 import { Manifest } from '../manifest/schema';
 import {
   resolveInstallParamValues,
@@ -14,6 +14,7 @@ import {
   applyEnvExamplePlaceholders,
 } from './installParams';
 import { verifyArtifactSignature } from '../provenance/verify';
+import { isExecError, isToolNotFoundError } from '../execHelpers';
 
 export interface PullResult {
   manifest: Manifest;
@@ -28,6 +29,11 @@ export interface PullResult {
    * otherwise-successful pull over one missing value. Always `[]` for
    * an artifact with no `install_params` at all. */
   missingRequiredParams: string[];
+  /** Set only when this pull actually wrote a real secret value into
+   * `.env.local` AND that file doesn't look covered by the project's own
+   * `.gitignore` -- see `checkEnvLocalGitignoreCoverage`. Absent for the
+   * overwhelming majority of pulls (no install_params written at all). */
+  gitignoreWarning?: string;
 }
 
 /**
@@ -41,9 +47,14 @@ export interface PullResult {
  */
 export type ProgressCallback = (stage: string, message: string) => void;
 
-function isExecError(err: unknown): err is Error & { stdout?: Buffer; stderr?: Buffer } {
-  return err instanceof Error;
-}
+// post_install commands are commonly `npm install`-shaped: on a fresh
+// machine with a cold npm/pip cache, no local package cache, native
+// module builds, or just a slow network, this can legitimately take
+// several minutes -- longer runway than the build-verify timeout
+// (`verifyBuild.ts`'s `BUILD_VERIFY_TIMEOUT_MS`) since this runs exactly
+// once per pull rather than repeatedly, and installs are typically
+// slower than a plain rebuild.
+export const POST_INSTALL_TIMEOUT_MS = 10 * 60 * 1000;
 
 /**
  * Resolves which catalog entry `id` refers to. Throws
@@ -88,6 +99,11 @@ export function resolveArtifact(
  * CLI's `--set KEY=VALUE` flags or the app's own required-config
  * checklist), then upserts the cwd-scoped lockfile. The lockfile is only
  * updated once the copy and post_install both succeed.
+ *
+ * `postInstallTimeoutMs` defaults to `POST_INSTALL_TIMEOUT_MS` for every
+ * real caller (none pass it) -- it exists purely so tests can exercise the
+ * real timeout path with a real hung command in milliseconds instead of
+ * actually waiting out the production constant.
  */
 export async function pullArtifact(
   id: string,
@@ -95,19 +111,61 @@ export async function pullArtifact(
   cwd: string,
   onProgress?: ProgressCallback,
   providedValues: Record<string, string> = {},
+  postInstallTimeoutMs: number = POST_INSTALL_TIMEOUT_MS,
 ): Promise<PullResult> {
   onProgress?.('resolve', `Resolving artifact "${id}"...`);
   const entry = resolveArtifact(id, remoteName);
   const { manifest, remoteName: resolvedRemoteName } = entry;
 
   const remoteDir = cachePath(resolvedRemoteName);
+  // `payload_path`/`install_target` are untrusted -- they come from
+  // whatever the artifact author's manifest says, not something DeliveryOS
+  // controls, and (unlike the payload's own content) neither is covered by
+  // signature verification below. Resolving either with plain path.join/
+  // path.resolve and no containment check would let a value like
+  // "../../../../evil" or an absolute path escape the remote's own clone
+  // (for payload_path) or the project (for install_target) entirely --
+  // exactly the threat model `resolveContainedTargetFile` already guards
+  // wiring_actions' own target_file against; this is that same check
+  // applied to the two manifest fields that didn't have it yet.
+  //
   // `payload_path`, when set, points directly at the artifact's real payload
   // location (a file or directory) relative to the remote's root, bypassing
   // the artifacts/<id>/payload/ convention entirely. Absent: unchanged.
-  const payloadSrc = manifest.payload_path
-    ? path.join(remoteDir, manifest.payload_path)
-    : path.join(remoteDir, 'artifacts', manifest.id, 'payload');
-  const installTarget = path.resolve(cwd, manifest.install_target);
+  let payloadSrc: string;
+  if (manifest.payload_path) {
+    const contained = resolveContainedPath(remoteDir, manifest.payload_path);
+    if (!contained) {
+      throw new ManifestValidationError(
+        `Artifact "${manifest.id}"'s payload_path ("${manifest.payload_path}") resolves outside the `
+          + `remote's own directory -- refusing to pull.`,
+      );
+    }
+    payloadSrc = contained;
+  } else {
+    payloadSrc = path.join(remoteDir, 'artifacts', manifest.id, 'payload');
+  }
+  if (!fs.existsSync(payloadSrc)) {
+    throw new ArtifactResolutionError(
+      `Artifact "${manifest.id}"'s payload was not found at the expected location (${payloadSrc}) -- `
+        + `the remote may be out of date, or payload_path may be wrong. Try refreshing the catalog.`,
+    );
+  }
+  // Adapts an install_target that assumes the `src/` convention (e.g.
+  // `src/lib/auth`) to whichever convention this REAL project actually
+  // uses -- see adaptSrcDirPath's own doc comment for why. Falls back to
+  // the manifest's own literal value when neither convention is yet
+  // detectable (a genuinely fresh project): resolving that ambiguity
+  // for real is a judgment call for the Wiring section's own AI-assist
+  // flow, not something the synchronous pull path guesses at.
+  const effectiveInstallTarget = adaptSrcDirPath(cwd, manifest.install_target) ?? manifest.install_target;
+  const installTarget = resolveContainedPath(cwd, effectiveInstallTarget);
+  if (!installTarget) {
+    throw new ManifestValidationError(
+      `Artifact "${manifest.id}"'s install_target ("${manifest.install_target}") resolves outside the `
+        + `project -- refusing to install.`,
+    );
+  }
 
   // Verifies BEFORE any files are written -- a no-op for the overwhelming
   // majority of artifacts, which declare no `signature` at all. The
@@ -135,13 +193,55 @@ export async function pullArtifact(
     // that stream mid-line. Capturing it instead and returning it lets each
     // caller (CLI vs. sidecar) decide how to surface it.
     try {
-      postInstallOutput = execSync(manifest.post_install, { cwd: installTarget, stdio: 'pipe' })
-        .toString('utf-8');
+      postInstallOutput = execSync(manifest.post_install, {
+        cwd: installTarget,
+        stdio: 'pipe',
+        timeout: postInstallTimeoutMs,
+        // DELIVERYOS_PROJECT_ROOT: a real, confirmed bug found while
+        // dogfooding a large backend-plugin -- a manifest whose
+        // post_install needs to `cd` back up to the consuming project's
+        // OWN root (almost every real one does, to run `npm install`
+        // against the project's real package.json, not installTarget's)
+        // used to have no reliable way to do that. A fixed relative
+        // escape like `cd ../../..` assumes install_target is always the
+        // same depth it was DECLARED at -- but adaptSrcDirPath (paths.ts)
+        // can shorten it at PULL time for a project that doesn't use
+        // `src/`, silently changing how many `..`s are actually needed.
+        // Confirmed the hard way: this overshot by one level for a real
+        // artifact, installing real packages into the pulling project's
+        // own PARENT directory instead (still resolvable at runtime via
+        // Node's own upward node_modules search, which is exactly why it
+        // went unnoticed -- but a real, unwanted side effect outside the
+        // project). This env var is the fix: an absolute, always-correct
+        // path a manifest's post_install can `cd` to directly, with no
+        // relative-depth guessing at all.
+        env: { ...process.env, DELIVERYOS_PROJECT_ROOT: cwd },
+      }).toString('utf-8');
     } catch (err) {
       const stdout = isExecError(err) ? err.stdout?.toString('utf-8') ?? '' : '';
       const stderr = isExecError(err) ? err.stderr?.toString('utf-8') ?? '' : '';
       const detail = err instanceof Error ? err.message : String(err);
       const output = [stdout, stderr].filter((s) => s.trim().length > 0).join('\n');
+
+      // Confirmed empirically: `execSync` killed for exceeding its
+      // `timeout` throws with `code: 'ETIMEDOUT'` -- unlike the
+      // promisified async `exec` used in `verifyBuild.ts`, which reports
+      // no distinct code at all for the same condition (see that file's
+      // doc comment).
+      if (isExecError(err) && err.code === 'ETIMEDOUT') {
+        throw new PostInstallError(
+          `post_install command timed out after ${postInstallTimeoutMs}ms for artifact "${manifest.id}" (still running/hung, no result was produced): ${manifest.post_install}`
+            + (output ? `\n${output}` : ''),
+        );
+      }
+
+      if (isToolNotFoundError([detail, output].join('\n'))) {
+        throw new PostInstallError(
+          `post_install command's tool was not found on this machine's PATH for artifact "${manifest.id}": ${manifest.post_install}`
+            + (output ? `\n${output}` : ''),
+        );
+      }
+
       throw new PostInstallError(
         `post_install command failed for artifact "${manifest.id}": ${detail}`
           + (output ? `\n${output}` : ''),
@@ -178,7 +278,7 @@ export async function pullArtifact(
     providedValues,
     readExistingEnvValues(cwd),
   );
-  applyInstallParams(cwd, values);
+  const { gitignoreWarning } = applyInstallParams(cwd, values);
   // Tier 1 of the wiring agent (Phase 7 item 6) -- derived straight from
   // install_params, no separate declared action. Same no-op guarantee as
   // applyInstallParams for the overwhelming majority of artifacts that
@@ -186,10 +286,22 @@ export async function pullArtifact(
   applyEnvExamplePlaceholders(cwd, manifest.install_params);
 
   onProgress?.('lockfile', 'Updating lockfile...');
+  // Spreads any existing entry first (not a bare {id, version, remote,
+  // installTarget}) -- a real, confirmed bug found via review: re-pulling
+  // an already-installed artifact (a normal, supported action -- see the
+  // "re-pulling upserts instead of duplicating" test) silently wiped that
+  // entry's `pendingPr`/`wiredFiles`, breaking PR tracking and the
+  // uninstall-safety guarantee (removeArtifact.ts reads `wiredFiles` to
+  // know which files it's safe to delete). Same spread-the-existing-entry
+  // pattern sync.ts/applyUpdate.ts/push.ts/pullAndAutoWire.ts already use
+  // for this exact reason.
+  const existingEntry = readLockfile(cwd).entries.find((e) => e.id === manifest.id);
   await upsertEntry(cwd, {
+    ...existingEntry,
     id: manifest.id,
     version: manifest.version,
     remote: resolvedRemoteName,
+    installTarget,
   });
 
   return {
@@ -198,5 +310,6 @@ export async function pullArtifact(
     installTarget,
     postInstallOutput,
     missingRequiredParams: missingRequired,
+    gitignoreWarning,
   };
 }
