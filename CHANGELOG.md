@@ -6,6 +6,125 @@ All notable changes to DeliveryOS are recorded here, newest first. See
 
 ---
 
+## Design system and hygiene overhaul (branch `overhaul/design-system-and-hygiene`)
+
+Numbered phases stop here. [PLAN.md](PLAN.md) merged the original 32 into 15
+on 2026-08-28, so continuing the old sequence in this file would invent a
+"Phase 33" that the plan no longer has. Entries below Phase 32 keep their
+original numbers and reconcile through PLAN.md's renumbering map.
+
+### Tier 0 hardening
+
+- **Sidecar prototype dispatch**: an RPC named after an `Object.prototype`
+  member (`constructor`, `toString`) resolved to the inherited function and
+  was dispatched. Now refused.
+- **Four unvalidated `JSON.parse` sites on untrusted input** guarded, so a
+  corrupt lockfile/registry/bundle reports as itself rather than escaping as a
+  raw `SyntaxError` stack trace.
+- **`applyUpdate` ran `post_install` without `DELIVERYOS_PROJECT_ROOT`**,
+  which broke `check-updates --apply` for every backend plugin (the authoring
+  skill mandates `cd "$DELIVERYOS_PROJECT_ROOT"`, and unset that expands to
+  `cd ""`). Same 1 MB `maxBuffer` trap fixed alongside it.
+- **The remote cache clone is locked** during refresh, and `push` no longer
+  leaves it parked on a half-built branch.
+- **Two long-standing "flaky" test failures** turned out to be real and are
+  fixed; the suite passes deterministically.
+
+### `install_target` at the project root
+
+- A guard added here refused a root `install_target` at the SCHEMA level,
+  which **took the whole catalog down**: `deliveryos list` returned nothing
+  but a validation error, because a root target is the correct shape for a
+  scaffold artifact and one of the 234 catalog artifacts uses it. The guard
+  now lives only in `remove`, where the deletion actually happens.
+- **One bad manifest no longer blanks the catalog.** `discoverManifests` threw
+  on the first invalid manifest, making all 234 unreachable for everyone.
+  Invalid manifests are skipped and reported after the catalog, not instead of
+  it.
+- **A root `install_target` now works through the whole lifecycle**, not just
+  `pull`. It was pullable but then permanently `not_pulled`, and could never
+  be pushed, updated or removed, because every other call site passed
+  `allowRoot: false`. Each operation is now scoped to the artifact's
+  **footprint** — the top-level entries its payload provided, recorded in the
+  pristine snapshot at pull time — via new `isRootInstall` /
+  `readPayloadFootprint` helpers and a `topLevelScope` option on
+  `computeChangedFiles`. `remove` deletes only those entries, never the root
+  directory. Where the snapshot is missing the footprint is unknowable and the
+  operation refuses rather than guess at the project root.
+- Two further defects found on the update path: `applyAvailableUpdates`
+  re-snapshotted with a bare `fs.cpSync(installTarget, pristineTarget)` (throws
+  `ERR_FS_CP_EINVAL` for a root install, and would snapshot the user's entire
+  project if it didn't), and its clean-check diffed unscoped. Both paths now
+  share one exported `writePristineSnapshot`.
+
+### Design system, dark mode and the Detail view
+
+- Theme blocks collapsed into one system; opacity-as-muted-text replaced with
+  real colour tokens; type, fonts, radii, motion and spacing swept onto the
+  scale tokens.
+- **Fonts vendored**, so the UI no longer depends on the network to render.
+- Real error states, and dark-mode defects fixed by direct inspection rather
+  than by report.
+- Backend-plugin Detail revamped: one loading treatment, identity first,
+  scannable wiring.
+
+### An in-flight operation survives navigation
+
+- Reported as "if I go back while pulling, things are broken" — four failures
+  behind one sentence, all from the progress panel treating the DOM as its
+  source of truth. Progress now accumulates into an operation store keyed by
+  artifact, and the panel is a pure render of it.
+- `test/e2e/uiOperationStore.e2e.test.ts` is the **first automated test of the
+  desktop frontend**, which had never had any.
+
+### Packaging
+
+- **The NSIS installer never compiled.** `path-hook.nsh` called `${StrRep}`
+  from the uninstall section, where NSIS permits only `"un."`-prefixed calls —
+  a hard `makensis` error. The MSI bundled fine, which is what made it easy to
+  miss, and an MSI installee gets no `deliveryos` on PATH at all. Now uses
+  `${UnStrRep}`. The PATH hook's runtime behaviour remains unverified on a
+  clean machine; see `docs/manual-smoke-test-cli-install.md`.
+- **The CLI reported a version it wasn't.** `.version('0.1.0')` is a hardcoded
+  literal (tsconfig's `rootDir: src` blocks importing package.json), and it
+  stayed behind while package.json, tauri.conf.json and Cargo.toml moved to
+  0.1.2 — so the binary shipped *inside* the 0.1.2 installer said 0.1.0.
+  `test/unit/cliVersion.test.ts` now fails the build if the four drift.
+- **The documented bundle output path was wrong**, in both the README and
+  `docs/release-process.md`: a plain `npx tauri build` writes to
+  `src-tauri/target/release/bundle/`, not the `x86_64-pc-windows-msvc/`
+  variant they named — which on a machine that has built both holds a stale
+  installer indistinguishable from the fresh one.
+
+### The UI described work that never happened
+
+- `pull` announced `Verifying artifact signature...` on every pull, though
+  `verifyArtifactSignature` returns immediately for an unsigned artifact —
+  contradicting the Detail panel's own "Unverified — no provenance signature
+  yet" badge on the same screen. Now emitted only when there is a signature or
+  bundle to check.
+- `Applying install-time configuration...` likewise announced itself for
+  artifacts declaring no `install_params`, pointing at an `.env.local` change
+  never made. Now gated on real `install_params`.
+- **"Verify build" was offered on artifacts that cannot affect the build.** The
+  build chip sat outside all gating, so a pulled `skill` showed a status panel
+  containing nothing else — and clicking it turned into a green "Build
+  passing" that read as if the `SKILL.md` had been validated. It was the host
+  project's unrelated build. Now gated on the same
+  `install_params || wiring_actions || post_install` check the lifecycle
+  explainer already used.
+
+### Docs
+
+- README rewritten; `REQUIREMENTS.md` restructured by audience (running the
+  app, running the CLI, building from source) rather than by build phase;
+  `docs/skills.md` added, documenting the six Claude Code skills that nothing
+  described anywhere.
+- `.gitattributes` added to stop line-ending noise on committed generated
+  files.
+
+---
+
 ## Phase 32 — "Merge with Claude" had no reference for a file's own canonical content
 
 - Found by direct testing: a one-character typo in a freshly-wired

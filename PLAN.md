@@ -184,10 +184,10 @@ Ordered by what blocks value, not by phase number.
 1. **Finish Phase 12** — responsive breakpoints (there are none today), error
    states on the remaining views, keyboard reachability, toast dismissal, and
    consolidating 10 chip classes and 5 card classes into one of each.
-2. **Make the gates real** — ESLint does not cover the 314KB desktop frontend
+2. **Make the gates real** — ESLint does not cover the 343KB desktop frontend
    at all, `test/` is not typechecked, and there is no CI. Nothing enforces
    any of it on a push.
-3. **Split `app.js`** — 6,900 lines in one IIFE. Deferred until ESLint covers
+3. **Split `app.js`** — 7,464 lines in one IIFE. Deferred until ESLint covers
    it, so the move happens with a linter watching.
 4. **A shared command surface** — the CLI exposes 15 commands and the sidecar
    40, with nothing shared between them, so they drift. `remote add`/`remove`
