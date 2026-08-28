@@ -547,8 +547,8 @@ describe('sidecar e2e', () => {
   );
 
   it(
-    'artifact.push (edit mode): the sidecar has no octokit-injection point, so it runs real ' +
-      'git ops and then hits the real GitHub auth/API boundary -- a clean error, not a crash',
+    'artifact.push (edit mode): the sidecar has no octokit-injection point, so it reaches ' +
+      'the real GitHub auth/API boundary and fails cleanly there, writing nothing',
     async () => {
       // src/sidecar.ts's `artifact.push` handler calls
       // `pushArtifact(id, options, cwd)` with no 4th (octokit) argument --
@@ -592,6 +592,8 @@ describe('sidecar e2e', () => {
           'utf-8',
         );
 
+        const branchesBefore = (await simpleGit(fixtureRemoteDir).branch(['-a'])).all;
+
         const pushResp = await session.request('artifact.push', {
           id: artifact.id,
           cwd,
@@ -607,14 +609,30 @@ describe('sidecar e2e', () => {
         expect(['GithubAuthError', 'GithubApiError']).toContain(pushResp.error?.type);
         expect(pushResp.error?.message.length ?? 0).toBeGreaterThan(0);
 
-        // The branch/commit/push sequence happens BEFORE the GitHub API
-        // call inside pushArtifact -- confirm it really ran for real
-        // against the fixture "remote", proving the sidecar's wiring
-        // reached all the way to the GitHub boundary.
-        const branchSummary = await simpleGit(fixtureRemoteDir).branch(['-a']);
-        expect(branchSummary.all.some((b) => b.startsWith(`deliveryos/${artifact.id}/`))).toBe(
-          true,
-        );
+        // This test used to assert the OPPOSITE of what the code does: that
+        // "the branch/commit/push sequence happens BEFORE the GitHub API
+        // call", and therefore that a `deliveryos/<id>/...` branch existed in
+        // the fixture remote afterwards. In edit mode pushArtifact calls
+        // createOctokit and then fetchRepoInfo well before createBranch, so
+        // this push dies at the GitHub boundary with no git write at all and
+        // that branch is never created.
+        //
+        // The assertion nonetheless "passed" in a full-suite run, because
+        // OTHER tests in this file push real branches into the same shared
+        // fixture remote -- so it was reading another test's leftover state.
+        // In isolation it failed every time. That is what made this one of
+        // the suite's two long-standing "flaky" failures: it was never
+        // flaky, it was order-dependent and wrong.
+        //
+        // What is actually worth asserting is that the failure happened at
+        // the GitHub boundary and left nothing behind: no new branch pushed
+        // by THIS attempt (snapshot-compared, since the fixture is shared),
+        // and a local cache not parked on a half-built push branch.
+        const branchesAfter = (await simpleGit(fixtureRemoteDir).branch(['-a'])).all;
+        expect(branchesAfter).toEqual(branchesBefore);
+
+        const cacheStatus = await simpleGit(cachePath(remoteName)).status();
+        expect(cacheStatus.current?.startsWith('deliveryos/')).toBe(false);
       } finally {
         await session.close();
       }
