@@ -567,7 +567,7 @@
     // Tag Folder both navigate in via showViewRaw (below), which already
     // calls this same reset right before rendering, so this doesn't clear
     // anything they're about to show.
-    resetProgressPanel();
+    hideProgressPanel();
     for (const section of document.querySelectorAll('.view')) {
       section.hidden = section.id !== `view-${view}`;
     }
@@ -4221,7 +4221,7 @@ ${bodyHtml}
       return;
     }
     await withBusy(btn, 'Pulling...', async () => {
-      await beginProgress();
+      const opKey = await beginProgress();
       let succeeded = 0;
       const failures = [];
       // Every artifact pulled here shares the same `cwd`/`.gitignore`, so a
@@ -4261,7 +4261,7 @@ ${bodyHtml}
           failures.push(`${entry.manifest.id}: ${err instanceof Error ? err.message : String(err)}`);
         }
       }
-      endProgress(failures.length === 0);
+      endProgress(failures.length === 0, opKey);
 
       if (succeeded > 0) {
         // "Pulled" (not "processed"/"handled") stays the right word even
@@ -4336,7 +4336,7 @@ ${bodyHtml}
     state.activeTagValue = value;
     state.tagFolderSearch = '';
     $('tag-folder-search').value = '';
-    resetProgressPanel();
+    hideProgressPanel();
     renderTagFolder();
     showViewRaw('tag-folder');
   }
@@ -4494,7 +4494,7 @@ ${bodyHtml}
    * own inline button inside a Tag Folder view. */
   async function runArtifactAction(entry, action, button) {
     await withBusy(button, 'Working...', async () => {
-      await beginProgress();
+      await beginProgress(entry);
       try {
         if (action === 'applyUpdate') {
           const [result] = await call('artifact.applyUpdate', {
@@ -4547,7 +4547,7 @@ ${bodyHtml}
               // Surface the real build output where it's actually visible
               // -- reuses the existing progress log rather than inventing
               // a new UI surface for this.
-              appendProgressLine('build', build.output || 'Build failed.');
+              recordProgress(entry, 'build', build.output || 'Build failed.');
               // Phase 10 item 2: offer to try fixing one of the files this
               // same pull just auto-wired -- never any other file. Never
               // offered for a timeout or a missing build tool (Phase 13's
@@ -4579,10 +4579,10 @@ ${bodyHtml}
           });
           toastSuccess(`Pushed ${entry.manifest.id}: opened PR #${result.number}`, result.url);
         }
-        endProgress(true);
+        endProgress(true, entry);
         await loadCatalog();
       } catch (err) {
-        endProgress(false);
+        endProgress(false, entry);
         toastError(err);
       }
     });
@@ -4611,10 +4611,10 @@ ${bodyHtml}
    * failure (after marking the progress panel failed) so each caller can
    * apply its own error handling. */
   async function checkForArtifactUpdatesCore() {
-    await beginProgress();
+    const opKey = await beginProgress();
     try {
       const updates = await call('sync.checkForUpdates', { cwd: state.projectDir });
-      endProgress(true);
+      endProgress(true, opKey);
 
       for (const update of updates) {
         const entry = state.catalog.find(
@@ -4635,7 +4635,7 @@ ${bodyHtml}
 
       return updates;
     } catch (err) {
-      endProgress(false);
+      endProgress(false, opKey);
       throw err;
     }
   }
@@ -4706,10 +4706,10 @@ ${bodyHtml}
   async function handleCheckPushStatus(entry) {
     const btn = $('detail-check-push-status-btn');
     await withBusy(btn, 'Checking...', async () => {
-      await beginProgress();
+      await beginProgress(entry);
       try {
         const results = await resolvePendingPushesCore();
-        endProgress(true);
+        endProgress(true, entry);
 
         const mine = results.find(
           (r) => r.id === entry.manifest.id && r.remote === entry.remoteName,
@@ -4727,7 +4727,7 @@ ${bodyHtml}
         }
         refreshDetailIfShown(entry);
       } catch (err) {
-        endProgress(false);
+        endProgress(false, entry);
         toastError(err);
       }
     });
@@ -4757,13 +4757,13 @@ ${bodyHtml}
 
     const btn = $('detail-remove-btn');
     await withBusy(btn, 'Removing...', async () => {
-      await beginProgress();
+      await beginProgress(entry);
       try {
         const result = await call('artifact.remove', {
           id: entry.manifest.id,
           cwd: state.projectDir,
         });
-        endProgress(true);
+        endProgress(true, entry);
         toastSuccess(`Removed ${entry.manifest.id}.`);
 
         const followUps = [];
@@ -4780,7 +4780,7 @@ ${bodyHtml}
         await loadCatalog();
         refreshDetailIfShown(entry);
       } catch (err) {
-        endProgress(false);
+        endProgress(false, entry);
         toastError(err);
       }
     });
@@ -4796,20 +4796,20 @@ ${bodyHtml}
   async function handleSaveMetadataEdit(entry, metadataEdit) {
     const saveBtn = $('edit-save-btn');
     await withBusy(saveBtn, 'Saving...', async () => {
-      await beginProgress();
+      await beginProgress(entry);
       try {
         const result = await call('artifact.push', {
           id: entry.manifest.id,
           cwd: state.projectDir,
           options: { metadataEdit },
         });
-        endProgress(true);
+        endProgress(true, entry);
         toastSuccess(`Updated ${entry.manifest.id} metadata: opened PR #${result.number} (${result.url})`);
         $('detail-edit-form').hidden = true;
         await loadCatalog();
         refreshDetailIfShown(entry);
       } catch (err) {
-        endProgress(false);
+        endProgress(false, entry);
         toastError(err);
       }
     });
@@ -4857,68 +4857,212 @@ ${bodyHtml}
    * where an early progress line could otherwise arrive before anyone is
    * listening for it. Tears down any previous subscription first (there's
    * only ever one action in flight at a time, but this is defensive). */
-  async function beginProgress() {
+  /** ---- in-flight operation store ----
+   *
+   * Pull/push/update run in the sidecar and keep running whether or not you
+   * stay on the screen that started them. Progress used to be written STRAIGHT
+   * TO THE DOM by a listener that `resetProgressPanel()` tore down -- and
+   * `resetProgressPanel()` ran on every view switch. So navigating away
+   * mid-pull broke things in four separate ways, all of which show up as
+   * "if I go back while pulling, things are broken":
+   *
+   *   1. The listener was unsubscribed, so every remaining progress event for
+   *      a still-running pull was silently dropped.
+   *   2. Nothing anywhere indicated an operation was still running.
+   *   3. Coming back to the artifact showed an EMPTY panel, because the log
+   *      lived only in the DOM that had just been cleared.
+   *   4. Worst: `endProgress()` wrote "Done"/"Failed" into whatever panel
+   *      happened to be on screen. Start a pull, go back, open a different
+   *      artifact -- and the first pull's completion stamped the second
+   *      artifact's panel.
+   *
+   * The fix is to stop treating the DOM as the source of truth. An operation's
+   * stages accumulate here, keyed by artifact; the panel becomes a pure render
+   * of whichever record belongs to the artifact you are currently looking at.
+   * Navigating away now costs nothing, and coming back replays the log.
+   *
+   * Keyed by artifact: the engine's progress events carry no operation id, and
+   * `withBusy` already prevents two actions on one artifact at once, so one
+   * record per artifact is exactly the granularity available.
+   */
+  const operations = new Map();
+
+  /** The artifact whose operation is currently receiving progress events.
+   * Needed because `sidecar-progress` events are global and carry no id. */
+  let activeOperationId = null;
+
+  /** The single, session-long progress subscription. Installed once and never
+   * torn down -- the old code subscribed per action and unsubscribed on view
+   * change, which is precisely what lost events. */
+  let progressUnlistenGlobal = null;
+
+  async function installProgressListener() {
+    if (progressUnlistenGlobal) return;
+    try {
+      progressUnlistenGlobal = await listen('sidecar-progress', (event) => {
+        const { stage, message } = event.payload;
+        const op = activeOperationId ? operations.get(activeOperationId) : null;
+        if (!op) return;
+        op.lines.push({ stage, message });
+        // Only touch the DOM when this operation's artifact is on screen.
+        // Otherwise the record just accumulates, ready to be replayed.
+        if (isOperationDisplayed(op)) appendProgressLine(stage, message);
+      });
+    } catch {
+      // listen() failing is rare and non-fatal: operations still run and still
+      // reach completion, they just will not stream live stages.
+      progressUnlistenGlobal = null;
+    }
+  }
+
+  /** The operation the panel is currently rendering, or null. This is the
+   * single source of truth for "does the panel on screen belong to this
+   * operation".
+   *
+   * An earlier version asked `state.view === 'detail' && detailShownEntryKey
+   * === op.entryKey` instead, which was wrong twice over: `#detail-progress`
+   * is a PAGE-LEVEL panel (index.html:940, outside every `.view` section)
+   * deliberately shared by Browse's card buttons, Tag Folder rows and bulk
+   * pulls -- so every operation not started from Detail rendered a panel that
+   * then refused to accept its own progress lines or its own "Done", and sat
+   * frozen on "Working…" with an empty log. A bulk pull, keyed `__global__`,
+   * could never match a `detailShownEntryKey` at all, so it was dead by
+   * definition. */
+  let displayedOperationKey = null;
+
+  /** Appends a stage to an operation's record, and to the panel only if that
+   * operation is the one on screen.
+   *
+   * The engine's own progress events go through the listener above; this is
+   * for stages the FRONTEND generates -- currently the post-install build
+   * result. That line used to be written straight to `$('progress-log')`,
+   * which meant it appeared under whatever artifact happened to be displayed
+   * (so artifact A's build error showed up in artifact B's log), and it was
+   * never stored, so navigating away and back lost it permanently. */
+  function recordProgress(entry, stage, message) {
+    const key = entry ? entryKey(entry) : activeOperationId;
+    const op = key ? operations.get(key) : null;
+    if (op) op.lines.push({ stage, message });
+    if (!op || isOperationDisplayed(op)) appendProgressLine(stage, message);
+  }
+
+  /** True when the panel currently on screen genuinely belongs to `op`. */
+  function isOperationDisplayed(op) {
+    return displayedOperationKey === op.entryKey;
+  }
+
+  /** Renders an operation record into the panel from scratch. Used when
+   * opening a Detail view for an artifact that has one, so a log built while
+   * you were elsewhere is not lost. */
+  function renderOperationPanel(op) {
+    displayedOperationKey = op.entryKey;
     const panel = $('detail-progress');
     $('progress-log').innerHTML = '';
     $('build-fix-offers').innerHTML = '';
     $('build-fix-offers').hidden = true;
     panel.hidden = false;
     panel.classList.remove('done', 'error');
-    $('progress-status').textContent = 'Working…';
-
-    if (progressUnlisten) {
-      progressUnlisten();
-      progressUnlisten = null;
-    }
-    try {
-      progressUnlisten = await listen('sidecar-progress', (event) => {
-        const { stage, message } = event.payload;
-        appendProgressLine(stage, message);
-      });
-    } catch (err) {
-      // Every call site does `await beginProgress()` BEFORE its own try
-      // block (deliberately -- see this function's own doc comment about
-      // closing the race before the real sidecar call goes out), so a
-      // rejection here would otherwise propagate out of beginProgress
-      // itself, skip every caller's endProgress(false) in its catch
-      // block, and leave the panel stuck showing "Working…" forever.
-      // Caught here instead: progress LINES just won't stream live for
-      // this action (a real but narrow degradation -- listen() itself
-      // failing is rare), but the action itself still runs and still
-      // reaches its own endProgress() normally either way.
-      progressUnlisten = null;
+    for (const line of op.lines) appendProgressLine(line.stage, line.message);
+    if (op.status === 'running') {
+      $('progress-status').textContent = 'Working…';
+    } else {
+      panel.classList.add(op.status === 'done' ? 'done' : 'error');
+      $('progress-status').textContent = op.status === 'done' ? 'Done' : 'Failed';
     }
   }
 
-  /** Marks the progress panel as finished (success or failure) and tears
-   * down the event subscription. Deliberately does NOT hide or clear the
-   * panel/log -- the point is to leave the full stage history visible
-   * through to "Done"/"Failed", not wipe it the moment the action settles. */
-  function endProgress(success) {
-    const panel = $('detail-progress');
-    panel.classList.add(success ? 'done' : 'error');
-    $('progress-status').textContent = success ? 'Done' : 'Failed';
-    if (progressUnlisten) {
-      progressUnlisten();
-      progressUnlisten = null;
-    }
+  /** Shows the panel for whichever artifact Detail is about to display, or
+   * hides it when that artifact has no operation. Replaces the old
+   * "always wipe on navigate" behaviour. */
+  function syncProgressPanelToDetail(entry) {
+    const op = entry ? operations.get(entryKey(entry)) : null;
+    if (op) renderOperationPanel(op);
+    else hideProgressPanel();
   }
 
-  /** Resets the progress panel back to its hidden, empty idle state. Called
-   * only when a NEW Detail view is opened (openDetail(), below) -- never by
-   * renderDetail()/refreshDetailIfShown()'s post-action re-render, which
-   * must leave an in-progress or just-finished log alone. */
-  function resetProgressPanel() {
+  /** Hides and empties the panel WITHOUT touching any operation record or the
+   * global listener -- the two things the old resetProgressPanel destroyed. */
+  function hideProgressPanel() {
+    displayedOperationKey = null;
     const panel = $('detail-progress');
     panel.hidden = true;
     panel.classList.remove('done', 'error');
     $('progress-log').innerHTML = '';
     $('build-fix-offers').innerHTML = '';
     $('build-fix-offers').hidden = true;
-    if (progressUnlisten) {
-      progressUnlisten();
-      progressUnlisten = null;
+  }
+
+  /** Starts (or restarts) the operation record for `entry` and shows it.
+   *
+   * RETURNS the operation key. Callers must hand that key back to
+   * `endProgress` rather than relying on `activeOperationId` still pointing at
+   * them: with two operations overlapping (a bulk pull running while the user
+   * opens an artifact and pulls it individually), whichever finishes first
+   * cleared `activeOperationId`, so the second one's `endProgress` found no
+   * key at all and never marked its record done -- leaving the "Working…"
+   * indicator stuck on screen for the rest of the session with nothing able to
+   * clear it. */
+  async function beginProgress(entry) {
+    await installProgressListener();
+    const key = entry ? entryKey(entry) : `__op-${operationSeq += 1}`;
+    activeOperationId = key;
+    const op = { entryKey: key, status: 'running', lines: [], startedAt: Date.now() };
+    operations.set(key, op);
+    renderOperationPanel(op);
+    renderRunningIndicator();
+    return key;
+  }
+
+  /** Counter behind the synthetic keys used by operations with no single
+   * artifact (a bulk pull, an update check, Scan's propose). A fixed
+   * `'__global__'` string meant two such operations shared one record and
+   * overwrote each other. */
+  let operationSeq = 0;
+
+  /** Marks the operation finished. Only writes to the DOM if its artifact is
+   * still on screen -- otherwise a pull finishing in the background would
+   * stamp "Done" onto whatever unrelated artifact you navigated to. */
+  function endProgress(success, entryOrKey) {
+    const key = typeof entryOrKey === 'string'
+      ? entryOrKey
+      : (entryOrKey ? entryKey(entryOrKey) : activeOperationId);
+    const op = key ? operations.get(key) : null;
+    if (op) {
+      op.status = success ? 'done' : 'failed';
+      if (isOperationDisplayed(op)) {
+        const panel = $('detail-progress');
+        panel.classList.add(success ? 'done' : 'error');
+        $('progress-status').textContent = success ? 'Done' : 'Failed';
+      }
     }
+    if (activeOperationId === key) activeOperationId = null;
+    renderRunningIndicator();
+  }
+
+  /** A persistent, app-wide "work is still running" affordance in the context
+   * strip. Without it, navigating away from a pull left NO indication anywhere
+   * that anything was happening -- the operation simply finished later and a
+   * toast appeared out of nowhere. Clicking it returns to that artifact. */
+  function renderRunningIndicator() {
+    const host = $('running-indicator');
+    if (!host) return;
+    const running = [];
+    for (const op of operations.values()) {
+      if (op.status === 'running') running.push(op);
+    }
+    host.hidden = running.length === 0;
+    if (running.length === 0) return;
+    host.textContent = running.length === 1 ? 'Working…' : `Working… (${running.length})`;
+    // Only offer navigation when there is somewhere to navigate TO. A bulk
+    // pull or update check has no single artifact, and the click used to be
+    // silently swallowed -- worst on exactly the long-running batch operations
+    // you are most likely to have navigated away from.
+    const target = state.catalog.find((e) => entryKey(e) === running[0].entryKey);
+    host.onclick = target ? () => void openDetail(target) : null;
+    host.style.cursor = target ? 'pointer' : 'default';
+    host.title = target
+      ? `Working on ${target.manifest.id} -- click to open`
+      : `${running.length} operation(s) still running`;
   }
 
   /** Detail's Back button label per possible `state.detailReturnView` --
@@ -4951,7 +5095,10 @@ ${bodyHtml}
     }
     $('back-to-browse-btn').textContent =
       DETAIL_RETURN_LABELS[state.detailReturnView] ?? DETAIL_RETURN_LABELS.browse;
-    resetProgressPanel();
+    // Show whatever operation belongs to THIS artifact, replaying a log
+    // built while you were elsewhere. This used to wipe the panel
+    // unconditionally, which is why coming back mid-pull showed nothing.
+    syncProgressPanelToDetail(entry);
     renderDetail(entry);
     showViewRaw('detail');
   }
@@ -6621,7 +6768,7 @@ ${bodyHtml}
    * network activity). The actual view-section toggle already happened in
    * showView() before this runs. */
   async function openScanView() {
-    resetProgressPanel();
+    hideProgressPanel();
     $('scan-results').innerHTML = '';
     $('scan-empty').hidden = true;
     await loadRemotesForScanSelect();
@@ -6726,17 +6873,17 @@ ${bodyHtml}
 
     const btn = $('scan-run-btn');
     await withBusy(btn, 'Scanning...', async () => {
-      await beginProgress();
+      const opKey = await beginProgress();
       try {
         const candidates = await call('scan.run', { cwd: state.projectDir, remote });
-        endProgress(true);
+        endProgress(true, opKey);
         // Cached so returnToScan can restore this batch later (minus
         // whichever one was just proposed, if any) without a second real
         // network scan -- see that function's own doc comment.
         state.lastScanCandidates = candidates;
         renderScanResults(candidates);
       } catch (err) {
-        endProgress(false);
+        endProgress(false, opKey);
         toastError(err);
       }
     });
@@ -6759,7 +6906,7 @@ ${bodyHtml}
    * nothing needs restoring there. */
   function returnToScan(proposedId) {
     showViewRaw('scan');
-    resetProgressPanel();
+    hideProgressPanel();
     if (proposedId) {
       state.lastScanCandidates = state.lastScanCandidates.filter((c) => c.id !== proposedId);
     }
@@ -6774,7 +6921,7 @@ ${bodyHtml}
    * populating BEFORE setting its value -- showView's own fire-and-forget
    * load would otherwise race, leaving the select on its default option. */
   async function openAddNewFromScanCandidate(candidate, remoteName) {
-    resetProgressPanel();
+    hideProgressPanel();
     showViewRaw('addnew');
     resetAddNewForm();
     populateKindPicker();
@@ -7246,11 +7393,12 @@ ${bodyHtml}
     initTagPickers();
     wireEvents();
 
-    // One-time subscription for the whole app session -- unlike
-    // `sidecar-progress` (re-subscribed per action via beginProgress/
-    // endProgress), there's exactly one `auto-sync-tick` listener ever
-    // needed, since the Rust timer behind it runs for the lifetime of the
-    // app and never needs tearing down/re-creating.
+    // One-time subscription for the whole app session, like
+    // `sidecar-progress` above: the Rust timer behind it runs for the
+    // lifetime of the app and never needs tearing down or re-creating.
+    // (`sidecar-progress` used to be re-subscribed per action instead, which
+    // is what lost progress events when you navigated away mid-pull -- see
+    // the operation store's own comment.)
     await listen('auto-sync-tick', () => void onAutoSyncTick());
 
     const stored = localStorage.getItem(PROJECT_DIR_KEY);

@@ -181,6 +181,12 @@
             <span class="folder-label">Project</span>
             <span id="folder-path" class="folder-path">No folder selected</span>
             <span class="context-strip-spacer"></span>
+            <!-- Shown whenever a pull/push/update is still running, wherever
+                 you have navigated to. Without it, leaving the artifact that
+                 started an operation left NO indication anywhere that anything
+                 was happening -- it simply finished later and a toast appeared
+                 out of nowhere. Clicking it goes back to that artifact. -->
+            <button id="running-indicator" class="running-indicator" type="button" hidden></button>
             <button id="theme-toggle-btn" class="btn btn-ghost btn-sm btn-icon-only" aria-label="Switch to dark mode" title="Switch to dark mode">
               <svg class="glyph"><use href="#i-theme-moon"/></svg>
             </button>
