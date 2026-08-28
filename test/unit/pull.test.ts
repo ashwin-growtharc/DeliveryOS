@@ -103,22 +103,24 @@ describe('pullArtifact input validation', () => {
     expect(fs.existsSync(path.join(cwd, 'installed'))).toBe(false);
   }, 30_000);
 
-  // Regression for the whole-project-delete bug, at the pull end: an
-  // install_target of "." used to break pull half-way through, AFTER the
-  // payload copy and post_install had already run, because the pristine
-  // snapshot cannot be written into a subdirectory of itself.
-  it('refuses an install_target of "." before writing anything', async () => {
+  // A ROOT install_target is legitimate: a lint/tooling scaffold's whole job
+  // is to write eslint.config.js, .prettierrc and friends at the project root.
+  // It previously died with ERR_FS_CP_EINVAL -- AFTER copying the payload and
+  // running post_install -- because the pristine snapshot is written to
+  // <cwd>/.deliveryos/pristine/<id>, inside the directory being copied.
+  it('installs an artifact whose install_target is the project root', async () => {
     writeRegistry(['test-remote']);
     const remoteCacheDir = remoteCachePath('test-remote');
-    const payloadDir = path.join(remoteCacheDir, 'artifacts', 'root-target', 'payload');
+    const payloadDir = path.join(remoteCacheDir, 'artifacts', 'lint-scaffold', 'payload');
     fs.mkdirSync(payloadDir, { recursive: true });
-    fs.writeFileSync(path.join(payloadDir, 'README.md'), '# root-target\n', 'utf-8');
+    fs.writeFileSync(path.join(payloadDir, 'eslint.config.js'), 'export default [];\n', 'utf-8');
+    fs.writeFileSync(path.join(payloadDir, '.prettierrc'), '{}\n', 'utf-8');
     fs.writeFileSync(
-      path.join(remoteCacheDir, 'artifacts', 'root-target', 'manifest.yaml'),
+      path.join(remoteCacheDir, 'artifacts', 'lint-scaffold', 'manifest.yaml'),
       [
-        'id: root-target',
+        'id: lint-scaffold',
         'kind: template',
-        'description: An artifact declaring the project root as its install target',
+        'description: ESLint + Prettier config for the project root',
         'owner: team-x',
         'version: 1.0.0',
         'source_repo: https://example.invalid/repo',
@@ -129,15 +131,23 @@ describe('pullArtifact input validation', () => {
       'utf-8',
     );
 
-    fs.writeFileSync(path.join(cwd, 'important-source.ts'), 'export const keep = true;', 'utf-8');
+    // Real pre-existing project content, which must survive.
+    fs.writeFileSync(path.join(cwd, 'existing.ts'), 'export const keep = true;', 'utf-8');
 
-    await expect(pullArtifact('root-target', undefined, cwd)).rejects.toThrow();
+    await pullArtifact('lint-scaffold', undefined, cwd);
 
-    // The project is untouched -- no payload copied over it, and nothing
-    // half-applied.
-    expect(fs.existsSync(path.join(cwd, 'important-source.ts'))).toBe(true);
-    expect(fs.existsSync(path.join(cwd, 'README.md'))).toBe(false);
-    expect(readLockfile(cwd).entries.find((e) => e.id === 'root-target')).toBeUndefined();
+    // The scaffold's files landed at the project root.
+    expect(fs.existsSync(path.join(cwd, 'eslint.config.js'))).toBe(true);
+    expect(fs.existsSync(path.join(cwd, '.prettierrc'))).toBe(true);
+    // Nothing pre-existing was destroyed.
+    expect(fs.readFileSync(path.join(cwd, 'existing.ts'), 'utf-8')).toContain('keep');
+    // The pristine snapshot exists and, crucially, does not contain a copy of
+    // itself -- the filter is what makes a root install possible at all.
+    const pristine = path.join(cwd, '.deliveryos', 'pristine', 'lint-scaffold');
+    expect(fs.existsSync(path.join(pristine, 'eslint.config.js'))).toBe(true);
+    expect(fs.existsSync(path.join(pristine, '.deliveryos'))).toBe(false);
+
+    expect(readLockfile(cwd).entries.find((e) => e.id === 'lint-scaffold')).toBeDefined();
   }, 30_000);
 });
 
@@ -247,7 +257,15 @@ describe('pullArtifact containment checks (install_target / payload_path)', () =
       'utf-8',
     );
 
-    await expect(pullArtifact('evil-target', undefined, cwd)).rejects.toBeInstanceOf(ManifestValidationError);
+    // Rejected EARLIER than it used to be. The schema now refuses an escaping
+    // install_target at parse time, so discoverManifests skips the artifact
+    // entirely and it never reaches the catalog -- pull cannot resolve it at
+    // all. That is a strictly better outcome than reaching pull and being
+    // refused there: a manifest that can never be safely installed should not
+    // be offerable in the first place.
+    await expect(pullArtifact('evil-target', undefined, cwd)).rejects.toBeInstanceOf(
+      ArtifactResolutionError,
+    );
     // Nothing was created outside cwd -- the escape target's parent (four
     // levels up from cwd) never gains an "escaped" child directory.
     expect(fs.existsSync(path.join(cwd, '..', '..', '..', '..', 'escaped'))).toBe(false);

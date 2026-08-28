@@ -35,18 +35,23 @@ describe('ManifestSchema', () => {
     }
   });
 
-  // Regression guard for the whole-project-delete bug. `pull` copies the
-  // payload OVER install_target and `remove` recursively DELETES it, so an
-  // install_target naming the consuming project's own root means "overwrite,
-  // then later delete, the user's entire project". Caught here at the trust
-  // boundary, in addition to resolveContainedPath's allowRoot: false at each
-  // use site.
   describe('install_target', () => {
-    it('rejects every spelling of the project root', () => {
-      const bs = String.fromCharCode(92);
-      for (const install_target of ['.', './', '.' + bs, 'sub/..', './sub/../.', './/']) {
+    // The schema deliberately ALLOWS a root install_target. An earlier version
+    // rejected it and broke a real artifact: `react-vite-lint-scaffold` is a
+    // lint/tooling scaffold whose whole job is to drop eslint.config.js,
+    // .prettierrc and friends at the project root, so a root target is the
+    // correct shape for it. And because discoverManifests treated an invalid
+    // manifest as fatal, that one rejection blanked the entire 227-artifact
+    // catalog.
+    //
+    // The hazard was never `pull` -- copying files into the project root is
+    // just what a scaffold does. It is `remove`, which recursively deletes the
+    // path. That guard lives in removeArtifact (`allowRoot: false`), where the
+    // deletion actually happens, and is covered by removeArtifact.test.ts.
+    it('allows a root install_target, which a scaffold legitimately needs', () => {
+      for (const install_target of ['.', './']) {
         const result = ManifestSchema.safeParse({ ...baseManifest, install_target });
-        expect(result.success, `expected ${JSON.stringify(install_target)} to be rejected`).toBe(false);
+        expect(result.success, `expected ${JSON.stringify(install_target)} to be accepted`).toBe(true);
       }
     });
 

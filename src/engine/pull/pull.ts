@@ -175,14 +175,16 @@ export async function pullArtifact(
   // for real is a judgment call for the Wiring section's own AI-assist
   // flow, not something the synchronous pull path guesses at.
   const effectiveInstallTarget = adaptSrcDirPath(cwd, manifest.install_target) ?? manifest.install_target;
-  const installTarget = resolveContainedPath(cwd, effectiveInstallTarget, { allowRoot: false });
+  // allowRoot stays TRUE here. A root install_target is a legitimate shape for
+  // a scaffold artifact whose job is to write config files at the project root
+  // (eslint.config.js, .prettierrc, ...), and rejecting it here broke exactly
+  // such an artifact. The destructive case is `remove`, not `pull` -- see
+  // removeArtifact, which passes allowRoot: false because it deletes.
+  const installTarget = resolveContainedPath(cwd, effectiveInstallTarget);
   if (!installTarget) {
     throw new ManifestValidationError(
-      `Artifact "${manifest.id}"'s install_target ("${manifest.install_target}") does not resolve to a `
-        + `directory inside the project -- refusing to install. An install_target must name a real `
-        + `subdirectory: it may not escape the project, and it may not be the project root itself `
-        + `(".", "./", or an empty path), because installing and later removing this artifact would `
-        + `then operate on the whole project.`,
+      `Artifact "${manifest.id}"'s install_target ("${manifest.install_target}") resolves outside the `
+        + `project -- refusing to install.`,
     );
   }
 
@@ -296,7 +298,29 @@ export async function pullArtifact(
   if (fs.existsSync(pristineTarget)) {
     fs.rmSync(pristineTarget, { recursive: true, force: true });
   }
-  fs.cpSync(installTarget, pristineTarget, { recursive: true });
+  if (installTarget === path.resolve(cwd)) {
+    // ROOT install_target (a scaffold that writes config files at the project
+    // root). Copying installTarget wholesale is both impossible and wrong
+    // here: impossible because the snapshot lives at
+    // <cwd>/.deliveryos/pristine/<id>, inside the directory being copied, and
+    // Node rejects that with ERR_FS_CP_EINVAL; wrong because it would
+    // snapshot the user's ENTIRE project as if it were the artifact, so every
+    // unrelated file they own would later read as part of it.
+    //
+    // A `filter` does not help -- Node checks self-containment before the
+    // filter runs. So copy only the top-level entries the payload actually
+    // provided, taken FROM installTarget so post_install's own output is still
+    // captured (the reasoning above still applies to those paths).
+    fs.mkdirSync(pristineTarget, { recursive: true });
+    for (const entry of fs.readdirSync(payloadSrc)) {
+      const installed = path.join(installTarget, entry);
+      if (fs.existsSync(installed)) {
+        fs.cpSync(installed, path.join(pristineTarget, entry), { recursive: true });
+      }
+    }
+  } else {
+    fs.cpSync(installTarget, pristineTarget, { recursive: true });
+  }
 
   // Deliberately after the pristine snapshot above, and writes to `cwd`
   // itself (`.env.local`), never into `installTarget` -- see

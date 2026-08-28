@@ -126,22 +126,24 @@ export const ManifestSchema = z.object({
   // Where the payload is installed inside the CONSUMING project, relative
   // to that project's root.
   //
-  // Refuses any value that names the project root itself (".", "./", "",
-  // trailing-slash and `a/..`-style variants are all normalized before the
-  // check). That is not a style rule -- `pull` copies the payload over this
-  // path and `remove` recursively DELETES it, so a root install_target means
-  // "overwrite, then later delete, the user's entire project". Rejected here
-  // at the trust boundary as well as at each use site (see
-  // `resolveContainedPath`'s `allowRoot: false`), so a bad manifest is caught
-  // when it is parsed rather than only when it is acted on.
+  // Rejects anything escaping the project. Deliberately does NOT reject the
+  // project root itself.
+  //
+  // An earlier version did, and it was wrong: it broke a real, legitimate
+  // artifact. `react-vite-lint-scaffold` is a lint/tooling scaffold whose
+  // entire purpose is to drop eslint.config.js, .prettierrc and friends at the
+  // project root -- a root `install_target` is the correct shape for it, not a
+  // mistake. Worse, because `discoverManifests` treats any invalid manifest as
+  // fatal, that one rejection blanked the whole 227-artifact catalog.
+  //
+  // The real hazard was never `pull` (copying files into the project root is
+  // just what a scaffold does) -- it is `remove`, which recursively DELETES
+  // this path and would take the user's entire project with it. So the guard
+  // belongs there, and only there: `removeArtifact` passes
+  // `{ allowRoot: false }` and refuses. See that call site.
   install_target: z
     .string()
     .min(1)
-    .refine((value) => normalizeRelative(value) !== '', {
-      message:
-        'install_target may not be the project root (".", "./", or equivalent) -- '
-        + 'it must name a subdirectory, because pull writes over it and remove deletes it',
-    })
     .refine((value) => !normalizeRelative(value).startsWith('..'), {
       message: 'install_target may not escape the project root',
     }),

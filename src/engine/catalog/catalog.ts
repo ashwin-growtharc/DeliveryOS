@@ -1,6 +1,6 @@
 import { listRemotes } from '../remote/remoteRegistry';
 import { cachePath, refreshRemoteCache } from '../remote/remoteCache';
-import { discoverManifests } from '../manifest/parser';
+import { discoverManifests, SkippedManifest } from '../manifest/parser';
 import { Manifest } from '../manifest/schema';
 import { readLockfile } from '../lockfile/lockfile';
 import { computeChangedFiles } from '../push/diff';
@@ -38,13 +38,34 @@ export function buildCatalog(): CatalogEntry[] {
   const entries: CatalogEntry[] = [];
 
   for (const remote of remotes) {
-    const manifests = discoverManifests(cachePath(remote.name));
+    const { manifests, skipped } = discoverManifests(cachePath(remote.name));
     for (const manifest of manifests) {
       entries.push({ manifest, remoteName: remote.name });
+    }
+    // Reported, never fatal. A single unloadable manifest used to throw and
+    // take the whole catalog with it -- 227 artifacts made unreachable by one
+    // bad file. Surfaced here so a broken artifact is still visible as a
+    // problem rather than silently vanishing, without stopping anyone else
+    // from browsing.
+    for (const entry of skipped) {
+      lastSkippedManifests.push({ ...entry, remoteName: remote.name });
     }
   }
 
   return entries;
+}
+
+/** Manifests skipped by the most recent `buildCatalog()` call, if any.
+ *
+ * Deliberately a module-level record rather than a return value: `buildCatalog`
+ * has many callers and returning a tuple from all of them would be a wide,
+ * mechanical change for a signal that is purely advisory. Callers that want to
+ * warn read this immediately after calling. */
+const lastSkippedManifests: Array<SkippedManifest & { remoteName: string }> = [];
+
+/** Returns (and clears) the manifests skipped by the last `buildCatalog()`. */
+export function takeSkippedManifests(): Array<SkippedManifest & { remoteName: string }> {
+  return lastSkippedManifests.splice(0, lastSkippedManifests.length);
 }
 
 /**
