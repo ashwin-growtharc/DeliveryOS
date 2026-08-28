@@ -38,14 +38,75 @@
      introduces no visual change here), but a distinct token so dark mode
      can turn text light without also turning brand-fill buttons light. */
   --ink: var(--primary-700);
-  --text-secondary: #6E6455;
+
+  /* ---- text colour ramp ----
+   * Three real colours, replacing the `opacity` on --ink that used to express
+   * "quieter text". That approach had two costs: it composited --ink down
+   * below the WCAG AA floor (46 of 200 theme-x-surface checks failed, worst
+   * being the primary nav tabs at 2.75:1), and because every rule picked its
+   * own number, one semantic role got several different values -- field
+   * labels at .55 in four places and .65 in three, counts at .5/.55/.65, body
+   * text at .7/.8/.85/.9. Nothing coordinated them, so nothing lined up.
+   *
+   * Values are chosen, not guessed: `node scripts/ui/audit-contrast.mjs`
+   * reports the real ratio of each against both surfaces the app actually
+   * paints text on (--surface and --card), and every one clears 4.5:1 against
+   * the WORSE of the two. --text-tertiary keeps the exact value
+   * --text-secondary used to hold, so the warm brand tone is preserved rather
+   * than replaced; --text-secondary is that same hue darkened. */
+  --text-primary: var(--ink);          /* 11.2:1 -- body copy, values, names */
+  --text-secondary: #5C5344;           /*  7.4:1 -- labels, hints, summaries */
+  --text-tertiary: #6E6455;            /*  5.7:1 -- counts, meta, captions   */
+
+  /* ---- type scale ----
+   * Was 13 distinct hardcoded values including four half-pixel steps
+   * (10, 10.5, 11, 11.5, 12, 12.5, 13, 13.5, 14, 18, 20, 22, 23) -- an
+   * eight-step ramp inside a 3.5px range, which reads as noise rather than
+   * hierarchy. Collapsed to seven, aligned with the design kit this product
+   * ships (13-14px body, 18-24px headings). --text-2xs exists because badges
+   * and micro-labels genuinely sit below body size; everything that was 10 or
+   * 10.5 rounds UP into it rather than staying sub-11px. */
+  --text-2xs: 11px; --text-xs: 12px; --text-sm: 13px; --text-base: 14px;
+  --text-lg: 18px; --text-xl: 20px; --text-2xl: 22px;
+
+  /* ---- spacing scale ----
+   * The design kit specifies multiples of 4. The stylesheet had 44 distinct
+   * padding combinations and 12 distinct gaps, including off-grid 5px, 7px
+   * and 18px one-offs. */
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px;
+  --space-5: 20px; --space-6: 24px; --space-7: 28px; --space-8: 32px;
+
+  /* ---- motion ----
+   * Exactly what the design kit specifies: .15s for ordinary state changes,
+   * .2s ease-out for a larger reveal. Replaces ad-hoc .1s/.15s/.2s.
+   * Everything using these is still disabled wholesale under
+   * prefers-reduced-motion at the end of this file. */
+  --motion-fast: .15s ease;
+  --motion-reveal: .2s ease-out;
+
+  /* ---- stacking ----
+   * Was ad-hoc, with the terminal overlay picking a bare 2000. */
+  --z-sticky: 10; --z-overlay: 1000; --z-toast: 2000;
   /* Same stack `code, .mono` already sets directly below -- defined as a
      token too since 5 other rules reference `var(--font-mono, monospace)`
      and, with no --font-mono ever defined, were silently falling back to
      the bare generic monospace fallback instead of the real font. */
   --font-mono: 'JetBrains Mono', ui-monospace, Consolas, monospace;
+  /* The other two stacks existed only as literals repeated through the file --
+     the serif one written out 9 times, the sans one 3 -- so there was no single
+     place to change a face. Worse, the mono stack was written THREE ways: this
+     full one, a lossy `'JetBrains Mono', monospace` (14 uses) that silently
+     dropped the ui-monospace/Consolas fallbacks, and var(--font-mono). */
+  --font-sans: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-serif: 'EB Garamond', Georgia, serif;
   /* AI accent colors -- AI-specific elements only, see rule comments below */
   --accent-500: #7A00DF; --accent-600: #6600B8; --cyan-500: #0693E3; --cyan-600: #0577B8; --mint-500: #00D084;
+  /* The AI accent as LINK TEXT, which -- unlike a fill -- has to stay
+     readable against the page itself. --accent-600 is deliberately fixed in
+     both themes (it reads fine as a solid fill with white on top), but as
+     text on the dark surface it measures 1.68:1: unusable. This token is the
+     adaptive counterpart, and only link-like text uses it. */
+  --link-accent: var(--accent-600);
   /* status */
   --success-100: #DCF8E6; --success-600: #236D40; --warning-100: #FFF4E0; --warning-600: #9C5D00;
   --danger-100: #FFE5E0; --danger-500: #E94E2D; --danger-600: #A2341F;
@@ -54,7 +115,7 @@
   --gradient-ai: linear-gradient(135deg, #0693E3, #7A00DF);
   --gradient-mint: linear-gradient(135deg, #00D084, #0693E3);
   --shadow-1: 0 1px 3px rgb(0 0 0/0.04); --shadow-2: 0 4px 12px rgb(0 0 0/0.08);
-  --radius-md: .5rem; --radius-lg: 1rem; --radius-xl: 1.25rem; --radius-pill: 31.25rem;
+  --radius-sm: .25rem; --radius-md: .5rem; --radius-lg: 1rem; --radius-xl: 1.25rem; --radius-pill: 31.25rem;
 }
 
 /* ---------- dark mode ----------
@@ -76,12 +137,25 @@
  * already vivid enough to read on a dark surface, and changing them would
  * dilute the brand identity they exist to carry. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  /* `:not([data-theme="light"])` is load-bearing, not decoration. It is the
+   * ONLY reason the old `:root[data-theme="light"]` block could be deleted:
+   * without this guard, a user on a dark-preference OS who explicitly picks
+   * light gets the media query's dark values anyway, because nothing outranks
+   * them. With it, an explicit light choice simply falls through to the base
+   * `:root` light palette above. */
+  :root:not([data-theme="light"]) {
     --surface: #15181B; --surface-secondary: #15181B; --surface-tertiary: #0F1214; --surface-inset: #0A0C0D;
     --card: #1F2427;
     --border: #343B3F; --border-strong: #454D51; --border-subtle: #0A0C0D;
     --ink: #ECE9E2;
-    --text-secondary: #918F89;
+    /* Same three-step ramp as light, measured the same way: each clears
+     * 4.5:1 against the worse of --surface/--card. --text-tertiary keeps
+     * the value --text-secondary used to hold here too. */
+    --text-primary: var(--ink);   /* 12.9:1 */
+    --text-secondary: #A8A6A1;    /*  6.4:1 */
+    --text-tertiary: #918F89;     /*  4.9:1 */
+  --link-accent: #BE93F0;       /*  6.4:1 -- see --link-accent above */
+    --link-accent: #BE93F0;       /*  6.4:1 -- see --link-accent above */
     --sage-100: #17261A;
     --sand-100: #2C2013; --sand-200: #382A18;
     --sky-100: #10202C;
@@ -93,12 +167,25 @@
   }
 }
 
+/* The explicit dark choice, for a user whose OS prefers light. Same values as
+ * the media query above -- CSS has no way to share one declaration block
+ * between a media-query context and a plain selector, so this pair is the
+ * irreducible minimum. It replaces what used to be FOUR copies of the same
+ * 24 tokens (base :root, this media block, [data-theme="dark"], and a
+ * [data-theme="light"] block that restated the base values verbatim), which
+ * meant every palette change needed four correct edits and any missed one
+ * produced a colour that was right in one theme and wrong in the other. */
 :root[data-theme="dark"] {
   --surface: #15181B; --surface-secondary: #15181B; --surface-tertiary: #0F1214; --surface-inset: #0A0C0D;
   --card: #1F2427;
   --border: #343B3F; --border-strong: #454D51; --border-subtle: #0A0C0D;
   --ink: #ECE9E2;
-  --text-secondary: #918F89;
+  /* Same three-step ramp as light, measured the same way: each clears
+   * 4.5:1 against the worse of --surface/--card. --text-tertiary keeps
+   * the value --text-secondary used to hold here too. */
+  --text-primary: var(--ink);   /* 12.9:1 */
+  --text-secondary: #A8A6A1;    /*  6.4:1 */
+  --text-tertiary: #918F89;     /*  4.9:1 */
   --sage-100: #17261A;
   --sand-100: #2C2013; --sand-200: #382A18;
   --sky-100: #10202C;
@@ -107,24 +194,6 @@
   --warning-100: #3D2907; --warning-600: #F2B24E;
   --danger-100: #45170F; --danger-600: #FF8A66;
   --shadow-1: 0 1px 3px rgb(0 0 0/0.4); --shadow-2: 0 4px 16px rgb(0 0 0/0.55);
-}
-
-/* Forces light mode even when the OS prefers dark -- an explicit
-   opposite choice has to win over the media query, not just add to it. */
-:root[data-theme="light"] {
-  --surface: #FFFCF2; --surface-secondary: #FFFCF2; --surface-tertiary: #F6F1E9; --surface-inset: #EDE6DA;
-  --card: #FFFFFF;
-  --border: #E0D9CE; --border-strong: #C9BFAF; --border-subtle: #EDE6DA;
-  --ink: #1E3C53;
-  --text-secondary: #6E6455;
-  --sage-100: #EAF4DB;
-  --sand-100: #F6E8CC; --sand-200: #EDD9B3;
-  --sky-100: #DBE8F4;
-  --icon-fg-warm: #8A5A2B; --icon-fg-cool: #2E5E82;
-  --success-100: #DCF8E6; --success-600: #236D40;
-  --warning-100: #FFF4E0; --warning-600: #9C5D00;
-  --danger-100: #FFE5E0; --danger-600: #A2341F;
-  --shadow-1: 0 1px 3px rgb(0 0 0/0.04); --shadow-2: 0 4px 12px rgb(0 0 0/0.08);
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -251,8 +320,7 @@ input, textarea, select {
   gap: 10px;
   padding: 9px 12px;
   border-radius: var(--radius-md);
-  color: var(--ink);
-  opacity: .7;
+  color: var(--text-secondary);
   font-weight: 500;
   font-size: 13.5px;
   cursor: pointer;
@@ -263,15 +331,14 @@ input, textarea, select {
 }
 
 .sidebar-item:hover {
-  opacity: 1;
   background: var(--surface-tertiary);
+  color: var(--ink);
 }
 
 /* Active nav state: sage-100 background + navy text, exactly the pairing
  * DESIGN_SYSTEM.md's Navigation section specifies for the active sidebar
  * item. */
 .sidebar-item.active {
-  opacity: 1;
   background: var(--sage-100);
   color: var(--ink);
   font-weight: 600;
@@ -316,7 +383,7 @@ input, textarea, select {
   letter-spacing: .8px;
   font-size: 10.5px;
   font-weight: 600;
-  opacity: .5;
+color: var(--text-tertiary);
 }
 
 .folder-path {
@@ -466,8 +533,7 @@ input, textarea, select {
 }
 
 .empty-state {
-  color: var(--ink);
-  opacity: .6;
+  color: var(--text-secondary);
   font-size: 13.5px;
   padding: 24px 4px;
 }
@@ -616,20 +682,18 @@ input, textarea, select {
   padding: 9px 15px 11px;
   font-size: 13.5px;
   font-weight: 500;
-  color: var(--ink);
-  opacity: .5;
+  color: var(--text-tertiary);
   cursor: pointer;
   white-space: nowrap;
 }
 
 .tab-row .tab:hover {
-  opacity: .8;
 }
 
 .tab-row .tab.active {
-  opacity: 1;
   font-weight: 600;
   border-bottom-color: var(--ink);
+  color: var(--ink);
 }
 
 .page-head {
@@ -643,7 +707,7 @@ input, textarea, select {
 
 .page-head .count {
   font-size: 13px;
-  opacity: .5;
+color: var(--text-tertiary);
 }
 
 .page-head-actions {
@@ -764,13 +828,13 @@ input, textarea, select {
 
 .tag-item-count {
   font-size: 11.5px;
-  opacity: .55;
   font-family: 'JetBrains Mono', monospace;
   margin-top: 4px;
+color: var(--text-tertiary);
 }
 
 .tag-item-chev {
-  opacity: .3;
+  color: var(--text-tertiary);
   font-size: 22px;
   line-height: 1;
   flex-shrink: 0;
@@ -817,8 +881,8 @@ input, textarea, select {
 .ui-component-row-header .index {
   font-family: 'JetBrains Mono', monospace;
   font-size: 12px;
-  opacity: .45;
   margin-right: 8px;
+color: var(--text-tertiary);
 }
 
 .ui-component-row-header .name {
@@ -829,15 +893,15 @@ input, textarea, select {
 
 .ui-component-row-header .meta {
   font-size: 11px;
-  opacity: .55;
   font-family: 'JetBrains Mono', monospace;
   margin-left: 10px;
+color: var(--text-tertiary);
 }
 
 .ui-component-row-header .description {
   margin: 6px 0 0;
   font-size: 13px;
-  opacity: .7;
+color: var(--text-secondary);
 }
 
 /* The live-preview slot -- an iframe fills this once IntersectionObserver
@@ -928,8 +992,8 @@ input, textarea, select {
   text-align: center;
   overflow-wrap: break-word;
   font-size: 11px;
-  opacity: .4;
   font-family: 'JetBrains Mono', monospace;
+color: var(--text-tertiary);
 }
 
 /* ---------- Detail view: live preview + variant tabs + controls (Phase C) ---------- */
@@ -959,8 +1023,8 @@ input, textarea, select {
   display: block;
   font-size: 12px;
   font-weight: 500;
-  opacity: .65;
   margin-bottom: 5px;
+color: var(--text-secondary);
 }
 
 .control-checkbox {
@@ -1024,9 +1088,9 @@ input, textarea, select {
 
 .kind-group-header .count {
   font-weight: 400;
-  opacity: .65;
   text-transform: none;
   letter-spacing: normal;
+color: var(--text-tertiary);
 }
 
 .kind-group-list {
@@ -1064,7 +1128,6 @@ input, textarea, select {
 
 .kind-group-row .row-main .summary {
   font-size: 13px;
-  opacity: .8;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1072,6 +1135,7 @@ input, textarea, select {
   align-items: center;
   gap: 6px;
   min-width: 0;
+color: var(--text-secondary);
 }
 
 .kind-group-row .row-main .summary .summary-text {
@@ -1125,15 +1189,15 @@ input, textarea, select {
   font-size: 10.5px;
   text-transform: uppercase;
   letter-spacing: .06em;
-  opacity: .5;
   font-weight: 600;
   margin-top: 2px;
+color: var(--text-tertiary);
 }
 
 .res-card .summary {
   font-size: 13px;
-  opacity: .8;
   flex: 1;
+color: var(--text-secondary);
 }
 
 .res-card .row2 {
@@ -1145,8 +1209,8 @@ input, textarea, select {
 
 .res-card .meta {
   font-size: 11px;
-  opacity: .55;
   font-family: 'JetBrains Mono', monospace;
+color: var(--text-tertiary);
 }
 
 /* status badges -- 3 distinct colors from the warm/status palette */
@@ -1170,13 +1234,11 @@ input, textarea, select {
 .badge.pulled {
   background: var(--success-100);
   color: var(--success-600);
-  opacity: 1;
 }
 
 .badge.edited_locally {
   background: var(--warning-100);
   color: var(--warning-600);
-  opacity: 1;
 }
 
 /* "Update available" is a plain data-freshness signal, not an AI feature --
@@ -1186,13 +1248,11 @@ input, textarea, select {
 .badge.update_available {
   background: var(--sand-200);
   color: var(--ink);
-  opacity: 1;
 }
 
 .badge.both_changed {
   background: var(--danger-100);
   color: var(--danger-600);
-  opacity: 1;
 }
 
 /* ---------- detail ---------- */
@@ -1236,7 +1296,7 @@ input, textarea, select {
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: .5px;
-  opacity: .6;
+color: var(--text-tertiary);
 }
 
 .detail-title .name {
@@ -1247,8 +1307,8 @@ input, textarea, select {
 
 .detail-description {
   font-size: 13.5px;
-  opacity: .85;
   margin: 0 0 4px;
+color: var(--text-secondary);
 }
 
 .meta-grid {
@@ -1263,8 +1323,7 @@ input, textarea, select {
 }
 
 .meta-grid .k {
-  color: var(--ink);
-  opacity: .55;
+  color: var(--text-secondary);
   font-size: 11.5px;
   font-weight: 500;
   text-transform: uppercase;
@@ -1291,10 +1350,10 @@ input, textarea, select {
 .install-path-label {
   font-size: 11.5px;
   font-weight: 500;
-  opacity: .55;
   text-transform: uppercase;
   letter-spacing: .3px;
   margin-bottom: 6px;
+color: var(--text-secondary);
 }
 
 .install-path {
@@ -1458,7 +1517,7 @@ input, textarea, select {
   flex-shrink: 0;
   border: none;
   background: none;
-  color: var(--accent-600);
+  color: var(--link-accent);
   font-size: 11.5px;
   font-weight: 600;
   cursor: pointer;
@@ -1543,8 +1602,8 @@ input, textarea, select {
   align-items: center;
   gap: 7px;
   font-size: 12.5px;
-  opacity: .6;
   margin: -6px 0 14px;
+color: var(--text-secondary);
 }
 
 .markdown-frame {
@@ -1578,8 +1637,8 @@ input, textarea, select {
 
 .install-param-help {
   font-size: 11px;
-  opacity: .6;
   margin-bottom: 5px;
+color: var(--text-secondary);
 }
 
 .install-params-form input[type="text"],
@@ -1619,8 +1678,8 @@ input, textarea, select {
 
 .route-node-error-note {
   font-size: 11px;
-  opacity: .6;
   font-style: italic;
+color: var(--text-secondary);
 }
 
 .route-node-children {
@@ -1691,8 +1750,8 @@ input, textarea, select {
   font-weight: 600;
   letter-spacing: .3px;
   text-transform: uppercase;
-  opacity: .65;
   margin: 18px 0 10px;
+color: var(--text-secondary);
 }
 
 .wiring-action-card {
@@ -1740,7 +1799,7 @@ input, textarea, select {
 
 .wiring-action-status.absent {
   background: var(--surface-inset);
-  opacity: .7;
+  color: var(--text-secondary);
 }
 
 .wiring-action-status.exists {
@@ -1766,8 +1825,8 @@ input, textarea, select {
 
 .wiring-action-instructions {
   font-size: 12.5px;
-  opacity: .75;
   margin-bottom: 8px;
+color: var(--text-secondary);
 }
 
 .wiring-action-snippet {
@@ -1841,9 +1900,9 @@ input, textarea, select {
 .type-sample-label {
   font-family: var(--font-mono, monospace);
   font-size: 10.5px;
-  opacity: .65;
   width: 130px;
   flex-shrink: 0;
+color: var(--text-secondary);
 }
 
 .type-sample-text {
@@ -1859,7 +1918,7 @@ input, textarea, select {
 
 .template-theme-toggle-caption {
   font-size: 12px;
-  opacity: .65;
+color: var(--text-secondary);
 }
 
 .template-component-grid {
@@ -1878,9 +1937,9 @@ input, textarea, select {
 
 .template-component-caption {
   font-size: 12px;
-  opacity: .75;
   margin: 6px 0 0;
   line-height: 1.5;
+color: var(--text-tertiary);
 }
 
 /* Layout-rules summary strip: real radius tokens as chips, plus
@@ -1914,22 +1973,22 @@ input, textarea, select {
 }
 
 .radius-token-chip span {
-  opacity: .65;
+color: var(--text-tertiary);
 }
 
 .layout-rules-note {
   font-size: 12.5px;
-  opacity: .75;
   line-height: 1.5;
   margin: 0 0 8px;
+color: var(--text-tertiary);
 }
 
 .component-detail-usage-rule {
   font-size: 13.5px;
-  opacity: .8;
   line-height: 1.6;
   margin: 4px 0 20px;
   max-width: 640px;
+color: var(--text-secondary);
 }
 
 /* ---------- progress panel (live Pull/Push stage feed) ----------
@@ -2036,8 +2095,8 @@ input, textarea, select {
   flex-shrink: 0;
   text-transform: uppercase;
   letter-spacing: .3px;
-  opacity: .6;
   min-width: 80px;
+color: var(--text-tertiary);
 }
 
 /* ---------- build-fix offers (Phase 10 item 2) ---------- */
@@ -2090,10 +2149,10 @@ input, textarea, select {
 }
 
 .progress-line .msg {
-  opacity: .9;
   overflow-wrap: anywhere;
   min-width: 0;
   flex: 1;
+color: var(--text-primary);
 }
 
 /* ---------- forms (add-new / remote) ---------- */
@@ -2108,14 +2167,14 @@ input, textarea, select {
   display: block;
   font-size: 12px;
   font-weight: 500;
-  opacity: .65;
   margin-bottom: 5px;
+color: var(--text-secondary);
 }
 
 .field-hint {
   font-size: 11px;
-  opacity: .55;
   margin: 5px 0 0;
+color: var(--text-secondary);
 }
 
 .field input[type="text"],
@@ -2210,8 +2269,7 @@ input, textarea, select {
 .tag-chip-remove {
   border: none;
   background: transparent;
-  color: var(--ink);
-  opacity: .55;
+  color: var(--text-tertiary);
   cursor: pointer;
   font-size: 14px;
   line-height: 1;
@@ -2219,7 +2277,6 @@ input, textarea, select {
 }
 
 .tag-chip-remove:hover {
-  opacity: 1;
 }
 
 .tag-picker-input {
@@ -2307,9 +2364,9 @@ input, textarea, select {
 .wizard-progress-label {
   font-size: 12px;
   font-weight: 500;
-  opacity: .6;
   white-space: nowrap;
   flex-shrink: 0;
+color: var(--text-secondary);
 }
 
 .wizard-step {
@@ -2387,7 +2444,7 @@ input, textarea, select {
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: .3px;
-  opacity: .55;
+color: var(--text-secondary);
 }
 
 .wizard-review-value {
@@ -2481,8 +2538,8 @@ input, textarea, select {
 
 .settings-row .s {
   font-size: 12px;
-  opacity: .55;
   word-break: break-all;
+color: var(--text-secondary);
 }
 
 /* ---------- toasts ---------- */
@@ -2538,7 +2595,7 @@ input, textarea, select {
   background: none;
   border: none;
   padding: 0;
-  color: var(--accent-600);
+  color: var(--link-accent);
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
