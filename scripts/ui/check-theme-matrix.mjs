@@ -17,14 +17,34 @@
 // launcher src/engine/preview/renderPreviewImage.ts uses), so it tests the
 // actual cascade rather than a reimplementation of it.
 
+import fs from 'node:fs';
+import postcss from 'postcss';
 import { chromium } from 'playwright-core';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-const TOKENS = ['--surface','--surface-secondary','--surface-tertiary','--surface-inset','--card',
-  '--border','--border-strong','--border-subtle','--ink','--text-secondary','--sage-100',
-  '--sand-100','--sand-200','--sky-100','--icon-fg-warm','--icon-fg-cool','--success-100',
-  '--success-600','--warning-100','--warning-600','--danger-100','--danger-600','--shadow-1','--shadow-2'];
+// Derived from the stylesheet itself, never hardcoded.
+//
+// An earlier version listed the 24 tokens by hand -- and then silently missed
+// a real bug: a bad edit left --sage-50 and --icon-fg-sage out of one of the
+// two dark blocks entirely, so the two disagreed and one theme path was
+// wrong. The check passed, because neither token was on its list. A guard
+// that only inspects what you remembered to tell it about is not a guard.
+const TOKENS = (() => {
+  const css = fs.readFileSync(
+    path.join(process.cwd(), 'src-tauri', 'spike-ui', 'style.css'), 'utf-8',
+  );
+  const root = postcss.parse(css);
+  const names = new Set();
+  root.walkRules((rule) => {
+    const sel = rule.selector.replace(/\s+/g, ' ').trim();
+    // Only tokens that a theme block actually redefines can differ between
+    // themes; the rest are theme-invariant by construction.
+    if (!/data-theme="dark"|not\(\[data-theme="light"\]\)/.test(sel)) return;
+    rule.walkDecls((d) => { if (d.prop.startsWith('--')) names.add(d.prop); });
+  });
+  return [...names].sort();
+})();
 
 const url = pathToFileURL(path.join(process.cwd(),'src-tauri','spike-ui','index.html')).href;
 let b;
@@ -57,6 +77,7 @@ for (const [label, cs, dt] of cases) results[label] = await read(cs, dt);
 await b.close();
 
 const isDark = o => o['--surface'] === '#15181B';
+console.log(`checking ${TOKENS.length} theme-varying tokens (derived from style.css)`);
 console.log('resolved theme per case:');
 for (const [label, o] of Object.entries(results)) {
   console.log('  ' + label + ' -> ' + (isDark(o) ? 'DARK' : 'LIGHT') + '  ink=' + o['--ink']);

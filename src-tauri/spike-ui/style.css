@@ -28,6 +28,12 @@
   --icon-fg-warm: #8A5A2B;
   /* Same pairing problem, for --sky-100 (command/typescript/go entries). */
   --icon-fg-cool: #2E5E82;
+  /* Third member of the same adaptive-icon-foreground family. The `agent`
+     swatch paired --sage-700 (a FIXED brand accent) with --sage-100 (which
+     adapts), giving 2.83:1 in light mode -- under the 3:1 WCAG floor for a
+     non-text graphic. No single fixed value clears both themes on those two
+     backgrounds, which is precisely why warm/cool are adaptive. */
+  --icon-fg-sage: #5F7A3E;
   /* primary -- navy teal. Fixed brand-identity color, deliberately NOT
      redefined for dark mode: it's only ever used as a solid fill (button/
      chip backgrounds) with white text on top, which stays legible on a
@@ -161,18 +167,22 @@
     --card: #1F2427;
     --border: #343B3F; --border-strong: #454D51; --border-subtle: #0A0C0D;
     --ink: #ECE9E2;
-    /* Same three-step ramp as light, measured the same way: each clears
-     * 4.5:1 against the worse of --surface/--card. --text-tertiary keeps
-     * the value --text-secondary used to hold here too. */
+    /* Same three-step ramp as light, measured the same way: each clears 4.5:1
+     * against the worse of --surface/--card. --text-tertiary keeps the value
+     * --text-secondary used to hold here too. */
     --text-primary: var(--ink);   /* 12.9:1 */
     --text-secondary: #A8A6A1;    /*  6.4:1 */
     --text-tertiary: #918F89;     /*  4.9:1 */
-  --link-accent: #BE93F0;       /*  6.4:1 -- see --link-accent above */
     --link-accent: #BE93F0;       /*  6.4:1 -- see --link-accent above */
+    /* --sage-50 was the one pale tint never given a dark value at all. It is the
+     * `rule` kind swatch's background, so that single tile rendered near-white on
+     * an otherwise dark page -- exactly the bug app.js's own comment describes
+     * fixing for doc/skill/command; this one was missed. */
+    --sage-50: #142013;
     --sage-100: #17261A;
     --sand-100: #2C2013; --sand-200: #382A18;
     --sky-100: #10202C;
-    --icon-fg-warm: #E3BD87; --icon-fg-cool: #9AC7EA;
+    --icon-fg-warm: #E3BD87; --icon-fg-cool: #9AC7EA; --icon-fg-sage: #ACC384;
     --success-100: #163B22; --success-600: #6EE0A0;
     --warning-100: #3D2907; --warning-600: #F2B24E;
     --danger-100: #45170F; --danger-600: #FF8A66;
@@ -193,16 +203,22 @@
   --card: #1F2427;
   --border: #343B3F; --border-strong: #454D51; --border-subtle: #0A0C0D;
   --ink: #ECE9E2;
-  /* Same three-step ramp as light, measured the same way: each clears
-   * 4.5:1 against the worse of --surface/--card. --text-tertiary keeps
-   * the value --text-secondary used to hold here too. */
+  /* Same three-step ramp as light, measured the same way: each clears 4.5:1
+   * against the worse of --surface/--card. --text-tertiary keeps the value
+   * --text-secondary used to hold here too. */
   --text-primary: var(--ink);   /* 12.9:1 */
   --text-secondary: #A8A6A1;    /*  6.4:1 */
   --text-tertiary: #918F89;     /*  4.9:1 */
+  --link-accent: #BE93F0;       /*  6.4:1 -- see --link-accent above */
+  /* --sage-50 was the one pale tint never given a dark value at all. It is the
+   * `rule` kind swatch's background, so that single tile rendered near-white on
+   * an otherwise dark page -- exactly the bug app.js's own comment describes
+   * fixing for doc/skill/command; this one was missed. */
+  --sage-50: #142013;
   --sage-100: #17261A;
   --sand-100: #2C2013; --sand-200: #382A18;
   --sky-100: #10202C;
-  --icon-fg-warm: #E3BD87; --icon-fg-cool: #9AC7EA;
+  --icon-fg-warm: #E3BD87; --icon-fg-cool: #9AC7EA; --icon-fg-sage: #ACC384;
   --success-100: #163B22; --success-600: #6EE0A0;
   --warning-100: #3D2907; --warning-600: #F2B24E;
   --danger-100: #45170F; --danger-600: #FF8A66;
@@ -354,7 +370,11 @@ input, textarea, select {
 .sidebar-item.active {
   background: var(--sage-100);
   color: var(--ink);
-  font-weight: 600;
+  /* Deliberately NOT a heavier weight. .sidebar-item is 500 and this used to
+     be 600, so the label physically changed width every time you navigated --
+     a small, constant wobble in the one element that is always on screen. The
+     sage background and the ink text already say "active" without moving
+     anything. */
 }
 
 .sidebar-item .glyph {

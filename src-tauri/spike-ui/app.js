@@ -33,6 +33,20 @@
     both_changed: 'Both changed',
   };
 
+  /** The human label for a localStatus, never `undefined`.
+   *
+   * Every call site used to index STATUS_LABELS directly, so any status the
+   * engine reports outside these five keys rendered the literal string
+   * "undefined" into a badge -- and injected an unknown class alongside it,
+   * so the badge lost its styling too. localStatus is computed engine-side
+   * and can gain values without this map being updated in the same change,
+   * which is exactly the kind of drift a fallback exists for. Showing the raw
+   * status is more useful than showing nothing: it is at least the truth, and
+   * it names the missing key for whoever has to add it. */
+  function statusLabel(status) {
+    return STATUS_LABELS[status] ?? String(status ?? 'Unknown');
+  }
+
   // ---------- kind icon (Browse's cards, Detail, Tag Folder/Scan rows) ----------
   //
   // A small, distinct mark per kind, plus a warm accent tint -- never the
@@ -53,10 +67,15 @@
   // saturated accent left unchanged across themes on purpose -- the fixed
   // dark text pairs with it fine regardless of theme.
   const KIND_ICON = {
-    agent: { icon: 'i-kind-agent', bg: 'var(--sage-100)', fg: 'var(--sage-700)' },
+    agent: { icon: 'i-kind-agent', bg: 'var(--sage-100)', fg: 'var(--icon-fg-sage)' },
     skill: { icon: 'i-kind-skill', bg: 'var(--sand-100)', fg: 'var(--icon-fg-warm)' },
     command: { icon: 'i-kind-command', bg: 'var(--sky-100)', fg: 'var(--icon-fg-cool)' },
-    rule: { icon: 'i-kind-rule', bg: 'var(--sage-50)', fg: 'var(--primary-700)' },
+    // Uses --ink for the same reason `doc` below does: --primary-700 is
+    // deliberately FIXED (brand-fill only), so pairing it with a background
+    // that adapts leaves this one swatch unreadable in the other theme.
+    // --sage-50 had additionally never been given a dark value at all, so
+    // this tile rendered near-white with navy text on a dark page.
+    rule: { icon: 'i-kind-rule', bg: 'var(--sage-50)', fg: 'var(--ink)' },
     template: { icon: 'i-kind-template', bg: 'var(--gold-500)', fg: '#6B4A00' },
     // A shade deeper than skill's own sand-100 -- stays in the same warm
     // family (backend-plugin reads as "a utility kind," same spirit as
@@ -592,8 +611,8 @@
         );
       }
       if (state.sortBy === 'status') {
-        const labelA = STATUS_LABELS[displayStatus(a)];
-        const labelB = STATUS_LABELS[displayStatus(b)];
+        const labelA = statusLabel(displayStatus(a));
+        const labelB = statusLabel(displayStatus(b));
         return labelA.localeCompare(labelB) || a.manifest.id.localeCompare(b.manifest.id);
       }
       if (state.sortBy === 'edited') {
@@ -1164,7 +1183,18 @@
   // before the next render" discipline as clearDetailTemplateListeners.
   let markdownIframeMessageHandlers = [];
 
+  /** Every markdown iframe currently on screen, as { container, markdownText }.
+   *
+   * buildMarkdownDocument bakes the theme into the iframe's srcdoc at RENDER
+   * time -- it has to, because a sandboxed document cannot read the parent
+   * page's custom properties (see that function's own comment). So toggling
+   * the app theme did nothing to an already-open README: it stayed in the old
+   * theme until you navigated away and came back. Keeping the source markdown
+   * here lets toggleTheme re-render them in place. */
+  let mountedMarkdownIframes = [];
+
   function clearMarkdownIframeListeners() {
+    mountedMarkdownIframes = [];
     for (const handler of markdownIframeMessageHandlers) {
       window.removeEventListener('message', handler);
     }
@@ -1211,6 +1241,12 @@
   // loadTemplateComponentPreview), so a card that finishes loading AFTER
   // the toggle was already flipped still self-syncs correctly with no
   // queuing logic needed.
+  // Initialised from the app's REAL current theme, not a hardcoded 'light'.
+  // Hardcoding it meant that running the app in dark mode and opening a
+  // template's Components tab rendered every preview light -- sitting right
+  // next to its own second Light/Dark switch, which is how the mismatch was
+  // visible without being obviously a bug. Assigned in initTheme() rather
+  // than here, since getEffectiveTheme reads the DOM.
   let currentTemplateTheme = 'light';
 
   // Note: renderBuildFixRow/renderWiringMergeRow each keep their OWN
@@ -1875,6 +1911,20 @@
     };
     window.addEventListener('message', handler);
     markdownIframeMessageHandlers.push(handler);
+    mountedMarkdownIframes.push({ container, markdownText });
+  }
+
+  /** Re-renders every open markdown iframe in the current theme. Called from
+   * toggleTheme, because the theme is baked into each iframe's srcdoc rather
+   * than inherited. Rebuilding is cheap (the markdown is already in memory)
+   * and is the only way to re-theme a sandboxed document. */
+  function refreshMarkdownIframeThemes() {
+    if (mountedMarkdownIframes.length === 0) return;
+    const open = mountedMarkdownIframes.slice();
+    clearMarkdownIframeListeners();
+    for (const { container, markdownText } of open) {
+      if (container.isConnected) renderMarkdownToSandboxedIframe(container, markdownText);
+    }
   }
 
   /** Wraps already-rendered (HTML-escaped-raw-HTML) markdown output into
@@ -4084,7 +4134,7 @@ ${bodyHtml}
           ${kindSwatchHtml(entry.manifest.kind, 'sm')}
           <div class="row-main">
             <span class="name">${escapeHtml(entry.manifest.id)}</span>
-            <span class="badge ${status}">${STATUS_LABELS[status]}</span>
+            <span class="badge ${status}">${statusLabel(status)}</span>
             <span class="summary">${escapeHtml(entry.manifest.description)}</span>
           </div>
         `;
@@ -4140,7 +4190,7 @@ ${bodyHtml}
     card.querySelector('.kind-label').textContent = entry.manifest.kind;
     card.querySelector('.summary').textContent = entry.manifest.description;
     card.querySelector('.meta').textContent = `v${entry.manifest.version} · ${entry.manifest.owner}`;
-    card.querySelector('.badge').textContent = STATUS_LABELS[status];
+    card.querySelector('.badge').textContent = statusLabel(status);
     card.addEventListener('click', () => openDetail(entry));
     return card;
   }
@@ -4845,7 +4895,7 @@ ${bodyHtml}
     kindIconEl.innerHTML = `<svg><use href="#${kindIcon.icon}"/></svg>`;
     $('detail-kind').textContent = manifest.kind;
     $('detail-name').textContent = manifest.id;
-    $('detail-badge').textContent = STATUS_LABELS[status];
+    $('detail-badge').textContent = statusLabel(status);
     $('detail-badge').className = `badge ${status}`;
     $('detail-description').textContent = manifest.description;
     $('meta-kind').textContent = manifest.kind;
@@ -5259,7 +5309,9 @@ ${bodyHtml}
     templateThemePicker = createSingleChipPicker($('detail-template-theme-toggle'));
     templateThemePicker.setOptions(
       [{ value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }],
-      'light',
+      // Seeded from the app's real theme, not a hardcoded 'light' -- otherwise
+      // this control claims "Light" while sitting inside a dark app.
+      getEffectiveTheme(),
     );
     templateThemePicker.onChange((theme) => {
       currentTemplateTheme = theme;
@@ -5267,6 +5319,29 @@ ${bodyHtml}
         iframe.contentWindow.postMessage({ type: 'setTheme', theme }, '*');
       }
     });
+  }
+
+  /** Points the template-preview grid's own Light/Dark control at whatever
+   * the app theme currently is, and pushes that to any preview iframe already
+   * mounted.
+   *
+   * There are two theme systems here: the global one (a data-theme attribute
+   * on <html>) and this one (a postMessage into each sandboxed preview
+   * iframe, which cannot see the parent's CSS). They are genuinely separate
+   * mechanisms, but they should never DISAGREE -- and they did, because this
+   * one was initialised to a hardcoded 'light' and never heard about the
+   * global toggle. */
+  function syncTemplateThemeToggle() {
+    if (!templateThemePicker) return;
+    templateThemePicker.setOptions(
+      [{ value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }],
+      currentTemplateTheme,
+    );
+    for (const iframe of detailTemplateIframes) {
+      if (iframe.contentWindow) {
+        iframe.contentWindow.postMessage({ type: 'setTheme', theme: currentTemplateTheme }, '*');
+      }
+    }
   }
 
   /** Refreshes every tag picker's suggestion list from the current catalog
@@ -6684,10 +6759,18 @@ ${bodyHtml}
       // restart; the toggle itself still works for this session.
     }
     updateThemeToggleButton();
+    // A sandboxed markdown iframe cannot read the parent's custom properties,
+    // so its theme is baked in at render time -- re-render to re-theme.
+    refreshMarkdownIframeThemes();
+    // Keep the template-preview grid's own theme following the app's, so the
+    // two theme systems cannot drift apart.
+    currentTemplateTheme = next;
+    syncTemplateThemeToggle();
   }
 
   function initTheme() {
     updateThemeToggleButton();
+    currentTemplateTheme = getEffectiveTheme();
     // Only matters before the user has ever made an explicit choice: keep
     // the button's icon tracking a live OS theme change rather than only
     // whatever `prefers-color-scheme` was at page load.
