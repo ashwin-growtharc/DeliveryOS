@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { checkSourceDrift } from '../../src/engine/drift/checkDrift';
 import { writeSourcesFile } from '../../src/engine/drift/recordSources';
-import { SourcesFileMissingError } from '../../src/engine/errors';
+import { SourcesFileMissingError, SourcesFileInvalidError } from '../../src/engine/errors';
 
 describe('checkSourceDrift', () => {
   let payloadDir: string;
@@ -22,6 +22,33 @@ describe('checkSourceDrift', () => {
 
   it('throws SourcesFileMissingError when the payload has no SOURCES.json', () => {
     expect(() => checkSourceDrift(payloadDir, sourceRoot)).toThrow(SourcesFileMissingError);
+  });
+
+  // Regression: SOURCES.json ships inside an artifact's payload, so it comes
+  // from a remote and is author-controlled. It used to be JSON.parse'd and
+  // cast straight to SourcesFile, so malformed JSON escaped as a raw
+  // SyntaxError stack trace and a structurally-wrong file died one line
+  // later with "Cannot read properties of undefined (reading 'map')".
+  it('throws SourcesFileInvalidError for a SOURCES.json that is not valid JSON', () => {
+    fs.writeFileSync(path.join(payloadDir, 'SOURCES.json'), '{ this is not json', 'utf-8');
+    expect(() => checkSourceDrift(payloadDir, sourceRoot)).toThrow(SourcesFileInvalidError);
+  });
+
+  it('throws SourcesFileInvalidError for a SOURCES.json of the wrong shape', () => {
+    for (const body of [
+      '{}',
+      '{"entries": "not-an-array"}',
+      '[]',
+      'null',
+      '{"sourceDescription":"x","recordedAt":"y"}',
+      '{"sourceDescription":"x","recordedAt":"y","entries":[{"payloadPath":1}]}',
+    ]) {
+      fs.writeFileSync(path.join(payloadDir, 'SOURCES.json'), body, 'utf-8');
+      expect(
+        () => checkSourceDrift(payloadDir, sourceRoot),
+        `expected ${body} to be rejected`,
+      ).toThrow(SourcesFileInvalidError);
+    }
   });
 
   it('reports "unchanged" when the real source file is untouched since extraction', () => {

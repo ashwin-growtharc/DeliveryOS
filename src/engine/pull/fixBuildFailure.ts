@@ -323,7 +323,20 @@ export function readBuildFixLog(cwd: string, remoteName: string, artifactId: str
   const lines = fs.readFileSync(logPath, 'utf-8').split('\n').filter((line) => line.trim().length > 0);
   const records: BuildFixLogRecord[] = [];
   for (const line of lines) {
-    const entry = JSON.parse(line) as BuildFixLogEntry;
+    // Skip, never throw, on an unparseable line. This is an append-only
+    // JSONL log written with a bare appendFileSync -- and because the Tauri
+    // host spawns ONE PROCESS PER RPC, concurrent appends from different
+    // processes are routine, so a torn or interleaved write is a real
+    // possibility rather than a theoretical one. An unguarded parse meant a
+    // single bad line threw and destroyed the ENTIRE Activity tab for that
+    // artifact, permanently. One unrecoverable record is worth losing; every
+    // other record in the file is not.
+    let entry: BuildFixLogEntry;
+    try {
+      entry = JSON.parse(line) as BuildFixLogEntry;
+    } catch {
+      continue;
+    }
     if (entry.remoteName !== remoteName || entry.artifactId !== artifactId) {
       continue;
     }

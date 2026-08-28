@@ -5,7 +5,12 @@ import { buildCatalog, CatalogEntry } from '../catalog/catalog';
 import { cachePath } from '../remote/remoteCache';
 import { upsertEntry, readLockfile } from '../lockfile/lockfile';
 import { pristinePath, resolveContainedPath, adaptSrcDirPath } from '../paths';
-import { ArtifactResolutionError, ManifestValidationError, PostInstallError } from '../errors';
+import {
+  ArtifactResolutionError,
+  ManifestValidationError,
+  PostInstallError,
+  SignatureBundleInvalidError,
+} from '../errors';
 import { Manifest } from '../manifest/schema';
 import {
   resolveInstallParamValues,
@@ -189,9 +194,21 @@ export async function pullArtifact(
   // record, not the payload location.
   onProgress?.('verify', 'Verifying artifact signature...');
   const signatureBundlePath = path.join(remoteDir, 'artifacts', manifest.id, 'signature.bundle');
-  const signatureBundle = fs.existsSync(signatureBundlePath)
-    ? JSON.parse(fs.readFileSync(signatureBundlePath, 'utf-8'))
-    : undefined;
+  // The bundle comes from the remote and is read on the DEFAULT pull path,
+  // so a corrupt or truncated one must report as an unverifiable signature
+  // rather than escaping as a raw SyntaxError stack trace from JSON.parse.
+  let signatureBundle: unknown;
+  if (fs.existsSync(signatureBundlePath)) {
+    try {
+      signatureBundle = JSON.parse(fs.readFileSync(signatureBundlePath, 'utf-8'));
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      throw new SignatureBundleInvalidError(
+        `Artifact "${manifest.id}" ships a signature.bundle that is not valid JSON, so its signature `
+          + `cannot be verified: ${detail}. Nothing was installed.`,
+      );
+    }
+  }
   await verifyArtifactSignature(manifest, payloadSrc, signatureBundle);
 
   onProgress?.('copy', `Copying payload files to ${installTarget}...`);

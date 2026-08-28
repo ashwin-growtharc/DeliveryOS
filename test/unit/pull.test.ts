@@ -3,7 +3,12 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { pullArtifact } from '../../src/engine/pull/pull';
-import { ArtifactResolutionError, ManifestValidationError, PostInstallError } from '../../src/engine/errors';
+import {
+  ArtifactResolutionError,
+  ManifestValidationError,
+  PostInstallError,
+  SignatureBundleInvalidError,
+} from '../../src/engine/errors';
 import { remotesRegistryPath, remoteCachePath } from '../../src/engine/paths';
 import { readLockfile, upsertEntry } from '../../src/engine/lockfile/lockfile';
 import { rmDirWithRetry } from '../../src/engine/execHelpers';
@@ -78,6 +83,63 @@ function writeArtifact(id: string, postInstall: string): void {
     'utf-8',
   );
 }
+
+describe('pullArtifact input validation', () => {
+  // Regression: signature.bundle comes from the REMOTE and is read on the
+  // default pull path. It used to be JSON.parse'd unguarded, so a corrupt or
+  // truncated bundle crashed `pull` with a raw SyntaxError stack trace rather
+  // than being reported as what it is -- a signature that cannot be verified.
+  it('reports a corrupt signature.bundle as an unverifiable signature, not a raw SyntaxError', async () => {
+    writeRegistry(['test-remote']);
+    writeArtifact('corrupt-sig', 'node -e "process.exit(0)"');
+    const bundlePath = path.join(
+      remoteCachePath('test-remote'), 'artifacts', 'corrupt-sig', 'signature.bundle',
+    );
+    fs.writeFileSync(bundlePath, '{"mediaType":"application/vnd.dev.sig', 'utf-8');
+
+    await expect(pullArtifact('corrupt-sig', undefined, cwd)).rejects.toThrow(SignatureBundleInvalidError);
+
+    // Nothing was installed -- verification happens before any file write.
+    expect(fs.existsSync(path.join(cwd, 'installed'))).toBe(false);
+  }, 30_000);
+
+  // Regression for the whole-project-delete bug, at the pull end: an
+  // install_target of "." used to break pull half-way through, AFTER the
+  // payload copy and post_install had already run, because the pristine
+  // snapshot cannot be written into a subdirectory of itself.
+  it('refuses an install_target of "." before writing anything', async () => {
+    writeRegistry(['test-remote']);
+    const remoteCacheDir = remoteCachePath('test-remote');
+    const payloadDir = path.join(remoteCacheDir, 'artifacts', 'root-target', 'payload');
+    fs.mkdirSync(payloadDir, { recursive: true });
+    fs.writeFileSync(path.join(payloadDir, 'README.md'), '# root-target\n', 'utf-8');
+    fs.writeFileSync(
+      path.join(remoteCacheDir, 'artifacts', 'root-target', 'manifest.yaml'),
+      [
+        'id: root-target',
+        'kind: template',
+        'description: An artifact declaring the project root as its install target',
+        'owner: team-x',
+        'version: 1.0.0',
+        'source_repo: https://example.invalid/repo',
+        'install_target: "."',
+        'review_required: false',
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    fs.writeFileSync(path.join(cwd, 'important-source.ts'), 'export const keep = true;', 'utf-8');
+
+    await expect(pullArtifact('root-target', undefined, cwd)).rejects.toThrow();
+
+    // The project is untouched -- no payload copied over it, and nothing
+    // half-applied.
+    expect(fs.existsSync(path.join(cwd, 'important-source.ts'))).toBe(true);
+    expect(fs.existsSync(path.join(cwd, 'README.md'))).toBe(false);
+    expect(readLockfile(cwd).entries.find((e) => e.id === 'root-target')).toBeUndefined();
+  }, 30_000);
+});
 
 describe('pullArtifact post_install error reporting', () => {
   it('runs a real, genuinely failing post_install and reports it via the pre-existing generic message', async () => {

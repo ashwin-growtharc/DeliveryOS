@@ -162,3 +162,23 @@ export class WiringPlacementError extends DeliveryOsError {}
  * dispatch checks own-property + callability; this error is what an unknown
  * command produces instead. */
 export class UnknownCommandError extends DeliveryOsError {}
+
+/** Thrown when an artifact's `SOURCES.json` exists but cannot be read as a
+ * valid sources file -- malformed JSON, or JSON of the wrong shape.
+ *
+ * Distinct from `SourcesFileMissingError` ("this artifact was never recorded
+ * with drift tracking", an ordinary, expected state) -- this one means the
+ * file IS there and is broken. It arrives inside a payload from a remote, so
+ * it is untrusted input: an unguarded parse surfaced either a raw
+ * `SyntaxError` stack trace or a `TypeError` from mapping over a missing
+ * `entries` array. */
+export class SourcesFileInvalidError extends DeliveryOsError {}
+
+/** Thrown when an artifact ships a `signature.bundle` that cannot be parsed
+ * as JSON at all.
+ *
+ * The bundle comes from the remote, and is read on the default `pull` path.
+ * An unguarded parse meant a corrupt or truncated bundle crashed `pull` with
+ * a raw `SyntaxError` stack trace, rather than being reported as what it
+ * actually is: a signature that cannot be verified. */
+export class SignatureBundleInvalidError extends DeliveryOsError {}

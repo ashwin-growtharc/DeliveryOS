@@ -1,8 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { SourcesFileMissingError } from '../errors';
+import { SourcesFileMissingError, SourcesFileInvalidError } from '../errors';
 import { hashFile } from './hashFile';
-import { SourcesFile } from './types';
+import { SourcesFile, SourcesFileSchema } from './types';
 import { resolveContainedPath } from '../paths';
 
 export interface DriftResult {
@@ -30,7 +30,22 @@ export function checkSourceDrift(payloadDir: string, sourceRootAbsolutePath: str
     );
   }
 
-  const sourcesFile: SourcesFile = JSON.parse(fs.readFileSync(sourcesFilePath, 'utf-8'));
+  // SOURCES.json ships inside the artifact's payload, so it comes from a
+  // remote and is author-controlled. Parsed and shape-checked rather than
+  // cast: malformed JSON used to escape as a raw SyntaxError stack trace,
+  // and a file with no `entries` died on the very next line with "Cannot
+  // read properties of undefined (reading 'map')".
+  let sourcesFile: SourcesFile;
+  try {
+    const parsed: unknown = JSON.parse(fs.readFileSync(sourcesFilePath, 'utf-8'));
+    sourcesFile = SourcesFileSchema.parse(parsed);
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    throw new SourcesFileInvalidError(
+      `The SOURCES.json at "${sourcesFilePath}" could not be read as a valid sources file: ${detail}`,
+    );
+  }
+
 
   return sourcesFile.entries.map((entry) => {
     // entry.sourcePath comes from the ARTIFACT's own SOURCES.json --
