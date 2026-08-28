@@ -1035,8 +1035,8 @@ describe('sidecar e2e', () => {
 
         // Now seed a real middleware.ts in the project -- re-resolving
         // must flip that ONE action to its whenPresent variant (merge
-        // guidance, no snippet) while auth.ts's own resolution is
-        // unaffected.
+        // guidance instructions, no whenPresent.snippet of its own) while
+        // auth.ts's own resolution is unaffected.
         fs.writeFileSync(path.join(cwd, 'middleware.ts'), 'export default function middleware() {}', 'utf-8');
 
         const afterResp = await session.request('artifact.resolveWiringActions', {
@@ -1046,13 +1046,21 @@ describe('sidecar e2e', () => {
         });
         expect(afterResp.ok).toBe(true);
         const after = afterResp.result as Array<{
-          targetFile: string; targetFileExists: boolean; snippet?: string; instructions: string;
+          targetFile: string; targetFileExists: boolean; snippet?: string;
+          snippetIsFullFileReference?: boolean; instructions: string;
         }>;
         const authAfter = after.find((a) => a.targetFile === 'auth.ts')!;
         expect(authAfter.targetFileExists).toBe(false);
         const middlewareAfter = after.find((a) => a.targetFile === 'middleware.ts')!;
         expect(middlewareAfter.targetFileExists).toBe(true);
-        expect(middlewareAfter.snippet).toBeUndefined();
+        // whenPresent declared no snippet of its own, so this falls back to
+        // whenAbsent's own canonical content -- a real reference for "Merge
+        // with Claude" to work from, not an absent value (see wiring.ts's
+        // own ResolvedWiringAction.snippet doc comment for why). Flagged
+        // via snippetIsFullFileReference so it's never mislabeled to the
+        // model as author-written merge guidance (see requestWiringMerge.ts).
+        expect(middlewareAfter.snippet).toContain('auth as middleware');
+        expect(middlewareAfter.snippetIsFullFileReference).toBe(true);
         expect(middlewareAfter.instructions).toContain('Merge');
 
         // Purely read-only -- resolving never creates/modifies auth.ts,

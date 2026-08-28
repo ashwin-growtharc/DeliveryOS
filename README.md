@@ -15,13 +15,24 @@ are both done and in real use. What's shipped:
   progress log, all built on the same engine via a sidecar process.
 - **UI Components** — live sandboxed-preview cards for pushed React/TS or
   plain-HTML components, with variant tabs and a generated props panel.
+- **Starter Kits and Backend Plugins** — two more sidebar shortcuts into
+  a single kind of the catalog (`template` and `backend-plugin`), for
+  going straight to "every backend plugin" without a manual Kind-chip
+  toggle on Browse.
 - **Design kits & whole-project templates** — a `kind: template` bundle
   (e.g. a design system, or a full starter kit) pulls as one unit, with a
   Detail view showing its color tokens, component grid, and route map.
 - **Backend plug-and-play artifacts** (`kind: backend-plugin`) — install-time
   config collection, signature verification before any files are written,
-  and a wiring agent that applies mechanical setup and suggests (never
-  silently applies) edits to existing project files.
+  a wiring agent that applies mechanical setup and suggests (never
+  silently applies) edits to existing project files, a symmetric
+  `post_remove` teardown step for uninstall, and a `.claude/skills/
+  backend-plugin-authoring` skill for writing one correctly.
+- **`deliveryos wire-with-claude <id>`** — hands the last mile (wiring a
+  pulled backend-plugin into the rest of your project) to a real,
+  interactive Claude Code session with the artifact's actual pulled
+  paths already in context; the desktop app runs the same thing in a
+  terminal embedded directly in its own window.
 - **Claude Code integration** — a skill that checks the catalog before
   generating new code, pulls a match, wires it in, and verifies the build
   (`deliveryos-check-first`); a companion skill for checking DeliveryOS's
@@ -74,6 +85,7 @@ deliveryos check-pending-pushes                    # check GitHub for the real s
 deliveryos check-drift <id> -r <remote> -s <path>  # check whether an extracted artifact's real external source has changed
 deliveryos scan -r <remote>                        # find installable content not yet tracked, print a ready-to-edit push command per candidate
 deliveryos wiring <id> [--remote <name>] [--json]  # show an artifact's Tier-2 wiring suggestions, resolved against the current project
+deliveryos wire-with-claude <id> [--remote <name>] # hand an already-pulled backend-plugin's wiring to a real interactive claude session
 deliveryos scaffold-backend-plugin --path <dir> --consumer-file <file> [...] [--out <path>]  # draft install_params/wiring_actions for a new backend-plugin, for you to review
 ```
 
@@ -108,6 +120,15 @@ config <id> --set KEY=VALUE` fills in the rest later without a re-pull
 is byte-for-byte identical to its pristine snapshot (no local edits) — one
 with real local edits is reported, never touched, since safely merging a
 local edit against a new upstream version isn't attempted here.
+
+`wire-with-claude` reads the artifact's real, already-resolved lockfile
+paths (never a hand-typed guess), writes them to a context file under
+`.deliveryos/`, and hands off to a real interactive `claude` session (the
+same trust model as running Claude Code by hand — not a restricted,
+tool-limited subprocess) to do the actual wiring. Reruns the project's
+build afterward and prints a plain pass/fail summary. The desktop app's
+Detail view offers the same thing via a "Wire with Claude" button that
+opens a real terminal embedded in the app window itself.
 
 `scaffold-backend-plugin` is scaffolding, not extraction: `--consumer-file`
 should point at real file(s) in your OWN project that already wire the

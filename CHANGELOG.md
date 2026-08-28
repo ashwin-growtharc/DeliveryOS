@@ -6,6 +6,99 @@ All notable changes to DeliveryOS are recorded here, newest first. See
 
 ---
 
+## Phase 32 — "Merge with Claude" had no reference for a file's own canonical content
+
+- Found by direct testing: a one-character typo in a freshly-wired
+  `auth.ts` made "Merge with Claude" refuse outright, with nothing to
+  review. Root cause: the merge only ever had `whenPresent.snippet` to
+  offer as reference content, which is `undefined` for the common case
+  (a file the artifact fully owns, `whenPresent` is prose-only).
+- Fixed: falls back to `whenAbsent.snippet` -- the artifact's own real,
+  known-good standalone content -- whenever `whenPresent` doesn't supply
+  its own, whether or not `whenPresent` was declared at all.
+- `docs/backend-plugin-lifecycle.md` brought up to date: a new "Connect
+  it to your app" stage for `wire-with-claude` (previously missing
+  entirely), `post_install`/`post_remove`/`DELIVERYOS_PROJECT_ROOT`
+  properly explained, and an overclaiming line in the doc's own summary
+  corrected.
+
+## Phase 31 — Two more sidebar destinations: Starter Kits and Backend Plugins
+
+- New sidebar items **Starter Kits** (kind: `template`) and **Backend
+  Plugins** (kind: `backend-plugin`), each a single-kind grid reusing
+  Browse's own card rendering (now shared via a new `buildResCard`
+  helper) -- the same shortcut-into-one-kind idea `UI Components`
+  already had, without needing that page's live-preview machinery.
+- Backend-plugin artifacts now get a real plug-shaped icon everywhere a
+  kind icon shows up (Browse, Detail, Tag Folder) instead of the
+  generic fallback diamond -- no `KIND_ICON` entry existed for this
+  kind until now.
+
+## Phase 30 — A `backend-plugin-authoring` skill, for both human and AI authors
+
+- New `.claude/skills/backend-plugin-authoring/SKILL.md` documenting how
+  to correctly author a `kind: backend-plugin` manifest -- the three-tier
+  wiring model, `post_install`/`post_remove` conventions including
+  `DELIVERYOS_PROJECT_ROOT`, dependency-version-pinning discipline, and
+  the `.env`/`.env.local` gotcha -- built on top of (not duplicating)
+  `deliveryos scaffold-backend-plugin`, and grounded entirely in real
+  bugs found this phase and the one before it, not hypotheticals.
+
+## Phase 29 — `post_remove`, and a real dogfood of a genuinely large backend-plugin
+
+- New `post_remove` manifest field, symmetric with `post_install` --
+  runs before the install target is deleted, but never blocks removal
+  on failure (reported as a warning instead), since `removeArtifact`
+  exists specifically so nobody gets stuck mid-removal.
+- Fixed a second, distinct Windows EPERM race: a killed `post_remove`
+  command's grandchild process could still hold a lock on the install
+  target right as it was being deleted. Fixed with a retrying delete
+  helper, in production code, not just test cleanup.
+- **Found and fixed a critical, real filesystem-pollution bug in
+  already-shipped manifests**: a fixed-depth relative `cd ../../..` in
+  `post_install` silently overshot into the *parent* of the real
+  project once Phase 26's own `adaptSrcDirPath` fix shortened
+  `install_target`'s effective depth for root-`app/` projects. Found
+  real evidence of this on the user's own Desktop folder; deleted only
+  after explicit confirmation. Root-fixed with a new
+  `DELIVERYOS_PROJECT_ROOT` absolute-path env var passed to both
+  `post_install` and `post_remove`, replacing every depth-counted
+  relative `cd` across all affected manifests.
+- Dogfooded a real, already-published, genuinely large artifact
+  (`nextauth-credentials` -- Prisma + bcrypt + Postgres) and found it
+  was missing `post_install` entirely, an unpinned `prisma` dependency
+  that can grab an incompatible major version, and a real Prisma-CLI
+  `.env`-vs-`.env.local` gotcha. A local-test copy now starts/stops a
+  real Postgres container via Docker through `post_install`/
+  `post_remove`, verified end to end.
+
+## Phase 28 — An embedded terminal for "Wire with Claude", and a Detail-view UI/UX pass
+
+- "Wire with Claude" now runs in a real terminal embedded inside the
+  DeliveryOS window itself (via a new Rust PTY module and vendored
+  `xterm.js`), instead of requiring a separate system terminal.
+- Fixed a real Windows-only bug where the embedded terminal couldn't
+  launch npm-shimmed CLIs at all (`CreateProcessW` error 193) --
+  routed through `cmd.exe /C` on Windows, verified with a standalone
+  Rust example rather than only through the full GUI.
+- Fixed a real wiring bug where the new PTY Tauri commands were
+  incorrectly routed through the sidecar RPC helper instead of called
+  directly.
+- Detail view: Configuration tab now leads (was last); Connection
+  Status panel moved above the installation explainer and given real
+  visual weight; both Connection Status and Wiring now show an
+  immediate loading state instead of a blank gap.
+- **Follow-up, found by re-reviewing the same Detail view**: the
+  Configuration tab's own install-params form was the one loading
+  region that never got the spinner+"Loading…" treatment its two
+  siblings did — fixed to match. Also found and fixed the real reason
+  it looked inconsistent even where it *was* present: `.spinner` had no
+  `display` set, so it only rendered as a proper 14px ring inside an
+  already-flex parent (Connection Status) — dropped into a plain div
+  (Wiring, Install params), it collapsed to a sliver. Fixed once, at
+  the component level (`display: inline-flex` on `.spinner` itself),
+  rather than requiring every call site to remember to wrap it.
+
 ## Phase 27 — `deliveryos wire-with-claude`: the wiring step stays in DeliveryOS
 
 - New `deliveryos wire-with-claude <id>` -- reads an already-pulled

@@ -34,6 +34,11 @@ export function buildWiringMergePrompt(
   description: string,
   instructions: string,
   guidanceSnippet: string | undefined,
+  // True when `guidanceSnippet` is the artifact's own complete, standalone
+  // file (no real merge guidance exists) -- see ResolvedWiringAction's own
+  // `snippetIsFullFileReference` doc comment for why this must be labeled
+  // differently than genuine author-written merge guidance.
+  guidanceSnippetIsFullFile = false,
 ): string {
   return [
     'You are looking at a real, already-existing file from someone\'s',
@@ -64,7 +69,13 @@ export function buildWiringMergePrompt(
     '',
     '<UNTRUSTED_WIRING_INSTRUCTIONS>',
     instructions,
-    guidanceSnippet ? `\n(merge guidance snippet the artifact's own author provided:)\n${guidanceSnippet}` : '',
+    guidanceSnippet
+      ? (guidanceSnippetIsFullFile
+        ? `\n(this artifact's own complete, standalone file for this purpose -- no specific merge `
+          + `guidance was provided by its author, so treat this only as a reference for what content `
+          + `should end up present somewhere in the result; do not insert it verbatim as one block):\n${guidanceSnippet}`
+        : `\n(merge guidance snippet the artifact's own author provided:)\n${guidanceSnippet}`)
+      : '',
     '</UNTRUSTED_WIRING_INSTRUCTIONS>',
     '',
     '<UNTRUSTED_EXISTING_FILE_CONTENT>',
@@ -148,6 +159,7 @@ export async function requestWiringMerge(
   description: string,
   instructions: string,
   guidanceSnippet?: string,
+  guidanceSnippetIsFullFile = false,
 ): Promise<WiringMergeResult> {
   const fullPath = resolveContainedTargetFile(cwd, targetFile);
   if (!fullPath) {
@@ -172,7 +184,13 @@ export async function requestWiringMerge(
         + `safely produce that without risking silent data loss past the truncation point.`,
     };
   }
-  const prompt = buildWiringMergePrompt(existingFileContent, description, instructions, guidanceSnippet);
+  const prompt = buildWiringMergePrompt(
+    existingFileContent,
+    description,
+    instructions,
+    guidanceSnippet,
+    guidanceSnippetIsFullFile,
+  );
 
   let output: string;
   try {

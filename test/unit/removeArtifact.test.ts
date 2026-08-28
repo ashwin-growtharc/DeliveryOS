@@ -8,6 +8,7 @@ import { readLockfile, upsertEntry } from '../../src/engine/lockfile/lockfile';
 import { pristinePath, remotesRegistryPath, remoteCachePath } from '../../src/engine/paths';
 import { ArtifactNotPulledError } from '../../src/engine/errors';
 import { Manifest } from '../../src/engine/manifest/schema';
+import { rmDirWithRetry } from '../../src/engine/execHelpers';
 
 // Same lightweight "fake a registered remote + cache directly on disk"
 // pattern test/unit/pull.test.ts already established -- removeArtifact's
@@ -19,6 +20,13 @@ let deliveryOsHome: string;
 let originalEnv: string | undefined;
 let cwd: string;
 
+// Same real Windows race post_remove's own timeout test exercises in
+// removeArtifact.ts itself (see rmDirWithRetry's own doc comment in
+// execHelpers.ts, shared with that file's real production fix): a killed
+// post_remove command's real grandchild process can outlive the timeout
+// and keep holding a lock on `cwd` for its own remaining duration -- plain
+// fs.rmSync's maxRetries does not reliably retry this specific EPERM.
+
 beforeEach(() => {
   originalEnv = process.env.DELIVERYOS_HOME;
   deliveryOsHome = fs.mkdtempSync(path.join(os.tmpdir(), 'deliveryos-remove-test-home-'));
@@ -26,14 +34,14 @@ beforeEach(() => {
   cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'deliveryos-remove-test-cwd-'));
 });
 
-afterEach(() => {
+afterEach(async () => {
   if (originalEnv === undefined) {
     delete process.env.DELIVERYOS_HOME;
   } else {
     process.env.DELIVERYOS_HOME = originalEnv;
   }
   fs.rmSync(deliveryOsHome, { recursive: true, force: true });
-  fs.rmSync(cwd, { recursive: true, force: true });
+  await rmDirWithRetry(cwd);
 });
 
 function writeRegistry(remoteNames: string[]): void {
@@ -248,5 +256,168 @@ describe('removeArtifact', () => {
 
     expect(result.envParamsStillSet).toEqual(['SHARED_SECRET']);
     expect(fs.readFileSync(path.join(cwd, '.env.local'), 'utf-8')).toBe('SHARED_SECRET=abc123\n');
+  });
+});
+
+describe('removeArtifact post_remove', () => {
+  it('runs a real, genuinely successful post_remove before deleting installTarget, and captures its output', async () => {
+    writeRegistry(['test-remote']);
+    // Writes a marker file INTO installTarget, proving the command ran
+    // with installTarget as its cwd while installTarget still existed --
+    // the whole reason post_remove has to run before deletion, not after.
+    writeManifest('test-remote', {
+      id: 'post-remove-plugin',
+      install_target: 'installed',
+      post_remove: 'node -e "require(\'fs\').writeFileSync(\'ran-here.txt\', \'ok\'); console.log(\'post_remove output\')"',
+    });
+
+    const installTarget = path.join(cwd, 'installed');
+    fs.mkdirSync(installTarget, { recursive: true });
+
+    await upsertEntry(cwd, { id: 'post-remove-plugin', version: '1.0.0', remote: 'test-remote', installTarget });
+
+    const result = await removeArtifact(cwd, 'post-remove-plugin');
+
+    expect(result.postRemoveOutput).toContain('post_remove output');
+    expect(result.postRemoveWarning).toBeUndefined();
+    // The install target (including the marker the command wrote into it)
+    // is still deleted afterward -- post_remove running doesn't change
+    // that removeArtifact's normal deletion behavior still happens.
+    expect(result.removedInstallTarget).toBe(true);
+    expect(fs.existsSync(installTarget)).toBe(false);
+  }, 30_000);
+
+  it('reports a genuinely failing post_remove as a warning, but still completes the removal -- the one behaviorally new thing to prove', async () => {
+    writeRegistry(['test-remote']);
+    writeManifest('test-remote', {
+      id: 'bad-post-remove-plugin',
+      install_target: 'installed',
+      post_remove: 'node -e "console.error(\'real post_remove error\'); process.exit(1)"',
+    });
+
+    const installTarget = path.join(cwd, 'installed');
+    fs.mkdirSync(installTarget, { recursive: true });
+
+    await upsertEntry(cwd, { id: 'bad-post-remove-plugin', version: '1.0.0', remote: 'test-remote', installTarget });
+
+    const result = await removeArtifact(cwd, 'bad-post-remove-plugin');
+
+    expect(result.postRemoveWarning).toContain('post_remove command failed');
+    expect(result.postRemoveWarning).toContain('real post_remove error');
+    expect(result.postRemoveOutput).toBeUndefined();
+    // Removal proceeded anyway -- this is the real, deliberate difference
+    // from post_install (whose failure aborts the whole pull).
+    expect(result.removedInstallTarget).toBe(true);
+    expect(fs.existsSync(installTarget)).toBe(false);
+    const lockfile = readLockfile(cwd);
+    expect(lockfile.entries.find((e) => e.id === 'bad-post-remove-plugin')).toBeUndefined();
+  }, 30_000);
+
+  it('reports a genuine post_remove timeout with its own distinct message, and still completes the removal', async () => {
+    writeRegistry(['test-remote']);
+    // Same short-hang shape as pull.test.ts's own post_install timeout
+    // test, and the same Windows caveat: killing a timed-out execSync
+    // only kills the cmd.exe wrapper, the real grandchild node process
+    // keeps running for its own duration -- kept short deliberately.
+    writeManifest('test-remote', {
+      id: 'hangs-remove-plugin',
+      install_target: 'installed',
+      post_remove: 'node -e "setTimeout(() => {}, 600)"',
+    });
+
+    const installTarget = path.join(cwd, 'installed');
+    fs.mkdirSync(installTarget, { recursive: true });
+
+    await upsertEntry(cwd, { id: 'hangs-remove-plugin', version: '1.0.0', remote: 'test-remote', installTarget });
+
+    const result = await removeArtifact(cwd, 'hangs-remove-plugin', 200);
+
+    expect(result.postRemoveWarning).toContain('post_remove command timed out after 200ms');
+    expect(result.postRemoveWarning).not.toContain('post_remove command failed');
+    expect(result.removedInstallTarget).toBe(true);
+  }, 10_000);
+
+  it('reports a genuine "tool not found" post_remove failure with its own distinct message, and still completes the removal', async () => {
+    writeRegistry(['test-remote']);
+    writeManifest('test-remote', {
+      id: 'missing-tool-remove-plugin',
+      install_target: 'installed',
+      post_remove: 'a-command-that-genuinely-does-not-exist-anywhere',
+    });
+
+    const installTarget = path.join(cwd, 'installed');
+    fs.mkdirSync(installTarget, { recursive: true });
+
+    await upsertEntry(cwd, { id: 'missing-tool-remove-plugin', version: '1.0.0', remote: 'test-remote', installTarget });
+
+    const result = await removeArtifact(cwd, 'missing-tool-remove-plugin');
+
+    expect(result.postRemoveWarning).toContain('post_remove command\'s tool was not found');
+    expect(result.postRemoveWarning).not.toContain('post_remove command failed');
+    expect(result.postRemoveWarning).not.toContain('timed out');
+    expect(result.removedInstallTarget).toBe(true);
+  }, 30_000);
+
+  it('never runs anything, and reports no output/warning, when the manifest declares no post_remove at all', async () => {
+    writeRegistry(['test-remote']);
+    writeManifest('test-remote', { id: 'no-post-remove-plugin', install_target: 'installed' });
+
+    const installTarget = path.join(cwd, 'installed');
+    fs.mkdirSync(installTarget, { recursive: true });
+
+    await upsertEntry(cwd, { id: 'no-post-remove-plugin', version: '1.0.0', remote: 'test-remote', installTarget });
+
+    const result = await removeArtifact(cwd, 'no-post-remove-plugin');
+
+    expect(result.postRemoveOutput).toBeUndefined();
+    expect(result.postRemoveWarning).toBeUndefined();
+    expect(result.removedInstallTarget).toBe(true);
+  });
+
+  // Same real, confirmed bug (and same fix) as pull.test.ts's own
+  // DELIVERYOS_PROJECT_ROOT test for post_install -- see that test's
+  // comment for the full story.
+  it('passes the real project root as DELIVERYOS_PROJECT_ROOT, independent of how deep installTarget actually is', async () => {
+    writeRegistry(['test-remote']);
+    // Printed to stdout (captured as postRemoveOutput) rather than
+    // written to a file inside installTarget -- installTarget is deleted
+    // by the time removeArtifact returns, so a file written there
+    // wouldn't be readable afterward, but captured stdout survives.
+    writeManifest('test-remote', {
+      id: 'project-root-env-remove',
+      install_target: 'installed',
+      post_remove: 'node -e "process.stdout.write(process.env.DELIVERYOS_PROJECT_ROOT || \'\')"',
+    });
+
+    const installTarget = path.join(cwd, 'installed');
+    fs.mkdirSync(installTarget, { recursive: true });
+
+    await upsertEntry(cwd, { id: 'project-root-env-remove', version: '1.0.0', remote: 'test-remote', installTarget });
+
+    const result = await removeArtifact(cwd, 'project-root-env-remove');
+    expect(result.postRemoveWarning).toBeUndefined();
+    expect(result.postRemoveOutput).toBe(cwd);
+    expect(result.removedInstallTarget).toBe(true);
+  }, 30_000);
+
+  it('skips post_remove (no output/warning) when installTarget no longer exists on disk -- nothing real to run it against', async () => {
+    writeRegistry(['test-remote']);
+    writeManifest('test-remote', {
+      id: 'already-gone-plugin',
+      install_target: 'installed',
+      post_remove: 'node -e "console.log(\'should never run\')"',
+    });
+
+    // installTarget deliberately never created -- simulates a project
+    // where it was already deleted by hand before running remove.
+    const installTarget = path.join(cwd, 'installed');
+
+    await upsertEntry(cwd, { id: 'already-gone-plugin', version: '1.0.0', remote: 'test-remote', installTarget });
+
+    const result = await removeArtifact(cwd, 'already-gone-plugin');
+
+    expect(result.postRemoveOutput).toBeUndefined();
+    expect(result.postRemoveWarning).toBeUndefined();
+    expect(result.removedInstallTarget).toBe(false);
   });
 });

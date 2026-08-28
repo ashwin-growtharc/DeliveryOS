@@ -8,21 +8,22 @@ for how `backend-plugin` fits into the rest of the artifact model.
 
 | Stage | What happens |
 |---|---|
-| [Install](#install) | Signature verified before any file lands, config form collects what it needs |
+| [Install](#install) | Signature verified before any file lands, config form collects what it needs, `post_install` installs whatever real dependencies it needs |
 | [Wire in](#wire-in) | Safe new files auto-applied, build runs automatically |
 | [Build breaks](#build-breaks) | AI proposes a fix, you confirm, rebuild verifies, auto-rollback if it doesn't hold |
-| [File already exists](#file-already-exists) | AI proposes a real merge instead of "go do it yourself," same verify/rollback |
+| [File already exists](#file-already-exists) | AI proposes a real merge instead of "go do it yourself," backed by the artifact's own reference content even when the manifest gives no explicit merge snippet |
+| [Connect it to your app](#connect-it-to-your-app) | Wiring the backend into YOUR specific pages/routes is project-specific — a real AI session (in-app or CLI) does this, then re-verifies the build |
 | [After install](#after-install) | Plain-language summary of what worked and what's still on you |
 | [Audit](#audit) | Every AI proposal/apply/rollback logged and viewable per-artifact |
-| [Uninstall](#uninstall) | `deliveryos remove` cleanly reverts what was pulled |
+| [Uninstall](#uninstall) | `deliveryos remove` cleanly reverts what was pulled, running a real teardown command first if the artifact declared one |
 | [Secrets](#secrets) | Warns if your `.env.local` isn't gitignored; never silently proceeds |
 | [Rotate a secret](#rotate-a-secret) | `deliveryos config --set` — CLI parity with the UI |
 | [Reconfigure](#reconfigure) | Form remembers what you already filled in (fixed a real bug where it forgot) |
 | [Update](#update) | Actually applies now — deletes files the new version removed, refuses (not guesses) if you've made local edits |
 | [Timeouts](#timeouts) | Build/install commands can't hang forever, and "tool not found" reads differently than "it broke" |
 
-That's the full lifecycle: install → wire → fix → merge → configure →
-rotate → update → uninstall.
+That's the full lifecycle: install → wire → fix → merge → connect →
+configure → rotate → update → uninstall.
 
 ---
 
@@ -52,6 +53,21 @@ existing `.env.local` value `>` the param's own `default`, then written to
 DeliveryOS keeps for update-checking. A missing required value is reported,
 not a hard failure — `pull` still succeeds and tells you exactly what's
 still needed.
+
+If the manifest declares `post_install`, it runs right after the payload
+lands — this is the artifact's own chance to run `npm install` for
+whatever real dependencies its code actually imports (a plugin that
+never installs its own dependencies is a real, confirmed bug class this
+closed). It runs with an absolute `DELIVERYOS_PROJECT_ROOT` env var set
+to the real consuming project's root, specifically so it never has to
+guess its way there with a relative `cd ../../..` — a real, confirmed
+bug: a fixed-depth `cd` silently overshoots once a project's own
+`src/`-vs-root convention shortens `install_target`'s effective depth,
+landing npm installs in the wrong folder entirely. A failing
+`post_install` aborts the pull outright, before anything is recorded as
+installed — unlike its uninstall-time counterpart (see
+[Uninstall](#uninstall)), there's nothing yet to leave a person stuck
+in the middle of.
 
 ## Wire in
 
@@ -88,9 +104,20 @@ Before this existed, a wiring target that already existed was a dead end —
 `whenPresent` merge-guidance snippet. **Merge with Claude** turns this into
 a real, reviewed option: a Claude subprocess reads the real existing file
 plus the manifest's own instructions/guidance, and either proposes a
-complete merged file or — just as often, and just as valuably — an honest
-refusal naming exactly what information is missing to do it safely, rather
-than guessing.
+complete merged file or an honest refusal naming exactly what information
+is missing to do it safely, rather than guessing.
+
+A real, confirmed gap this closed: a `whenPresent` with only prose
+instructions and no snippet of its own (the common case — e.g. "this
+artifact expects to own this file, review before replacing it") used to
+leave the merge with nothing concrete to work from at all, so it could
+only ever refuse — even for something as trivial as reverting a single
+stray character someone typed into a file the artifact fully owns. It
+now falls back to the same `whenAbsent.snippet` a fresh install would
+have written — real, known-good reference content either way — so a
+genuine refusal is now reserved for cases that actually need one (a real
+library conflict, content it truly can't reconcile), not just "no
+snippet happened to be declared for this branch."
 
 Nothing is written until you click **Apply**. When applied, the project's
 real build reruns to verify it, with the exact same automatic rollback
@@ -109,6 +136,39 @@ honest refusals (a vague instruction with nothing concrete to merge), one
 real merge, applied and verified in one click. Still exactly one human
 confirmation before anything is written — it just now covers every file
 that click applies to, instead of requiring one click per file.
+
+## Connect it to your app
+
+`wiring_actions` (the two stages above) only cover files with a fixed,
+predictable path every project shares (`middleware.ts`, a specific API
+route) — that's a real, closed set. Actually connecting the backend's
+own functions to YOUR app's specific login page, dashboard, and routing
+is a different problem: it depends on which UI you happen to have,
+which is different for every project, with no fixed convention to write
+a `wiring_action` against. Automating it would mean guessing; that's not
+this tier's job.
+
+```bash
+deliveryos wire-with-claude <id> --remote <name>
+```
+
+This reads the artifact's own real, already-resolved lockfile paths (the
+exact files this pull produced, never a hand-typed guess), writes them
+to a real context file, then hands off to a genuine interactive `claude`
+session — in the desktop app, a real terminal opens right inside the
+window; on the CLI, the same session opens in your own terminal. It
+connects the backend to your actual pages, confirms the login flow
+really works, then re-runs the project's real build one more time before
+handing back a plain pass/fail summary.
+
+This is deliberately NOT DeliveryOS's own restricted, no-tool-access AI
+subprocess (the same one used for [Build breaks](#build-breaks) and
+[File already exists](#file-already-exists)) — that flags a bounded,
+single-file proposal for review. This step needs a real, unrestricted
+coding session instead, so it opens the same trusted `claude` you'd run
+by hand, under its own normal permission prompts, rather than trying to
+grant a restricted subprocess broad write access a flag can't reliably
+enforce. Commit or branch first, same as before any real coding session.
 
 ## After install
 
@@ -159,9 +219,18 @@ view since it isn't scoped to one artifact's own wiring.)
 deliveryos remove <id>
 ```
 
-Deletes `install_target` and the artifact's pristine snapshot, and drops
-its lockfile entry — but is deliberately conservative about anything it
-didn't create itself:
+If the manifest declares `post_remove` — the symmetric counterpart to
+`post_install`, for an artifact that started something with its own
+lifecycle (a local dev database via Docker, say) — it runs first, while
+`install_target` still exists to reference. Unlike `post_install`, a
+failing `post_remove` never blocks the removal itself: it's reported as
+a warning, not a hard error, since trapping someone with both a broken
+teardown *and* an artifact DeliveryOS now refuses to finish uninstalling
+would be strictly worse than the teardown just failing on its own.
+
+Then it deletes `install_target` and the artifact's pristine snapshot,
+and drops its lockfile entry — but is deliberately conservative about
+anything it didn't create itself:
 
 - Only deletes wiring-created files it has an actual record of writing
   (`wiredFiles` in the lockfile) — a file that already existed before this
@@ -270,7 +339,7 @@ as timed out. Found along the way, not yet fixed.)
 
 ## The bottom line, from your side of the terminal
 
-None of the twelve stages above are things you have to orchestrate
+None of the thirteen stages above are things you have to orchestrate
 yourself — they're what happens *while you run one command*. From where
 you're sitting:
 
@@ -283,20 +352,31 @@ you're sitting:
   it out yourself" — it becomes a diff you read and click Apply on, or an
   honest "I can't tell what you need without more information," never a
   guess dressed up as confidence.
-- **Nothing is ever written without you clicking something first** — not
-  once, across any of this: not the merge, not the build fix, not the
-  update. The one thing that *is* automatic (writing a brand-new file
-  from the manifest's own declared content) is also the one thing with
-  nothing to guess at — there was no existing file to overwrite, no
-  judgment call to make.
+- **Nothing DeliveryOS itself proposes is ever written without you
+  clicking something first** — not once: not the merge, not the build
+  fix, not the update. The one thing that *is* automatic (writing a
+  brand-new file from the manifest's own declared content) is also the
+  one thing with nothing to guess at — there was no existing file to
+  overwrite, no judgment call to make. **Connect it to your app** is the
+  one deliberate exception: it hands off to a real, unrestricted coding
+  session (the same `claude` you'd run by hand) rather than a single
+  bounded proposal, so its one confirmation covers the whole session,
+  not one file at a time — say so explicitly if anyone asks "does this
+  ever write without asking."
 - **If you change your mind, you get your project back**, not a folder
   full of mystery files — `deliveryos remove` undoes exactly what it
   created and is explicit about the two things it won't touch (a file
   that already existed, your `.env.local`), rather than silently
-  guessing either way.
-- **Every AI-assisted change it ever made to your files is one click away
-  from being read again** — not just "it happened," but the actual
-  before, the actual after, and whether the rebuild confirmed it.
+  guessing either way. That covers what DeliveryOS itself wired in;
+  whatever a **Connect it to your app** session wrote afterward is
+  real, normal code in your project now, same as anything you'd typed
+  yourself — your own git history is the undo button for that part.
+- **Every proposal DeliveryOS itself made to your files is one click
+  away from being read again** — not just "it happened," but the
+  actual before, the actual after, and whether the rebuild confirmed
+  it. A **Connect it to your app** session isn't part of that same log
+  (it's not a bounded proposal to begin with) — commit or branch before
+  running it for exactly this reason.
 
 What's still genuinely yours to do, every time: writing your own database
 migration, reading a file DeliveryOS flagged rather than trusting it was

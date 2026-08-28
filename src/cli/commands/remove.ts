@@ -8,6 +8,10 @@ export function registerRemoveCommand(program: Command): void {
     .action(async (id: string) => {
       const result = await removeArtifact(process.cwd(), id);
 
+      if (result.postRemoveOutput && result.postRemoveOutput.trim().length > 0) {
+        console.log(result.postRemoveOutput.trimEnd());
+      }
+
       console.log(`Removed "${id}":`);
       console.log(`  Install directory: ${result.removedInstallTarget ? 'deleted' : 'was already gone'}`);
       if (result.removedWiredFiles.length > 0) {
@@ -20,7 +24,11 @@ export function registerRemoveCommand(program: Command): void {
       // two things `removeArtifact` never touches automatically, so a
       // person must not assume either one is handled just because the rest
       // of the removal succeeded.
-      if (result.filesNeedingManualReview.length > 0 || result.envParamsStillSet.length > 0) {
+      if (
+        result.filesNeedingManualReview.length > 0
+        || result.envParamsStillSet.length > 0
+        || result.postRemoveWarning
+      ) {
         console.log('');
         console.log('Needs your attention -- not touched automatically:');
         if (result.filesNeedingManualReview.length > 0) {
@@ -34,6 +42,9 @@ export function registerRemoveCommand(program: Command): void {
             `  .env.local still has value(s) for: ${result.envParamsStillSet.join(', ')} -- left in place `
               + `in case another artifact shares them; remove manually if no longer needed.`,
           );
+        }
+        if (result.postRemoveWarning) {
+          console.log(`  post_remove did not complete cleanly -- removal proceeded anyway: ${result.postRemoveWarning}`);
         }
       }
     });

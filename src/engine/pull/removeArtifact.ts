@@ -1,16 +1,91 @@
 import * as fs from 'fs';
+import { execSync } from 'child_process';
 import { readLockfile, removeEntry } from '../lockfile/lockfile';
 import { resolveArtifact } from './pull';
 import { resolveContainedTargetFile, resolveWiringActions } from './wiring';
 import { readExistingEnvValues } from './installParams';
 import { pristinePath, resolveContainedPath } from '../paths';
 import { ArtifactNotPulledError } from '../errors';
+import { isExecError, isToolNotFoundError, rmDirWithRetry } from '../execHelpers';
+
+// Same 10-minute runway as pull.ts's POST_INSTALL_TIMEOUT_MS, same
+// reasoning (a real, one-shot lifecycle command, not something run
+// repeatedly) -- see that constant's own doc comment.
+const POST_REMOVE_TIMEOUT_MS = 10 * 60 * 1000;
+
+/**
+ * Runs a manifest's `post_remove` command, if any -- mirrors
+ * `pull.ts`'s own `post_install` execution shape (`execSync`, piped
+ * stdio, the same timeout/tool-not-found classification via
+ * `execHelpers.ts`) with ONE deliberate difference: this never throws.
+ * `post_install`'s failure safely aborts a pull (nothing has been
+ * recorded as installed yet); `post_remove`'s failure must NOT abort a
+ * removal -- see `removeArtifact`'s own doc comment for why a hard-fail
+ * here would trap a person with both a broken side effect (e.g. a
+ * still-running Docker container) AND a DeliveryOS that refuses to let
+ * them finish removing the artifact tracking it. Returns whichever of
+ * `output`/`warning` actually applies; a caller with no `post_remove`
+ * declared at all never calls this function in the first place.
+ */
+function runPostRemoveCommand(
+  command: string,
+  installTarget: string,
+  projectRoot: string,
+  timeoutMs: number = POST_REMOVE_TIMEOUT_MS,
+): { output?: string; warning?: string } {
+  try {
+    // DELIVERYOS_PROJECT_ROOT: same real, confirmed fix as post_install's
+    // own identical addition in pull.ts -- see that file's doc comment
+    // for the full story (a fixed relative `cd ../..` escape silently
+    // overshoots whenever adaptSrcDirPath shortens install_target's
+    // effective depth). Runs with cwd: installTarget by default (same as
+    // post_install, and for the same reason -- its command may reference
+    // files inside it), but a manifest that needs the real project root
+    // now has an absolute, always-correct path to reach it.
+    const output = execSync(command, {
+      cwd: installTarget,
+      stdio: 'pipe',
+      timeout: timeoutMs,
+      env: { ...process.env, DELIVERYOS_PROJECT_ROOT: projectRoot },
+    }).toString('utf-8');
+    return { output };
+  } catch (err) {
+    const stdout = isExecError(err) ? err.stdout?.toString('utf-8') ?? '' : '';
+    const stderr = isExecError(err) ? err.stderr?.toString('utf-8') ?? '' : '';
+    const detail = err instanceof Error ? err.message : String(err);
+    const combined = [stdout, stderr].filter((s) => s.trim().length > 0).join('\n');
+
+    if (isExecError(err) && err.code === 'ETIMEDOUT') {
+      return {
+        warning: `post_remove command timed out after ${timeoutMs}ms (still running/hung, no result was produced): ${command}`
+          + (combined ? `\n${combined}` : ''),
+      };
+    }
+    if (isToolNotFoundError([detail, combined].join('\n'))) {
+      return {
+        warning: `post_remove command's tool was not found on this machine's PATH: ${command}`
+          + (combined ? `\n${combined}` : ''),
+      };
+    }
+    return {
+      warning: `post_remove command failed: ${detail}`
+        + (combined ? `\n${combined}` : ''),
+    };
+  }
+}
 
 /** What `removeArtifact` actually did against a real project -- every field
  * reports something that genuinely happened (or genuinely didn't), never a
  * best-effort guess. */
 export interface RemoveResult {
   removedInstallTarget: boolean;
+  /** Set when `installTarget` still existed but could not actually be
+   * deleted after retrying (a real, confirmed Windows race -- see
+   * `rmDirWithRetry`'s own doc comment in `execHelpers.ts`). Informational
+   * only, same posture as `postRemoveWarning`: the rest of removal
+   * (wired files, pristine snapshot, lockfile entry) still completes
+   * regardless, so a stuck directory lock never traps a person mid-removal. */
+  installTargetWarning?: string;
   removedWiredFiles: string[];
   /** Anything the artifact's wiring touched that was NOT in wiredFiles --
    * i.e. a file that already existed before the pull, or one that went
@@ -23,6 +98,17 @@ export interface RemoveResult {
    * still there. */
   envParamsStillSet: string[];
   removedPristineSnapshot: boolean;
+  /** Captured stdout of a real, successfully-run `post_remove` command --
+   * absent when the manifest declares none, or when it couldn't be
+   * resolved at all (same graceful degradation as filesNeedingManualReview/
+   * envParamsStillSet below). */
+  postRemoveOutput?: string;
+  /** Set when `post_remove` was declared and actually ran, but failed --
+   * informational only, same posture as envParamsStillSet: removal still
+   * completed normally regardless. See `runPostRemoveCommand`'s own doc
+   * comment for why this never blocks removal the way a failing
+   * post_install blocks a pull. */
+  postRemoveWarning?: string;
 }
 
 /**
@@ -39,7 +125,13 @@ export interface RemoveResult {
  * flow (`filesNeedingManualReview`) -- neither is something DeliveryOS
  * itself created, so neither is safe to delete automatically.
  */
-export async function removeArtifact(cwd: string, id: string): Promise<RemoveResult> {
+export async function removeArtifact(
+  cwd: string,
+  id: string,
+  // Test-only override -- production always uses POST_REMOVE_TIMEOUT_MS.
+  // Same shape as pullArtifact's own postInstallTimeoutMs parameter.
+  postRemoveTimeoutMs: number = POST_REMOVE_TIMEOUT_MS,
+): Promise<RemoveResult> {
   const lockfile = readLockfile(cwd);
   const entry = lockfile.entries.find((e) => e.id === id);
   if (!entry) {
@@ -54,6 +146,13 @@ export async function removeArtifact(cwd: string, id: string): Promise<RemoveRes
   // (remote unregistered, artifact deleted from the catalog), fail loud and
   // honest rather than guess a path to delete.
   let rawInstallTarget: string;
+  // Set only by the fallback branch below, when it had to resolve the
+  // manifest anyway to recover a never-recorded installTarget -- reused
+  // by resolvedManifest further down instead of resolving it a second
+  // time (found via review: the fallback's own already-resolved manifest
+  // was being silently discarded, contradicting this file's own doc
+  // comment that resolution happens "ONCE... and reused for both").
+  let manifestFromInstallTargetFallback: ReturnType<typeof resolveArtifact>['manifest'] | undefined;
   if (entry.installTarget) {
     rawInstallTarget = entry.installTarget;
   } else {
@@ -69,6 +168,7 @@ export async function removeArtifact(cwd: string, id: string): Promise<RemoveRes
       );
     }
     rawInstallTarget = resolved.manifest.install_target;
+    manifestFromInstallTargetFallback = resolved.manifest;
   }
 
   // Defense in depth, same posture as the wiredFiles re-validation just
@@ -89,10 +189,65 @@ export async function removeArtifact(cwd: string, id: string): Promise<RemoveRes
     );
   }
 
+  // Resolved ONCE, here -- before any deletion -- and reused for both
+  // post_remove execution (needs installTarget to still exist on disk,
+  // since its command may reference files inside it, e.g. a
+  // docker-compose.yml) and the review-lists computation below (moved
+  // earlier from its own previous location for exactly this reason).
+  // `resolveWiringActions`/`readExistingEnvValues` both check the
+  // PROJECT ROOT (cwd), never installTarget's own contents, so moving
+  // this earlier changes nothing about what either one reports -- only
+  // post_remove's own timing requirement forced the move. Degrades
+  // gracefully to `undefined` when the manifest can no longer be
+  // resolved (remote unregistered, artifact deleted from the catalog) --
+  // wiredFiles is already the authoritative record of what DeliveryOS
+  // itself created, so a real removal still completes even without this.
+  //
+  // Genuinely reuses the fallback branch's own resolution above when it
+  // already ran (an old-shape lockfile entry) -- only resolves fresh here
+  // for the normal case, where entry.installTarget already existed and
+  // nothing above needed the manifest yet.
+  let resolvedManifest: ReturnType<typeof resolveArtifact>['manifest'] | undefined;
+  if (manifestFromInstallTargetFallback) {
+    resolvedManifest = manifestFromInstallTargetFallback;
+  } else {
+    try {
+      resolvedManifest = resolveArtifact(id, entry.remote).manifest;
+    } catch {
+      resolvedManifest = undefined;
+    }
+  }
+
+  let postRemoveOutput: string | undefined;
+  let postRemoveWarning: string | undefined;
+  if (resolvedManifest?.post_remove && fs.existsSync(installTarget)) {
+    const result = runPostRemoveCommand(resolvedManifest.post_remove, installTarget, cwd, postRemoveTimeoutMs);
+    postRemoveOutput = result.output;
+    postRemoveWarning = result.warning;
+  }
+
   let removedInstallTarget = false;
+  let installTargetWarning: string | undefined;
   if (fs.existsSync(installTarget)) {
-    fs.rmSync(installTarget, { recursive: true, force: true });
-    removedInstallTarget = true;
+    // A just-run post_remove (above) may have timed out and left a real
+    // grandchild process still holding a lock on this exact directory --
+    // see rmDirWithRetry's own doc comment (execHelpers.ts). Caught here,
+    // deliberately: even rmDirWithRetry's own widened retry budget can't
+    // guarantee a stuck lock clears in time, and this function's whole
+    // design exists so a person is never trapped mid-removal (the exact
+    // posture runPostRemoveCommand's own failures already take) -- the
+    // rest of removal (wired files, pristine snapshot, lockfile entry)
+    // still needs to complete even when this one step doesn't.
+    try {
+      await rmDirWithRetry(installTarget);
+      removedInstallTarget = true;
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      installTargetWarning = `Could not delete "${installTarget}" -- something may still be holding it open `
+        + `(this can happen right after a slow post_remove command was killed for exceeding its timeout): `
+        + `${detail}. The rest of removal still completed; delete this directory by hand once nothing is `
+        + `using it.`;
+    }
   }
 
   // Defense in depth, same posture as applyDeterministicWiring's own
@@ -111,26 +266,18 @@ export async function removeArtifact(cwd: string, id: string): Promise<RemoveRes
     removedWiredFiles.push(wiredFile);
   }
 
-  // Both of these degrade gracefully to [] when the manifest can no longer
-  // be resolved (remote unregistered, artifact deleted from the catalog) --
-  // wiredFiles above is already the authoritative record of what DeliveryOS
-  // itself created, so a real removal still completes even without this.
   let filesNeedingManualReview: string[] = [];
   let envParamsStillSet: string[] = [];
-  try {
-    const resolved = resolveArtifact(id, entry.remote);
+  if (resolvedManifest) {
     const wiredSet = new Set(wiredFiles);
-    filesNeedingManualReview = resolveWiringActions(resolved.manifest.wiring_actions, cwd)
+    filesNeedingManualReview = resolveWiringActions(resolvedManifest.wiring_actions, cwd)
       .filter((action) => action.targetFileExists && !wiredSet.has(action.targetFile))
       .map((action) => action.targetFile);
 
     const existingEnvValues = readExistingEnvValues(cwd);
-    envParamsStillSet = resolved.manifest.install_params
+    envParamsStillSet = resolvedManifest.install_params
       .filter((param) => existingEnvValues[param.key] !== undefined)
       .map((param) => param.key);
-  } catch {
-    filesNeedingManualReview = [];
-    envParamsStillSet = [];
   }
 
   const pristineTarget = pristinePath(cwd, id);
@@ -147,9 +294,12 @@ export async function removeArtifact(cwd: string, id: string): Promise<RemoveRes
 
   return {
     removedInstallTarget,
+    installTargetWarning,
     removedWiredFiles,
     filesNeedingManualReview,
     envParamsStillSet,
     removedPristineSnapshot,
+    postRemoveOutput,
+    postRemoveWarning,
   };
 }

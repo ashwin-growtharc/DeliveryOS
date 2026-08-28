@@ -1275,6 +1275,218 @@ resurrect a risk this team already found and moved away from.
   rewritten around the new command -- no more hand-written prompt to
   copy-paste, no more risk of it referencing a stale path.
 
+## Phase 28 — An embedded terminal for "Wire with Claude", and a Detail-view UI/UX pass — **Done**
+
+Phase 27 explicitly deferred an app-side launcher for `wire-with-claude`
+as a bigger, separate feature. Asked directly which shape to build --
+a system-terminal launcher, or a real terminal embedded inside the
+DeliveryOS window -- the user chose the embedded terminal.
+
+- **New Rust module `src-tauri/src/pty.rs`** (via `portable-pty`):
+  spawns and owns one interactive PTY session at a time
+  (`PtyState(Mutex<Option<PtySession>>)`), streaming output to the
+  webview as base64-encoded `pty-output`/`pty-exit` Tauri events;
+  `xterm.js` (vendored via a new `scripts/generate-vendored-xterm.mjs`
+  esbuild script) renders it client-side. The app's `RunEvent::
+  ExitRequested` handler kills any still-running session so closing the
+  window can't orphan a `claude` process.
+- **A real, confirmed Windows-only bug, found and fixed**:
+  `portable_pty::CommandBuilder::new("deliveryos")` failed with "%1 is
+  not a valid Win32 application" (os error 193) -- `CreateProcessW` has
+  no `PATHEXT` resolution the way `cmd.exe` does, and `deliveryos` on
+  Windows resolves to an extensionless npm shim script. Fixed by
+  routing the spawned command through `cmd.exe /C` on Windows only
+  (`#[cfg(windows)]`); verified with a standalone `cargo run --example
+  pty_smoke` printing a real `deliveryos --version` through the fixed
+  path, rather than only through the full GUI.
+- **A real bug in the existing PTY-command wiring, found and fixed**:
+  the app.js launcher called the new `pty_spawn`/`pty_write`/
+  `pty_resize`/`pty_kill` commands through the sidecar's `call()`
+  helper, which actually wraps `invoke('sidecar_call', ...)` -- wrong
+  for these, since they're standalone Tauri commands, not sidecar RPCs.
+  Fixed by importing `invoke` from `window.__TAURI__.core` directly.
+- **Detail-view UI/UX pass**, run as a 3-agent swarm plus direct fixes
+  for the two agents whose worktrees were based on a stale `main` and
+  never touched the target code: tabs reordered so Configuration (the
+  most immediately actionable) leads instead of trailing; the
+  Connection Status panel moved above the (now collapsed-by-default)
+  "How installing this works" explainer, and given a real boxed
+  treatment matching the explainer's own visual weight instead of a
+  bare inline row; Connection Status and Wiring both now show an
+  immediate spinner + "Loading…" row (matching the existing tabs
+  loading pattern) instead of a blank gap before their async calls
+  resolve.
+- **Follow-up pass (via the new `ui-ux-pro-max` skill)**, prompted by
+  the user still seeing "lots of different loading and stuff" in this
+  same panel: found the Configuration tab's own install-params form was
+  the one loading region that never got the spinner treatment its two
+  siblings did (fixed), and a real underlying CSS bug explaining why the
+  existing spinners still looked inconsistent -- `.spinner` had no
+  `display` set, so it rendered as a proper 14px ring only inside an
+  already-flex parent (Connection Status) and collapsed to a sliver
+  inside a plain div (Wiring, Install params). Fixed once at the
+  component level (`display: inline-flex` on `.spinner` itself) instead
+  of patching each call site's container.
+
+## Phase 29 — `post_remove`, and a real dogfood of a genuinely large backend-plugin — **Done**
+
+Asked directly whether the current backend-plugin mechanism scales past
+something as small as `email-code-auth` -- a module that's foldered,
+needs a real database, maybe Docker. Answer given directly: payload
+size and config already scale fine; the real, confirmed gap was that
+`deliveryos remove` only ever deletes files and never runs anything, so
+a plugin that started something on install (a local dev Postgres via
+Docker) had no symmetric way to tear it down. Agreed approach: build
+that piece, then dogfood a real, already-published, genuinely bigger
+artifact (`nextauth-credentials` -- Prisma + bcrypt + a real Postgres
+`DATABASE_URL`, 4 `wiring_actions`) to find out what actually breaks.
+
+- **New `post_remove` manifest field**, mirroring `post_install`'s
+  execution shape (`execSync`, timeout, tool-not-found/exec-error
+  classification) but deliberately **never blocking removal on
+  failure** -- reported as a `postRemoveWarning` instead of a thrown
+  error, because `removeArtifact`'s entire design exists so a person is
+  never left stuck mid-removal, unlike `post_install`, which safely
+  hard-aborts a pull before anything is recorded as installed. Runs
+  before the install target is deleted (so it can still reference files
+  inside it), reusing the manifest resolution that was previously
+  computed later, only for the review-lists.
+- **A real, second Windows EPERM race, distinct from the known
+  post_install one**: a killed `post_remove` command's grandchild
+  `node` process (Windows only kills the immediate `cmd.exe` wrapper)
+  could still hold a lock on `installTarget` exactly as the following
+  `fs.rmSync` tried to delete it. Fixed with a retrying `rmDirWithRetry`
+  helper, applied in `removeArtifact.ts` itself (a real production fix)
+  and reused in the test suite's own cleanup, which hit the identical race.
+- **A critical, real, confirmed filesystem-pollution bug found in
+  already-shipped code, while computing directory-depth math for this
+  work**: `email-code-auth`/`kortix-auth-shell`'s `post_install: cd
+  ../../.. && npm install ...` assumed `install_target` is always
+  exactly 3 segments deep -- but Phase 26's own `adaptSrcDirPath` fix
+  shortens this to 2 segments for a project using a root `app/` instead
+  of `--src-dir`, so the fixed 3-level `cd` overshoots by one directory,
+  landing in the *parent* of the real project. It went unnoticed because
+  Node's own upward `node_modules` resolution still found the misplaced
+  packages at runtime. Confirmed with real evidence -- a genuine
+  `package.json`/`package-lock.json`/`node_modules` found sitting
+  directly on the user's real Desktop folder, dated to match earlier
+  session work. **Disclosed immediately with the exact evidence, and
+  deleted only after the user explicitly confirmed via AskUserQuestion.**
+  Root-fixed generically, not per-manifest: a new `DELIVERYOS_PROJECT_ROOT`
+  absolute-path env var is now injected into both `post_install`'s and
+  `post_remove`'s subprocess environment, and every affected manifest
+  (`email-code-auth`, `kortix-auth-shell`, and the new `nextauth-credentials`
+  local-test copy) now `process.chdir`s to it instead of using a
+  depth-counted relative `cd`. Real regression tests added in both
+  `pull.test.ts` and `removeArtifact.test.ts` proving the env var is
+  set to the exact real project root.
+- **Dogfooded `nextauth-credentials` for real**: pulled into a fresh
+  test project, found it shipped with no `post_install` at all (so
+  `next-auth`/`@auth/prisma-adapter`/`@prisma/client`/`bcryptjs`/`prisma`
+  never installed on a real pull -- the same missing-post_install bug
+  class as `email-code-auth`/`kortix-auth-shell`), a `prisma@8.0.0-rc`
+  version-drift trap from an unpinned `npm install -D prisma` (a
+  completely restructured CLI with no `generate`/`migrate dev` at all --
+  fixed by pinning `prisma@6`), and a real Prisma-CLI gotcha where
+  `DATABASE_URL` lands in `.env.local` (matching Next.js's own
+  convention) but the standalone `npx prisma` CLI only reads a plain
+  `.env`. A local-test copy (v1.0.2) additionally starts a real,
+  throwaway local Postgres container via Docker on `post_install` and
+  tears it down via `post_remove` -- verified end to end with real
+  `docker ps` checks before and after, not assumed. Fixes stayed on the
+  `local-test` remote; nothing pushed to the real `growtharc-ai-helpers`
+  copy without being asked again.
+
+## Phase 30 — A `backend-plugin-authoring` skill, for both human and AI authors — **Done**
+
+Asked directly, mid-dogfood: with real code this size and this easy to
+get wrong (a missing `post_install`, a silently-overshooting relative
+`cd`, an unpinned dependency grabbing an incompatible major, an env file
+one CLI doesn't read), could the mechanism actually be authored
+correctly by someone who hadn't just lived through Phase 29's failures?
+
+- New `.claude/skills/backend-plugin-authoring/SKILL.md`, following this
+  repo's existing skill conventions (frontmatter, `## When to activate`,
+  a why-this-needs-its-own-process section, numbered `## Process`, a
+  `## Worked example` section) -- built to be read directly by a human
+  author or invoked by an AI agent equally.
+- Documents the three-tier wiring model authoritatively (`install_params`
+  → Tier 1, auto; `wiring_actions` → Tier 2, auto-write-if-absent, one
+  human confirmation to merge into an existing file; DB schema/migrations
+  → Tier 3, a deliberate permanent never-touch, shipped only as a
+  passive reference file + README prose) and every real failure mode
+  Phase 29 actually found: missing `post_install`, the
+  `DELIVERYOS_PROJECT_ROOT`-vs-relative-`cd` trap, dependency
+  version-pinning, and the `.env`/`.env.local` split -- each cited
+  against the real artifact it was found on, not hypothetically.
+
+## Phase 31 — Two more sidebar destinations: Starter Kits and Backend Plugins — **Done**
+
+The sidebar already had a dedicated shortcut for one kind (`UI Components`,
+kind: ui-component, with live previews) but not for the other two kinds
+with their own real machinery -- someone who already knows they want
+"every backend plugin" had to land on the full Browse grid and manually
+toggle a Kind chip.
+
+- Two new sidebar destinations, **Starter Kits** (kind: `template`) and
+  **Backend Plugins** (kind: `backend-plugin`), each a plain single-kind
+  grid -- no chips, no search box, kind is implicitly fixed by which
+  sidebar item got you there. Unlike UI Components, neither kind needed
+  a live-preview story or a sub-dimension worth its own tab row, so both
+  share one generic renderer (`renderKindListPage`) instead of two more
+  bespoke pages.
+- Extracted `buildResCard` from Browse's own card-grid loop so Browse,
+  Starter Kits, and Backend Plugins all render visually identical cards
+  by construction, not three copies that can silently drift.
+- Backend-plugin artifacts previously fell back to the generic diamond
+  kind-icon everywhere (Browse cards, Detail header, Tag Folder rows) --
+  no entry existed for that kind. Added a real plug-shaped icon
+  (`i-kind-backend-plugin`) and a `KIND_ICON` entry, which upgrades all
+  of those existing surfaces too, not just the two new pages.
+- Both pages support "Pull all" (reusing the existing shared
+  `bulkPull`/`renderPullAllButton` helpers, same as Browse and Tag
+  Folder already do) and open into Detail with a correct "← Back to
+  Starter Kits"/"← Back to Backend Plugins" label.
+
+## Phase 32 — "Merge with Claude" had no reference content for a file's OWN canonical version — **Done**
+
+Found by direct user testing, not by reasoning about the code: deliberately
+typed a one-character typo into a freshly-wired `auth.ts` (`NextAuth` ->
+`Nex tAuth`), pulled up Detail, and clicked "Merge with Claude" to fix it.
+It refused outright, with no diff to review at all.
+
+- **Root cause**: `resolveWiringActions` only ever offered `whenPresent.snippet`
+  as the merge's reference content -- and for a file the artifact fully
+  owns (`whenPresent` declares only prose instructions, e.g. "review before
+  replacing it," no snippet of its own -- the common case, true for every
+  wiring action in both `email-code-auth` and `nextauth-credentials`), that's
+  always `undefined`. The merge prompt went out with zero concrete reference
+  for what the artifact's own correct content even is, so Claude could only
+  ever honestly refuse -- even to fix a single stray character in a file it
+  wrote in the first place.
+- **Fix**: fall back to `whenAbsent.snippet` -- the artifact's own canonical,
+  standalone version of the file -- whenever `whenPresent.snippet` is absent,
+  whether `whenPresent` was declared at all or not. Real, known-good content
+  either way (every `wiring_action` requires a `whenAbsent.snippet`), so it's
+  always safe to hand over as a reference: as a wholesale-replace reference
+  for a file the artifact owns outright, and as concrete "here's what I'm
+  trying to add" material even for a genuine partial merge (e.g. `middleware.ts`,
+  whose own `whenPresent` is prose-only too).
+- Updated `test/unit/wiring.test.ts` to assert the new fallback (24/24
+  passing) plus the full related suite (`applyWiring`, `manifest.schema`,
+  `suggestWiringActions`, the `wiring.e2e` CLI test) and a full typecheck --
+  all clean. `applyDeterministicWiring`'s own auto-write path is provably
+  unaffected (it already skips every `targetFileExists: true` action before
+  ever looking at `.snippet`).
+- `docs/backend-plugin-lifecycle.md` updated to match: a new "Connect it to
+  your app" stage documenting `wire-with-claude` (previously missing from
+  this doc entirely, despite shipping in Phase 27/28), `post_install`/
+  `post_remove`/`DELIVERYOS_PROJECT_ROOT` given their own real explanation
+  (previously mentioned only in passing), and the "bottom line" section's
+  "nothing is ever written without a click" claim corrected to carve out
+  `wire-with-claude`'s genuinely different trust model rather than
+  overclaiming.
+
 ## What's next
 
 - **Phase 13** (backend plug-and-play: basic hygiene) — in progress, 5 of 6 items done (uninstall, secrets safety net, timeouts, post-pull secret rotation, config-form reuse-existing-value autofill); config-form autofill's other two sub-cases (genuine local signal, neither) deliberately deferred/descoped, see above

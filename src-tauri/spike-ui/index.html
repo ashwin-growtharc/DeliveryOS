@@ -65,6 +65,11 @@
           <path d="M12 2.2 V5.5 H15.3" />
           <path d="M7.2 9.5 H12.8 M7.2 12.6 H12.8" />
         </symbol>
+        <symbol id="i-kind-backend-plugin" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M7 2.5v4.3M13 2.5v4.3" />
+          <path d="M5.3 6.8h9.4v3a4.7 4.7 0 0 1-9.4 0z" />
+          <path d="M10 14.5v3" />
+        </symbol>
         <symbol id="i-kind-default" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round">
           <path d="M10 2.5 L17.5 10 L10 17.5 L2.5 10 Z" />
         </symbol>
@@ -132,6 +137,8 @@
             <button class="sidebar-item" data-view="browse"><svg class="glyph"><use href="#i-folder"/></svg>Browse</button>
             <button class="sidebar-item" data-view="tags"><svg class="glyph"><use href="#i-tag"/></svg>Browse by tag</button>
             <button class="sidebar-item" data-view="ui-components"><svg class="glyph"><use href="#i-components"/></svg>UI Components</button>
+            <button class="sidebar-item" data-view="starter-kits"><svg class="glyph"><use href="#i-kind-template"/></svg>Starter Kits</button>
+            <button class="sidebar-item" data-view="backend-plugins"><svg class="glyph"><use href="#i-kind-backend-plugin"/></svg>Backend Plugins</button>
             <button class="sidebar-item" data-view="settings"><svg class="glyph"><use href="#i-settings"/></svg>Settings</button>
             <div class="sidebar-divider"></div>
             <button class="sidebar-item" data-view="scan"><svg class="glyph"><use href="#i-scan"/></svg>Scan</button>
@@ -250,6 +257,48 @@
           <p id="ui-components-empty" class="empty-state" hidden>No UI components yet -- Add New or Scan to propose one.</p>
         </section>
 
+        <!-- Starter Kits (kind: template) and Backend Plugins
+             (kind: backend-plugin): single-kind slices of the same catalog
+             Browse already shows, their own sidebar destinations for the
+             same reason "Browse by tag" and "UI Components" are -- someone
+             who already knows what they want ("give me every backend
+             plugin") shouldn't have to land on the full unfiltered grid
+             and manually toggle a Kind chip first. Unlike UI Components,
+             neither kind here has a live-preview story or a sub-dimension
+             worth its own tab row, so this stays a plain grid reusing
+             Browse's own card markup (buildResCard) -- no chips, no
+             search box; kind is implicitly fixed by which sidebar item
+             got you here. See renderKindListPage in app.js. -->
+        <section id="view-starter-kits" class="view" hidden>
+          <div id="starter-kits-no-folder" class="hint-banner" hidden>
+            Select a project folder to browse starter kits.
+          </div>
+          <div class="page-head">
+            <h2 class="section-title">Starter Kits</h2>
+            <div class="page-head-actions">
+              <span id="starter-kits-count" class="count"></span>
+              <button id="starter-kits-pull-all-btn" class="btn btn-sm" hidden></button>
+            </div>
+          </div>
+          <div id="starter-kits-grid" class="grid"></div>
+          <p id="starter-kits-empty" class="empty-state" hidden>No starter kits match.</p>
+        </section>
+
+        <section id="view-backend-plugins" class="view" hidden>
+          <div id="backend-plugins-no-folder" class="hint-banner" hidden>
+            Select a project folder to browse backend plugins.
+          </div>
+          <div class="page-head">
+            <h2 class="section-title">Backend Plugins</h2>
+            <div class="page-head-actions">
+              <span id="backend-plugins-count" class="count"></span>
+              <button id="backend-plugins-pull-all-btn" class="btn btn-sm" hidden></button>
+            </div>
+          </div>
+          <div id="backend-plugins-grid" class="grid"></div>
+          <p id="backend-plugins-empty" class="empty-state" hidden>No backend plugins match.</p>
+        </section>
+
         <!-- Tag folder: opened by picking a tag VALUE (e.g. "stack: python")
              from Browse by tag -- its own navigable view (back button, like
              Detail), not an inline filter of Browse's own grid. Lists every
@@ -321,19 +370,20 @@
             <p id="detail-description" class="detail-description"></p>
             <div id="detail-provenance-badge" class="provenance-badge"></div>
 
+            <div id="detail-connection-status" class="connection-status" hidden></div>
+
             <!-- "How this works": a plain-language walkthrough of the
                  whole install lifecycle for an artifact that actually has
                  one (install_params/wiring_actions/post_install) -- filled
                  in by renderLifecycleExplainer(entry) in app.js. Sits
-                 ABOVE the live status chips below, open by default, since
-                 it's written for someone seeing this for the first time
-                 and not yet sure what any of the chips below even mean. -->
-            <details id="detail-lifecycle-explainer" class="lifecycle-explainer" hidden open>
+                 BELOW the live status chips above, collapsed by default,
+                 since it's reference/educational material -- the live
+                 status is the more actionable thing to see first, and this
+                 is one click away via its own <summary>. -->
+            <details id="detail-lifecycle-explainer" class="lifecycle-explainer" hidden>
               <summary>How installing this works</summary>
               <ol id="detail-lifecycle-steps" class="lifecycle-steps"></ol>
             </details>
-
-            <div id="detail-connection-status" class="connection-status" hidden></div>
 
             <!-- Top-level content tabs -- built dynamically per artifact
                  by refreshDetailTabs() in app.js, one tab per section that

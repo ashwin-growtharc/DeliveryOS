@@ -58,6 +58,11 @@
     command: { icon: 'i-kind-command', bg: 'var(--sky-100)', fg: 'var(--icon-fg-cool)' },
     rule: { icon: 'i-kind-rule', bg: 'var(--sage-50)', fg: 'var(--primary-700)' },
     template: { icon: 'i-kind-template', bg: 'var(--gold-500)', fg: '#6B4A00' },
+    // A shade deeper than skill's own sand-100 -- stays in the same warm
+    // family (backend-plugin reads as "a utility kind," same spirit as
+    // skill) while remaining visually distinct at a glance, without
+    // introducing a new bg/fg token pair just for this one entry.
+    'backend-plugin': { icon: 'i-kind-backend-plugin', bg: 'var(--sand-200)', fg: 'var(--icon-fg-warm)' },
     // Uses --ink (adaptive text), not --primary-700 (deliberately FIXED,
     // brand-fill-only) -- surface-inset itself adapts to dark mode, and
     // pairing it with fixed navy text has the exact same contrast problem
@@ -388,6 +393,10 @@
       renderTagsPage();
     } else if (view === 'ui-components') {
       renderUiComponentsPage();
+    } else if (view === 'starter-kits') {
+      renderStarterKitsPage();
+    } else if (view === 'backend-plugins') {
+      renderBackendPluginsPage();
     } else if (view === 'settings') {
       void loadRemotesForSettings();
     } else if (view === 'scan') {
@@ -778,6 +787,73 @@
     const btn = $('ui-components-pull-all-btn');
     const pullable = visibleUiComponentEntries().filter(isBulkPullable);
     await bulkPull(pullable, btn, () => renderUiComponentsPage());
+  }
+
+  // ---------- Starter Kits / Backend Plugins (single-kind sidebar pages) ----------
+  //
+  // Same idea as UI Components -- a sidebar shortcut into one kind of the
+  // catalog -- but neither `template` nor `backend-plugin` has a live-
+  // preview story or a sub-dimension worth its own tab row, so both share
+  // one plain-grid renderer instead of two more bespoke pages.
+
+  function visibleKindEntries(kind) {
+    return applyRemoteFilter(state.catalog.filter((entry) => entry.manifest.kind === kind));
+  }
+
+  /** Populates one kind-scoped page (count, grid, empty state, Pull all)
+   * from `ids`, an { noFolder, count, grid, empty, pullAllBtn } map of
+   * element ids -- see view-starter-kits/view-backend-plugins in
+   * index.html for the two real call sites. */
+  function renderKindListPage(kind, ids) {
+    $(ids.noFolder).hidden = Boolean(state.projectDir);
+
+    const entries = sortEntries(visibleKindEntries(kind));
+    $(ids.count).textContent = `${entries.length} artifact${entries.length === 1 ? '' : 's'}`;
+
+    const grid = $(ids.grid);
+    grid.innerHTML = '';
+    $(ids.empty).hidden = entries.length !== 0;
+
+    for (const entry of entries) {
+      grid.appendChild(buildResCard(entry));
+    }
+
+    renderPullAllButton($(ids.pullAllBtn), entries);
+  }
+
+  const STARTER_KITS_IDS = {
+    noFolder: 'starter-kits-no-folder',
+    count: 'starter-kits-count',
+    grid: 'starter-kits-grid',
+    empty: 'starter-kits-empty',
+    pullAllBtn: 'starter-kits-pull-all-btn',
+  };
+  const BACKEND_PLUGINS_IDS = {
+    noFolder: 'backend-plugins-no-folder',
+    count: 'backend-plugins-count',
+    grid: 'backend-plugins-grid',
+    empty: 'backend-plugins-empty',
+    pullAllBtn: 'backend-plugins-pull-all-btn',
+  };
+
+  function renderStarterKitsPage() {
+    renderKindListPage('template', STARTER_KITS_IDS);
+  }
+
+  function renderBackendPluginsPage() {
+    renderKindListPage('backend-plugin', BACKEND_PLUGINS_IDS);
+  }
+
+  async function handleStarterKitsPullAll() {
+    const btn = $(STARTER_KITS_IDS.pullAllBtn);
+    const pullable = visibleKindEntries('template').filter(isBulkPullable);
+    await bulkPull(pullable, btn, () => renderStarterKitsPage());
+  }
+
+  async function handleBackendPluginsPullAll() {
+    const btn = $(BACKEND_PLUGINS_IDS.pullAllBtn);
+    const pullable = visibleKindEntries('backend-plugin').filter(isBulkPullable);
+    await bulkPull(pullable, btn, () => renderBackendPluginsPage());
   }
 
   /** The active category's rows, each a live sandboxed-iframe preview.
@@ -1487,6 +1563,15 @@
     const requestId = ++connectionStatusRequestId;
     const chips = [];
 
+    // A real loading cue while the two RPCs below are in flight -- same
+    // spinner+text pattern #detail-tabs-loading already uses, not a new
+    // one. Previously this panel just sat in whatever state it was until
+    // both awaits resolved, a real inconsistency next to every other
+    // async wait in Detail that DOES show this. Cleared the moment real
+    // chips are ready to render (panel.innerHTML = '' below).
+    panel.innerHTML = '<span class="spinner" aria-hidden="true"></span> Loading…';
+    panel.hidden = false;
+
     // Signed/unsigned is deliberately NOT repeated here -- detail-provenance-badge
     // right above already shows it, for every artifact regardless of kind
     // or pulled state; this panel only adds what that badge doesn't cover.
@@ -1634,6 +1719,12 @@
     // the artifact and reading .env.local for nothing.
     let existingValues = {};
     if (manifest.install_params.length > 0) {
+      // Same spinner+text pattern renderConnectionStatusPanel/
+      // renderWiringSection already use -- this section previously showed
+      // nothing at all while the RPC below was in flight (or, worse, a
+      // PREVIOUS artifact's still-rendered fields), the one gap left when
+      // that pattern was applied to its two siblings.
+      fieldsContainer.innerHTML = '<span class="spinner" aria-hidden="true"></span> Loading…';
       try {
         const result = await call('artifact.readInstallParamValues', {
           id: manifest.id,
@@ -2327,6 +2418,14 @@ ${bodyHtml}
 
     renderWireWithClaudeLauncher(entry);
 
+    // Same real loading cue as renderConnectionStatusPanel's own fix --
+    // #detail-tabs-loading's exact spinner+text pattern, not a new one.
+    // Previously this section stayed exactly as it was (hidden, or
+    // showing a PREVIOUS artifact's stale cards) until resolveWiringActions
+    // resolved, with no indication anything was happening.
+    section.hidden = false;
+    container.innerHTML = '<span class="spinner" aria-hidden="true"></span> Loading…';
+
     let resolved;
     try {
       resolved = await call('artifact.resolveWiringActions', {
@@ -2402,6 +2501,7 @@ ${bodyHtml}
           action.description,
           action.instructions,
           action.snippet,
+          Boolean(action.snippetIsFullFileReference),
           entry.remoteName,
           entry.manifest.id,
         );
@@ -2450,7 +2550,15 @@ ${bodyHtml}
    * that could drift from the single-file one. Clicking the row's own
    * buttons and the batch controls calling these functions are genuinely
    * the same call, not two implementations of the same idea. */
-  function renderWiringMergeRow(targetFile, description, instructions, guidanceSnippet, remoteName, artifactId) {
+  function renderWiringMergeRow(
+    targetFile,
+    description,
+    instructions,
+    guidanceSnippet,
+    guidanceSnippetIsFullFile,
+    remoteName,
+    artifactId,
+  ) {
     const row = document.createElement('div');
     row.className = 'build-fix-row';
 
@@ -2497,6 +2605,7 @@ ${bodyHtml}
             description,
             instructions,
             guidanceSnippet,
+            guidanceSnippetIsFullFile,
           });
         } catch (err) {
           if (requestId !== wiringMergeRequestId) return; // superseded while awaiting
@@ -4001,6 +4110,41 @@ ${bodyHtml}
     }
   }
 
+  /** Builds one Browse-style `.res-card` element for `entry` -- shared by
+   * Browse's own grid and the kind-scoped Starter Kits/Backend Plugins
+   * pages (see renderKindListPage) so all three stay visually identical
+   * by construction rather than three copies that can silently drift.
+   * The whole card is the click target -- Pull/Push moved into Detail,
+   * so there's no inner action button to carve out a stopPropagation()
+   * exception for anymore. */
+  function buildResCard(entry) {
+    const card = document.createElement('div');
+    card.className = 'res-card';
+
+    const status = displayStatus(entry);
+    card.innerHTML = `
+      <div class="row1">
+        ${kindSwatchHtml(entry.manifest.kind)}
+        <div>
+          <div class="name"></div>
+          <div class="kind-label"></div>
+        </div>
+      </div>
+      <div class="summary"></div>
+      <div class="row2">
+        <span class="meta"></span>
+        <span class="badge ${status}"></span>
+      </div>
+    `;
+    card.querySelector('.name').textContent = entry.manifest.id;
+    card.querySelector('.kind-label').textContent = entry.manifest.kind;
+    card.querySelector('.summary').textContent = entry.manifest.description;
+    card.querySelector('.meta').textContent = `v${entry.manifest.version} · ${entry.manifest.owner}`;
+    card.querySelector('.badge').textContent = STATUS_LABELS[status];
+    card.addEventListener('click', () => openDetail(entry));
+    return card;
+  }
+
   function renderCards() {
     const grid = $('card-grid');
     renderBrowsePullAllButton();
@@ -4014,36 +4158,7 @@ ${bodyHtml}
         : 'No artifacts match.';
 
     for (const entry of entries) {
-      const card = document.createElement('div');
-      card.className = 'res-card';
-
-      const status = displayStatus(entry);
-      card.innerHTML = `
-        <div class="row1">
-          ${kindSwatchHtml(entry.manifest.kind)}
-          <div>
-            <div class="name"></div>
-            <div class="kind-label"></div>
-          </div>
-        </div>
-        <div class="summary"></div>
-        <div class="row2">
-          <span class="meta"></span>
-          <span class="badge ${status}"></span>
-        </div>
-      `;
-      card.querySelector('.name').textContent = entry.manifest.id;
-      card.querySelector('.kind-label').textContent = entry.manifest.kind;
-      card.querySelector('.summary').textContent = entry.manifest.description;
-      card.querySelector('.meta').textContent = `v${entry.manifest.version} · ${entry.manifest.owner}`;
-      card.querySelector('.badge').textContent = STATUS_LABELS[status];
-
-      // The whole card is the click target now -- Pull/Push moved into
-      // Detail, so there's no inner action button to carve out a
-      // stopPropagation() exception for anymore.
-      card.addEventListener('click', () => openDetail(entry));
-
-      grid.appendChild(card);
+      grid.appendChild(buildResCard(entry));
     }
   }
 
@@ -4488,6 +4603,8 @@ ${bodyHtml}
     browse: '← Back to Browse',
     'tag-folder': '← Back to Tag Folder',
     'ui-components': '← Back to UI Components',
+    'starter-kits': '← Back to Starter Kits',
+    'backend-plugins': '← Back to Backend Plugins',
   };
 
   function openDetail(entry) {
@@ -4544,12 +4661,17 @@ ${bodyHtml}
   // Documentation lead (per direct user feedback: the concrete, visual
   // "what does this look like" content first), Preview/Configuration/
   // Routes follow.
+  // 'configuration' sits first -- for a backend-plugin it's the entire
+  // point of the artifact (install_params + Wiring), yet it used to sit
+  // 5th, behind three tabs that are frequently irrelevant to a plugin
+  // (Design/Components/Documentation are template/ui-component-oriented).
+  // Every other tab's relative order is unchanged.
   const DETAIL_TAB_DEFS = [
+    { key: 'configuration', label: 'Configuration', panelId: 'detail-configuration-section' },
     { key: 'design', label: 'Design', panelId: 'detail-design-section' },
     { key: 'components', label: 'Components', panelId: 'detail-components-section' },
     { key: 'documentation', label: 'Documentation', panelId: 'detail-documentation-section' },
     { key: 'preview', label: 'Preview', panelId: 'detail-preview-section' },
-    { key: 'configuration', label: 'Configuration', panelId: 'detail-configuration-section' },
     { key: 'routes', label: 'Routes', panelId: 'detail-routes-section' },
     { key: 'sourceDrift', label: 'Source drift', panelId: 'detail-source-drift-section' },
     { key: 'activity', label: 'Activity', panelId: 'detail-activity-section' },
@@ -4561,6 +4683,27 @@ ${bodyHtml}
   // these is still pending, so a tab that ends up applicable doesn't
   // just silently pop in with no warning it was coming.
   const DETAIL_ASYNC_TAB_KEYS = ['documentation', 'design', 'components', 'routes', 'sourceDrift', 'activity'];
+
+  // Deliberately SEPARATE from DETAIL_TAB_DEFS's own display order
+  // (Configuration leads there, per direct user feedback above) -- this is
+  // only the priority used to pick a default ACTIVE tab when no real user
+  // preference exists yet. Found via review: reusing display order for
+  // both purposes silently regressed an earlier, separately-fixed bug
+  // (see the "no real preference yet" branch in refreshDetailTabs() below)
+  // the moment Configuration's display position moved to first -- Design
+  // must still win as the default tab once it resolves and applies, even
+  // though Configuration now displays to its left.
+  const DETAIL_DEFAULT_TAB_PRIORITY = [
+    'design', 'components', 'documentation', 'configuration', 'preview', 'routes', 'sourceDrift', 'activity',
+  ];
+
+  function firstByDefaultPriority(applicableDefs) {
+    for (const key of DETAIL_DEFAULT_TAB_PRIORITY) {
+      const match = applicableDefs.find((def) => def.key === key);
+      if (match) return match.key;
+    }
+    return applicableDefs[0].key;
+  }
 
   let detailTabState = {};
   let detailActiveTabKey = null;
@@ -4635,19 +4778,22 @@ ${bodyHtml}
       // absent" would silently steal focus the instant ANY other tab
       // happened to resolve first.
       if (detailTabState[detailActiveTabKey] === false) {
-        detailActiveTabKey = applicable[0].key;
+        detailActiveTabKey = firstByDefaultPriority(applicable);
         detailActiveTabIsUserChosen = false;
       }
     } else {
-      // No real preference yet -- always track DETAIL_TAB_DEFS's own
-      // display order, recomputed fresh on every call. Direct user
-      // feedback: Configuration (always synchronous) used to "win" by
-      // simply being known before Design/Components (which need a real
-      // RPC round-trip) -- once Design/Components resolve and turn out
-      // applicable, THIS is what makes the view correctly switch to
-      // Design (the intended first tab) instead of getting stuck on
-      // whichever tab merely happened to resolve first.
-      detailActiveTabKey = applicable[0].key;
+      // No real preference yet -- always track DETAIL_DEFAULT_TAB_PRIORITY,
+      // recomputed fresh on every call (deliberately NOT DETAIL_TAB_DEFS's
+      // own display order -- see that constant's own doc comment for why
+      // the two must stay separate). Direct user feedback: Configuration
+      // (always synchronous) used to "win" by simply being known before
+      // Design/Components (which need a real RPC round-trip) -- once
+      // Design/Components resolve and turn out applicable, THIS is what
+      // makes the view correctly switch to Design (the intended default)
+      // instead of getting stuck on whichever tab merely happened to
+      // resolve first, or on Configuration's own new, purely-visual lead
+      // position.
+      detailActiveTabKey = firstByDefaultPriority(applicable);
     }
 
     // What's actually SHOWN right now, as distinct from the preference
@@ -6574,6 +6720,8 @@ ${bodyHtml}
     $('browse-pull-all-btn').addEventListener('click', () => void handleBrowsePullAll());
     $('tag-folder-pull-all-btn').addEventListener('click', () => void handleTagFolderPullAll());
     $('ui-components-pull-all-btn').addEventListener('click', () => void handleUiComponentsPullAll());
+    $('starter-kits-pull-all-btn').addEventListener('click', () => void handleStarterKitsPullAll());
+    $('backend-plugins-pull-all-btn').addEventListener('click', () => void handleBackendPluginsPullAll());
     $('back-to-browse-btn').addEventListener('click', () => {
       // Tag Folder needs its own dedicated re-open (category + value), not
       // just a generic showView -- 'tags' alone would land on the

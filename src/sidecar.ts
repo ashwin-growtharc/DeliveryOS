@@ -539,7 +539,8 @@ const commands: Record<string, CommandHandler> = {
     const description = requireString(args, 'description');
     const instructions = requireString(args, 'instructions');
     const guidanceSnippet = optionalString(args, 'guidanceSnippet');
-    return requestWiringMerge(cwd, targetFile, description, instructions, guidanceSnippet);
+    const guidanceSnippetIsFullFile = args.guidanceSnippetIsFullFile === true;
+    return requestWiringMerge(cwd, targetFile, description, instructions, guidanceSnippet, guidanceSnippetIsFullFile);
   },
 
   // Backend plug-and-play: the "apply" half -- writes the merge for

@@ -1474,12 +1474,19 @@ input, textarea, select {
  * always visible for a pulled backend-plugin-shaped artifact so the
  * question "is this actually connected and working" has an answer any
  * time Detail is reopened, not just right after a pull. See
- * renderConnectionStatusPanel in app.js. */
+ * renderConnectionStatusPanel in app.js. Boxed with the same visual
+ * weight as .lifecycle-explainer below it -- this is the live, actionable
+ * status, so it should read at least as prominently as the static
+ * lifecycle reference text, not as bare unboxed pills. */
 .connection-status {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+  background: var(--surface-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
   margin: 0 0 14px;
 }
 
@@ -1952,7 +1959,18 @@ input, textarea, select {
   font-weight: 500;
 }
 
+/* inline-flex, not inline-block: this gets dropped as a bare
+ * `<span class="spinner"></span> Loading…` into plain, non-flex
+ * containers in several places (e.g. #detail-wiring-actions,
+ * #detail-install-params-fields) -- without an explicit display here it
+ * stays the default `inline`, which ignores width/height and collapses
+ * to a barely-visible sliver instead of the 14px ring every other call
+ * site (inside an already-flex parent, where an inline child gets
+ * blockified for free) shows correctly. Setting it here fixes every
+ * call site at once rather than requiring each new one to remember to
+ * wrap it in a flex container. */
 .spinner {
+  display: inline-flex;
   width: 14px;
   height: 14px;
   border-radius: 50%;
@@ -1960,6 +1978,7 @@ input, textarea, select {
   border-top-color: var(--ink);
   animation: spin .7s linear infinite;
   flex-shrink: 0;
+  vertical-align: middle;
 }
 
 @keyframes spin {

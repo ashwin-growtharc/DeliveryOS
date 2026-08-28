@@ -197,6 +197,25 @@ export async function pullArtifact(
         cwd: installTarget,
         stdio: 'pipe',
         timeout: postInstallTimeoutMs,
+        // DELIVERYOS_PROJECT_ROOT: a real, confirmed bug found while
+        // dogfooding a large backend-plugin -- a manifest whose
+        // post_install needs to `cd` back up to the consuming project's
+        // OWN root (almost every real one does, to run `npm install`
+        // against the project's real package.json, not installTarget's)
+        // used to have no reliable way to do that. A fixed relative
+        // escape like `cd ../../..` assumes install_target is always the
+        // same depth it was DECLARED at -- but adaptSrcDirPath (paths.ts)
+        // can shorten it at PULL time for a project that doesn't use
+        // `src/`, silently changing how many `..`s are actually needed.
+        // Confirmed the hard way: this overshot by one level for a real
+        // artifact, installing real packages into the pulling project's
+        // own PARENT directory instead (still resolvable at runtime via
+        // Node's own upward node_modules search, which is exactly why it
+        // went unnoticed -- but a real, unwanted side effect outside the
+        // project). This env var is the fix: an absolute, always-correct
+        // path a manifest's post_install can `cd` to directly, with no
+        // relative-depth guessing at all.
+        env: { ...process.env, DELIVERYOS_PROJECT_ROOT: cwd },
       }).toString('utf-8');
     } catch (err) {
       const stdout = isExecError(err) ? err.stdout?.toString('utf-8') ?? '' : '';

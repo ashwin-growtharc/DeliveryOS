@@ -6,35 +6,22 @@ import { pullArtifact } from '../../src/engine/pull/pull';
 import { ArtifactResolutionError, ManifestValidationError, PostInstallError } from '../../src/engine/errors';
 import { remotesRegistryPath, remoteCachePath } from '../../src/engine/paths';
 import { readLockfile, upsertEntry } from '../../src/engine/lockfile/lockfile';
+import { rmDirWithRetry } from '../../src/engine/execHelpers';
 
 // Same lightweight "fake a registered remote + cache directly on disk"
 // pattern as test/unit/pullPayloadComponent.test.ts -- pullArtifact reads
 // remotes/manifests straight off DELIVERYOS_HOME via buildCatalog(), so no
 // real git clone/fetch is needed to exercise post_install's own error
 // handling.
-
+//
 // On Windows, killing a timed-out `execSync` call only terminates the
 // cmd.exe shell wrapper -- the real grandchild `node` process spawned by
 // the timeout test below keeps running independently for its own ~600ms,
 // still holding a lock on `cwd`, regardless of the timeout already having
 // fired (confirmed by hand). `fs.rmSync`'s own `maxRetries` option was
-// tried first and did NOT reliably retry this specific EPERM -- this
-// explicit retry loop does.
-async function rmDirWithRetry(dir: string): Promise<void> {
-  const maxAttempts = 30;
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      fs.rmSync(dir, { recursive: true, force: true });
-      return;
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code;
-      if (attempt === maxAttempts || (code !== 'EPERM' && code !== 'EBUSY')) {
-        throw err;
-      }
-      await new Promise((resolve) => { setTimeout(resolve, 100); });
-    }
-  }
-}
+// tried first and did NOT reliably retry this specific EPERM --
+// `rmDirWithRetry` (shared with `removeArtifact.ts`'s own identical real
+// production fix, see its doc comment) does.
 
 let deliveryOsHome: string;
 let originalEnv: string | undefined;
@@ -145,6 +132,33 @@ describe('pullArtifact post_install error reporting', () => {
       expect(message).not.toContain('post_install command failed');
       expect(message).not.toContain('timed out');
     }
+  }, 30_000);
+
+  // Real, confirmed bug found while dogfooding a large backend-plugin:
+  // post_install's own cwd is installTarget, not the project root (see
+  // pull.ts's own doc comment) -- a manifest that needs to `cd` back up
+  // to the real project (almost every real one does, to run `npm
+  // install` against the project's own package.json) had no reliable
+  // way to do that. A fixed relative escape like `cd ../../..` silently
+  // overshoots whenever install_target's actual depth differs from what
+  // it was declared at (e.g. adaptSrcDirPath shortening it) -- confirmed
+  // the hard way: this actually installed real packages into a real
+  // project's PARENT directory. DELIVERYOS_PROJECT_ROOT is the fix.
+  it('passes the real project root as DELIVERYOS_PROJECT_ROOT, independent of how deep installTarget actually is', async () => {
+    writeRegistry(['test-remote']);
+    // Writes the env var's own value to a file INSIDE installTarget (its
+    // real cwd) -- proving both that the var is set, and that it's set
+    // to the real `cwd` this test controls, not installTarget itself or
+    // some other guessed path.
+    writeArtifact(
+      'project-root-env-install',
+      'node -e "require(\'fs\').writeFileSync(\'root.txt\', process.env.DELIVERYOS_PROJECT_ROOT || \'\')"',
+    );
+
+    const result = await pullArtifact('project-root-env-install', undefined, cwd);
+
+    const written = fs.readFileSync(path.join(result.installTarget, 'root.txt'), 'utf-8');
+    expect(written).toBe(cwd);
   }, 30_000);
 });
 

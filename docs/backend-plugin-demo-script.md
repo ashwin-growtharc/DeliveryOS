@@ -124,6 +124,12 @@ branch before you start is the honest safety net for everything else.
   terminal opens right inside the window), or `deliveryos
   wire-with-claude email-code-auth` on the CLI, covered below. No
   prompt to hand-write, no risk of it referencing a stale path.
+- **Detail now opens straight to Configuration.** It's the first tab,
+  not something you click over to -- the panel you land on right after
+  Pull is the same one you fill in. Connection status sits right above
+  the tabs (above the collapsed "How installing this works" panel too),
+  so the live `Configured`/`Wired`/`Build` chips are the first thing
+  visible, not something you have to scroll to find.
 
 ### 0. Build the UI first, with an honest, unimplemented seam -- if you haven't pulled the backend yet
 
@@ -320,11 +326,11 @@ DeliveryOS detects which and adapts automatically (see the callout
 above).
 
 **App**: Browse -> search "email-code-auth" -> open the card -> **Pull**.
-A Configuration tab appears immediately -- fill in `AUTH_SECRET`,
-`RESEND_API_KEY`, `AUTH_URL`, click **Save**. Wiring applies
-automatically the moment you pull (before you even fill the form); the
-Connection-status panel above the tabs shows live `Configured`/`Wired`/
-`Build` chips once you have.
+Detail opens straight onto Configuration (it's the first tab now) --
+fill in `AUTH_SECRET`, `RESEND_API_KEY`, `AUTH_URL`, click **Save**.
+Wiring applies automatically the moment you pull (before you even fill
+the form); the Connection-status panel above the tabs shows live
+`Configured`/`Wired`/`Build` chips once you have.
 
 **CLI**:
 ```
@@ -517,7 +523,9 @@ No wall of logs. One line covering what worked and what's still on you
 (a missing config value, a file that needs review) -- shown as a toast
 right after pulling, and available any time after in Detail as a
 persistent "Connection status" panel with live chips (Configured,
-Wired, Build).
+Wired, Build) -- it sits right at the top of the Detail view, above the
+"How installing this works" panel, so it's the first thing you see
+when you reopen it.
 
 ### 6. Audit -- everything proposed is recorded
 

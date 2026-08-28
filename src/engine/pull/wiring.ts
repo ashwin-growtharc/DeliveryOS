@@ -62,12 +62,31 @@ export interface ResolvedWiringAction {
   targetFile: string;
   targetFileExists: boolean;
   instructions: string;
-  /** Absent exactly when the target file already exists AND the action
-   * declared no `whenPresent` at all -- "this already exists, review before
-   * touching it," with nothing safe to paste verbatim. Present in every
-   * other case (a fresh file always has a `whenAbsent.snippet`; an existing
-   * one might still offer a `whenPresent.snippet` for merge guidance). */
+  /** `whenPresent.snippet` when the action declared one (the author's own
+   * merge guidance); otherwise `whenAbsent.snippet` -- the artifact's own
+   * canonical, standalone version of this file -- as a fallback reference,
+   * even when the target file already exists. Never actually absent in
+   * practice (every `WiringAction` requires a `whenAbsent.snippet`), kept
+   * optional only for the two safety-refusal cases (out-of-bounds /
+   * sensitive path), which report nothing at all rather than any content.
+   * Found by direct user testing: "Merge with Claude" on a file this
+   * artifact fully owns (no `whenPresent.snippet` declared, just "review
+   * before replacing it") had no reference for what the file's OWN correct
+   * content even is, so it could only ever honestly refuse -- even for the
+   * trivial case of reverting a one-character corruption of a file the
+   * artifact wrote in the first place. */
   snippet?: string;
+  /** True when `snippet` above is the artifact's own complete, standalone
+   * `whenAbsent.snippet` used only as a fallback reference (no genuine
+   * `whenPresent.snippet` merge guidance exists) -- as opposed to real,
+   * author-written merge guidance meant to be added alongside existing
+   * content. Found via review: `requestWiringMerge`'s prompt always
+   * labeled `snippet` as "merge guidance snippet the artifact's own
+   * author provided," which is actively misleading in this fallback case
+   * -- it risks the model splicing a whole file in as if it were a small
+   * addition. Never set when `snippet` is real `whenPresent.snippet`
+   * guidance, or when `snippet` is unset entirely. */
+  snippetIsFullFileReference?: boolean;
   /** True when the target file already exists AND its real current content
    * matches `whenAbsent.snippet` exactly (trimmed) -- i.e. this is exactly
    * what a fresh auto-wire would have produced, most commonly because it
@@ -199,12 +218,18 @@ export function resolveWiringActions(
     if (!variant) {
       // Only reachable when targetFileExists is true and whenPresent was
       // never declared -- "this already exists, review before touching
-      // it," with no snippet to offer at all.
+      // it." Still hands back whenAbsent.snippet as a reference (the
+      // artifact's own canonical content for this file) -- without it,
+      // "Merge with Claude" has no way to know what the artifact's own
+      // correct version even looks like, so it can only ever refuse (see
+      // this function's own ResolvedWiringAction.snippet doc comment).
       return {
         description: action.description,
         targetFile: effectiveTargetFile,
         targetFileExists,
         instructions: `"${effectiveTargetFile}" already exists -- review it before making any changes; this artifact expects to own this file.`,
+        snippet: action.whenAbsent.snippet,
+        snippetIsFullFileReference: true,
       };
     }
 
@@ -213,7 +238,13 @@ export function resolveWiringActions(
       targetFile: effectiveTargetFile,
       targetFileExists,
       instructions: variant.instructions,
-      snippet: variant.snippet,
+      // whenPresent's own snippet when it declared one; otherwise the same
+      // whenAbsent fallback as the no-whenPresent-at-all case above -- a
+      // whenPresent with only prose instructions (e.g. "merge this in
+      // alongside your own routes") still benefits from a concrete
+      // reference for what the artifact intends to add, not just words.
+      snippet: variant.snippet ?? action.whenAbsent.snippet,
+      snippetIsFullFileReference: variant.snippet === undefined,
     };
   });
 }

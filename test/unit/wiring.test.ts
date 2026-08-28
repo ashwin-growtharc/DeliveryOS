@@ -59,21 +59,31 @@ describe('resolveWiringActions', () => {
     expect(resolved.instructions).toContain('Create auth.ts');
   });
 
-  it('returns the whenPresent variant (with its own snippet) when the target file exists and whenPresent was declared', () => {
+  it('returns the whenPresent variant\'s own instructions, falling back to whenAbsent.snippet as a reference since whenPresent declared none of its own', () => {
     fs.writeFileSync(path.join(cwd, 'middleware.ts'), 'export default function middleware() {}', 'utf-8');
 
     const [resolved] = resolveWiringActions([MIDDLEWARE_ACTION], cwd);
     expect(resolved.targetFileExists).toBe(true);
-    expect(resolved.snippet).toBeUndefined();
+    // MIDDLEWARE_ACTION's whenPresent has prose instructions but no snippet
+    // of its own -- without this fallback, "Merge with Claude" would have
+    // no concrete reference for what the artifact intends to add at all,
+    // only the word "merge."
+    expect(resolved.snippet).toBe('export { auth as middleware } from "./auth";');
     expect(resolved.instructions).toContain('Merge the auth re-export');
   });
 
-  it('falls back to a "review before touching it" instruction, no snippet, when the file exists and no whenPresent was declared', () => {
+  it('falls back to whenAbsent.snippet as a reference (not no snippet at all) when the file exists and no whenPresent was declared', () => {
     fs.writeFileSync(path.join(cwd, 'auth.ts'), 'export default function auth() {}', 'utf-8');
 
     const [resolved] = resolveWiringActions([AUTH_TS_ACTION], cwd);
     expect(resolved.targetFileExists).toBe(true);
-    expect(resolved.snippet).toBeUndefined();
+    // Real, confirmed bug this fixes: a file this artifact fully owns (no
+    // whenPresent at all) used to hand "Merge with Claude" zero reference
+    // for what the artifact's own correct content even is -- it could only
+    // ever honestly refuse, even to fix something as trivial as a single
+    // stray character corrupting the file. whenAbsent.snippet IS that
+    // artifact's canonical content, so it's the right fallback here too.
+    expect(resolved.snippet).toBe('export const { handlers, auth } = NextAuth(authConfig);');
     expect(resolved.instructions).toContain('already exists');
     expect(resolved.instructions).toContain('auth.ts');
   });
