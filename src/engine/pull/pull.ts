@@ -194,13 +194,25 @@ export async function pullArtifact(
   // alongside the manifest at artifacts/<id>/signature.bundle, regardless
   // of any `payload_path` override -- it's a property of the manifest
   // record, not the payload location.
-  onProgress?.('verify', 'Verifying artifact signature...');
   const signatureBundlePath = path.join(remoteDir, 'artifacts', manifest.id, 'signature.bundle');
+  const hasSignatureBundle = fs.existsSync(signatureBundlePath);
+  // Announced only when there is genuinely something to check: either the
+  // manifest declares a `signature` (the only case verifyArtifactSignature
+  // does any work at all -- it returns immediately otherwise), or a bundle
+  // file is actually present to be parsed and validated. Emitting this stage
+  // unconditionally made the pull log claim "Verifying artifact signature..."
+  // for the overwhelming majority of artifacts that have never been signed,
+  // flatly contradicting the Detail panel's own provenance badge reading
+  // "Unverified -- no provenance signature yet" on that very same artifact.
+  // Same conditional-stage convention `post_install` below already follows.
+  if (manifest.signature || hasSignatureBundle) {
+    onProgress?.('verify', 'Verifying artifact signature...');
+  }
   // The bundle comes from the remote and is read on the DEFAULT pull path,
   // so a corrupt or truncated one must report as an unverifiable signature
   // rather than escaping as a raw SyntaxError stack trace from JSON.parse.
   let signatureBundle: unknown;
-  if (fs.existsSync(signatureBundlePath)) {
+  if (hasSignatureBundle) {
     try {
       signatureBundle = JSON.parse(fs.readFileSync(signatureBundlePath, 'utf-8'));
     } catch (err) {
@@ -328,7 +340,14 @@ export async function pullArtifact(
   // real point, not just a convenient ordering. A no-op (writes nothing)
   // for the overwhelming majority of artifacts, which declare no
   // install_params at all.
-  onProgress?.('install-params', 'Applying install-time configuration...');
+  // Same conditional-stage reasoning as 'verify' above: applyInstallParams
+  // and applyEnvExamplePlaceholders are both explicit no-ops for an artifact
+  // declaring no install_params, so announcing "Applying install-time
+  // configuration..." there described work that never happened and left no
+  // trace anywhere for the user to go looking for afterward.
+  if (manifest.install_params.length > 0) {
+    onProgress?.('install-params', 'Applying install-time configuration...');
+  }
   const { values, missingRequired } = resolveInstallParamValues(
     manifest.install_params,
     providedValues,

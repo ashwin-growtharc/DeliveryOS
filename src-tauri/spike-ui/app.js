@@ -1872,6 +1872,36 @@
       panel.appendChild(el);
     }
 
+    // "Verify build" runs the CONSUMING PROJECT's build (artifact.verifyBuild
+    // -> the same runProjectBuild every other build-verify step already uses),
+    // so it only means anything for an artifact that can actually break that
+    // build: one that edits the project's own source/config (wiring_actions),
+    // needs configuration wired into it (install_params), or runs a command on
+    // install (post_install). An artifact whose entire payload is copied into a
+    // folder of its own -- a skill's SKILL.md under .claude/skills/, a doc, a
+    // template -- cannot affect the build at all.
+    //
+    // Found by direct user feedback: a pulled skill showed a status panel
+    // containing nothing but "Build -- not checked yet" and a "Verify build"
+    // button, and clicking it turned that into a green "Build passing" that
+    // read as if the SKILL.md had itself been built and validated. It had not
+    // -- that was the host project's unrelated build, which would have said
+    // exactly the same thing with the artifact deleted. Same hasLifecycle gate,
+    // and the same "data, not kind" convention, that renderLifecycleExplainer
+    // already uses.
+    const hasLifecycle = (manifest.install_params && manifest.install_params.length > 0)
+      || (manifest.wiring_actions && manifest.wiring_actions.length > 0)
+      || !!manifest.post_install;
+
+    if (!hasLifecycle) {
+      // chips is necessarily empty here -- its only two sources are
+      // install_params and wiring_actions, both of which hasLifecycle covers --
+      // so with the build row gone too there is nothing left to render. Hide
+      // the panel rather than leave an unexplained empty strip above the tabs.
+      panel.hidden = true;
+      return;
+    }
+
     const buildChip = document.createElement('span');
     buildChip.className = 'status-chip neutral';
     buildChip.textContent = 'Build -- not checked yet';

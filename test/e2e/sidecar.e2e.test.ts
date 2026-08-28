@@ -642,8 +642,7 @@ describe('sidecar e2e', () => {
 
   it(
     'artifact.pull emits progress stages in order (resolve, copy, post_install, snapshot, '
-      + 'install-params, lockfile) before the final response, and the final response shape '
-      + 'is untouched',
+      + 'lockfile) before the final response, and the final response shape is untouched',
     async () => {
       const cwd = newScratchCwd('pull-progress');
       const session = new SidecarSession(cwd, deliveryOsHome);
@@ -656,8 +655,13 @@ describe('sidecar e2e', () => {
         session.takeProgressLines(); // discard remote.add's own progress lines (it emits none, but be defensive)
 
         // handbook-doc is TEST_ARTIFACTS's one artifact with a post_install
-        // command -- pulling it exercises all 5 progress stages, including
-        // the 'post_install' one that's conditionally emitted.
+        // command -- pulling it exercises every stage this artifact's shape
+        // actually earns, including the conditionally-emitted 'post_install'.
+        // It declares no signature and no install_params, so 'verify' and
+        // 'install-params' are correctly absent: both are conditional on the
+        // same real-work basis 'post_install' always has been (see the
+        // signed-artifact and install_params tests below for their positive
+        // halves).
         const artifact = TEST_ARTIFACTS.find((a) => a.hasPostInstall)!;
         const pullResp = await session.request('artifact.pull', {
           id: artifact.id,
@@ -669,11 +673,9 @@ describe('sidecar e2e', () => {
         const progressLines = session.takeProgressLines();
         expect(progressLines.map((p) => p.stage)).toEqual([
           'resolve',
-          'verify',
           'copy',
           'post_install',
           'snapshot',
-          'install-params',
           'lockfile',
         ]);
         for (const line of progressLines) {
@@ -694,8 +696,9 @@ describe('sidecar e2e', () => {
   );
 
   it(
-    "artifact.pull on an artifact WITHOUT post_install emits progress stages with the "
-      + "'post_install' stage absent",
+    "artifact.pull on an artifact with no post_install, no signature and no install_params "
+      + "emits only the stages that did real work -- 'post_install', 'verify' and "
+      + "'install-params' are all absent",
     async () => {
       const cwd = newScratchCwd('pull-progress-no-postinstall');
       const session = new SidecarSession(cwd, deliveryOsHome);
@@ -716,7 +719,7 @@ describe('sidecar e2e', () => {
         expect(pullResp.ok).toBe(true);
 
         const stages = session.takeProgressLines().map((p) => p.stage);
-        expect(stages).toEqual(['resolve', 'verify', 'copy', 'snapshot', 'install-params', 'lockfile']);
+        expect(stages).toEqual(['resolve', 'copy', 'snapshot', 'lockfile']);
       } finally {
         await session.close();
       }
@@ -913,6 +916,12 @@ describe('sidecar e2e', () => {
         expect(pullResp.ok).toBe(true);
         expect((pullResp.result as { missingRequiredParams: string[] }).missingRequiredParams)
           .toEqual(['DATABASE_URL']);
+
+        // The positive half of the conditional-stage rule the two
+        // pull-progress tests above assert the negative half of: this
+        // artifact really does declare install_params, so the stage that
+        // announces applying them must actually be emitted here.
+        expect(session.takeProgressLines().map((line) => line.stage)).toContain('install-params');
 
         let envContent = fs.readFileSync(path.join(cwd, '.env.local'), 'utf-8');
         expect(envContent).toContain('AUTH_SECRET=from-pull');
@@ -1211,6 +1220,12 @@ describe('sidecar e2e', () => {
         expect(pullResp.error?.type).toBe('SignatureVerificationError');
         expect(pullResp.error?.message).toContain('no signature bundle was found');
         expect(fs.existsSync(path.join(cwd, SIGNED_ARTIFACT.installTarget))).toBe(false);
+
+        // The positive half of the 'verify' stage's own conditional: this
+        // artifact DOES declare a signature, so the stage is emitted (and the
+        // pull then fails on it) -- where an unsigned artifact never claims to
+        // have verified anything at all.
+        expect(session.takeProgressLines().map((line) => line.stage)).toContain('verify');
       } finally {
         await session.close();
         await teardownTestRemote(signedRemoteDir);
