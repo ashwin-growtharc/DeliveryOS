@@ -20,7 +20,7 @@ Install: `npm install` at the repo root. Verify: `npm run typecheck && npm run l
 
 | Requirement | Notes |
 |---|---|
-| Claude Code CLI (`claude`), **authenticated** | Required for every AI-assisted feature: "Suggest with Claude" (Add New's description/component-type suggestions), the "want help fixing this?" build-fix flow, and anti-pattern-fix suggestions — all spawn a real `claude -p` subprocess. Also required to install/use the `deliveryos-check-first` and `deliveryos-status` Skills at all, since those ARE Claude Code Skills. Nothing else in DeliveryOS depends on it — the CLI, `pull`/`push`, and the desktop app all work fully without it. |
+| Claude Code CLI (`claude`), **authenticated** | Required for every AI-assisted feature: "Suggest with Claude" (Add New's description/component-type suggestions), the "want help fixing this?" build-fix flow, and anti-pattern-fix suggestions — all spawn a real `claude -p` subprocess. Also required to use the `deliveryos-check-first` and `deliveryos-status` Skills at all, since those ARE Claude Code Skills (pull them with `deliveryos pull <id>` — see [docs/skills.md](docs/skills.md)). Nothing else in DeliveryOS depends on it — the CLI, `pull`/`push`, and the desktop app all work fully without it. |
 
 ## Phase 3+ (Tauri desktop app)
 

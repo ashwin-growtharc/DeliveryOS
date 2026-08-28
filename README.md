@@ -99,6 +99,26 @@ It needs Rust and, on Windows, MSVC Build Tools — see
 | `check-pending-pushes` | Ask GitHub what actually happened to your open PRs |
 | `check-drift <id> -r <remote> -s <path>` | Has the artifact's original external source changed? |
 
+## Claude Code skills
+
+DeliveryOS ships six skills, in two groups.
+
+**Authoring** — one per artifact kind, for turning something you already have
+into a pullable artifact. They live in this repo's `.claude/skills/`:
+`ui-component-extractor`, `feature-extractor`, `starter-kit-extractor`,
+`backend-plugin-authoring`.
+
+**Usage** — for driving DeliveryOS from Claude Code. Published as artifacts,
+so pull them into whichever project you want them in:
+
+```
+deliveryos pull deliveryos-check-first   # check the catalog before writing new code
+deliveryos pull deliveryos-status        # typecheck, lint, tests, and real PR state
+```
+
+Both need the `claude` CLI authenticated. See [docs/skills.md](docs/skills.md)
+for what each one does and why.
+
 ## How it behaves
 
 **`push`** opens a real pull request against the artifact's owning remote
@@ -188,6 +208,7 @@ changes by hand.
 | [CHANGELOG.md](CHANGELOG.md) | Detailed release notes, phase by phase |
 | [REQUIREMENTS.md](REQUIREMENTS.md) | What to install to build and run this |
 | [docs/backend-plugin-lifecycle.md](docs/backend-plugin-lifecycle.md) | Every backend-plugin stage: install, wire, merge, uninstall, secrets, updates |
+| [docs/skills.md](docs/skills.md) | The six Claude Code skills: what each does, and how to get them |
 | [docs/release-process.md](docs/release-process.md) | Runbook for cutting a signed release with working auto-update |
 
 `docs/` also holds working notes — demo scripts, spike write-ups, phase
