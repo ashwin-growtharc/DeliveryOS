@@ -19,6 +19,11 @@ original never improves, and eventually nobody trusts either one.
 
 **The hard part was never taking a copy. It's giving one back.**
 
+This is a developer-experience problem before it's anything else: the friction
+that stops a fix from ever reaching the other three teams who need it is
+friction a developer eats every day, usually without naming it. DeliveryOS
+exists to remove that specific friction — not to be a UI wrapped around git.
+
 DeliveryOS is one shelf the whole org looks at, with two buttons:
 
 - **Pull** — get a working copy, with any setup already run for you.
@@ -112,3 +117,19 @@ the fourth slightly-worse copy of it.
 Same journey for a non-technical person, minus the terminal. The difference is
 the Push step: they just opened a professional code review on a real codebase,
 which was closed to them entirely before.
+
+### Already happened, not hypothetical
+
+The table above is illustrative. This one isn't — it's what actually ran.
+
+An open-source project (Suna) was extracted into a UI starter kit and pushed
+to DeliveryOS. In an unrelated project, that kit was pulled, and Claude was
+asked to "make a landing page using the Suna starter kit" — nothing more
+specific than that. It read the real components and design tokens that came
+with the pull and built the page from them, not from generic defaults.
+
+Same pattern on the backend side, with a real login module. When the target
+project already had an app to plug into — not a blank scaffold — a second
+mode gives the AI read/write access to that existing project, so it connects
+the new backend to the actual pages and routes already there, instead of only
+ever being able to drop in files that don't exist yet.
