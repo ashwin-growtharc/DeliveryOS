@@ -8,7 +8,7 @@ import { fetchAndReset } from '../git/git';
 import { buildCatalog } from '../catalog/catalog';
 import { computeChangedFiles, listFilesRecursive } from '../push/diff';
 import { pristinePath, resolveContainedPath } from '../paths';
-import { ProgressCallback, POST_INSTALL_TIMEOUT_MS } from '../pull/pull';
+import { ProgressCallback, POST_INSTALL_TIMEOUT_MS, POST_INSTALL_MAX_BUFFER_BYTES } from '../pull/pull';
 import { isExecError, isToolNotFoundError } from '../execHelpers';
 import { compareVersions } from './sync';
 
@@ -190,6 +190,22 @@ export async function applyAvailableUpdates(
           cwd: installTarget,
           stdio: 'pipe',
           timeout: POST_INSTALL_TIMEOUT_MS,
+          // Same env and buffer as pull.ts's own post_install call -- this
+          // is the SAME manifest command, just run on the update path
+          // instead of the first install, so it needs the same contract.
+          //
+          // DELIVERYOS_PROJECT_ROOT was missing here, which broke
+          // `check-updates --apply` for every backend plugin: the authoring
+          // skill mandates `cd "$DELIVERYOS_PROJECT_ROOT" && npm install`,
+          // and with the variable unset that expands to `cd "" && npm
+          // install`. Reported as "post_install failed", with the update
+          // already half-applied on disk. See pull.ts's own call site for
+          // the full history of why this variable exists.
+          env: { ...process.env, DELIVERYOS_PROJECT_ROOT: cwd },
+          // Node's default is 1 MB, which a real `npm install` routinely
+          // exceeds -- and blowing it surfaces as a generic post_install
+          // failure rather than anything that names the real cause.
+          maxBuffer: POST_INSTALL_MAX_BUFFER_BYTES,
         }).toString('utf-8');
       } catch (err) {
         const stdout = isExecError(err) ? err.stdout?.toString('utf-8') ?? '' : '';

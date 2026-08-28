@@ -56,6 +56,17 @@ export type ProgressCallback = (stage: string, message: string) => void;
 // slower than a plain rebuild.
 export const POST_INSTALL_TIMEOUT_MS = 10 * 60 * 1000;
 
+/** Capture limit for a shelled-out hook's combined stdout/stderr.
+ *
+ * Node's default is 1 MB, and exceeding it kills the child and throws
+ * ENOBUFS -- which surfaces to the user as a generic "post_install failed"
+ * that names nothing about the real cause. A real `npm install` routinely
+ * prints more than 1 MB, so the default was effectively a size-dependent
+ * random failure. 10 MB matches what `runClaudeSubprocess` already settled
+ * on for the same reason. Shared by pull's post_install, applyUpdate's
+ * post_install, removeArtifact's post_remove, and verifyBuild. */
+export const POST_INSTALL_MAX_BUFFER_BYTES = 10 * 1024 * 1024;
+
 /**
  * Resolves which catalog entry `id` refers to. Throws
  * ArtifactResolutionError if the id doesn't exist anywhere, or if it exists
@@ -219,6 +230,7 @@ export async function pullArtifact(
         // path a manifest's post_install can `cd` to directly, with no
         // relative-depth guessing at all.
         env: { ...process.env, DELIVERYOS_PROJECT_ROOT: cwd },
+        maxBuffer: POST_INSTALL_MAX_BUFFER_BYTES,
       }).toString('utf-8');
     } catch (err) {
       const stdout = isExecError(err) ? err.stdout?.toString('utf-8') ?? '' : '';

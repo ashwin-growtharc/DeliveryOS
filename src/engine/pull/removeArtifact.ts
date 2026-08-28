@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import { execSync } from 'child_process';
 import { readLockfile, removeEntry } from '../lockfile/lockfile';
-import { resolveArtifact } from './pull';
+import { resolveArtifact, POST_INSTALL_MAX_BUFFER_BYTES } from './pull';
 import { resolveContainedTargetFile, resolveWiringActions } from './wiring';
 import { readExistingEnvValues } from './installParams';
 import { pristinePath, resolveContainedPath } from '../paths';
@@ -47,6 +47,10 @@ function runPostRemoveCommand(
       stdio: 'pipe',
       timeout: timeoutMs,
       env: { ...process.env, DELIVERYOS_PROJECT_ROOT: projectRoot },
+      // Same 1 MB-default trap as post_install/verifyBuild: a chatty
+      // teardown command would otherwise be killed with ENOBUFS and
+      // reported as a post_remove failure.
+      maxBuffer: POST_INSTALL_MAX_BUFFER_BYTES,
     }).toString('utf-8');
     return { output };
   } catch (err) {

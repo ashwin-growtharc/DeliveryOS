@@ -206,6 +206,45 @@ describe('sidecar e2e', () => {
     return fs.mkdtempSync(path.join(scratchRoot, `${label}-`));
   }
 
+  // Regression: the command map was a plain object literal, and dispatch was
+  // a bracket lookup on the unvalidated `command` string off the wire -- so
+  // every Object.prototype member was reachable as a "command" that ran and
+  // reported success. `{"command":"toString"}` returned
+  // {"ok":true,"result":"[object Undefined]"}. The map now has a null
+  // prototype and dispatch checks own-property + callability.
+  it(
+    'refuses Object.prototype members as commands instead of dispatching them',
+    async () => {
+      const cwd = newScratchCwd('proto-dispatch');
+      const session = new SidecarSession(cwd, deliveryOsHome);
+      try {
+        for (const command of [
+          'toString',
+          'valueOf',
+          'constructor',
+          'hasOwnProperty',
+          'isPrototypeOf',
+          '__proto__',
+        ]) {
+          const resp = await session.request(command, {});
+          expect(resp.ok, `expected "${command}" to be refused, not dispatched`).toBe(false);
+          expect(JSON.stringify(resp.error)).toContain('Unknown command');
+        }
+
+        // A genuinely unknown name still behaves the same way, and the
+        // session is still healthy afterwards.
+        const bogus = await session.request('definitely.not.a.command', {});
+        expect(bogus.ok).toBe(false);
+
+        const listResp = await session.request('remote.list', {});
+        expect(listResp.ok).toBe(true);
+      } finally {
+        expect(await session.close()).toBe(0);
+      }
+    },
+    30_000,
+  );
+
   it(
     'remote.add registers a real local git remote, and a subsequent remote.list on the same session shows it',
     async () => {

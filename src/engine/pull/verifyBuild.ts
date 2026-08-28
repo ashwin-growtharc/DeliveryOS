@@ -3,6 +3,7 @@ import * as path from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { isExecError, isToolNotFoundError } from '../execHelpers';
+import { POST_INSTALL_MAX_BUFFER_BYTES } from './pull';
 
 const execAsync = promisify(exec);
 
@@ -111,7 +112,16 @@ export async function runProjectBuild(
   }
 
   try {
-    const { stdout } = await execAsync(command, { cwd, timeout: timeoutMs });
+    // maxBuffer: Node's 1 MB default kills the child with ENOBUFS when a
+    // build prints more than that, and this function reports the result as
+    // an ordinary build FAILURE -- so a merely verbose build looked exactly
+    // like a broken one. Same 10 MB ceiling every other shelled-out command
+    // in the engine uses.
+    const { stdout } = await execAsync(command, {
+      cwd,
+      timeout: timeoutMs,
+      maxBuffer: POST_INSTALL_MAX_BUFFER_BYTES,
+    });
     return { ran: true, command, success: true, output: stdout };
   } catch (err) {
     const stdout = isExecError(err) ? err.stdout?.toString('utf-8') ?? '' : '';

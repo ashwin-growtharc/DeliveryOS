@@ -148,3 +148,17 @@ export class WiringMergeError extends DeliveryOsError {}
  * valid, expected outcome) -- same posture as `WiringMergeError`/
  * `BuildFixError`. */
 export class WiringPlacementError extends DeliveryOsError {}
+
+/** Thrown by the sidecar when a request names a command that does not
+ * exist. Its own class rather than a raw `Error` so the frontend can tell
+ * "you asked for something that isn't a command" apart from "the command
+ * ran and failed", and so it is reported through the same taxonomy as
+ * every other engine failure.
+ *
+ * The command map used to be a plain object literal looked up by bracket
+ * access on an unvalidated string off the wire, so every `Object.prototype`
+ * member -- `toString`, `constructor`, `valueOf` -- dispatched as a real
+ * command and reported `ok: true`. The map now has a null prototype and
+ * dispatch checks own-property + callability; this error is what an unknown
+ * command produces instead. */
+export class UnknownCommandError extends DeliveryOsError {}

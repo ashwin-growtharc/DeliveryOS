@@ -63,7 +63,7 @@ import {
 } from './engine/remote/remoteRegistry';
 import { cloneRemote, cachePath } from './engine/remote/remoteCache';
 import * as fs from 'fs';
-import { RemoteRegistryError } from './engine/errors';
+import { RemoteRegistryError, UnknownCommandError } from './engine/errors';
 import {
   compileArtifactPreview,
   compileLocalPreview,
@@ -200,8 +200,15 @@ async function remoteRemove(args: Record<string, unknown>): Promise<{ name: stri
   return { name };
 }
 
-/** Command map: every command the frontend/Tauri layer can invoke. */
-const commands: Record<string, CommandHandler> = {
+/** Command map: every command the frontend/Tauri layer can invoke.
+ *
+ * Built with a null prototype. As a plain object literal this map inherited
+ * `Object.prototype`, and dispatch is a bracket lookup on an unvalidated
+ * `command` string off the wire -- so `{"command":"toString"}` found
+ * `Object.prototype.toString`, invoked it, and returned
+ * `{"ok":true,"result":"[object Undefined]"}`. Every `Object.prototype`
+ * member was reachable as a "command" that reported success. */
+const commandTable: Record<string, CommandHandler> = {
   'catalog.list': (args) => catalogList(args),
 
   'catalog.refresh': (args, { onProgress }) => catalogRefresh(args, onProgress),
@@ -703,6 +710,12 @@ const commands: Record<string, CommandHandler> = {
   },
 };
 
+/** The dispatch map actually used, as a null-prototype copy of the table
+ * above. Kept as two declarations so the literal keeps its contextual
+ * typing (an `Object.assign(Object.create(null), {...})` expression loses
+ * it and every handler parameter silently becomes `any`). */
+const commands: Record<string, CommandHandler> = Object.assign(Object.create(null) as Record<string, CommandHandler>, commandTable);
+
 /**
  * Writes a single response line. Uses plain `JSON.stringify` with no
  * pretty-printing arguments -- this is load-bearing: it guarantees the
@@ -761,9 +774,14 @@ async function handleLine(line: string): Promise<void> {
   const { id, command, args } = request;
 
   try {
-    const handler = commands[command];
-    if (!handler) {
-      throw new Error(`Unknown command "${String(command)}"`);
+    // `typeof` check as well as the null-prototype map above: belt and
+    // braces, so this stays correct even if the map is ever rebuilt as a
+    // plain literal by a future edit.
+    const handler = Object.prototype.hasOwnProperty.call(commands, command)
+      ? commands[command]
+      : undefined;
+    if (typeof handler !== 'function') {
+      throw new UnknownCommandError(`Unknown command "${String(command)}"`);
     }
     const ctx = { onProgress: (stage: string, message: string) => writeProgress(id, stage, message) };
     const result = await handler(args ?? {}, ctx);
