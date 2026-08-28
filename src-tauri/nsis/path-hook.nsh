@@ -13,12 +13,16 @@
 ; After uninstall, that PATH entry is removed again, and nothing else the
 ; user has on PATH is touched.
 ;
-; **Real, stated limitation**: this file was written and hand-traced for
-; correctness, but has NOT been compiled or run through a real `makensis`
-; build -- the Rust/Tauri toolchain this needs isn't reachable in the
-; environment this was written in. The very first `npx tauri build` run
-; after this lands is real verification this still needs, not a
-; formality -- see docs/manual-smoke-test-cli-install.md.
+; **Build status**: this file now compiles through a real `makensis` run --
+; `npx tauri build` produces the NSIS installer successfully. That first real
+; build immediately found a genuine error hand-tracing had missed (${StrRep}
+; used in the uninstall section, where NSIS only permits "un."-prefixed
+; calls), which is why the caveat that used to sit here mattered.
+;
+; Still NOT verified by a real build: the runtime BEHAVIOUR -- that the PATH
+; entry is actually added on install and cleanly removed on uninstall. That
+; needs a real install/uninstall cycle on a real machine; see
+; docs/manual-smoke-test-cli-install.md.
 ;
 ; Uses only instructions/headers that ship with stock NSIS itself, never
 ; a third-party plugin (no EnVar, nothing downloaded separately):
@@ -36,8 +40,25 @@
 ; real Function block these calls below rely on. Must happen exactly once
 ; per script -- placed here, at the top of this included file, rather
 ; than inside either NSIS_HOOK_* macro below.
+;
+; The Un- prefixed variants are SEPARATE generated functions, and they are
+; not optional: NSIS keeps install and uninstall functions in different
+; namespaces, and a `Call` from an uninstall section must name a function
+; starting with "un.". Using ${StrRep} inside NSIS_HOOK_POSTUNINSTALL is
+; therefore a hard makensis error, not a style issue:
+;
+;   Call must be used with function names starting with "un." in the
+;   uninstall section.
+;   Error in macro STRFUNC_CALL_StrRep on macroline 7
+;   Error in macro NSIS_HOOK_POSTUNINSTALL on macroline 15
+;
+; That is exactly what the very first real `tauri build` of this file
+; produced -- the verification this script's header said it still needed.
+; The MSI bundled fine and the NSIS installer, the one we actually ship,
+; failed outright.
 ${StrStr}
 ${StrRep}
+${UnStrRep}
 
 ; Resolves which real on-disk directory the `deliveryos.exe` resource
 ; landed in, into $R9 -- checked defensively rather than assumed, since
@@ -114,7 +135,10 @@ ${StrRep}
   ; semicolon or eating a neighboring entry.
   StrCpy $R1 ";$R0;"
   StrCpy $R2 ";$R9;"
-  ${StrRep} $R3 "$R1" "$R2" ";"
+  ; ${UnStrRep}, not ${StrRep} -- see the declaration block at the top of this
+  ; file. This macro runs in the UNINSTALL section, where only "un."-prefixed
+  ; functions may be called.
+  ${UnStrRep} $R3 "$R1" "$R2" ";"
 
   ; Strip the leading/trailing semicolon this padding added back off,
   ; rather than writing the padded form back to the registry. Handled as

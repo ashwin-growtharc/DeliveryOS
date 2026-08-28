@@ -1,6 +1,6 @@
 {
   "name": "deliveryos",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "private": true,
   "bin": {
     "deliveryos": "dist/index.js"
