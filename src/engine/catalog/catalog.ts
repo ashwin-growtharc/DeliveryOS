@@ -3,10 +3,28 @@ import { cachePath } from '../remote/remoteCache';
 import { discoverManifests } from '../manifest/parser';
 import { Manifest } from '../manifest/schema';
 import { fetchAndReset } from '../git/git';
+import { readLockfile } from '../lockfile/lockfile';
+import { computeChangedFiles } from '../push/diff';
+import { pristinePath, resolveContainedPath } from '../paths';
 
 export interface CatalogEntry {
   manifest: Manifest;
   remoteName: string;
+}
+
+export type LocalStatus = 'not_pulled' | 'pulled' | 'edited_locally';
+
+export interface CatalogListEntry {
+  manifest: Manifest;
+  remoteName: string;
+  localStatus: LocalStatus;
+  installTarget: string;
+  /** Set when a previous push opened a PR for this artifact that hasn't
+   * been resolved yet (see `sync.ts`'s `resolvePendingPushes`) -- lets a
+   * caller show real transparency about a push's outcome without a
+   * separate network call just to display it, since this is already-known
+   * local lockfile data. */
+  pendingPr?: { number: number; url: string };
 }
 
 /**
@@ -61,4 +79,69 @@ export async function refreshCatalog(
   }
 
   return buildCatalog();
+}
+
+/**
+ * Computes each catalog entry's status relative to the cwd-scoped
+ * lockfile/pristine snapshot:
+ *  - no lockfile entry -> 'not_pulled'
+ *  - lockfile entry, no diff against the pristine snapshot -> 'pulled'
+ *  - lockfile entry, diff detected -> 'edited_locally'
+ *  - lockfile entry, but the diff can't be computed (e.g. a missing
+ *    pristine snapshot, `PristineSnapshotMissingError`) -> falls back to
+ *    'pulled' rather than throwing, so one bad entry never breaks a whole
+ *    listing for every other artifact in the same call.
+ *
+ * Originally lived only in `src/sidecar.ts` (as a private function backing
+ * `catalog.list`/`catalog.refresh`), so `deliveryos list` (the CLI) never
+ * had this -- a real CLI/sidecar parity gap: the app's own Browse view
+ * showed pulled/edited/not-pulled state over the exact same catalog data
+ * the CLI's `list` command was already reading, just without ever
+ * computing it. Extracted here so both share the one implementation.
+ */
+export function annotateCatalog(
+  entries: CatalogEntry[],
+  cwd: string,
+  remote: string | undefined,
+): CatalogListEntry[] {
+  const filtered = remote ? entries.filter((entry) => entry.remoteName === remote) : entries;
+  const lockfile = readLockfile(cwd);
+
+  return filtered.map((entry) => {
+    const { manifest, remoteName } = entry;
+    // manifest.install_target is untrusted (the artifact author's own
+    // manifest) -- same containment check pull.ts already applies before
+    // ever writing there. This function only ever READS via
+    // computeChangedFiles below, but its `installTarget` is also handed
+    // back to callers (the app's "Open folder"/Detail "installs to"
+    // display) -- a crafted value shouldn't silently resolve to something
+    // outside the project just because this ran across every remote's
+    // catalog, not just artifacts the user chose to pull. One bad manifest
+    // degrades to `not_pulled` for that entry alone; it never breaks
+    // listing the rest of the catalog.
+    const installTarget = resolveContainedPath(cwd, manifest.install_target);
+    const lockEntry = lockfile.entries.find((e) => e.id === manifest.id);
+
+    let localStatus: LocalStatus;
+    if (!installTarget) {
+      localStatus = 'not_pulled';
+    } else if (!lockEntry) {
+      localStatus = 'not_pulled';
+    } else {
+      try {
+        const changedFiles = computeChangedFiles(installTarget, pristinePath(cwd, manifest.id));
+        localStatus = changedFiles.length === 0 ? 'pulled' : 'edited_locally';
+      } catch {
+        localStatus = 'pulled';
+      }
+    }
+
+    return {
+      manifest,
+      remoteName,
+      localStatus,
+      installTarget: installTarget ?? manifest.install_target,
+      pendingPr: lockEntry?.pendingPr,
+    };
+  });
 }

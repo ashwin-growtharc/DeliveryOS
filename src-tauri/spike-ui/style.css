@@ -20,8 +20,30 @@
   --sand-100: #F6E8CC; --sand-200: #EDD9B3; --sand-500: #DBC6AB;
   /* additional warm tones */
   --gold-500: #FBD17E; --sky-100: #DBE8F4;
-  /* primary -- navy teal */
+  /* Text-on-tint pair for icon swatches sitting on --sand-100 (kindSwatch's
+     skill/java entries in app.js) -- a fixed hex fg used to pair fine with
+     sand-100's light value, but sand-100 itself gets a real dark tint for
+     dark mode (below), and a medium warm-brown text stopped being legible
+     against it (~2.2:1 contrast, confirmed). Adaptive so both stay paired. */
+  --icon-fg-warm: #8A5A2B;
+  /* Same pairing problem, for --sky-100 (command/typescript/go entries). */
+  --icon-fg-cool: #2E5E82;
+  /* primary -- navy teal. Fixed brand-identity color, deliberately NOT
+     redefined for dark mode: it's only ever used as a solid fill (button/
+     chip backgrounds) with white text on top, which stays legible on a
+     dark page. Body/UI text uses --ink instead (below), which does
+     adapt -- see the dark-mode blocks at the end of this file. */
   --primary-700: #1E3C53; --primary-800: #162D3F; --primary-900: #0E1E2B;
+  /* Generic UI text color. Equal to primary-700 in light mode (so this
+     introduces no visual change here), but a distinct token so dark mode
+     can turn text light without also turning brand-fill buttons light. */
+  --ink: var(--primary-700);
+  --text-secondary: #6E6455;
+  /* Same stack `code, .mono` already sets directly below -- defined as a
+     token too since 5 other rules reference `var(--font-mono, monospace)`
+     and, with no --font-mono ever defined, were silently falling back to
+     the bare generic monospace fallback instead of the real font. */
+  --font-mono: 'JetBrains Mono', ui-monospace, Consolas, monospace;
   /* AI accent colors -- AI-specific elements only, see rule comments below */
   --accent-500: #7A00DF; --accent-600: #6600B8; --cyan-500: #0693E3; --cyan-600: #0577B8; --mint-500: #00D084;
   /* status */
@@ -33,6 +55,76 @@
   --gradient-mint: linear-gradient(135deg, #00D084, #0693E3);
   --shadow-1: 0 1px 3px rgb(0 0 0/0.04); --shadow-2: 0 4px 12px rgb(0 0 0/0.08);
   --radius-md: .5rem; --radius-lg: 1rem; --radius-xl: 1.25rem; --radius-pill: 31.25rem;
+}
+
+/* ---------- dark mode ----------
+ * Defaults to the OS preference (prefers-color-scheme) until the user
+ * makes an explicit choice via the sidebar toggle (app.js), at which
+ * point a `data-theme` attribute on <html> wins in both directions --
+ * same "media query sets the default, an explicit attribute overrides
+ * it either way" pattern used for themeable web content generally.
+ *
+ * A genuine dark palette, not an inversion: surfaces keep the app's warm
+ * (not cold blue-black) character, and every pale accent tint
+ * (sage-100, sand-100/200, sky-100, success/warning/danger-100) gets its
+ * own darkened panel color, with success/warning/danger-600 lightened to
+ * match -- otherwise those badges/banners would keep rendering as bright
+ * light-mode patches on an otherwise dark page. --primary-700/800/900
+ * (brand-fill buttons/chips, white text on top) and the saturated
+ * standalone accents (gold-500, danger-500, accent-500/600, cyan-500/600,
+ * mint-500, sage-500/700, sand-500) are left unchanged in both themes --
+ * already vivid enough to read on a dark surface, and changing them would
+ * dilute the brand identity they exist to carry. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface: #15181B; --surface-secondary: #15181B; --surface-tertiary: #0F1214; --surface-inset: #0A0C0D;
+    --card: #1F2427;
+    --border: #343B3F; --border-strong: #454D51; --border-subtle: #0A0C0D;
+    --ink: #ECE9E2;
+    --text-secondary: #918F89;
+    --sage-100: #17261A;
+    --sand-100: #2C2013; --sand-200: #382A18;
+    --sky-100: #10202C;
+    --icon-fg-warm: #E3BD87; --icon-fg-cool: #9AC7EA;
+    --success-100: #163B22; --success-600: #6EE0A0;
+    --warning-100: #3D2907; --warning-600: #F2B24E;
+    --danger-100: #45170F; --danger-600: #FF8A66;
+    --shadow-1: 0 1px 3px rgb(0 0 0/0.4); --shadow-2: 0 4px 16px rgb(0 0 0/0.55);
+  }
+}
+
+:root[data-theme="dark"] {
+  --surface: #15181B; --surface-secondary: #15181B; --surface-tertiary: #0F1214; --surface-inset: #0A0C0D;
+  --card: #1F2427;
+  --border: #343B3F; --border-strong: #454D51; --border-subtle: #0A0C0D;
+  --ink: #ECE9E2;
+  --text-secondary: #918F89;
+  --sage-100: #17261A;
+  --sand-100: #2C2013; --sand-200: #382A18;
+  --sky-100: #10202C;
+  --icon-fg-warm: #E3BD87; --icon-fg-cool: #9AC7EA;
+  --success-100: #163B22; --success-600: #6EE0A0;
+  --warning-100: #3D2907; --warning-600: #F2B24E;
+  --danger-100: #45170F; --danger-600: #FF8A66;
+  --shadow-1: 0 1px 3px rgb(0 0 0/0.4); --shadow-2: 0 4px 16px rgb(0 0 0/0.55);
+}
+
+/* Forces light mode even when the OS prefers dark -- an explicit
+   opposite choice has to win over the media query, not just add to it. */
+:root[data-theme="light"] {
+  --surface: #FFFCF2; --surface-secondary: #FFFCF2; --surface-tertiary: #F6F1E9; --surface-inset: #EDE6DA;
+  --card: #FFFFFF;
+  --border: #E0D9CE; --border-strong: #C9BFAF; --border-subtle: #EDE6DA;
+  --ink: #1E3C53;
+  --text-secondary: #6E6455;
+  --sage-100: #EAF4DB;
+  --sand-100: #F6E8CC; --sand-200: #EDD9B3;
+  --sky-100: #DBE8F4;
+  --icon-fg-warm: #8A5A2B; --icon-fg-cool: #2E5E82;
+  --success-100: #DCF8E6; --success-600: #236D40;
+  --warning-100: #FFF4E0; --warning-600: #9C5D00;
+  --danger-100: #FFE5E0; --danger-600: #A2341F;
+  --shadow-1: 0 1px 3px rgb(0 0 0/0.04); --shadow-2: 0 4px 12px rgb(0 0 0/0.08);
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -58,7 +150,7 @@ body {
   margin: 0;
   font-family: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
   background: var(--surface);
-  color: var(--primary-700);
+  color: var(--ink);
   line-height: 1.5;
   font-size: 14px;
   /* A global safety net: fixing each individual long-unbreakable-string
@@ -94,7 +186,7 @@ button {
 
 input, textarea, select {
   font: inherit;
-  color: var(--primary-700);
+  color: var(--ink);
 }
 
 /* Accessibility: visible keyboard focus on every interactive element, 2px
@@ -102,7 +194,7 @@ input, textarea, select {
  * section. `:focus-visible` (not `:focus`) so mouse/touch clicks don't get
  * a ring, only keyboard/programmatic focus. */
 :focus-visible {
-  outline: 2px solid var(--primary-700);
+  outline: 2px solid var(--ink);
   outline-offset: 2px;
 }
 
@@ -142,7 +234,7 @@ input, textarea, select {
 .sidebar-brand {
   font-family: 'EB Garamond', Georgia, serif;
   font-size: 23px;
-  color: var(--primary-700);
+  color: var(--ink);
   padding: 0 8px 22px;
   letter-spacing: .2px;
 }
@@ -159,7 +251,7 @@ input, textarea, select {
   gap: 10px;
   padding: 9px 12px;
   border-radius: var(--radius-md);
-  color: var(--primary-700);
+  color: var(--ink);
   opacity: .7;
   font-weight: 500;
   font-size: 13.5px;
@@ -181,7 +273,7 @@ input, textarea, select {
 .sidebar-item.active {
   opacity: 1;
   background: var(--sage-100);
-  color: var(--primary-700);
+  color: var(--ink);
   font-weight: 600;
 }
 
@@ -229,7 +321,7 @@ input, textarea, select {
 
 .folder-path {
   font-family: 'JetBrains Mono', monospace;
-  color: var(--primary-700);
+  color: var(--ink);
   background: var(--surface-tertiary);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -257,7 +349,7 @@ input, textarea, select {
   border-radius: var(--radius-md);
   padding: 7px 14px;
   cursor: pointer;
-  color: var(--primary-700);
+  color: var(--ink);
   transition: background .1s ease, opacity .1s ease, box-shadow .15s ease;
 }
 
@@ -294,7 +386,7 @@ input, textarea, select {
 }
 
 .btn-ghost {
-  color: var(--primary-700);
+  color: var(--ink);
   border-color: transparent;
   background: transparent;
 }
@@ -306,6 +398,21 @@ input, textarea, select {
 .btn-sm {
   font-size: 12px;
   padding: 5px 11px;
+}
+
+/* A button whose only content is one .glyph icon (currently: the theme
+   toggle) -- square padding instead of .btn-sm's text-shaped padding, so
+   the icon sits centered rather than off-balance. */
+.btn-icon-only {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+}
+
+.btn-icon-only .glyph {
+  width: 16px;
+  height: 16px;
 }
 
 .btn-danger-ghost {
@@ -359,7 +466,7 @@ input, textarea, select {
 }
 
 .empty-state {
-  color: var(--primary-700);
+  color: var(--ink);
   opacity: .6;
   font-size: 13.5px;
   padding: 24px 4px;
@@ -372,6 +479,23 @@ input, textarea, select {
 .hint-banner {
   background: var(--sky-100);
   border-left: 3px solid var(--gold-500);
+  border-radius: var(--radius-md);
+  padding: 12px 16px;
+  font-size: 13.5px;
+  margin-bottom: 16px;
+}
+
+/* Same shape as .hint-banner, but for a genuinely AI-generated finding
+ * (Phase 11 item 3, "Suggest with Claude" on the Review step) rather
+ * than a plain mechanical fact -- accent-500 border instead of gold-500,
+ * the one deliberate exception to .hint-banner's own "stays in the warm
+ * palette" comment above, since DESIGN_SYSTEM.md reserves the AI accent
+ * specifically for AI-specific elements, and this is one. Signals
+ * "probabilistic judgment call, worth double-checking" vs. item 2's
+ * deterministic .hint-banner warnings, not just a copy difference. */
+.hint-banner-ai {
+  background: var(--sky-100);
+  border-left: 3px solid var(--accent-500);
   border-radius: var(--radius-md);
   padding: 12px 16px;
   font-size: 13.5px;
@@ -426,7 +550,7 @@ input, textarea, select {
   border-radius: var(--radius-md);
   padding: 8px 12px;
   background: var(--card);
-  color: var(--primary-700);
+  color: var(--ink);
   font-size: 13px;
   flex-shrink: 0;
 }
@@ -457,7 +581,7 @@ input, textarea, select {
   padding: 5px 12px;
   border-radius: var(--radius-md);
   border: 1px solid var(--border);
-  color: var(--primary-700);
+  color: var(--ink);
   opacity: .75;
   background: var(--card);
   cursor: pointer;
@@ -492,7 +616,7 @@ input, textarea, select {
   padding: 9px 15px 11px;
   font-size: 13.5px;
   font-weight: 500;
-  color: var(--primary-700);
+  color: var(--ink);
   opacity: .5;
   cursor: pointer;
   white-space: nowrap;
@@ -505,7 +629,7 @@ input, textarea, select {
 .tab-row .tab.active {
   opacity: 1;
   font-weight: 600;
-  border-bottom-color: var(--primary-700);
+  border-bottom-color: var(--ink);
 }
 
 .page-head {
@@ -520,6 +644,12 @@ input, textarea, select {
 .page-head .count {
   font-size: 13px;
   opacity: .5;
+}
+
+.page-head-actions {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
 }
 
 /* ---------- kind swatch (icon + warm accent tint) ----------
@@ -646,6 +776,205 @@ input, textarea, select {
   flex-shrink: 0;
 }
 
+/* ---------- UI Components (its own page, live sandboxed-iframe previews)
+ * ---------- */
+
+/* A plain vertical list, not a packed grid -- components genuinely
+ * differ in natural size (a Badge vs. a full animated hero), but with
+ * every row full-width there's no bin-packing problem to solve for that
+ * at all. This used to be a Muuri-managed bin-packed masonry grid
+ * (variable width AND height, tightly packed); removed entirely once
+ * every row being the same width made the whole mechanism -- vendoring a
+ * library, `position: absolute`, an item-content-wrapper requirement,
+ * explicit repack calls on every resize -- unnecessary complexity for
+ * what's fundamentally a component catalog, not a Pinterest-style tile
+ * wall. */
+.ui-component-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.ui-component-row {
+  padding: 24px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.ui-component-row:first-child {
+  padding-top: 0;
+}
+
+.ui-component-row:last-child {
+  border-bottom: none;
+}
+
+.ui-component-row-header {
+  display: block;
+  cursor: pointer;
+  margin-bottom: 16px;
+  max-width: 720px;
+}
+
+.ui-component-row-header .index {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  opacity: .45;
+  margin-right: 8px;
+}
+
+.ui-component-row-header .name {
+  font-family: 'EB Garamond', Georgia, serif;
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+.ui-component-row-header .meta {
+  font-size: 11px;
+  opacity: .55;
+  font-family: 'JetBrains Mono', monospace;
+  margin-left: 10px;
+}
+
+.ui-component-row-header .description {
+  margin: 6px 0 0;
+  font-size: 13px;
+  opacity: .7;
+}
+
+/* The live-preview slot -- an iframe fills this once IntersectionObserver
+ * fires and the compiled preview.tsx/preview.html comes back from
+ * `preview.compile`. 160px/100% here are only the LOADING-STATE default;
+ * every compiled preview reports its own real content WIDTH and height
+ * back over postMessage (compile.ts's injectContentHeightReporter -- the
+ * parent can't just read the iframe's DOM directly, since
+ * sandbox="allow-scripts" deliberately omits allow-same-origin), and
+ * app.js sets this frame's width/height inline to match once that
+ * arrives -- see loadUiComponentPreview/loadDetailPreview and
+ * clampPreviewWidth/clampPreviewHeight. A component genuinely narrower
+ * than the column (e.g. a fixed-width themed box around a short string)
+ * gets a frame that hugs its real width instead of a fixed 720px box
+ * with dead space either side of it. max-width stays as the ceiling for
+ * BOTH the loading state and the clamp above -- a wide viewport still
+ * never stretches the demo wider than the header's own column. */
+.ui-component-preview-frame {
+  height: 160px;
+  width: 100%;
+  max-width: 720px;
+  /* The header above is left-aligned (it's text); the live preview's
+   * width now genuinely varies per component (see above), so `margin: 0
+   * auto` is what keeps it centered in the row's available width
+   * regardless of whether it happens to hit the max-width cap or is
+   * narrower than that -- not just a one-time offset from the header's
+   * own left alignment. */
+  margin: 0 auto;
+  /* Real bug, found via a real screenshot: this used to fill with
+   * --surface-inset (a flat beige) and carry a 1px border. Fine for a
+   * plain component, but many real components (e.g. the "search"
+   * artifact) use their own translucent/backdrop-blur surfaces designed
+   * to sit on an interesting background -- compositing THAT over a flat
+   * beige wash reads as a muddy, mismatched "box" behind the component.
+   * A follow-up screenshot showed even a hairline border here still read
+   * as an unwanted line boxing in the component -- fully transparent, no
+   * border at all, lets every component's own background/shape render as
+   * authored, with nothing of this frame's own visible. border-radius
+   * stays (paired with overflow: hidden below) purely to clip a
+   * component's own corners/hover effects to a rounded region -- it
+   * draws no visible edge on its own with no border or fill to outline. */
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-md);
+  position: relative;
+  overflow: hidden;
+  /* Centers the iframe itself when it's SHORTER than this frame (e.g. a
+   * tiny Badge hitting the 80px height floor in clampPreviewHeight) --
+   * the iframe's own #root can't do this centering itself: it has to
+   * shrink-wrap tightly to its real content for the height MEASUREMENT
+   * to be correct (see compile.ts's injectContentHeightReporter and its
+   * "measure document.body, not document.documentElement" comment), so
+   * there's no spare space left inside the iframe's own document to
+   * center anything within. Centering the iframe AS AN ELEMENT from out
+   * here, instead, gets the same visual result without corrupting the
+   * measurement. */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Only .ui-component-row-header opens Detail (see app.js) -- an
+   * explicit default cursor here stops this area from visually promising
+   * a click that goes nowhere. */
+  cursor: default;
+}
+
+.ui-component-preview-frame iframe {
+  width: 100%;
+  border: none;
+  display: block;
+  /* `width: 100%` here is only the LOADING-STATE default (before app.js
+   * has a real measurement to act on) -- once a contentHeight message
+   * arrives, app.js sets an explicit inline `width` (and no `height:
+   * 100%` is set here at all, ever), both to the REAL reported content
+   * size, not the frame's own (possibly larger, clamped) size, so
+   * short/narrow content centers via the flex rule above instead of
+   * pinning to the top-left with dead space around it. */
+}
+
+/* Shown until the lazy-loaded iframe's srcdoc actually lands -- avoids a
+ * blank/empty-looking tile while `preview.compile` is in flight. */
+.ui-component-preview-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 16px;
+  text-align: center;
+  overflow-wrap: break-word;
+  font-size: 11px;
+  opacity: .4;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* ---------- Detail view: live preview + variant tabs + controls (Phase C) ---------- */
+
+/* Reuses .ui-component-preview-frame's own sizing/background/iframe rules
+ * as-is (see above) -- this class only adds Detail-specific overrides,
+ * not a parallel frame style. Taller than the grid card's preview slot:
+ * Detail is where a person actually interacts with a component, not just
+ * glances at its default state. */
+.detail-preview-frame {
+  /* border/border-radius already come from the shared
+   * .ui-component-preview-frame rule -- only the size/spacing differ
+   * here. */
+  height: 260px;
+  max-width: none;
+  margin-bottom: 12px;
+}
+
+.controls-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.control-row label {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  opacity: .65;
+  margin-bottom: 5px;
+}
+
+.control-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.control-checkbox input[type="checkbox"] {
+  cursor: pointer;
+}
+
 .tag-folder-header {
   display: flex;
   align-items: center;
@@ -689,7 +1018,7 @@ input, textarea, select {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: .04em;
-  color: var(--primary-700);
+  color: var(--ink);
   margin-bottom: 8px;
 }
 
@@ -834,7 +1163,7 @@ input, textarea, select {
 
 .badge.not_pulled {
   background: var(--surface-inset);
-  color: var(--primary-700);
+  color: var(--ink);
   opacity: .8;
 }
 
@@ -856,7 +1185,7 @@ input, textarea, select {
  * rule. */
 .badge.update_available {
   background: var(--sand-200);
-  color: var(--primary-800);
+  color: var(--ink);
   opacity: 1;
 }
 
@@ -934,7 +1263,7 @@ input, textarea, select {
 }
 
 .meta-grid .k {
-  color: var(--primary-700);
+  color: var(--ink);
   opacity: .55;
   font-size: 11.5px;
   font-weight: 500;
@@ -955,7 +1284,7 @@ input, textarea, select {
   border-radius: var(--radius-md);
   padding: 2px 9px;
   margin: 3px 5px 0 0;
-  color: var(--primary-700);
+  color: var(--ink);
   opacity: .85;
 }
 
@@ -975,7 +1304,7 @@ input, textarea, select {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: 9px 11px;
-  color: var(--primary-700);
+  color: var(--ink);
   opacity: .85;
   word-break: break-all;
 }
@@ -1035,8 +1364,572 @@ input, textarea, select {
 
 .push-status-text {
   font-size: 13px;
-  color: var(--primary-700);
+  color: var(--ink);
   margin: 0 0 10px;
+}
+
+/* ---------- backend-plugin Detail section (Phase 7) ----------
+ * Non-visual counterpart to the ui-component live-preview section above --
+ * a provenance badge, a plain rendered README, and a required-config
+ * checklist. Reuses .field's existing label/input styling verbatim rather
+ * than inventing a second input language. */
+
+.provenance-badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .2px;
+  padding: 4px 10px;
+  border-radius: var(--radius-md);
+  margin: 14px 0;
+}
+
+.provenance-badge.signed {
+  background: var(--success-100);
+  color: var(--success-600);
+}
+
+.provenance-badge.unsigned {
+  background: var(--warning-100);
+  color: var(--warning-600);
+}
+
+/* Detail's "How this works" explainer -- a plain-language, always-static
+ * walkthrough of the install lifecycle, sitting above the live
+ * "Connection status" chips below it. A native <details> (open by
+ * default) rather than custom show/hide JS, matching the Activity tab's
+ * own before/after disclosures -- free keyboard/accessibility behavior,
+ * no extra state to manage. See renderLifecycleExplainer in app.js. */
+.lifecycle-explainer {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-tertiary);
+  padding: 10px 14px;
+  margin: 0 0 14px;
+}
+
+.lifecycle-explainer summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 13px;
+  padding: 2px 0;
+}
+
+.lifecycle-explainer[open] summary {
+  margin-bottom: 8px;
+}
+
+.lifecycle-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.lifecycle-step {
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.lifecycle-step:first-child {
+  padding-top: 0;
+  border-top: none;
+}
+
+.lifecycle-step-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 12.5px;
+}
+
+.lifecycle-step-description {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+  line-height: 1.45;
+}
+
+.lifecycle-step-link {
+  flex-shrink: 0;
+  border: none;
+  background: none;
+  color: var(--accent-600);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+}
+
+.lifecycle-step-link:hover {
+  text-decoration: underline;
+}
+
+/* Detail's "Connection status" panel (Phase 21) -- a row of at-a-glance
+ * chips (signed, configured, wired, build) plus the "Verify build" button,
+ * always visible for a pulled backend-plugin-shaped artifact so the
+ * question "is this actually connected and working" has an answer any
+ * time Detail is reopened, not just right after a pull. See
+ * renderConnectionStatusPanel in app.js. Boxed with the same visual
+ * weight as .lifecycle-explainer below it -- this is the live, actionable
+ * status, so it should read at least as prominently as the static
+ * lifecycle reference text, not as bare unboxed pills. */
+.connection-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
+  margin: 0 0 14px;
+}
+
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .2px;
+  padding: 4px 10px;
+  border-radius: var(--radius-md);
+}
+
+.status-chip.ok {
+  background: var(--success-100);
+  color: var(--success-600);
+}
+
+.status-chip.warn {
+  background: var(--warning-100);
+  color: var(--warning-600);
+}
+
+.status-chip.neutral {
+  background: var(--surface-tertiary);
+  border: 1px solid var(--border);
+  color: var(--ink);
+  opacity: .85;
+}
+
+/* A chip rendered as a real <button> (something needs review, and has a
+ * real place to jump to) -- same chip look, but obviously interactive. */
+.status-chip.clickable {
+  border: none;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.status-chip.clickable:hover {
+  filter: brightness(1.12);
+}
+
+/* Holds one real, sandboxed markdown iframe (see
+ * renderMarkdownToSandboxedIframe in app.js) -- no text styling of its
+ * own; the rendered document's own <style> (inside the iframe) owns
+ * all of that. Replaces the old .detail-readme, which used to hold raw
+ * pre-wrap monospace text before a real markdown renderer existed. */
+.markdown-container {
+  margin-bottom: 14px;
+}
+
+.detail-tabs-loading {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  opacity: .6;
+  margin: -6px 0 14px;
+}
+
+.markdown-frame {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--card);
+  display: block;
+}
+
+/* Only reached if `marked` itself throws (malformed input) -- same
+ * plain pre-wrap fallback the old .detail-readme rule provided, so a
+ * genuinely broken markdown file still shows SOMETHING readable. */
+.markdown-fallback {
+  white-space: pre-wrap;
+  font-family: var(--font-mono, monospace);
+  font-size: 12.5px;
+  line-height: 1.6;
+  background: var(--surface-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  margin: 0;
+}
+
+.install-params-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.install-param-help {
+  font-size: 11px;
+  opacity: .6;
+  margin-bottom: 5px;
+}
+
+.install-params-form input[type="text"],
+.install-params-form input[type="password"] {
+  width: 100%;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  padding: 8px 12px;
+  background: var(--card);
+}
+
+/* ---------- Route/page map (whole-app template Detail section) ----------
+ * A simple indented tree, one <div> per level of nesting -- no new grid or
+ * card framework, just .tag-pill (already used for the meta-grid's Tags
+ * row) and the shared mono text convention. */
+
+.route-tree {
+  font-size: 12.5px;
+}
+
+.route-node {
+  padding: 3px 0;
+}
+
+.route-node-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.route-node-path {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.route-node-error-note {
+  font-size: 11px;
+  opacity: .6;
+  font-style: italic;
+}
+
+.route-node-children {
+  margin-left: 18px;
+  border-left: 1px solid var(--border);
+  padding-left: 12px;
+}
+
+/* ---------- Source-drift check (Detail section) ----------
+ * Distinct from .drift-warning above -- that's a LOCAL pulled copy vs.
+ * this project's own registry; this is an extracted artifact vs. the
+ * real third-party project it came from. Reuses the same danger/gold
+ * tokens as .drift-warning/.push-status for the same at-a-glance
+ * severity read, just at list-item scale rather than a full banner. */
+
+.source-drift-caption {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 4px 0 10px;
+}
+
+.source-drift-results {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.source-drift-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  padding: 6px 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+}
+
+.source-drift-item .source-drift-path {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+}
+
+.source-drift-item.drifted {
+  background: var(--danger-100);
+  border-color: var(--danger-500);
+  color: var(--danger-600);
+}
+
+.source-drift-item.source-missing {
+  background: var(--surface-secondary);
+  border-color: var(--gold-500);
+}
+
+.source-drift-item.unchanged {
+  color: var(--text-secondary);
+}
+
+.source-drift-summary {
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+/* ---------- Tier 2 wiring suggestions (Phase 7 item 6) ---------- */
+
+.wiring-section-label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .3px;
+  text-transform: uppercase;
+  opacity: .65;
+  margin: 18px 0 10px;
+}
+
+.wiring-action-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  margin-bottom: 10px;
+  background: var(--surface-tertiary);
+}
+
+.wiring-action-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.wiring-action-header code {
+  font-size: 12.5px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+
+.wiring-action-status {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .2px;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: var(--radius-md);
+}
+
+/* Activity tab only: which of the two underlying logs (merge vs.
+   build-fix) this entry came from -- a category, never a status, so it
+   stays visually quieter than .wiring-action-status's colored pills. */
+.wiring-action-kind {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .2px;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.wiring-action-status.absent {
+  background: var(--surface-inset);
+  opacity: .7;
+}
+
+.wiring-action-status.exists {
+  background: var(--warning-100);
+  color: var(--warning-600);
+}
+
+.wiring-action-status.ok {
+  background: var(--success-100);
+  color: var(--success-600);
+}
+
+.wiring-action-status.ambiguous {
+  background: var(--danger-100);
+  color: var(--danger-600);
+}
+
+.wiring-action-description {
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.wiring-action-instructions {
+  font-size: 12.5px;
+  opacity: .75;
+  margin-bottom: 8px;
+}
+
+.wiring-action-snippet {
+  white-space: pre-wrap;
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  overflow-x: auto;
+}
+
+/* Phase 11 Detail-view task: design-kit's color tokens/type scale/
+   component grid. Reuses .wiring-action-card/.chip-picker verbatim for
+   everything structural -- only the swatch/table/grid layout pieces below
+   are genuinely new. */
+.token-swatch-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.token-swatch {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 76px;
+}
+
+.token-swatch-color {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.token-swatch-label {
+  font-size: 10.5px;
+  font-family: var(--font-mono, monospace);
+  text-align: center;
+  line-height: 1.3;
+  word-break: break-word;
+}
+
+/* Type scale as real applied type samples, not a data table -- each row
+   is rendered in its own real Font/Weight/Size (see fontFamilyStack in
+   app.js), so this shows what the type actually looks like. */
+.type-sample-list {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 4px;
+}
+
+.type-sample-row {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  padding: 8px 0;
+  border-bottom: 1px dashed var(--border);
+}
+
+.type-sample-row:last-child {
+  border-bottom: none;
+}
+
+.type-sample-label {
+  font-family: var(--font-mono, monospace);
+  font-size: 10.5px;
+  opacity: .65;
+  width: 130px;
+  flex-shrink: 0;
+}
+
+.type-sample-text {
+  color: var(--ink, inherit);
+}
+
+.template-theme-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.template-theme-toggle-caption {
+  font-size: 12px;
+  opacity: .65;
+}
+
+.template-component-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.template-component-card .ui-component-preview-frame {
+  margin-top: 8px;
+}
+
+.template-component-card .wiring-action-header {
+  justify-content: space-between;
+}
+
+.template-component-caption {
+  font-size: 12px;
+  opacity: .75;
+  margin: 6px 0 0;
+  line-height: 1.5;
+}
+
+/* Layout-rules summary strip: real radius tokens as chips, plus
+   GUIDELINES.md's own Layout grid/Spacing prose -- never the mockup's
+   fictional "Max width/Section rhythm" labels, since those were invented
+   for its own made-up demo kit, not something this real doc states. */
+.layout-rules-strip {
+  margin-top: 4px;
+}
+
+.radius-token-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.radius-token-chip {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 6px 10px;
+  background: var(--surface-tertiary);
+  font-size: 11px;
+}
+
+.radius-token-chip code {
+  font-size: 11.5px;
+}
+
+.radius-token-chip span {
+  opacity: .65;
+}
+
+.layout-rules-note {
+  font-size: 12.5px;
+  opacity: .75;
+  line-height: 1.5;
+  margin: 0 0 8px;
+}
+
+.component-detail-usage-rule {
+  font-size: 13.5px;
+  opacity: .8;
+  line-height: 1.6;
+  margin: 4px 0 20px;
+  max-width: 640px;
 }
 
 /* ---------- progress panel (live Pull/Push stage feed) ----------
@@ -1066,14 +1959,26 @@ input, textarea, select {
   font-weight: 500;
 }
 
+/* inline-flex, not inline-block: this gets dropped as a bare
+ * `<span class="spinner"></span> Loading…` into plain, non-flex
+ * containers in several places (e.g. #detail-wiring-actions,
+ * #detail-install-params-fields) -- without an explicit display here it
+ * stays the default `inline`, which ignores width/height and collapses
+ * to a barely-visible sliver instead of the 14px ring every other call
+ * site (inside an already-flex parent, where an inline child gets
+ * blockified for free) shows correctly. Setting it here fixes every
+ * call site at once rather than requiring each new one to remember to
+ * wrap it in a flex container. */
 .spinner {
+  display: inline-flex;
   width: 14px;
   height: 14px;
   border-radius: 50%;
   border: 2px solid var(--border-strong);
-  border-top-color: var(--primary-700);
+  border-top-color: var(--ink);
   animation: spin .7s linear infinite;
   flex-shrink: 0;
+  vertical-align: middle;
 }
 
 @keyframes spin {
@@ -1133,6 +2038,55 @@ input, textarea, select {
   letter-spacing: .3px;
   opacity: .6;
   min-width: 80px;
+}
+
+/* ---------- build-fix offers (Phase 10 item 2) ---------- */
+
+.build-fix-offers {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.build-fix-row {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 8px 10px;
+  background: var(--card);
+}
+
+.build-fix-result {
+  margin-top: 8px;
+}
+
+.build-fix-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* Phase 11 item 4: structurally identical to .build-fix-row/-result/
+ * -actions above, kept as its own set rather than a shared/renamed
+ * class -- each feature's own styling stays independently editable,
+ * matching how item 3 got its own .hint-banner-ai instead of
+ * overloading .hint-banner. */
+.design-fix-row {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 8px 10px;
+  background: var(--card);
+  margin-bottom: 8px;
+}
+
+.design-fix-result {
+  margin-top: 8px;
+}
+
+.design-fix-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
 }
 
 .progress-line .msg {
@@ -1230,7 +2184,7 @@ input, textarea, select {
 .chip.tag-picker-suggestion {
   border: 1px dashed var(--border-strong);
   background: transparent;
-  color: var(--primary-700);
+  color: var(--ink);
   opacity: .8;
 }
 
@@ -1250,13 +2204,13 @@ input, textarea, select {
   border: 1px solid var(--border);
   border-radius: var(--radius-pill);
   padding: 3px 6px 3px 10px;
-  color: var(--primary-700);
+  color: var(--ink);
 }
 
 .tag-chip-remove {
   border: none;
   background: transparent;
-  color: var(--primary-700);
+  color: var(--ink);
   opacity: .55;
   cursor: pointer;
   font-size: 14px;
@@ -1276,7 +2230,7 @@ input, textarea, select {
   padding: 4px 2px;
   background: transparent;
   font-size: 13px;
-  color: var(--primary-700);
+  color: var(--ink);
 }
 
 .payload-picker {
@@ -1371,7 +2325,7 @@ input, textarea, select {
   font-family: 'EB Garamond', Georgia, serif;
   font-size: 22px;
   font-weight: 400;
-  color: var(--primary-700);
+  color: var(--ink);
   opacity: 1;
   margin-bottom: 12px;
 }
@@ -1446,6 +2400,64 @@ input, textarea, select {
   flex-shrink: 0;
 }
 
+/* ---------- add new: install-params list (Phase 10 item 3) ---------- */
+
+.install-param-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--card);
+  margin-bottom: 6px;
+}
+
+.install-param-row .install-param-key {
+  flex: 0 0 160px;
+  font-family: var(--font-mono, monospace);
+}
+
+.install-param-row .install-param-description {
+  flex: 1;
+  min-width: 0;
+}
+
+.install-param-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.install-param-row .install-param-remove {
+  flex-shrink: 0;
+}
+
+/* ---------- add new: Suggest with Claude (Phase 10 item 3) ---------- */
+
+.field-with-suggest {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.field-with-suggest textarea {
+  width: 100%;
+}
+
+.suggest-btn {
+  align-self: flex-end;
+}
+
+.suggest-btn:disabled {
+  opacity: 0.7;
+  cursor: wait;
+}
+
 /* ---------- settings ---------- */
 
 .settings-row {
@@ -1510,8 +2522,31 @@ input, textarea, select {
 .toast.success .dot { background: var(--mint-500); }
 .toast.error .dot { background: var(--danger-500); }
 
+.toast-body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+}
+
 .toast .msg {
   word-break: break-word;
+}
+
+.toast-link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent-600);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.toast-link:hover {
+  opacity: .8;
 }
 
 @keyframes toast-in {
@@ -1537,4 +2572,66 @@ input, textarea, select {
   .btn {
     transition: none;
   }
+}
+
+/* Embedded terminal ("Wire with Claude") -- a real xterm.js instance
+   streaming a real PTY session (src-tauri/src/pty.rs). Fixed dark theme
+   throughout, deliberately not tied to --surface/light-dark tokens --
+   see openWireTerminal's own comment on why (every mainstream embedded-
+   terminal UI is dark regardless of the host app's own theme). */
+.wire-terminal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(10, 12, 13, 0.55);
+  padding: 32px;
+}
+
+.wire-terminal-panel {
+  width: min(960px, 100%);
+  height: min(560px, 85vh);
+  display: flex;
+  flex-direction: column;
+  background: #181a20;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.45);
+}
+
+.wire-terminal-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: #10121600;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.wire-terminal-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e6e6e6;
+}
+
+.wire-terminal-status {
+  font-size: 12px;
+  color: #8a8f98;
+  margin-right: auto;
+}
+
+.wire-terminal-header .btn {
+  color: #e6e6e6;
+}
+
+.wire-terminal-container {
+  flex: 1;
+  min-height: 0;
+  padding: 8px 10px;
+}
+
+.wire-terminal-container .xterm {
+  height: 100%;
 }

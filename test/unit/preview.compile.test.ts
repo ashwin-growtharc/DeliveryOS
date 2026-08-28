@@ -1,0 +1,849 @@
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { JSDOM } from 'jsdom';
+import { compilePreviewHtml, getOrCompilePreview, listVariantNames } from '../../src/engine/preview/compile';
+import { previewCachePath } from '../../src/engine/paths';
+
+const fixtureDir = path.join(__dirname, '..', 'fixtures', 'preview-spike', 'Button');
+const previewPath = path.join(fixtureDir, 'preview.tsx');
+const htmlPreviewPath = path.join(
+  __dirname, '..', 'fixtures', 'preview-spike', 'HtmlButton', 'preview.html',
+);
+const maliciousPreviewPath = path.join(
+  __dirname, '..', 'fixtures', 'preview-spike', 'Malicious', 'preview.tsx',
+);
+const repoRoot = path.join(__dirname, '..', '..');
+
+describe('listVariantNames', () => {
+  it('returns exported variant names in real source declaration order', () => {
+    // The fixture declares Primary, Secondary, Disabled in that order --
+    // asserting the exact order, not just membership, is the point: this
+    // is what catches esbuild's bundled-namespace-object reordering bug if
+    // it ever creeps back in via some other code path.
+    expect(listVariantNames(previewPath)).toEqual(['Primary', 'Secondary', 'Disabled']);
+  });
+});
+
+/**
+ * Executes a compiled preview's HTML in a real jsdom document and returns
+ * the rendered <button> -- the only reliable way to prove which variant
+ * actually rendered. A plain string-match against the compiled bundle
+ * CANNOT tell variants apart: the bundle's JS source textually contains
+ * every branch (Button.tsx's full source, all three preview variants)
+ * regardless of which one actually executes at runtime. Confirmed the hard
+ * way during the Phase A spike -- a `toContain('#1E3C53')` /
+ * `not.toContain('not-allowed')` pair of assertions passed even when the
+ * wrong variant (Disabled) was rendering, because both strings are
+ * unconditionally present in Button.tsx's own source, compiled in either
+ * way.
+ */
+async function renderCompiledButton(previewEntryPath: string): Promise<HTMLButtonElement> {
+  const { html } = await compilePreviewHtml(previewEntryPath);
+  const dom = new JSDOM(html, { runScripts: 'dangerously' });
+
+  // React 19's createRoot schedules its initial render via its own internal
+  // task/microtask scheduling rather than rendering purely synchronously
+  // within the inline <script> -- polls for the rendered <button> instead
+  // of trusting one fixed sleep duration, which would otherwise be a
+  // magic-number race liable to flake on a slower/loaded runner.
+  const deadline = Date.now() + 2000;
+  while (Date.now() < deadline) {
+    const found = dom.window.document.querySelector('button');
+    if (found) {
+      return found as HTMLButtonElement;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error('Expected a <button> to have rendered into #root within 2s');
+}
+
+describe('compilePreviewHtml (Phase A spike)', () => {
+  it('compiles a real React component + preview.tsx into a self-contained HTML document', async () => {
+    const { html } = await compilePreviewHtml(previewPath);
+
+    expect(html).toContain('<!DOCTYPE html>');
+    expect(html).toContain('id="root"');
+    // The bundle must be fully self-contained -- React/ReactDOM inlined, not
+    // left as an external `require`/`import` the sandboxed iframe could
+    // never resolve on its own.
+    expect(html).not.toMatch(/require\(["']react/);
+    expect(html).not.toMatch(/from\s+["']react/);
+  });
+
+  it('renders the FIRST-declared variant (Primary) in the real DOM, not an arbitrary one', async () => {
+    const button = await renderCompiledButton(previewPath);
+
+    // Regression guard for the exact bug the Phase A spike's manual visual
+    // check caught: relying on Object.keys() order on the bundled namespace
+    // silently rendered "Disabled" (alphabetically first) instead of
+    // "Primary" (source-order first). `disabled` is the one property that
+    // conclusively distinguishes Primary from Disabled (both render the
+    // same "Get started" text) -- checked against the REAL rendered
+    // element, not the bundle's source text.
+    expect(button.textContent).toBe('Get started');
+    expect(button.disabled).toBe(false);
+  });
+
+  it('inlines the actual component output (not just React/ReactDOM boilerplate)', async () => {
+    const { html } = await compilePreviewHtml(previewPath);
+
+    // Button.tsx's own distinguishing content should be present in the
+    // bundle -- proves the real component source was actually compiled in,
+    // not just a blank harness.
+    expect(html).toContain('Get started');
+  });
+
+  it('produces a reasonably-sized minified bundle', async () => {
+    const { html } = await compilePreviewHtml(previewPath);
+
+    // Every compiled preview embeds ALL vendored libraries unconditionally
+    // (see VENDORED_LIBRARY_NAMES's own doc comment), regardless of which
+    // one this particular component actually imports -- so lucide-react's
+    // ~716 KB plus the full starter set of @radix-ui/react-* primitives
+    // (~560 KB combined -- see generate-vendored-libraries.mjs) both land
+    // in THIS bundle too, even though Button.tsx imports neither. Ceiling
+    // raised to match that real, expected cost, not loosened arbitrarily
+    // -- a rough sanity ceiling, not a tight budget; Phase A's real
+    // size/latency check happens against the packaged sidecar, not this
+    // unit test.
+    expect(html.length).toBeLessThan(1_900_000);
+  });
+});
+
+describe('vendored React runtime (Phase B)', () => {
+  it('compiles successfully even with react/react-dom entirely absent from node_modules', async () => {
+    // The actual claim this test exists to prove: React/ReactDOM are
+    // genuinely vendored (embedded via VENDORED_REACT_RUNTIME_JS), not
+    // just coincidentally resolving because the fixture happens to sit
+    // inside this monorepo's own node_modules. Temporarily hides both
+    // packages so that coincidental fallback genuinely cannot succeed --
+    // mirrors the exact isolation-testing discipline Phase A used for the
+    // native esbuild binary itself. Always restores in `finally`, even if
+    // the compile throws unexpectedly.
+    const reactDir = path.join(repoRoot, 'node_modules', 'react');
+    const reactDomDir = path.join(repoRoot, 'node_modules', 'react-dom');
+    const reactHidden = `${reactDir}.hidden-for-test`;
+    const reactDomHidden = `${reactDomDir}.hidden-for-test`;
+
+    fs.renameSync(reactDir, reactHidden);
+    fs.renameSync(reactDomDir, reactDomHidden);
+    try {
+      const { html } = await compilePreviewHtml(previewPath);
+      expect(html.length).toBeGreaterThan(0);
+      expect(html).toContain('__DeliveryOSReactRuntime');
+    } finally {
+      fs.renameSync(reactHidden, reactDir);
+      fs.renameSync(reactDomHidden, reactDomDir);
+    }
+  });
+
+  it('compiles a component that imports { useState } from a real, untouched "react" import, and hook state actually works', async () => {
+    // A real bug found via Phase 8's own adoption test: several
+    // already-pushed ui-component artifacts (magic-container,
+    // decrypting-text, orbiting-skills, search) used
+    // `window.__DeliveryOSReactRuntime.React` directly instead of a normal
+    // `import { useState } from 'react'`, because that normal import
+    // wasn't resolvable here before REACT_EXTERNAL_NAMES was added --
+    // making them non-portable outside DeliveryOS's own preview (a real
+    // consuming project has no `window.__DeliveryOSReactRuntime` at all).
+    // This proves the fix: not just that a real `import ... from 'react'`
+    // compiles, but that the resulting hook state is REAL and reactive --
+    // clicking the button twice must show "Count: 2", not a static "0"
+    // that a stubbed-out useState might produce.
+    const realReactImportPreviewPath = path.join(
+      __dirname, '..', 'fixtures', 'preview-spike', 'RealReactImport', 'preview.tsx',
+    );
+    const { html } = await compilePreviewHtml(realReactImportPreviewPath);
+    const dom = new JSDOM(html, { runScripts: 'dangerously' });
+
+    const deadline = Date.now() + 2000;
+    let button: HTMLElement | null = null;
+    while (Date.now() < deadline) {
+      button = dom.window.document.querySelector('[data-testid="counter-button"]');
+      if (button) break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(button?.textContent).toBe('Count: 0');
+
+    button!.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    button!.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(button?.textContent).toBe('Count: 2');
+  });
+});
+
+describe('import sandboxing (Phase B)', () => {
+  it('rejects a relative import that escapes the artifact\'s own directory', async () => {
+    // test/fixtures/preview-spike/Malicious/preview.tsx imports
+    // '../../../../package.json' -- a real path-traversal attempt. Must
+    // fail loudly (a rejected promise), never silently inline content from
+    // outside the artifact's own folder.
+    await expect(compilePreviewHtml(maliciousPreviewPath)).rejects.toThrow(
+      /resolves outside this component's own directory/,
+    );
+  });
+});
+
+describe('vendored UI-kit libraries (framer-motion, clsx, etc.)', () => {
+  const vendoredLibPreviewPath = path.join(
+    __dirname, '..', 'fixtures', 'preview-spike', 'VendoredLib', 'preview.tsx',
+  );
+  const vendoredMotionPreviewPath = path.join(
+    __dirname, '..', 'fixtures', 'preview-spike', 'VendoredMotion', 'preview.tsx',
+  );
+
+  it('compiles a component that imports clsx directly, untouched, and clsx actually runs', async () => {
+    const { html } = await compilePreviewHtml(vendoredLibPreviewPath);
+    const dom = new JSDOM(html, { runScripts: 'dangerously' });
+
+    const deadline = Date.now() + 2000;
+    let tag: Element | null = null;
+    while (Date.now() < deadline) {
+      tag = dom.window.document.querySelector('[data-testid="tag"]');
+      if (tag) break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    // Checked against the real rendered className, not just "did this
+    // compile" -- clsx('tag', active && 'tag--active') only produces this
+    // exact joined string if clsx's own real logic executed, not just if
+    // the import happened to not throw.
+    expect(tag?.className).toBe('tag tag--active');
+  });
+
+  it('compiles a component that imports framer-motion directly, untouched, and it actually mounts', async () => {
+    const { html } = await compilePreviewHtml(vendoredMotionPreviewPath);
+    const dom = new JSDOM(html, { runScripts: 'dangerously' });
+
+    const deadline = Date.now() + 2000;
+    let fader: Element | null = null;
+    while (Date.now() < deadline) {
+      fader = dom.window.document.querySelector('[data-testid="fader"]');
+      if (fader) break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    // Proves framer-motion's real module resolved and rendered a real DOM
+    // node -- this is the exact import shape ("import { motion } from
+    // 'framer-motion'") that failed with "Could not resolve" before the
+    // vendoring support this test guards.
+    expect(fader?.textContent).toBe('Hello');
+  });
+
+  it('compiles a component that imports an icon from lucide-react directly, untouched, and renders a real SVG', async () => {
+    // lucide-react is the one real size outlier in this allow-list (~716
+    // KB minified, since every icon component gets bundled regardless of
+    // which one a given component actually imports -- see
+    // generate-vendored-libraries.mjs's own doc comment on that
+    // tradeoff), added after a real pasted component (a command-palette
+    // style search modal) needed exactly one icon out of it and failed
+    // with "Could not resolve lucide-react" before this.
+    const vendoredIconPreviewPath = path.join(
+      __dirname, '..', 'fixtures', 'preview-spike', 'VendoredIcon', 'preview.tsx',
+    );
+    const { html } = await compilePreviewHtml(vendoredIconPreviewPath);
+    const dom = new JSDOM(html, { runScripts: 'dangerously' });
+
+    const deadline = Date.now() + 2000;
+    let icon: Element | null = null;
+    while (Date.now() < deadline) {
+      icon = dom.window.document.querySelector('[data-testid="search-icon"]');
+      if (icon) break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    // A real lucide-react icon renders as an actual <svg>, not just some
+    // placeholder element -- proves the real module resolved and its
+    // component actually rendered, not just that the import didn't throw.
+    expect(icon?.tagName.toLowerCase()).toBe('svg');
+  });
+
+  it('compiles a component that imports a Radix UI primitive (@radix-ui/react-switch) directly, untouched, and it actually renders with real state', async () => {
+    // The @radix-ui/react-* entries are a starter set of the primitives
+    // shadcn/ui-derived pasted components reach for most often (Dialog,
+    // Dropdown Menu, Select, Tooltip, Tabs, Checkbox, Switch, ...) -- see
+    // generate-vendored-libraries.mjs's own doc comment. Switch is a
+    // simple, single-package one to regression-test: no Provider/portal
+    // wrapper required, and its rendered `data-state` attribute proves
+    // the real Radix state machine ran, not just that the import didn't
+    // throw.
+    const radixSwitchPreviewPath = path.join(
+      __dirname, '..', 'fixtures', 'preview-spike', 'VendoredRadix', 'preview.tsx',
+    );
+    const { html } = await compilePreviewHtml(radixSwitchPreviewPath);
+    const dom = new JSDOM(html, { runScripts: 'dangerously' });
+
+    const deadline = Date.now() + 2000;
+    let root: Element | null = null;
+    while (Date.now() < deadline) {
+      root = dom.window.document.querySelector('[data-testid="switch-root"]');
+      if (root) break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(root?.getAttribute('role')).toBe('switch');
+    // defaultChecked was passed -- a real Radix Switch reflects this as
+    // data-state="checked", not just an inert checked attribute.
+    expect(root?.getAttribute('data-state')).toBe('checked');
+  });
+
+  it('still rejects a real npm package import that is NOT on the vendored allow-list', async () => {
+    // A regression guard for the sandbox itself: adding the vendored-
+    // library allow-list must not accidentally widen esbuild's resolution
+    // to arbitrary node_modules packages in general. UnvendoredLib/
+    // Formatted.tsx imports 'zod' -- a real dependency of this very repo,
+    // so esbuild CAN resolve it from node_modules (unlike a genuinely
+    // missing package) -- and it must still be rejected by
+    // createDirectorySandboxPlugin, exactly like any other file outside
+    // the component's own directory. Only the exact names in
+    // VENDORED_LIBRARY_NAMES should ever bypass that check.
+    const unvendoredLibPreviewPath = path.join(
+      __dirname, '..', 'fixtures', 'preview-spike', 'UnvendoredLib', 'preview.tsx',
+    );
+    await expect(compilePreviewHtml(unvendoredLibPreviewPath)).rejects.toThrow(
+      /resolves outside this component's own directory/,
+    );
+  });
+});
+
+describe('Tailwind CSS generation', () => {
+  const tailwindStyledPreviewPath = path.join(
+    __dirname, '..', 'fixtures', 'preview-spike', 'TailwindStyled', 'preview.tsx',
+  );
+
+  it('generates real CSS rules for a Tailwind-authored component, not just inert class names', async () => {
+    const { html } = await compilePreviewHtml(tailwindStyledPreviewPath);
+
+    // Chip.tsx uses rounded-full/bg-indigo-600/px-3/py-1/text-white -- this
+    // checks the actual generated declarations exist, not just that the
+    // class name string appears (which it always would, straight from the
+    // component's own source getting bundled in regardless of any CSS
+    // generation at all).
+    expect(html).toMatch(/\.rounded-full\s*\{[^}]*border-radius:\s*9999px/);
+    expect(html).toMatch(/\.bg-indigo-600\s*\{[^}]*background-color:\s*rgb\(79 70 229/);
+  });
+
+  it('a component using no Tailwind classes at all still compiles with no extra Tailwind CSS bloat', async () => {
+    // Button.tsx (the Phase A fixture) uses inline `style={{...}}`, never a
+    // className -- Tailwind's own scanner should find nothing to generate
+    // beyond its always-present base custom-property declarations, not
+    // silently fail or throw.
+    const { html } = await compilePreviewHtml(previewPath);
+    expect(html).not.toMatch(/\.rounded-full/);
+  });
+
+  it('includes a real preflight reset even with tailwindcss\'s own preflight.css asset file entirely absent', async () => {
+    // The actual claim this test exists to prove: preflight CSS is
+    // genuinely vendored (VENDORED_TAILWIND_PREFLIGHT_CSS), not just
+    // coincidentally read off disk because the fixture happens to run
+    // inside this monorepo's own node_modules -- mirrors the exact
+    // isolation-testing discipline the "vendored React runtime" test uses
+    // for react/react-dom. This is a real, previously-confirmed bug: the
+    // packaged Node SEA sidecar has no node_modules/tailwindcss directory
+    // at all, and Tailwind's own `preflight` core plugin reads its
+    // package's lib/css/preflight.css with a plain `fs.readFileSync` at
+    // RUNTIME -- confirmed by hand to throw ENOENT inside the real
+    // packaged sidecar exe before this fix. Hiding the file here
+    // reproduces that exact missing-asset condition without needing a
+    // full SEA build in this test.
+    const preflightPath = path.join(repoRoot, 'node_modules', 'tailwindcss', 'lib', 'css', 'preflight.css');
+    const hiddenPath = `${preflightPath}.hidden-for-test`;
+    fs.renameSync(preflightPath, hiddenPath);
+    try {
+      const { html } = await compilePreviewHtml(tailwindStyledPreviewPath);
+      expect(html).toMatch(/box-sizing:\s*border-box/);
+    } finally {
+      fs.renameSync(hiddenPath, preflightPath);
+    }
+  });
+});
+
+describe('dark-mode strategy (real bug, found via a real screenshot)', () => {
+  const darkModeStyledPreviewPath = path.join(
+    __dirname, '..', 'fixtures', 'preview-spike', 'DarkModeStyled', 'preview.tsx',
+  );
+
+  it('compiles dark: classes as requiring a real ".dark" ancestor selector, never a live prefers-color-scheme media query', async () => {
+    // Real bug: with no darkMode strategy set, Tailwind defaults to
+    // 'media' -- dark: classes compile to
+    // `@media (prefers-color-scheme: dark)`, which resolves against the
+    // VIEWER's own OS setting (broken contrast when composited over
+    // DeliveryOS's own fixed-light preview frame; the background visibly
+    // changing mid-view if the OS scheme flips while a preview stays
+    // open). 'class' makes dark: classes require an ancestor `.dark`
+    // element this pipeline never adds anywhere, so they can never
+    // activate -- confirmed here by asserting the compiled CSS contains
+    // a real `.dark` selector for Card.tsx's own dark:bg-black class,
+    // and does NOT contain a live prefers-color-scheme media query at
+    // all (the actual, previously-real bug this proves is fixed).
+    const { html } = await compilePreviewHtml(darkModeStyledPreviewPath);
+    // Real, confirmed selector shape Tailwind v3 emits for darkMode:
+    // 'class' -- ":is(.dark *)" (matching a .dark ancestor OR the
+    // element itself carrying the class), not a plain ".dark .foo"
+    // descendant selector. Either way, no `.dark` class is ever added
+    // anywhere in this pipeline, so it never matches.
+    expect(html).toMatch(/\.dark\\:bg-black:is\(\.dark \*\)\s*\{[^}]*background-color:\s*rgb\(0 0 0/);
+    expect(html).not.toMatch(/@media\s*\(prefers-color-scheme:\s*dark\)/);
+  });
+
+  it('pins color-scheme: light on the iframe\'s own html/body, so native browser UI (scrollbars, form controls) never follows the OS scheme either', async () => {
+    const { html } = await compilePreviewHtml(darkModeStyledPreviewPath);
+    expect(html).toMatch(/html,\s*body\s*\{[^}]*color-scheme:\s*light/);
+  });
+});
+
+describe('compiler-adapter dispatch (Phase B)', () => {
+  it('routes a .tsx preview through the React adapter', async () => {
+    const { html } = await compilePreviewHtml(previewPath);
+    // The React adapter always produces a fresh HTML document wrapper +
+    // the vendored runtime -- present only because esbuild actually ran.
+    expect(html).toContain('<!DOCTYPE html>');
+    expect(html).toContain('__DeliveryOSReactRuntime');
+  });
+
+  it('routes a .html preview through the zero-build adapter, body untouched', async () => {
+    const rawFile = fs.readFileSync(htmlPreviewPath, 'utf-8');
+    const { html } = await compilePreviewHtml(htmlPreviewPath);
+
+    // Zero-build means no esbuild involvement, no vendored-runtime
+    // injection -- the file's own content is untouched. It's no longer
+    // byte-for-byte identical to the raw file, though: every adapter's
+    // output gets a CSP <meta> tag AND the contentHeight reporter script
+    // injected uniformly (see injectPreviewCsp/injectContentHeightReporter),
+    // including this one.
+    expect(html).not.toContain('__DeliveryOSReactRuntime');
+    expect(html).toContain('Zero-build button');
+    expect(html).toContain('Content-Security-Policy');
+    expect(html).toContain('contentHeight');
+    // Everything else about the original file survives verbatim.
+    const withoutCsp = html.replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/, '');
+    const withoutHeightReporter = withoutCsp.replace(/<script>\(function \(\) \{[\s\S]*?\}\)\(\);<\/script>/, '');
+    expect(withoutHeightReporter).toBe(rawFile);
+  });
+});
+
+describe('variantNames + propsSchemas (Phase C)', () => {
+  it('the React adapter returns every CSF variant, in source declaration order', async () => {
+    const compiled = await compilePreviewHtml(previewPath);
+    expect(compiled.variantNames).toEqual(['Primary', 'Secondary', 'Disabled']);
+  });
+
+  it('the React adapter returns a real docgen-derived props schema for the underlying component', async () => {
+    const compiled = await compilePreviewHtml(previewPath);
+    expect(Object.keys(compiled.propsSchemas)).toEqual(['Button']);
+    const variant = compiled.propsSchemas.Button.find((p) => p.name === 'variant');
+    expect(variant).toMatchObject({ enumValues: ['primary', 'secondary'], defaultValue: 'primary' });
+  });
+
+  it('the zero-build HTML adapter returns empty variantNames/propsSchemas -- no CSF/docgen concept applies', async () => {
+    const compiled = await compilePreviewHtml(htmlPreviewPath);
+    expect(compiled.variantNames).toEqual([]);
+    expect(compiled.propsSchemas).toEqual({});
+  });
+});
+
+describe('postMessage protocol (Phase C)', () => {
+  it('reports the real component name via postMessage even though the bundle is minified (keepNames regression)', async () => {
+    // If `keepNames: true` were ever accidentally dropped from the
+    // esbuild.build() call, esbuild's minifier would rename `Button` to a
+    // single letter, and this assertion is what would catch it -- a plain
+    // `html.toContain('Button')` string check would NOT catch this
+    // regression, since "Button" also appears elsewhere in the bundle
+    // (e.g. inside the harness's own JSX call sites) regardless of
+    // whether the function's runtime `.name` itself survived minification.
+    const { html } = await compilePreviewHtml(previewPath);
+    const dom = new JSDOM(html, { runScripts: 'dangerously' });
+
+    const messages: Array<Record<string, unknown>> = [];
+    dom.window.addEventListener('message', (event) => {
+      messages.push(event.data as Record<string, unknown>);
+    });
+
+    const deadline = Date.now() + 2000;
+    while (Date.now() < deadline) {
+      const variantChanged = messages.find((m) => m.type === 'variantChanged');
+      if (variantChanged) {
+        expect(variantChanged.componentName).toBe('Button');
+        expect(variantChanged.variant).toBe('Primary');
+        expect(variantChanged.initialProps).toMatchObject({ children: 'Get started' });
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error('Expected a "variantChanged" postMessage within 2s -- keepNames regression, or the harness protocol broke');
+  });
+
+  it('ignores an incoming message whose source is not window.parent, even with a valid-looking payload (security boundary)', async () => {
+    // A real browser lets the harness legitimately receive a
+    // window.parent-sourced message; jsdom has no way to fake that
+    // relationship (confirmed empirically: a real `srcdoc` iframe never
+    // executes its inline <script> in jsdom's `runScripts: 'dangerously'`
+    // mode, and even a same-window self-post -- the only other way to
+    // trigger `window.addEventListener('message', ...)` here -- always
+    // comes back with `event.source === null`, never `window` itself).
+    // That limitation is exactly what this test turns into real coverage:
+    // it proves the harness's `event.source !== window.parent` guard
+    // actually rejects a same-shape `{type:'selectVariant', ...}` message
+    // from an untrusted source, rather than just asserting the check
+    // exists in the source text. The genuine "switch variant, watch it
+    // re-render" happy path needs a real two-window browser check instead
+    // (see this feature's manual-verification steps).
+    const { html } = await compilePreviewHtml(previewPath);
+    const dom = new JSDOM(html, { runScripts: 'dangerously' });
+
+    const messages: Array<Record<string, unknown>> = [];
+    dom.window.addEventListener('message', (event) => {
+      messages.push(event.data as Record<string, unknown>);
+    });
+
+    const deadline = Date.now() + 2000;
+    while (Date.now() < deadline && !messages.some((m) => m.type === 'variantChanged')) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(messages.filter((m) => m.type === 'variantChanged')).toHaveLength(1);
+
+    dom.window.postMessage({ type: 'selectVariant', variant: 'Disabled' }, '*');
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    // Still Primary, still non-disabled -- the untrusted message was
+    // dropped, not honored, and no second `variantChanged` was posted.
+    const button = dom.window.document.querySelector('button');
+    expect(button?.disabled).toBe(false);
+    expect(messages.filter((m) => m.type === 'variantChanged')).toHaveLength(1);
+  });
+});
+
+describe('injectPreviewCsp (Phase B)', () => {
+  it('every compiled preview includes a strict CSP meta tag', async () => {
+    const reactResult = await compilePreviewHtml(previewPath);
+    const htmlResult = await compilePreviewHtml(htmlPreviewPath);
+
+    for (const { html } of [reactResult, htmlResult]) {
+      expect(html).toContain('Content-Security-Policy');
+      expect(html).toContain("default-src 'none'");
+    }
+  });
+});
+
+describe('injectContentHeightReporter (dynamic card sizing)', () => {
+  it('every compiled preview (both adapters) reports a real contentHeight over postMessage', async () => {
+    // Adapter-agnostic by design: the parent can't read the iframe's DOM
+    // directly (sandbox="allow-scripts" has no allow-same-origin), so
+    // every compiled preview -- React or zero-build HTML -- has to
+    // self-report its own height for the grid/Detail preview frames to
+    // size to real content instead of a fixed guess.
+    for (const previewEntryPath of [previewPath, htmlPreviewPath]) {
+      const { html } = await compilePreviewHtml(previewEntryPath);
+      const dom = new JSDOM(html, { runScripts: 'dangerously' });
+
+      // jsdom has no actual layout engine, so every element's
+      // scrollWidth/scrollHeight reads 0 regardless of real content
+      // (confirmed empirically, same limitation hit while verifying the
+      // vendored Muuri grid library) -- and reportSize() now (correctly)
+      // refuses to post a (0, 0) measurement at all, a real fix for a
+      // real pre-mount-corruption bug (see injectContentHeightReporter's
+      // own doc comment). Left un-stubbed, jsdom would therefore never
+      // fire a message here no matter how long this test waited, since
+      // it can never produce a non-zero reading -- this stub exists
+      // purely so THIS test can still exercise "does the message fire,
+      // with the right shape" at all; it says nothing about real pixel
+      // values, which still needs a real browser to verify.
+      dom.window.Object.defineProperty(dom.window.HTMLElement.prototype, 'scrollWidth', {
+        configurable: true,
+        get: () => 42,
+      });
+      dom.window.Object.defineProperty(dom.window.HTMLElement.prototype, 'scrollHeight', {
+        configurable: true,
+        get: () => 42,
+      });
+
+      const messages: Array<Record<string, unknown>> = [];
+      dom.window.addEventListener('message', (event) => {
+        messages.push(event.data as Record<string, unknown>);
+      });
+
+      const deadline = Date.now() + 2000;
+      while (Date.now() < deadline && !messages.some((m) => m.type === 'contentHeight')) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      const heightMessage = messages.find((m) => m.type === 'contentHeight');
+      expect(heightMessage).toBeTruthy();
+      expect(typeof heightMessage?.height).toBe('number');
+      expect(typeof heightMessage?.width).toBe('number');
+    }
+  });
+
+  it('the React adapter never reintroduces a "min-height: 100vh" #root rule', async () => {
+    // Regression guard for a real bug: #root { min-height: 100vh } makes
+    // the measured "content height" circular -- 100vh is 100% of the
+    // iframe's OWN current height, so scrollHeight just reflects whatever
+    // height the iframe already has rather than the content's real size,
+    // which is exactly backwards for a height that's supposed to be
+    // DERIVED from measuring the content. Confirmed by hand (a real
+    // screenshot of the running app showed exactly this: a component
+    // clipped with an internal scrollbar despite the resize wiring being
+    // in place) before landing this guard.
+    const { html } = await compilePreviewHtml(previewPath);
+    expect(html).not.toMatch(/#root\s*\{[^}]*100vh/);
+  });
+
+  it('sets overflow: hidden on the iframe\'s own html/body, so a mid-resize moment never flashes a native scrollbar', async () => {
+    // Real, confirmed bug: resizing is asynchronous (measure -> postMessage
+    // -> parent applies a new box on its own next frame), so any component
+    // whose size changes at runtime (an animation, a hover state) always
+    // has a brief window where its real content is bigger than whatever
+    // box the parent has applied so far. Without this rule, that moment
+    // shows a real native scrollbar on the iframe's own document -- see
+    // injectContentHeightReporter's own doc comment for the full research
+    // behind this fix.
+    const { html } = await compilePreviewHtml(previewPath);
+    expect(html).toMatch(/html,\s*body\s*\{[^}]*overflow:\s*hidden/);
+  });
+
+  it('measures document.body, never document.documentElement (a real, confirmed bug)', async () => {
+    // Regression guard: confirmed by hand against the real compiled
+    // badge-showcase artifact that document.documentElement.scrollHeight
+    // reported 735 (the iframe's ambient viewport-ish size) for content
+    // whose real height (document.body.scrollHeight) was only 24 --
+    // `<html>` is the document's root scrolling element, and its
+    // scrollHeight is spec'd to never read smaller than the viewport,
+    // even when real content is far shorter. This broke every SMALL
+    // component (a lone Badge, a couple of Buttons): blank space inside
+    // the card, content pinned to the top instead of filling it. jsdom
+    // can't reproduce the actual wrong number (it has no real layout
+    // engine, both read 0 there), so this only guards the source text --
+    // the real behavior was verified in an actual browser before this
+    // guard was written, not assumed.
+    const { html } = await compilePreviewHtml(previewPath);
+    expect(html).toContain('document.body.scrollHeight');
+    expect(html).not.toContain('document.documentElement.scrollHeight');
+  });
+
+  it('measures width from the #root child, never a plain document.body.scrollWidth (a real, confirmed bug)', async () => {
+    // Regression guard for a distinct bug from the one above: unlike
+    // height, a block element's default WIDTH fills its parent rather
+    // than shrink-wrapping to content, so `document.body.scrollWidth`
+    // always reports the frame's own full width regardless of how
+    // narrow the real rendered content is. Confirmed by hand against a
+    // real compiled preview (a themed, fixed-width text box) whose frame
+    // kept dead space on both sides even after the height fix above --
+    // `document.body` was reporting the frame's full width every time,
+    // not the box's real (narrower) one. Fixed by measuring the actual
+    // React-rendered element (#root's one child), which -- as an
+    // ordinary flex item with no flex-grow -- genuinely shrinks to its
+    // own content width. (Reading its plain scrollWidth directly turned
+    // out to have its OWN bug -- see the max-content regression guard
+    // below -- but the "measure this specific element, not document.body"
+    // part of this fix stayed correct throughout.)
+    const { html } = await compilePreviewHtml(previewPath);
+    expect(html).toContain('widthMeasureTarget()');
+    expect(html).not.toMatch(/width:\s*Math\.ceil\(document\.body\.scrollWidth\)/);
+  });
+
+  it('measures width via max-content, never a plain scrollWidth read (a real, confirmed runaway-shrink bug)', async () => {
+    // Regression guard for a serious bug in the FIRST version of the
+    // width fix above: reading widthMeasureTarget()'s plain scrollWidth
+    // is unstable for anything that can wrap (running text, a flex-wrap
+    // button row) -- its scrollWidth only reflects how much it wraps at
+    // whatever width it CURRENTLY happens to have, and the parent then
+    // applies that reading as its NEXT width. A width even slightly
+    // narrower than the content's real unwrapped width forces one extra
+    // wrap, which makes the widest remaining line -- and therefore the
+    // next reading -- narrower still, which the parent applies as an
+    // even smaller width next. Confirmed by hand against the real
+    // running app: this ran all the way down to one character per line
+    // with a scrollbar, not just a slightly-too-narrow box. `max-content`
+    // asks for this element's width if it never had to wrap at all,
+    // which by definition does not depend on whatever width it currently
+    // has, breaking the feedback loop structurally rather than damping
+    // it.
+    const { html } = await compilePreviewHtml(previewPath);
+    expect(html).toContain('measureIntrinsicWidth');
+    expect(html).toContain("'max-content'");
+  });
+
+  it('never reports a (0, 0) pre-mount measurement (a real, confirmed bug distinct from the wrapping one above)', async () => {
+    // Regression guard: this function's own immediate call and its
+    // 'load' listener can both fire before React's initial commit has
+    // landed (scheduling work asynchronously, not painting synchronously
+    // just because the bundle's <script> finished executing), so
+    // document.body can genuinely still be empty at that point.
+    // Reporting (0, 0) there let the parent apply it as the iframe's own
+    // literal CSS size -- and once an iframe's real rendering surface is
+    // squeezed to zero, layout inside it comes back corrupted even
+    // moments later once React DOES mount and takes a real, correct
+    // measurement. Confirmed by hand with an instrumented standalone
+    // copy of a real compiled preview: message #1 and #2 both reported
+    // (0, 0), the parent applied that as a literal 0x0 iframe, message
+    // #3 correctly reported (587, 97) once React mounted, but message #4
+    // (the very next one) came back as a nonsensical (79, 1015) and
+    // stayed wrong from then on -- not a transient blip, a permanent
+    // corruption traceable directly to the earlier 0x0 resize. Either
+    // axis reading exactly 0 (not just both together) is treated the
+    // same way -- see the OR, not AND, below.
+    const { html } = await compilePreviewHtml(previewPath);
+    expect(html).toMatch(/if\s*\(\s*width\s*===\s*0\s*\|\|\s*height\s*===\s*0\s*\)\s*\{\s*return;/);
+  });
+
+  it('treats an empty #root as not-yet-mounted directly, not by inferring it from a (0, 0) measurement (a real, confirmed bug)', async () => {
+    // Regression guard: body padding, added and then reverted for an
+    // unrelated hover-clipping fix, briefly meant a genuinely-unmounted
+    // #root no longer measured as exactly (0, 0) -- it measured as the
+    // padding alone, a small but nonzero value that slipped straight past
+    // the width===0||height===0 check above and let a premature
+    // measurement through. Checking #root's own child count directly is
+    // immune to whatever body padding does or doesn't exist, so a future
+    // change here can't reintroduce the same failure mode again.
+    const { html } = await compilePreviewHtml(previewPath);
+    expect(html).toMatch(/root\.children\.length\s*===\s*0/);
+  });
+
+  it('re-observes #root\'s own childList directly, so a real mount is caught even without a ResizeObserver-visible size change (a real, confirmed bug)', async () => {
+    // Regression guard: the precise pre-mount check above correctly
+    // skips reportSize()'s two premature calls (immediate + 'load'), but
+    // without this, NOTHING else re-triggers it once React actually
+    // mounts unless that same commit also happens to change some
+    // observed element's SIZE -- true by chance in every real browser
+    // tested by hand, but not guaranteed, and not true at all in a test
+    // environment with no ResizeObserver at all (confirmed: exactly the
+    // failure this MutationObserver fixes). Watching #root's childList
+    // catches the real mount moment directly, independent of size.
+    const { html } = await compilePreviewHtml(previewPath);
+    expect(html).toMatch(/new MutationObserver\(reportSize\)\.observe\(root,\s*\{\s*childList:\s*true\s*\}\)/);
+  });
+
+  it('re-observes the real rendered element for width, not just document.body forever (a real, confirmed bug)', async () => {
+    // Regression guard: the ResizeObserver was set up with TWO .observe()
+    // calls -- document.body, and whatever widthMeasureTarget() returned
+    // AT THAT MOMENT. Both calls run synchronously at script-setup time,
+    // before React's initial commit has landed, so widthMeasureTarget()
+    // falls back to document.body for BOTH of them -- the second call was
+    // an unwitting duplicate of the first, and the real rendered element
+    // was never actually subscribed for its own future size changes.
+    // Only document.body's own (shrink-wrapped) box re-triggered a
+    // re-measure, and body's height can easily stay constant across a
+    // real content change that has nothing to do with height (a
+    // width-only reflow; text re-rendering at the same line count).
+    // Confirmed by hand: reloading the same decrypting-text preview
+    // repeatedly reported different widths (587 vs. 572) across
+    // otherwise-identical loads -- whichever render happened to be live
+    // at the single moment body's height first changed got measured and
+    // then frozen forever, and that moment's exact timing varies run to
+    // run. Fixed by re-observing whichever element reportSize() actually
+    // measured on every call, upgrading from document.body to the real
+    // element the instant it exists.
+    const { html } = await compilePreviewHtml(previewPath);
+    expect(html).toContain('observedWidthTarget');
+    expect(html).toMatch(/if\s*\(\s*observer\s*&&\s*target\s*!==\s*observedWidthTarget\s*\)/);
+  });
+
+  it('measures width against a detached clone, never by mutating the real (observed) element (a real, confirmed bug)', async () => {
+    // Regression guard for a bug the fix above directly caused: once the
+    // ResizeObserver was correctly upgraded to watch the REAL rendered
+    // element (not just document.body), measureIntrinsicWidth's old
+    // technique -- temporarily setting THAT SAME element's own
+    // style.width to 'max-content', reading scrollWidth, then reverting
+    // it -- meant the observer's own callback was now mutating the exact
+    // element the observer itself was watching. Synchronously reverting
+    // before the callback returns is spec-legal and worked fine in the
+    // Chromium build used to develop/verify this fix, but the real
+    // running app (WebView2, a different engine/version) does not handle
+    // this as gracefully: the old one-character-per-line collapse bug
+    // came BACK, confirmed by hand in the real app, immediately after
+    // landing the ResizeObserver re-subscription fix -- not a stale
+    // build; the served preview's own cached output was confirmed (by
+    // hand) to already contain that fix's code. Measuring against a
+    // cloned element in a dedicated, never-observed sandbox removes the
+    // whole self-mutation-during-callback hazard category regardless of
+    // any given engine's specific ResizeObserver loop-detection
+    // heuristics -- nothing the observer watches is ever touched.
+    const { html } = await compilePreviewHtml(previewPath);
+    expect(html).toContain('measurementSandbox');
+    expect(html).toContain('cloneNode');
+    expect(html).not.toMatch(/el\.style\.width\s*=\s*'max-content'/);
+  });
+});
+
+describe('getOrCompilePreview caching (Phase B)', () => {
+  let deliveryOsHome: string;
+  let originalEnv: string | undefined;
+
+  beforeAll(() => {
+    originalEnv = process.env.DELIVERYOS_HOME;
+    deliveryOsHome = fs.mkdtempSync(path.join(os.tmpdir(), 'deliveryos-preview-cache-test-home-'));
+    process.env.DELIVERYOS_HOME = deliveryOsHome;
+  });
+
+  afterAll(() => {
+    if (originalEnv === undefined) {
+      delete process.env.DELIVERYOS_HOME;
+    } else {
+      process.env.DELIVERYOS_HOME = originalEnv;
+    }
+    fs.rmSync(deliveryOsHome, { recursive: true, force: true });
+  });
+
+  it('compiles on a cache miss, then serves a cache hit without recompiling', async () => {
+    const first = await getOrCompilePreview('test-remote', 'button', '1.0.0', previewPath);
+    expect(first.html.length).toBeGreaterThan(0);
+    // Phase C: the cache stores the WHOLE CompiledPreview as JSON now, not
+    // just the raw HTML string -- variantNames/propsSchemas have to
+    // actually survive a cache hit, or every request after the first
+    // compile would silently lose variant tabs and controls.
+    expect(first.variantNames).toEqual(['Primary', 'Secondary', 'Disabled']);
+    expect(first.propsSchemas.Button.length).toBeGreaterThan(0);
+
+    // Proves the second call is a genuine cache hit, not a coincidental
+    // recompile: hides react/react-dom (mirroring the vendoring isolation
+    // test above) so a real recompile attempt would fail loudly. A cache
+    // hit must succeed anyway, since it never touches esbuild at all.
+    const reactDir = path.join(repoRoot, 'node_modules', 'react');
+    const reactDomDir = path.join(repoRoot, 'node_modules', 'react-dom');
+    const reactHidden = `${reactDir}.hidden-for-test`;
+    const reactDomHidden = `${reactDomDir}.hidden-for-test`;
+
+    fs.renameSync(reactDir, reactHidden);
+    fs.renameSync(reactDomDir, reactDomHidden);
+    try {
+      const second = await getOrCompilePreview('test-remote', 'button', '1.0.0', previewPath);
+      expect(second).toEqual(first);
+    } finally {
+      fs.renameSync(reactHidden, reactDir);
+      fs.renameSync(reactDomHidden, reactDomDir);
+    }
+  });
+
+  it('a different version is a genuine cache miss, not accidentally shared with another version', async () => {
+    await getOrCompilePreview('test-remote', 'button', '1.0.0', previewPath);
+    // Different version -> different cache key -> this call actually
+    // recompiles (react/react-dom are NOT hidden here, so it can) rather
+    // than incorrectly returning the 1.0.0 entry.
+    const result = await getOrCompilePreview('test-remote', 'button', '2.0.0', previewPath);
+    expect(result.html.length).toBeGreaterThan(0);
+  });
+
+  it('a stale cache entry from an OLDER compiler version is never served, even with the same (remote, id, version)', async () => {
+    // Regression guard for a real, confirmed bug: an already-pushed
+    // artifact's cache used to be keyed on (remote, id, version) alone --
+    // an artifact whose OWN version never changes stayed cached
+    // indefinitely, invisible to every subsequent fix to compile.ts
+    // itself (confirmed by hand against a real months-old cached preview
+    // still missing Tailwind CSS generation, vendored libraries, and the
+    // iframe scrollbar fix, all added long after that cache entry was
+    // first written). Simulates a legacy cache entry from a hypothetical
+    // older PREVIEW_COMPILER_VERSION by writing directly to where
+    // previewCachePath says one would live, then confirms the CURRENT
+    // getOrCompilePreview (which always asks for the CURRENT compiler
+    // version) never serves it -- a real compile happens instead.
+    const legacyCachePath = previewCachePath('test-remote', 'stale-version-check', '1.0.0', '0-fake-legacy');
+    fs.mkdirSync(path.dirname(legacyCachePath), { recursive: true });
+    fs.writeFileSync(
+      legacyCachePath,
+      JSON.stringify({ html: '<html><!-- stale legacy cache entry, pre-dates every current fix --></html>', variantNames: [], propsSchemas: {} }),
+      'utf-8',
+    );
+
+    const result = await getOrCompilePreview('test-remote', 'stale-version-check', '1.0.0', previewPath);
+    expect(result.html).not.toContain('stale legacy cache entry');
+    expect(result.html).toContain('__DeliveryOSReactRuntime');
+  });
+});

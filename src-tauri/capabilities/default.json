@@ -18,6 +18,14 @@
     },
     "opener:allow-reveal-item-in-dir",
     {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        {
+          "url": "https://github.com/*"
+        }
+      ]
+    },
+    {
       "identifier": "shell:allow-execute",
       "allow": [
         {

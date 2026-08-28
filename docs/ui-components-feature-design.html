@@ -1,0 +1,1229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UI Components in DeliveryOS — Feature Design</title>
+<style>
+  :root {
+    --surface: #FFFCF2;
+    --surface-2: #F6F1E9;
+    --surface-inset: #EDE6DA;
+    --card: #FFFFFF;
+    --border: #E0D9CE;
+    --border-strong: #C9BFAF;
+    --ink: #1E3C53;
+    --ink-soft: #3E5164;
+    --ink-muted: #6b7280;
+    --sage-100: #EAF4DB;
+    --sage-500: #ACC384;
+    --sage-700: #6d8a49;
+    --sand-100: #F6E8CC;
+    --sand-200: #EDD9B3;
+    --accent: #7A00DF;
+    --danger-bg: #FBEAEA;
+    --danger-border: #E8B4B4;
+    --danger-ink: #8A2E2E;
+    --code-bg: #F6F1E9;
+    --shadow: 0 1px 2px rgba(30,60,83,.06), 0 6px 16px rgba(30,60,83,.06);
+  }
+  :root[data-theme="dark"] {
+    --surface: #10181F;
+    --surface-2: #16212A;
+    --surface-inset: #1C2731;
+    --card: #182129;
+    --border: #2A3742;
+    --border-strong: #3B4954;
+    --ink: #F2EFE6;
+    --ink-soft: #C9D3D9;
+    --ink-muted: #8B98A1;
+    --sage-100: #22301E;
+    --sage-500: #8FB06A;
+    --sage-700: #A9D186;
+    --sand-100: #34291A;
+    --sand-200: #493A24;
+    --accent: #B27CE8;
+    --danger-bg: #2E1A1A;
+    --danger-border: #5A2E2E;
+    --danger-ink: #E8A9A9;
+    --code-bg: #1C2731;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 6px 20px rgba(0,0,0,.35);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --surface: #10181F;
+      --surface-2: #16212A;
+      --surface-inset: #1C2731;
+      --card: #182129;
+      --border: #2A3742;
+      --border-strong: #3B4954;
+      --ink: #F2EFE6;
+      --ink-soft: #C9D3D9;
+      --ink-muted: #8B98A1;
+      --sage-100: #22301E;
+      --sage-500: #8FB06A;
+      --sage-700: #A9D186;
+      --sand-100: #34291A;
+      --sand-200: #493A24;
+      --accent: #B27CE8;
+      --danger-bg: #2E1A1A;
+      --danger-border: #5A2E2E;
+      --danger-ink: #E8A9A9;
+      --code-bg: #1C2731;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 6px 20px rgba(0,0,0,.35);
+    }
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--surface);
+    color: var(--ink-soft);
+    font-family: Georgia, Cambria, "Times New Roman", serif;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+  }
+  .font-serif { font-family: Georgia, "Iowan Old Style", "Palatino Linotype", Palatino, serif; }
+  .font-mono { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+  .page {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 56px 28px 120px;
+  }
+
+  header.hero {
+    margin-bottom: 40px;
+  }
+  .eyebrow {
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--sage-700);
+    margin: 0 0 14px;
+  }
+  h1 {
+    font-family: Georgia, "Iowan Old Style", "Palatino Linotype", Palatino, serif;
+    font-weight: 400;
+    font-size: clamp(28px, 4vw, 40px);
+    line-height: 1.15;
+    color: var(--ink);
+    margin: 0 0 14px;
+    text-wrap: balance;
+  }
+  .lede {
+    font-size: 17px;
+    color: var(--ink-soft);
+    max-width: 62ch;
+    margin: 0;
+  }
+  .lede a { color: var(--sage-700); }
+
+  nav.toc {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 10px;
+    margin: 28px 0 0;
+    padding: 14px 16px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+  }
+  nav.toc a {
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--ink-soft);
+    text-decoration: none;
+    padding: 4px 9px;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    white-space: nowrap;
+  }
+  nav.toc a:hover, nav.toc a:focus-visible {
+    background: var(--card);
+    border-color: var(--border-strong);
+    color: var(--ink);
+  }
+
+  section { margin-top: 56px; scroll-margin-top: 20px; }
+  section > .section-num {
+    font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+    font-size: 12px;
+    color: var(--ink-muted);
+    letter-spacing: .04em;
+    margin: 0 0 4px;
+  }
+  h2 {
+    font-family: Georgia, "Iowan Old Style", "Palatino Linotype", Palatino, serif;
+    font-weight: 400;
+    font-size: 26px;
+    color: var(--ink);
+    margin: 0 0 18px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  h3 {
+    font-family: Georgia, serif;
+    font-weight: 400;
+    font-size: 18px;
+    color: var(--ink);
+    margin: 28px 0 10px;
+  }
+  p { margin: 0 0 14px; }
+  ul, ol { margin: 0 0 14px; padding-left: 22px; }
+  li { margin-bottom: 6px; }
+  strong { color: var(--ink); }
+  code {
+    font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+    font-size: 13px;
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 5px;
+    color: var(--ink);
+  }
+  pre.code-block {
+    font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+    font-size: 13px;
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 18px;
+    overflow-x: auto;
+    color: var(--ink-soft);
+    line-height: 1.55;
+  }
+  pre.code-block code { background: none; border: none; padding: 0; }
+
+  .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; background: var(--card); }
+  th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  thead th {
+    background: var(--surface-2);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    font-weight: 600;
+    color: var(--ink-muted);
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:hover { background: var(--surface-2); }
+  td code, th code { white-space: nowrap; }
+
+  .callout {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 18px;
+    background: var(--card);
+    box-shadow: var(--shadow);
+  }
+  .callout.danger {
+    background: var(--danger-bg);
+    border-color: var(--danger-border);
+    color: var(--danger-ink);
+  }
+  .callout.danger strong { color: var(--danger-ink); }
+  .callout-label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    margin-bottom: 8px;
+    display: block;
+  }
+
+  .verdict-chosen { color: var(--sage-700); font-weight: 600; }
+  .verdict-out { color: var(--ink-muted); }
+
+  /* mockup: sidebar + tab row + preview card grid, styled after DeliveryOS's own app */
+  .mockup {
+    display: grid;
+    grid-template-columns: 150px 1fr;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: var(--shadow);
+    background: var(--card);
+  }
+  .mockup-sidebar {
+    background: var(--card);
+    border-right: 1px solid var(--border);
+    padding: 14px 10px;
+    font-size: 12.5px;
+  }
+  .mockup-brand {
+    font-family: Georgia, serif;
+    font-size: 15px;
+    color: var(--ink);
+    padding: 0 6px 12px;
+  }
+  .mockup-item {
+    padding: 7px 10px;
+    border-radius: 7px;
+    color: var(--ink-soft);
+    margin-bottom: 2px;
+  }
+  .mockup-item.active { background: var(--sage-100); color: var(--sage-700); font-weight: 600; }
+  .mockup-main { padding: 16px 18px; background: var(--surface-2); }
+  .mockup-tabs { display: flex; gap: 16px; border-bottom: 1px solid var(--border); margin-bottom: 14px; font-size: 12.5px; }
+  .mockup-tabs span { padding-bottom: 8px; color: var(--ink-muted); }
+  .mockup-tabs span.active { color: var(--ink); border-bottom: 2px solid var(--sage-500); font-weight: 600; }
+  .mockup-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+  .mockup-card { background: var(--card); border: 1px solid var(--border); border-radius: 9px; padding: 12px; }
+  .mockup-preview {
+    height: 56px;
+    border-radius: 6px;
+    background: var(--surface-inset);
+    display: flex; align-items: center; justify-content: center;
+    margin-bottom: 8px;
+  }
+  .fake-btn {
+    font-size: 11.5px; font-weight: 600; padding: 6px 14px; border-radius: 6px;
+    background: var(--ink); color: var(--surface); box-shadow: 0 2px 6px rgba(0,0,0,.15);
+  }
+  .fake-navbar { width: 85%; display: flex; justify-content: space-between; align-items: center; font-size: 9px; color: var(--ink-muted); }
+  .mockup-card-label { font-size: 11.5px; color: var(--ink-soft); font-weight: 500; }
+  .mockup-card-sub { font-size: 10.5px; color: var(--ink-muted); font-family: "JetBrains Mono", monospace; }
+
+  /* phased rollout timeline */
+  .timeline { list-style: none; margin: 0; padding: 0; }
+  .timeline li {
+    position: relative;
+    padding: 2px 0 26px 34px;
+    border-left: 2px solid var(--border);
+    margin-left: 8px;
+  }
+  .timeline li:last-child { border-left-color: transparent; padding-bottom: 0; }
+  .timeline .dot {
+    position: absolute; left: -9px; top: 2px;
+    width: 16px; height: 16px; border-radius: 50%;
+    background: var(--sage-500); color: #fff;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 9px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 0 0 4px var(--surface);
+  }
+  .timeline .phase-title { font-weight: 600; color: var(--ink); font-size: 14.5px; margin-bottom: 3px; }
+  .timeline .phase-desc { font-size: 13.5px; color: var(--ink-soft); }
+
+  .qa-list { list-style: none; margin: 0; padding: 0; }
+  .qa-list li {
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 14.5px;
+  }
+  .qa-list li:last-child { border-bottom: none; }
+  .qa-list li::before { content: "?"; display: inline-block; width: 18px; height: 18px; line-height: 18px; text-align: center; border-radius: 50%; background: var(--sand-100); color: var(--ink); font-size: 11px; font-weight: 700; margin-right: 8px; }
+
+
+  .filetree-compare { display: flex; align-items: center; gap: 14px; margin: 16px 0; }
+  .filetree-col { flex: 1; min-width: 0; }
+  .filetree-label {
+    font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--ink-muted); margin-bottom: 6px;
+  }
+  .filetree-arrow { font-size: 20px; color: var(--sage-500); flex-shrink: 0; }
+  .dim { color: var(--ink-muted); font-style: italic; }
+  .new-file { color: var(--sage-700); font-weight: 700; }
+  @media (max-width: 640px) {
+    .filetree-compare { flex-direction: column; align-items: stretch; }
+    .filetree-arrow { text-align: center; transform: rotate(90deg); }
+  }
+
+  .path-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0; }
+  .path-card {
+    border: 1px solid var(--border); border-radius: 10px; padding: 16px;
+    background: var(--card); box-shadow: var(--shadow);
+  }
+  .path-title { font-weight: 600; color: var(--ink); font-size: 14.5px; margin-bottom: 8px; }
+  @media (max-width: 640px) { .path-compare { grid-template-columns: 1fr; } }
+
+  .tldr {
+    background: var(--sage-100);
+    border: 1px solid var(--sage-500);
+    border-radius: 14px;
+    padding: 28px 30px;
+    margin-top: 40px;
+  }
+  .tldr h2 { border-bottom: none; margin-bottom: 6px; padding-bottom: 0; }
+  .tldr .lede-sub { font-size: 13.5px; color: var(--ink-soft); margin: 0 0 20px; }
+  .flow-steps { list-style: none; margin: 0 0 24px; padding: 0; counter-reset: flowstep; }
+  .flow-steps li {
+    counter-increment: flowstep;
+    position: relative;
+    padding: 10px 0 10px 40px;
+    font-size: 14.5px;
+    border-bottom: 1px solid var(--border);
+  }
+  .flow-steps li:last-child { border-bottom: none; }
+  .flow-steps li::before {
+    content: counter(flowstep);
+    position: absolute; left: 0; top: 9px;
+    width: 24px; height: 24px; border-radius: 50%;
+    background: var(--sage-500); color: #fff;
+    font-family: "JetBrains Mono", monospace; font-size: 11px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .tldr-footnote { font-size: 13px; color: var(--ink-muted); margin: 18px 0 0; font-style: italic; }
+
+  footer {
+    margin-top: 64px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+    font-size: 12.5px;
+    color: var(--ink-muted);
+  }
+
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--sage-500); outline-offset: 2px; }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+  @media (max-width: 640px) {
+    .mockup { grid-template-columns: 1fr; }
+    .mockup-sidebar { display: none; }
+    .mockup-grid { grid-template-columns: 1fr; }
+  }
+
+  .flowdiagram { display: flex; flex-direction: column; gap: 0; margin: 16px 0; }
+  .flow-group { border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; background: var(--surface-2); }
+  .flow-group-label { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--sage-700); margin-bottom: 10px; }
+  .flow-nodes { display: flex; flex-wrap: wrap; gap: 10px; }
+  .flow-node { background: var(--card); border: 1px solid var(--border-strong); border-radius: 8px; padding: 10px 14px; font-size: 12.5px; box-shadow: var(--shadow); flex: 1; min-width: 160px; }
+  .flow-node b { color: var(--ink); }
+  .flow-node .sub { color: var(--ink-muted); font-size: 11.5px; }
+  .flow-connector { display: flex; align-items: center; justify-content: center; font-size: 20px; color: var(--sage-500); padding: 2px 0; }
+  .flow-loopback { margin-top: 6px; padding: 8px 14px; border: 1px dashed var(--border-strong); border-radius: 8px; font-size: 12px; color: var(--ink-muted); text-align: center; }
+  .flow-single { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  .flow-single .flow-node { width: 100%; max-width: 480px; text-align: center; }
+  .flow-lanes-2 { display: flex; gap: 14px; }
+  .flow-lanes-2 > .flow-group { flex: 1; }
+  .flow-lanes-2 .flow-nodes { flex-direction: column; }
+  @media (max-width: 640px) { .flow-lanes-2 { flex-direction: column; } }
+  .flow-seq { list-style: none; margin: 0; padding: 0; }
+  .flow-seq li { display: flex; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+  .flow-seq li:last-child { border-bottom: none; }
+  .flow-seq .actor { flex-shrink: 0; width: 130px; font-weight: 600; color: var(--sage-700); font-family: "JetBrains Mono", monospace; font-size: 11.5px; }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <header class="hero">
+    <p class="eyebrow">DeliveryOS — Feature Brainstorm — Draft</p>
+    <h1>UI Components, with real live previews</h1>
+    <p class="lede">
+      A new artifact kind for reusable frontend pieces — buttons, navbars, cards —
+      extracted from real projects by AI coding agents. The one hard requirement:
+      DeliveryOS must show each one as a genuine interactive preview (hover, focus,
+      animation, real DOM), the way component-doc sites like
+      <a href="https://seraui.com/docs/verify-badge" target="_blank" rel="noopener">seraui.com</a>
+      render live components on the page — not a screenshot.
+    </p>
+    <nav class="toc" aria-label="Table of contents">
+      <a href="#tldr" style="font-weight:700;">The whole flow</a>
+      <a href="#data-model">1. Data model</a>
+      <a href="#ux">2. Sidebar / UX</a>
+      <a href="#architecture">3. Preview architecture</a>
+      <a href="#controls">4. Interactive controls</a>
+      <a href="#scan">5. Extraction / Scan</a>
+      <a href="#push-pull">6. Push / Pull / Edit</a>
+      <a href="#security">7. Security</a>
+      <a href="#rollout">8. Phased rollout</a>
+      <a href="#open">9. Open questions</a>
+      <a href="#example">10. Worked example</a>
+      <a href="#edge-cases">11. Edge cases</a>
+      <a href="#future-work">12. Future work</a>
+    </nav>
+  </header>
+
+  <section id="tldr" class="tldr">
+    <h2 class="font-serif">The whole flow, end to end</h2>
+    <p class="lede-sub">Everything below goes deep on one piece at a time. Here's the whole loop, in plain English, before any of the detail.</p>
+    <ol class="flow-steps">
+      <li>You ask Claude Code to pull the reusable pieces (buttons, cards, navbars) out of a project.</li>
+      <li>Claude Code finds them, tidies each one into its own little package — the real component plus a small demo file — and leaves them sitting in your project. Nothing's shared yet.</li>
+      <li>DeliveryOS's Scan notices these new pieces.</li>
+      <li>For each one, you (or Claude Code, from the terminal) hit "Propose" — DeliveryOS shows a <strong>real, working preview right there</strong>, so you see exactly what you're about to share, not just a description.</li>
+      <li>DeliveryOS opens a normal GitHub Pull Request — with a picture of the component right in it — same as any other code review.</li>
+      <li>Someone reviews it and merges it. Nothing DeliveryOS-specific here — it's genuinely just GitHub.</li>
+      <li>It's now live in the shared catalog. Anyone on the team can browse "UI Components," see it rendered live and interactive (not a screenshot), and pull it into their own project in one click.</li>
+      <li>If it changes later, everyone who already has it gets told an update is available, and can grab the new version the same way.</li>
+    </ol>
+    <div class="flowdiagram">
+      <div class="flow-group">
+        <div class="flow-group-label">Your project</div>
+        <div class="flow-nodes">
+          <div class="flow-node">Ask Claude Code: <b>"extract reusable components"</b></div>
+          <div class="flow-node"><b>Button.tsx</b> + <b>preview.tsx</b> left in your project</div>
+        </div>
+      </div>
+      <div class="flow-connector">↓</div>
+      <div class="flow-group">
+        <div class="flow-group-label">DeliveryOS</div>
+        <div class="flow-nodes">
+          <div class="flow-node">Scan notices them</div>
+          <div class="flow-node">Review &amp; Propose <span class="sub">(see it live, right there)</span></div>
+        </div>
+      </div>
+      <div class="flow-connector">↓</div>
+      <div class="flow-group">
+        <div class="flow-group-label">GitHub</div>
+        <div class="flow-nodes">
+          <div class="flow-node">Pull Request opened <span class="sub">(with a preview image)</span></div>
+          <div class="flow-node">Reviewed &amp; merged <span class="sub">(ordinary GitHub review)</span></div>
+        </div>
+      </div>
+      <div class="flow-connector">↓</div>
+      <div class="flow-group">
+        <div class="flow-group-label">Shared catalog</div>
+        <div class="flow-nodes"><div class="flow-node">Live for everyone, under "UI Components"</div></div>
+      </div>
+      <div class="flow-connector">↓</div>
+      <div class="flow-group">
+        <div class="flow-group-label">Someone else's project</div>
+        <div class="flow-nodes">
+          <div class="flow-node">Pull it in, one click</div>
+          <div class="flow-node">Real, interactive component in their own code</div>
+        </div>
+      </div>
+      <div class="flow-loopback">↩ later: it gets updated — loops back to "Scan notices them"</div>
+    </div>
+    <p class="tldr-footnote">Every section from here on is answering "okay, but what actually happens at step N" for one specific step above.</p>
+  </section>
+
+  <section id="data-model">
+    <p class="section-num">01</p>
+    <h2>Data model — reuse what exists, add only what's new</h2>
+    <p>
+      DeliveryOS's manifest keeps <code>kind</code> deliberately open-ended and avoids
+      special-casing any one kind — even the existing <code>agent-asset</code> kind uses the
+      plain generic Pull/Push path. This feature follows the same discipline:
+      <strong>no new required schema fields.</strong>
+    </p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Need</th><th>Mechanism</th><th>Why no schema change</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Mark an artifact as a UI component</td>
+            <td><code>kind: "ui-component"</code></td>
+            <td>Just another value in the existing open <code>kind: z.string()</code></td>
+          </tr>
+          <tr>
+            <td>Framework (React, Vue, plain HTML)</td>
+            <td>Reuse existing <code>tags.stacks</code> (e.g. <code>["react"]</code>)</td>
+            <td><code>stacks</code> already means "tech stack" and already feeds current-project stack routing</td>
+          </tr>
+          <tr>
+            <td>Category (button, navbar, header, card, ...)</td>
+            <td>New tag dimension: <code>tags.componentTypes</code></td>
+            <td>Same free-form array shape as <code>roles</code>/<code>teams</code>/<code>stacks</code> — Browse-by-tag's category tabs/value list/Tag Folder work on it for free</td>
+          </tr>
+          <tr>
+            <td>Preview entry point</td>
+            <td>Filename convention: co-located <code>preview.tsx</code> / <code>.vue</code> / <code>.html</code></td>
+            <td>Same spirit as the existing optional <code>post_install</code> convention</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Example manifest</h3>
+    <pre class="code-block font-mono"><code>id: primary-button
+kind: ui-component
+description: Primary CTA button with hover/press/disabled states
+owner: frontend-guild
+version: 1.0.0
+tags:
+  roles: [frontend]
+  teams: [design-system]
+  stacks: [react, typescript]
+  componentTypes: [button]
+source_repo: growtharc/deliveryos-ui-components
+install_target: src/components/Button
+payload_path: artifacts/primary-button/payload
+review_required: true</code></pre>
+  </section>
+
+  <section id="ux">
+    <p class="section-num">02</p>
+    <h2>Sidebar / UX</h2>
+    <p>
+      A new top-level sidebar item, <strong>"UI Components"</strong> — not folded into the
+      existing Browse-by-tag page, because its card needs a live rendered preview, not
+      text + an icon. Category tabs across the top (reusing the underline-tab pattern
+      already built for Kind filtering), then a grid of live-preview cards below.
+    </p>
+    <div class="mockup" role="img" aria-label="Mockup of the UI Components sidebar page: a sidebar with UI Components active, category tabs for Buttons and Navbars, and a grid of component preview cards">
+      <div class="mockup-sidebar">
+        <div class="mockup-brand">DeliveryOS</div>
+        <div class="mockup-item">Browse</div>
+        <div class="mockup-item">Browse by tag</div>
+        <div class="mockup-item active">UI Components</div>
+        <div class="mockup-item">Settings</div>
+      </div>
+      <div class="mockup-main">
+        <div class="mockup-tabs">
+          <span class="active">Buttons</span>
+          <span>Navbars</span>
+          <span>Headers</span>
+          <span>Cards</span>
+        </div>
+        <div class="mockup-grid">
+          <div class="mockup-card">
+            <div class="mockup-preview"><span class="fake-btn">Click me</span></div>
+            <div class="mockup-card-label">primary-button</div>
+            <div class="mockup-card-sub">react · button</div>
+          </div>
+          <div class="mockup-card">
+            <div class="mockup-preview"><span class="fake-btn" style="background:transparent;color:var(--ink);border:1px solid var(--border-strong);box-shadow:none;">Outline</span></div>
+            <div class="mockup-card-label">outline-button</div>
+            <div class="mockup-card-sub">react · button</div>
+          </div>
+          <div class="mockup-card">
+            <div class="mockup-preview"><span class="fake-navbar"><b>Logo</b><span>Home&nbsp;&nbsp;Docs&nbsp;&nbsp;About</span></span></div>
+            <div class="mockup-card-label">app-navbar</div>
+            <div class="mockup-card-sub">react · navbar</div>
+          </div>
+          <div class="mockup-card">
+            <div class="mockup-preview"><span class="fake-btn" style="background:var(--sage-500);">Disabled</span></div>
+            <div class="mockup-card-label">ghost-button</div>
+            <div class="mockup-card-sub">vue · button</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p style="margin-top:14px; font-size:13.5px; color:var(--ink-muted);">
+      Clicking a card opens a bigger Detail view: larger preview, the controls panel
+      (§4), and full source. Previews lazy-render via <code>IntersectionObserver</code> —
+      a grid of 50 button variants shouldn't eagerly boot 50 iframes at once.
+    </p>
+  </section>
+
+  <section id="architecture">
+    <p class="section-num">03</p>
+    <h2>Preview rendering architecture</h2>
+
+    <h3>What was ruled out, and why</h3>
+    <p>Researched real prior art before designing this. Summary:</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Approach</th><th>Build timing</th><th>Offline?</th><th>Verdict</th></tr></thead>
+        <tbody>
+          <tr><td>Storybook</td><td>Heavy build per project</td><td>Yes, once built</td><td class="verdict-out">Too heavy per artifact</td></tr>
+          <tr><td>Bit.dev / Backlight / zeroheight</td><td>Build on ingest (hosted)</td><td>No</td><td class="verdict-out">Wrong class — cloud SaaS, no backend here</td></tr>
+          <tr><td>CodeSandbox Sandpack</td><td>Client bundler, per preview</td><td>Partial (npm access)</td><td class="verdict-out">Close, but needs registry access</td></tr>
+          <tr><td>StackBlitz WebContainers</td><td>Real Node-in-WASM</td><td>Partial, heaviest</td><td class="verdict-out">Not built for embedding elsewhere</td></tr>
+          <tr><td>react-live / react-runner</td><td>In-browser JSX transform</td><td>Yes</td><td class="verdict-out">Single-file only, no sandboxing of its own</td></tr>
+          <tr><td>Web Components / Shadow DOM</td><td>Compile-to-WC per component</td><td>Yes, once compiled</td><td class="verdict-out">No general React→WC compiler exists</td></tr>
+          <tr><td><strong>Sandboxed iframe + local esbuild</strong></td><td>Local, at preview time</td><td>Yes</td><td class="verdict-chosen">Chosen ✓</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>The chosen pipeline</h3>
+    <div class="flowdiagram">
+      <div class="flow-single">
+        <div class="flow-node">Pushed component source (React / Vue / HTML)</div>
+        <div class="flow-connector">↓</div>
+        <div class="flow-node">Compiler adapter <span class="sub">(per framework — the ONLY framework-specific part)</span></div>
+        <div class="flow-connector">↓</div>
+        <div class="flow-node">Local esbuild bundle + vendored runtime + inlined CSS</div>
+        <div class="flow-connector">↓</div>
+        <div class="flow-node">Self-contained HTML doc (&lt;style&gt; + &lt;script type=module&gt;)</div>
+        <div class="flow-connector">↓</div>
+        <div class="flow-node">iframe sandbox="allow-scripts" <span class="sub">(no allow-same-origin)</span></div>
+        <div class="flow-connector">↓</div>
+        <div class="flow-node">Cached by id + version hash</div>
+        <div class="flow-loopback">↩ reused on next view, no rebuild</div>
+      </div>
+    </div>
+
+    <div class="callout danger">
+      <span class="callout-label">Non-negotiable</span>
+      <strong>Never</strong> add <code>allow-same-origin</code> to the sandboxed iframe. Omitting
+      it is what gives the frame a genuinely opaque origin — enforced by the browser
+      itself — so a malicious pushed component can't reach <code>window.parent</code>,
+      cookies, or localStorage. This is the single most commonly-botched detail in
+      "safe" iframe sandboxing writeups.
+    </div>
+
+    <h3>Extensibility</h3>
+    <p>
+      This is a pluggable <strong>compiler-adapter</strong> interface, not a React-specific
+      pipeline — every adapter implements the same contract
+      (<code>compile(source) → { bundle, propsSchema }</code>), and the
+      rendering/sandboxing/caching machinery never changes. React + TypeScript and
+      plain HTML/CSS/JS ship first; Vue, Svelte, Angular are each one more adapter
+      later, not a redesign.
+    </p>
+  </section>
+
+  <section id="controls">
+    <p class="section-num">04</p>
+    <h2>Storybook-style interactive controls</h2>
+    <p>
+      Real prop-switching, not just a fixed default state — mirroring how Storybook
+      itself works, just computed locally instead of via a project-wide build.
+    </p>
+    <ol>
+      <li><strong>Prop schema, auto-derived.</strong> <code>react-docgen-typescript</code> (offline, no network) reads the component's own <code>Props</code> interface — name, type, default, enum values. The extracting agent never hand-writes a controls schema.</li>
+      <li><strong>Named variants via CSF-style exports</strong> in <code>preview.tsx</code>:
+        <pre class="code-block font-mono"><code>export const Primary = () => &lt;Button variant="primary"&gt;Click me&lt;/Button&gt;;
+export const Disabled = () => &lt;Button disabled&gt;Click me&lt;/Button&gt;;</code></pre>
+        Each exported variant becomes a tab/dropdown on the preview card.
+      </li>
+      <li><strong>Live prop editing via postMessage</strong> — never reaching directly into the iframe's <code>window</code>, keeping the opaque-origin boundary intact.</li>
+    </ol>
+    <div class="flowdiagram">
+      <div class="flow-single">
+        <div class="flow-node">Controls panel <span class="sub">(parent DeliveryOS UI)</span></div>
+        <div class="flow-connector">↓ <span class="sub" style="margin-left:6px;">postMessage({ props })</span></div>
+        <div class="flow-node">Sandboxed iframe harness script</div>
+        <div class="flow-connector">↓ <span class="sub" style="margin-left:6px;">root.render(&lt;Component {...props}/&gt;)</span></div>
+        <div class="flow-node">Live DOM update</div>
+        <div class="flow-loopback">↩ visible change reflected back to the controls panel</div>
+      </div>
+    </div>
+    <p style="font-size:13.5px; color:var(--ink-muted);">Vue's equivalent of docgen: parsing <code>defineProps</code>/<code>&lt;script setup&gt;</code> via <code>@vue/compiler-sfc</code> — same shape, a different adapter.</p>
+  </section>
+
+  <section id="scan">
+    <p class="section-num">05</p>
+    <h2>Extraction / Scan flow</h2>
+    <p>
+      Scan today parses frontmatter in <code>.claude/agents|skills|commands|rules</code>.
+      UI components need a different detection heuristic entirely — scanning for
+      component-shaped exports, not frontmatter. Decision: route this through the
+      <strong>existing</strong> Scan → Review &amp; propose → wizard pipeline rather than
+      building a parallel UI.
+    </p>
+
+    <div class="callout">
+      <span class="callout-label" style="color:var(--sage-700);">The glob can't assume one folder-naming convention</span>
+      An early version of this design assumed a glob like
+      <code>src/components/**/*.tsx</code> — that would silently miss a project using
+      <code>src/ui/*.tsx</code>, or <code>elements/</code>, or <code>design-system/</code>
+      (every team names it differently). Relying on a folder name to <em>find</em>
+      candidates is the wrong foundation. Instead: scan broadly —
+      <code>src/**/*.{tsx,jsx}</code> (excluding <code>node_modules</code>, probably
+      <code>pages/</code>/<code>app/</code>/<code>routes/</code> as a first-pass noise
+      filter) — and let the <strong>structural heuristic</strong> (does this file export
+      something that returns JSX, ideally with a <code>Props</code> type) do the real
+      filtering. Cast a wide net structurally, filter semantically, not by
+      folder-naming convention.
+    </div>
+
+    <div class="flowdiagram">
+      <div class="flow-lanes-2">
+        <div class="flow-group">
+          <div class="flow-group-label">Existing</div>
+          <div class="flow-nodes">
+            <div class="flow-node">.claude/agents · skills · commands · rules</div>
+            <div class="flow-node">Frontmatter parse</div>
+          </div>
+        </div>
+        <div class="flow-group">
+          <div class="flow-group-label">New</div>
+          <div class="flow-nodes">
+            <div class="flow-node">src/**/*.tsx broad scan</div>
+            <div class="flow-node">Component-shaped export detection</div>
+            <div class="flow-node">Auto-scaffold preview.tsx stub if missing</div>
+          </div>
+        </div>
+      </div>
+      <div class="flow-connector">↓ ↓</div>
+      <div class="flow-single">
+        <div class="flow-node">Scan candidates</div>
+        <div class="flow-connector">↓</div>
+        <div class="flow-node">Review &amp; Propose wizard</div>
+        <div class="flow-connector">↓</div>
+        <div class="flow-node">Live visual check in the Review step</div>
+      </div>
+    </div>
+    <p>
+      Two knock-on benefits of reusing that pipeline: a missing <code>preview.tsx</code>
+      can be auto-scaffolded (same spirit as today's "AI guessed" description, left
+      fully editable), and Review becomes a live visual check — "does this actually
+      render right?" — rather than just reading text fields.
+    </p>
+  </section>
+
+  <section id="push-pull">
+    <p class="section-num">06</p>
+    <h2>Push / Pull / Edit — grounded in the real engine</h2>
+    <p>
+      <code>pullArtifact</code>/<code>pushArtifact</code>
+      (<code>src/engine/pull/pull.ts</code>, <code>src/engine/push/push.ts</code>) never
+      branch on <code>kind</code> anywhere. A <code>ui-component</code> artifact rides through
+      two of the three flows with <strong>zero new engine code.</strong>
+    </p>
+
+    <h3>Pull — unchanged</h3>
+    <p>
+      <code>fs.cpSync(payloadSrc, installTarget, {recursive:true})</code> copies the whole
+      payload folder (<code>Button.tsx</code>, <code>preview.tsx</code>, any
+      <code>.module.css</code>) into wherever <code>install_target</code> says, runs
+      <code>post_install</code> if set, snapshots a pristine copy via
+      <code>pristinePath(cwd, id)</code> for later diffing, upserts the lockfile — identical
+      to pulling a template or a doc today.
+    </p>
+    <p style="font-size:13.5px; color:var(--ink-muted);">
+      <code>preview.tsx</code> lands in the consumer's real project alongside the real
+      component — not a gap needing an exclusion filter, the same convention real
+      component libraries already use (<code>Button.stories.tsx</code> next to
+      <code>Button.tsx</code>).
+    </p>
+
+    <h3>Push (edit mode) — unchanged, but exposes a real pre-existing gap</h3>
+    <p>
+      <code>computeChangedFiles</code> diffs <code>installTarget</code> against the pristine
+      snapshot and copies back whatever changed (real source, the demo file, or both) to
+      the remote's <code>payload/</code> dir, branches, commits, opens a PR. Pulling a
+      button, tweaking its hover color, and pushing gets the exact same edit-mode PR flow
+      every other kind gets.
+    </p>
+
+    <div class="callout danger">
+      <span class="callout-label">The gap</span>
+      Edit-mode push stages only the changed payload files — it never touches
+      <code>manifest.yaml</code>, and <code>PushOptions</code> has no <code>version</code>
+      field outside propose-new mode. <code>manifest.yaml</code> isn't even part of what's
+      copied into <code>install_target</code> on Pull, so there's no local copy to edit
+      even if a pusher wanted to bump it by hand. <strong>There is, today, no way for a
+      normal content-edit push to change <code>version</code> at all</strong>, short of
+      someone manually editing the PR's diff on GitHub after DeliveryOS already opened it.
+    </div>
+
+    <p style="margin-top:14px;">
+      This is a pre-existing gap for every kind, but it's load-bearing here, not cosmetic:
+    </p>
+    <ul>
+      <li><code>checkForUpdates</code> does a pure <code>compareVersions(remote.version, lockfile.version)</code> — no content hashing. If version never bumps, <strong>nobody who already pulled the component is ever told an update exists</strong>, even after the edit PR merges.</li>
+      <li>The preview cache (§6.5) is keyed on <code>(id, version)</code>. If version never changes, the cache never invalidates either — a merged styling fix could sit upstream indefinitely while every existing puller's copy, cache included, silently stays stale.</li>
+    </ul>
+    <p>
+      <strong>Concrete fix needed:</strong> edit-mode push needs an explicit version-bump
+      input — a <code>--bump patch|minor|major</code> CLI flag / a field in Detail's Edit
+      form — defaulting to an automatic patch bump whenever payload <em>content</em> (not
+      just metadata) actually changed.
+    </p>
+    <p>
+      <strong>The PR's <code>preview.png</code> needs to regenerate on edits too.</strong>
+      §6.4's screenshot step was scoped to propose-new; it needs the same
+      file-presence-gated step on every edit-mode push, or GitHub's free before/after
+      image diff would show a stale screenshot pretending nothing visually changed —
+      actively misleading, worse than no image.
+    </p>
+    <p>
+      <strong>Once merged with a real version bump</strong>, everything downstream is
+      already fully generic: <code>checkForUpdates</code> flags <code>update_available</code>
+      (or <code>both_changed</code> if the puller also has local edits), and a fresh Pull
+      replaces the whole payload folder atomically — <code>Button.tsx</code> and
+      <code>preview.tsx</code> always arrive as a matched pair, so there's no risk of
+      pulling a new component against a stale demo file. One thing that stays a genuine
+      open risk rather than something this feature solves: a puller who locally edited
+      only <code>preview.tsx</code> while an upstream update changes <code>Button.tsx</code>'s
+      props out from under it is a real merge conflict — the same unresolved risk
+      ARCHITECTURE.md §9 risk #3 already names ("a real merge has no designed behavior
+      yet"), not something new here.
+    </p>
+
+    <h3>Push (propose-new mode) — one real schema addition</h3>
+    <p>
+      Everything else already works generically. The only actual code, not just UI:
+    </p>
+    <ol>
+      <li><code>src/engine/manifest/schema.ts</code> — add <code>componentTypes: z.array(z.string()).default([])</code> to <code>ManifestSchema.tags</code>. The one real schema change (§1's "no schema change" was about nothing being <em>required</em>; this is optional/additive, same shape as <code>roles</code>/<code>teams</code>/<code>stacks</code>).</li>
+      <li><code>src/engine/push/push.ts</code> — thread <code>options.componentTypes</code> into <code>candidateManifest.tags</code>, and add it to <code>MetadataEditOptions</code> so it's retaggable later without touching the payload.</li>
+      <li><code>app.js</code> — a fourth tag-picker in Add New (reusing <code>createTagPicker</code>), plus <code>'componentTypes'</code> added to the existing <code>TAG_CATEGORIES</code> array so Browse-by-tag picks it up automatically.</li>
+    </ol>
+    <p>
+      Concretely, on submit: <code>pushArtifact</code>'s <code>isNew</code> branch builds the
+      manifest object, validates with <code>ManifestSchema.safeParse</code>, and writes it
+      with <code>stringifyYaml(manifest)</code> to <code>artifacts/&lt;id&gt;/manifest.yaml</code>
+      inside the cloned remote cache — literally where the YAML gets written, unchanged.
+      <code>listPayloadFiles</code> walks the folder recursively (respecting
+      <code>.gitignore</code>), copies each file into <code>artifacts/&lt;id&gt;/payload/</code>,
+      and manifest + every payload file get committed on a new branch, pushed, and opened
+      as a PR via the existing <code>buildProposeNewPrContent</code> template.
+    </p>
+
+    <h3>PR preview image</h3>
+    <p>Two complementary mechanisms, not one:</p>
+    <ol>
+      <li><strong>Free.</strong> Commit a rendered <code>preview.png</code> alongside the payload (<code>artifacts/button/preview.png</code>). GitHub's own "Files changed" tab automatically renders it as an image diff — no markdown needed, and later edits even get a before/after image comparison for free.</li>
+      <li><strong>Deliberate.</strong> Also embed it inline in the PR body via <code>![Button preview](https://raw.githubusercontent.com/&lt;owner&gt;/&lt;repo&gt;/&lt;branch&gt;/artifacts/button/preview.png)</code>. <code>raw.githubusercontent.com</code> serves files from any pushed branch, merged or not — no hosting, no GitHub Pages, no CI required.</li>
+    </ol>
+    <p>
+      The PNG reuses the exact same compiled <code>srcdoc</code> bundle from §3's pipeline
+      (no separate build), rendered once headlessly, screenshotting the first/default CSF
+      variant only — full variant inspection is what the live app preview is for.
+    </p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th></th><th>GUI path (Review &amp; propose)</th><th>CLI path (Claude Code, autonomous)</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>Mechanism</td>
+            <td>Reuse Tauri's own webview — already rendering the live preview on the Review step at the exact moment Propose is clicked</td>
+            <td>No webview is open — needs a real headless render</td>
+          </tr>
+          <tr>
+            <td>New dependency</td>
+            <td>None</td>
+            <td>Headless Chrome via Playwright, pointed at the system's already-installed Chrome (<code>channel: 'chrome'</code>) — not bundling its own Chromium</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="font-size:13.5px; color:var(--ink-muted);">
+      Since the CLI path is likely the <em>more</em> common one for "extract everything
+      and propose it" (§10), the engine needs the headless-render capability
+      regardless — the Tauri-webview shortcut only covers the GUI case.
+    </p>
+    <div class="callout danger">
+      <span class="callout-label">Honest tension</span>
+      Every other claim in this doc has been "<code>pushArtifact</code> never branches on
+      kind." A screenshot step is the <strong>first real exception</strong> — but it's
+      framed as gated on <strong>file presence</strong> (does a <code>preview.*</code> exist
+      in this payload?), not a kind check, consistent with how <code>post_install</code>
+      already works. Also worth naming: committed PNGs bloat git history a bit over
+      time (binary, regenerated on every visual edit) — mitigate with modest fixed
+      dimensions and compression, not a blocker.
+    </div>
+
+    <div class="callout">
+      <span class="callout-label" style="color:var(--sage-700);">New, non-engine piece</span>
+      The compiled <code>srcdoc</code> bundle (§3's pipeline) is a derived build artifact,
+      not source — it must <strong>never</strong> be committed to the remote and never
+      appears in the manifest. It lives purely in a local cache keyed by
+      <code>(artifact id, version)</code>, invalidated on version bump. Same shape as the
+      existing <code>pristinePath(cwd, id)</code> helper — a sibling
+      <code>previewCachePath(cwd, id, version)</code> is the natural home.
+    </div>
+  </section>
+
+  <section id="security">
+    <p class="section-num">07</p>
+    <h2>Security, summarized</h2>
+    <ul>
+      <li>Pushed component code is <strong>never</strong> rendered in the main webview DOM — always through the sandboxed iframe.</li>
+      <li><code>sandbox="allow-scripts"</code>, no <code>allow-same-origin</code>, always.</li>
+      <li>A strict inline CSP inside the <code>srcdoc</code> string, restricting <code>script-src</code>/<code>connect-src</code>/<code>img-src</code> to only what's needed.</li>
+      <li>Parent ↔ iframe communication only via <code>postMessage</code>, with <code>event.origin</code>/<code>event.source</code> validated on receipt.</li>
+      <li>Compilation runs locally on the consuming machine — same trust boundary as cloning and reading the code yourself already implies, not a shared build server.</li>
+    </ul>
+  </section>
+
+  <section id="rollout">
+    <p class="section-num">08</p>
+    <h2>Phased rollout</h2>
+    <ul class="timeline">
+      <li><span class="dot">A</span><div class="phase-title">Spike</div><div class="phase-desc">Prototype sandboxed-iframe + local-esbuild end to end for one hardcoded example component. De-risk packaging size/latency first.</div></li>
+      <li><span class="dot">B</span><div class="phase-title">React + TS adapter, fixed preview</div><div class="phase-desc">Ship <code>kind: ui-component</code>, the <code>tags.componentTypes</code> dimension, the sidebar page, React/TS + plain-HTML adapters. No controls yet.</div></li>
+      <li><span class="dot">C</span><div class="phase-title">Storybook-style controls</div><div class="phase-desc">Add docgen prop-schema extraction, CSF-style variants, the postMessage controls panel.</div></li>
+      <li><span class="dot">D</span><div class="phase-title">Scan integration</div><div class="phase-desc">Component-detection heuristic, auto-scaffolded <code>preview.tsx</code> stubs, live-preview Review step.</div></li>
+      <li><span class="dot">E</span><div class="phase-title">More framework adapters</div><div class="phase-desc">Vue via <code>@vue/compiler-sfc</code>, then Svelte/Angular as needed — each one more adapter, not a redesign.</div></li>
+      <li><span class="dot">F</span><div class="phase-title">Preview for large artifacts <span style="font-weight:400; color:var(--ink-muted); font-size:12.5px;">(roadmap, not blocking)</span></div><div class="phase-desc">Everything above assumes one small, atomic component. A <code>template</code>/starter-kit artifact (a whole scaffolded project, not a single Button) needs a fundamentally different notion of "preview" — showing how to <em>use</em> it, not rendering it in an iframe. Explicitly deferred: keep in mind when designing §3's pipeline so it doesn't assume "always one component," but don't solve it now.</div></li>
+    </ul>
+  </section>
+
+  <section id="open">
+    <p class="section-num">09</p>
+    <h2>Open questions, carried forward</h2>
+    <ul class="qa-list">
+      <li>How much of the docgen/compile step happens at <strong>pull</strong> time (pre-warm the cache) vs. lazily at first <strong>view</strong>? Still open.</li>
+      <li style="opacity:.6;"><s>Cache location/invalidation.</s> <span class="verdict-chosen">Resolved (§6)</span> — <code>previewCachePath(cwd, id, version)</code>, a sibling to the existing <code>pristinePath</code> helper, never pushed/pulled.</li>
+      <li style="opacity:.6;"><s>Does <code>install_target</code> need special handling for a UI component?</s> <span class="verdict-chosen">Resolved (§6)</span> — no, <code>pullArtifact</code> is fully kind-agnostic.</li>
+      <li style="opacity:.6;"><s>Multi-file components with extra co-located assets.</s> <span class="verdict-chosen">Resolved (§6)</span> — <code>payload_path</code> already supports a whole folder; a co-located <code>preview.tsx</code> landing alongside the real component matches how <code>*.stories.tsx</code> files already work in real component libraries.</li>
+      <li>New gap, flagged in §10: there's no <strong>"Propose all"</strong> bulk action for propose-new mode. Browse has bulk "Pull all"; proposing 15 extracted components today means clicking "Review &amp; propose" 15 separate times (or scripting 15 separate CLI calls).</li>
+    </ul>
+  </section>
+
+  <section id="example">
+    <p class="section-num">10</p>
+    <h2>Worked example: extracting components from a real project</h2>
+    <p>Ties §5/§6 together as one concrete walkthrough.</p>
+
+    <h3>Step 0 — Claude Code's extraction happens outside DeliveryOS entirely</h3>
+    <p>
+      Telling Claude Code "extract all reusable UI components from this project" is
+      just normal coding work — Read/Grep/Edit/Write, no DeliveryOS involvement yet.
+      Two different starting situations, two different amounts of work:
+    </p>
+    <p>
+      <strong>Situation A — components already live in their own files</strong>
+      (<code>src/components/Button.jsx</code>, <code>Card.jsx</code> already separate).
+      The easy case: nothing moves, no import paths change — Claude Code just writes
+      a <code>preview.tsx</code> next to each existing file.
+    </p>
+    <p>
+      <strong>Situation B — everything is jammed into one <code>components.tsx</code></strong>,
+      with a page like <code>Dashboard.jsx</code> importing several components from it.
+      This needs real splitting first:
+    </p>
+
+    <div class="filetree-label" style="margin-top:18px;">Before</div>
+    <pre class="code-block font-mono"><code>// src/components.tsx — Button and Card both defined in one file
+export function Button({ children, variant = 'primary' }) {
+  return &lt;button className={`btn btn-${variant}`}&gt;{children}&lt;/button&gt;;
+}
+export function Card({ title, children }) {
+  return &lt;div className="card"&gt;&lt;h3&gt;{title}&lt;/h3&gt;{children}&lt;/div&gt;;
+}
+
+// src/pages/Dashboard.jsx — imports both from that one file
+import { Button, Card } from '../components';
+export function Dashboard() {
+  return &lt;Card title="Welcome"&gt;&lt;Button variant="primary"&gt;Get started&lt;/Button&gt;&lt;/Card&gt;;
+}</code></pre>
+
+    <div class="filetree-label" style="margin-top:18px;">After</div>
+    <pre class="code-block font-mono" style="font-size:12.5px;"><code>src/
+  components/
+    Button/
+      Button.tsx      <span class="dim">the real component, physically moved out of components.tsx</span>
+      <span class="new-file">preview.tsx</span>     <span class="dim">NEW -- demo file, only for DeliveryOS's catalog preview</span>
+    Card/
+      Card.tsx
+      <span class="new-file">preview.tsx</span>
+  pages/
+    Dashboard.jsx     <span class="dim">import path fixed, otherwise untouched</span></code></pre>
+
+    <pre class="code-block font-mono"><code>// src/components/Button/Button.tsx — the "main" file: the real, working code
+export function Button({ children, variant = 'primary' }: ButtonProps) {
+  return &lt;button className={`btn btn-${variant}`}&gt;{children}&lt;/button&gt;;
+}
+
+// src/components/Button/preview.tsx — demo-only, for the catalog's
+// live preview + controls -- NOT the thing being distributed
+import { Button } from './Button';
+export const Primary = () => &lt;Button variant="primary"&gt;Get started&lt;/Button&gt;;
+export const Secondary = () => &lt;Button variant="secondary"&gt;Cancel&lt;/Button&gt;;
+
+// src/pages/Dashboard.jsx — same page, just pointed at the new location
+import { Button } from '../components/Button/Button';
+import { Card } from '../components/Card/Card';
+export function Dashboard() {
+  return &lt;Card title="Welcome"&gt;&lt;Button variant="primary"&gt;Get started&lt;/Button&gt;&lt;/Card&gt;;
+}</code></pre>
+
+    <div class="callout">
+      <span class="callout-label" style="color:var(--sage-700);">"Do we push preview.tsx or the main .tsx?"</span>
+      Both, always together, never either/or. <code>payload_path</code> points at the
+      whole folder (<code>src/components/Button/</code>), which contains both files.
+      <code>Button.tsx</code> is the actual product — what a consuming project gets
+      on Pull. <code>preview.tsx</code> rides along in the same folder purely so
+      DeliveryOS can render a live preview when browsing/reviewing — scaffolding for
+      the catalog experience, not the thing being distributed (same relationship a
+      <code>.stories.tsx</code> file has to its real component in any normal repo).
+    </div>
+
+    <p style="margin-top:14px;">
+      <strong><code>Dashboard.jsx</code> itself is never extracted, never pushed.</strong>
+      It's a page — specific to this one app, not reusable — so it's not a
+      UI-component candidate at all. The only thing that happens to it is the
+      mechanical import-path fix shown above: ordinary local refactoring, done once,
+      staying entirely inside the original project. It never becomes a DeliveryOS
+      artifact.
+    </p>
+
+    <p>
+      <strong>A variant worth naming: a flat convention</strong>, e.g.
+      <code>src/ui/button.tsx</code> sitting alongside many other components in one
+      shared folder — no per-component subfolder at all, a very common real-world
+      layout. This doesn't require restructuring the project either:
+      <code>button.tsx</code> already stands alone, so Claude Code reads it, generates
+      <code>preview.tsx</code>, and stages a <em>copy</em> of both into a synthetic
+      payload location built just for the push (a temp dir, never the project's real
+      <code>src/ui/</code> folder) — the original file never moves.
+    </p>
+
+    <p>This surfaces three layouts that are genuinely <strong>decoupled</strong>, not one convention flowing through the whole pipeline:</p>
+    <ol>
+      <li><strong>The source project's own layout</strong> — however that team organizes things. Never touched by extraction, beyond the Situation-B case where components are genuinely entangled in one file.</li>
+      <li><strong>DeliveryOS's payload-staging layout</strong> — always one folder per component, regardless of what #1 looked like. Not arbitrary: a directory-shaped payload copied onto a file-shaped <code>install_target</code> is a real, already-hit bug (the same one the CHANGELOG documents fixing for the growtharc-ai-helpers import) — so the payload is always a folder, on principle.</li>
+      <li><strong>The consuming project's <code>install_target</code> layout</strong> — defaults to <code>src/components/button/</code> in whoever pulls it, independent of what #1 was. A puller wanting a flat layout instead does that manual reorg themselves, same as reorganizing any pulled template today.</li>
+    </ol>
+
+    <h3>Step 1 — Scan finds them</h3>
+    <p>
+      Either you click <strong>Scan</strong> in the sidebar, or Claude Code runs
+      <code>deliveryos scan --remote growtharc-ui-components</code>. Scan walks the
+      component glob, checks each isn't already in the remote's catalog by id, and
+      returns one candidate per component — auto-scaffolding a <code>preview.tsx</code>
+      stub for any that don't have one yet. Nothing's proposed yet.
+    </p>
+
+    <h3>Step 2 — one "Review &amp; propose" per component, two possible paths</h3>
+    <div class="path-compare">
+      <div class="path-card">
+        <div class="path-title">🖱️ GUI — a person</div>
+        <p>Click "Review &amp; propose" on a Scan result.</p>
+        <p style="font-size:13px; color:var(--ink-muted);">Opens the step-by-step wizard; the Review step <strong>renders Button live</strong> via the sandboxed-iframe pipeline before proposing.</p>
+      </div>
+      <div class="path-card">
+        <div class="path-title">⌨️ CLI — Claude Code, autonomous</div>
+        <pre class="code-block font-mono" style="font-size:11.5px; white-space:pre-wrap;"><code>deliveryos push button --new \
+  --remote growtharc-ui-components \
+  --path src/components/Button \
+  --kind ui-component \
+  --owner frontend-guild \
+  --description "Primary CTA button" \
+  --stacks react,typescript</code></pre>
+        <p style="font-size:13px; color:var(--ink-muted);">No GUI at all — one invocation per discovered component, e.g. in a loop.</p>
+      </div>
+    </div>
+    <p style="font-size:13.5px; color:var(--ink-muted); text-align:center;">Both call the exact same engine function underneath: <code>pushArtifact(id, &#123; isNew: true, payloadPath, kind: 'ui-component', ... &#125;)</code></p>
+
+    <h3>Step 3 — what <code>pushArtifact</code> actually does, for Button</h3>
+    <ul class="flow-seq">
+      <li><span class="actor">You/CC → Engine</span> push button --new --remote ui-components ...</li>
+      <li><span class="actor">Engine → Cache</span> fetch + reset to remote's current tip</li>
+      <li><span class="actor">Engine</span> check "button" isn't already an id in the catalog</li>
+      <li><span class="actor">Engine → Cache</span> copy Button.tsx, preview.tsx into artifacts/button/payload/</li>
+      <li><span class="actor">Engine</span> compile preview.tsx (§3 pipeline), headless-render default variant</li>
+      <li><span class="actor">Engine → Cache</span> write artifacts/button/preview.png + manifest.yaml</li>
+      <li><span class="actor">Engine → Cache</span> create branch, commit manifest + payload + preview.png</li>
+      <li><span class="actor">Cache → GitHub</span> push branch</li>
+      <li><span class="actor">Engine → GitHub</span> open PR (body embeds preview.png via raw.githubusercontent.com)</li>
+      <li><span class="actor">GitHub → You/CC</span> PR opened — Files changed tab renders preview.png automatically</li>
+    </ul>
+    <p style="font-size:13.5px; color:var(--ink-muted);">
+      This repeats once per component — Button, Card, Navbar each get their own
+      branch and their own PR (see the bulk-propose gap noted in §9).
+    </p>
+
+    <h3>Step 4 — ordinary GitHub review, then it's live</h3>
+    <p>
+      Whoever owns <code>growtharc-ui-components</code> reviews each PR exactly like
+      any GitHub PR (manifest diff + new source files) and merges — no
+      DeliveryOS-side approval step exists, it's genuinely just GitHub underneath.
+      Once merged, Button shows up for everyone else under the "UI Components"
+      sidebar page, rendered live via the sandboxed-iframe pipeline, and is pullable
+      into any other project.
+    </p>
+  </section>
+
+  <section id="edge-cases">
+    <p class="section-num">11</p>
+    <h2>Edge cases and failure handling</h2>
+
+    <div class="callout">
+      <span class="callout-label" style="color:var(--sage-700);">The recurring principle</span>
+      Anything about the <strong>preview</strong> fails soft — degrade to no-preview,
+      never block the artifact existing. Anything about the
+      <strong>manifest/artifact itself</strong> fails hard and loud (existing
+      <code>DeliveryOsError</code> subclasses, a clear message, no silent corruption).
+    </div>
+
+    <h3>Already handled today, no new code</h3>
+    <p>"What if the source folder doesn't exist" — already covered, in <code>push.ts</code>:</p>
+    <pre class="code-block font-mono"><code>if (!fs.existsSync(options.payloadPath)) {
+  throw new ManifestValidationError('--path "' + options.payloadPath + '" does not exist');
+}</code></pre>
+    <p style="font-size:13.5px; color:var(--ink-muted);">
+      If Claude Code says "extract Button" but the folder got renamed/deleted before
+      <code>push --new</code> actually runs, this throws a clear, existing error — not a
+      crash. Same error class every other kind already relies on.
+    </p>
+
+    <h3>Scan / extraction time</h3>
+    <ul>
+      <li><strong>False positives</strong> from the glob heuristic (page components, HOCs, test files matching "function returning JSX"). Not dangerous — Review is still required before anything's proposed, just noisy.</li>
+      <li><strong>Id collisions within one scan batch</strong> — two different <code>Button</code>s in <code>forms/</code> and <code>marketing/</code>. Scan needs its own dedupe by folder path (<code>forms-button</code>, <code>marketing-button</code>), same shape as the real fix used when the growtharc-ai-helpers import hit filename collisions across categories.</li>
+      <li><strong>Component escapes its own folder</strong> — imports <code>../../../utils/foo</code> from elsewhere in the original project. Probably the most realistic real-world failure, since components are rarely 100% self-contained. Best handling: Scan/the wizard statically checks for any relative import escaping the payload root and flags it in Review <em>before</em> proposing, rather than failing opaquely at compile time.</li>
+    </ul>
+
+    <h3>Compile time (esbuild / docgen)</h3>
+    <ul>
+      <li><strong>Genuine syntax/type errors</strong> — surface the raw esbuild message directly (same pattern as <code>PostInstallError</code> capturing stdout/stderr today), never an opaque crash.</li>
+      <li><strong>Unresolved imports</strong> the vendored runtime doesn't cover (lodash, an internal design-system package, a chart library). A failed preview build must <strong>never</strong> block propose/push/pull — degrade to "no live preview, text-only card," the same way an unrecognized <code>kind</code> already falls back to a neutral icon instead of breaking.</li>
+      <li>Vue SFC compile failure — same degrade-gracefully answer.</li>
+    </ul>
+
+    <h3>Headless-render time (the PR screenshot)</h3>
+    <ul>
+      <li><strong>Never settles</strong> (infinite CSS animation, a runaway interval) — timeout after ~3–5s and take whatever's on screen, or skip the image entirely.</li>
+      <li><strong>Headless Chrome missing</strong> on the machine running a CLI-driven push — log a warning, skip <code>preview.png</code>, still open the PR without an image.</li>
+      <li><strong>Reads localStorage/cookies</strong> for a legitimate reason (a saved theme) — blocked by the opaque sandbox origin, throws inside the iframe. Not a bug, the correct security tradeoff — document as a known limitation and extraction guidance: components should receive such values as props, not read them directly.</li>
+    </ul>
+
+    <h3>Push / pull time</h3>
+    <ul>
+      <li><strong>Concurrent extraction, same id</strong> — already effectively handled: <code>buildBranchName</code> embeds a UTC timestamp + 4 random hex chars per push, so branch names never collide even for the same id. Worst case: two competing PRs, resolved like any duplicate PR — a human problem, not a system one.</li>
+      <li><strong>install_target collision on Pull</strong> — two different component libraries both naming something <code>Button</code>, pulled into the same project. A <strong>pre-existing engine gap</strong>, not new to <code>ui-component</code> — <code>pullArtifact</code>'s <code>fs.cpSync</code> overwrites whatever's already at that path for <em>any</em> kind today. More likely to bite here since name collisions are far more common in frontend land than, say, agent ids.</li>
+    </ul>
+
+    <h3>Data model</h3>
+    <ul>
+      <li><strong>Untagged componentTypes</strong> — the component still exists and pulls fine, just needs an "Uncategorized" fallback tab so it isn't silently invisible under the category tabs.</li>
+      <li><strong>Mistagged stacks</strong> (says react, code is actually Vue) — wrong adapter gets picked, compile fails — same graceful-degradation path as the unresolved-import case, not a special case.</li>
+    </ul>
+  </section>
+
+  <section id="future-work">
+    <p class="section-num">12</p>
+    <h2>Future work: preview for large/multi-file artifacts (not yet designed)</h2>
+    <p>
+      Flagged explicitly, deliberately <strong>not</strong> solved here — a separate design
+      problem layered on top of everything above, kept only as a marker so §3's
+      pipeline doesn't get built in a way that quietly assumes "there's always exactly
+      one small component" (see Phase F, §8).
+    </p>
+
+    <h3>What the problem actually is</h3>
+    <p>
+      Everything in this doc assumes the artifact is one small, self-contained
+      thing — a Button, a Card. "Preview" means render it live in a sandboxed iframe,
+      done. But DeliveryOS already has a <code>template</code> kind (a whole
+      starter-code scaffold — e.g. <code>pattern02-starter</code>: a full project
+      skeleton, possibly frontend + backend + config + its own dependency tree). For
+      something that size, "render it live in an iframe" doesn't mean anything — you
+      can't boot an entire multi-file app inside a tiny preview card the way you can a
+      single Button.
+    </p>
+    <p>
+      The real question: <strong>when someone's browsing the catalog and sees a
+      starter-kit artifact, how do they understand what it actually does and how to
+      use it, before pulling it?</strong> For a Button, they see it by hovering it. For
+      a whole project template, there's no equivalent single live-render.
+    </p>
+
+    <h3>Why it's a genuinely different problem, not an extension</h3>
+    <p>
+      The sandboxed-iframe + local-esbuild pipeline (§3) was built on an
+      assumption — one component, one compile, one render — that doesn't hold here at
+      all. This isn't "make the same pipeline handle a bigger input"; it needs its own
+      separate approach entirely.
+    </p>
+
+    <h3>Candidate directions (unevaluated, just named)</h3>
+    <ul>
+      <li>A rendered README/quickstart preview (setup steps, maybe screenshots the template's own author included).</li>
+      <li>A file-tree preview, so someone can see the shape of what they're pulling before committing to it.</li>
+      <li>A static screenshot or short GIF of the running result, rather than attempting any live render at all.</li>
+      <li>A heavier StackBlitz/WebContainer-style <strong>actual runnable sandbox</strong> — explicitly ruled out in §3 for single components (too heavy, wants npm-registry access) but potentially the <em>right</em> tool specifically here, since a full project with a real dependency tree is exactly what StackBlitz is built for. Worth reconsidering in this narrower context even though it lost for the component case.</li>
+    </ul>
+
+    <div class="callout">
+      <span class="callout-label" style="color:var(--sage-700);">Why this stays deferred, not solved now</span>
+      A legitimately separate feature-design problem stacked on an already large one.
+      The only thing worth doing now (Phase F) is making sure §3 isn't built in a way
+      that assumes "there's always exactly one component" — actually designing what a
+      template preview looks like is its own follow-up conversation, not something to
+      improvise inside this one.
+    </div>
+  </section>
+
+  <footer>
+    Full write-up: <code>docs/ui-components-feature-design.md</code>. Status: brainstorm draft, not yet planned into phases.
+  </footer>
+
+</div>
+</body>
+</html>

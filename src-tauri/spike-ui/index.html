@@ -11,6 +11,23 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="vendor/xterm.css" />
+    <script>
+      // Applied synchronously, before body/CSS paint, so a saved dark-mode
+      // choice doesn't show a flash of the light theme while app.js (which
+      // loads at the end of body) is still parsing.
+      (function () {
+        try {
+          var saved = localStorage.getItem('deliveryos.theme');
+          if (saved === 'dark' || saved === 'light') {
+            document.documentElement.setAttribute('data-theme', saved);
+          }
+        } catch (e) {
+          // localStorage unavailable (e.g. disabled) -- fall back to
+          // prefers-color-scheme, same as if nothing were saved.
+        }
+      })();
+    </script>
   </head>
   <body>
     <!-- Icon defs used throughout via <svg><use href="#i-..."/></svg> --
@@ -48,6 +65,11 @@
           <path d="M12 2.2 V5.5 H15.3" />
           <path d="M7.2 9.5 H12.8 M7.2 12.6 H12.8" />
         </symbol>
+        <symbol id="i-kind-backend-plugin" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M7 2.5v4.3M13 2.5v4.3" />
+          <path d="M5.3 6.8h9.4v3a4.7 4.7 0 0 1-9.4 0z" />
+          <path d="M10 14.5v3" />
+        </symbol>
         <symbol id="i-kind-default" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round">
           <path d="M10 2.5 L17.5 10 L10 17.5 L2.5 10 Z" />
         </symbol>
@@ -73,6 +95,12 @@
           <circle cx="10" cy="7" r="3" />
           <path d="M3.5 17c0-3.3 2.9-6 6.5-6s6.5 2.7 6.5 6" />
         </symbol>
+        <symbol id="i-components" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round">
+          <rect x="2.5" y="2.5" width="6" height="6" rx="1.2" />
+          <rect x="11.5" y="2.5" width="6" height="6" rx="1.2" />
+          <rect x="2.5" y="11.5" width="6" height="6" rx="1.2" />
+          <rect x="11.5" y="11.5" width="6" height="6" rx="1.2" />
+        </symbol>
         <symbol id="i-lang-python" viewBox="0 0 20 20" fill="currentColor">
           <path d="M9.9 2.2c-3.6 0-3.4 1.6-3.4 1.6l0 1.6h3.5v.5H5.1S2.2 5.6 2.2 9.2s2.6 3.5 2.6 3.5h1.5v-2s-.1-2.6 2.5-2.6h3.4s2.4 0 2.4-2.4V4.6s.4-2.4-4.7-2.4Zm-1.9 1.1a.7.7 0 1 1 0 1.4.7.7 0 0 1 0-1.4Z"/>
           <path d="M10.1 17.8c3.6 0 3.4-1.6 3.4-1.6l0-1.6h-3.5v-.5h4.9s2.9.3 2.9-3.3-2.6-3.5-2.6-3.5h-1.5v2s.1 2.6-2.5 2.6H7.8s-2.4 0-2.4 2.4v2.6s-.4 2.4 4.7 2.4Zm1.9-1.1a.7.7 0 1 1 0-1.4.7.7 0 0 1 0 1.4Z"/>
@@ -88,6 +116,16 @@
           <circle cx="10" cy="10" r="1.1" fill="currentColor" stroke="none" />
           <path d="M10 3.5v1.4M10 15.1v1.4M16.5 10h-1.4M4.9 10H3.5M14.6 5.4l-1 1M6.4 13.6l-1 1M14.6 14.6l-1-1M6.4 6.4l-1-1" />
         </symbol>
+        <!-- Theme toggle: sun shown while in dark mode ("switch to light"),
+             moon shown while in light mode ("switch to dark") -- app.js
+             swaps the <use> href, same convention as kindIcon(). -->
+        <symbol id="i-theme-sun" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+          <circle cx="10" cy="10" r="3.4" />
+          <path d="M10 2.3v2M10 15.7v2M17.7 10h-2M4.3 10h-2M15.4 4.6l-1.4 1.4M6 14l-1.4 1.4M15.4 15.4l-1.4-1.4M6 6l-1.4-1.4" />
+        </symbol>
+        <symbol id="i-theme-moon" viewBox="0 0 20 20" fill="currentColor">
+          <path d="M15.5 12.9A6.8 6.8 0 0 1 7.1 4.5a6.8 6.8 0 1 0 8.4 8.4Z" />
+        </symbol>
       </defs>
     </svg>
 
@@ -98,6 +136,9 @@
           <div class="sidebar-nav">
             <button class="sidebar-item" data-view="browse"><svg class="glyph"><use href="#i-folder"/></svg>Browse</button>
             <button class="sidebar-item" data-view="tags"><svg class="glyph"><use href="#i-tag"/></svg>Browse by tag</button>
+            <button class="sidebar-item" data-view="ui-components"><svg class="glyph"><use href="#i-components"/></svg>UI Components</button>
+            <button class="sidebar-item" data-view="starter-kits"><svg class="glyph"><use href="#i-kind-template"/></svg>Starter Kits</button>
+            <button class="sidebar-item" data-view="backend-plugins"><svg class="glyph"><use href="#i-kind-backend-plugin"/></svg>Backend Plugins</button>
             <button class="sidebar-item" data-view="settings"><svg class="glyph"><use href="#i-settings"/></svg>Settings</button>
             <div class="sidebar-divider"></div>
             <button class="sidebar-item" data-view="scan"><svg class="glyph"><use href="#i-scan"/></svg>Scan</button>
@@ -110,6 +151,9 @@
             <span class="folder-label">Project</span>
             <span id="folder-path" class="folder-path">No folder selected</span>
             <span class="context-strip-spacer"></span>
+            <button id="theme-toggle-btn" class="btn btn-ghost btn-sm btn-icon-only" aria-label="Switch to dark mode" title="Switch to dark mode">
+              <svg class="glyph"><use href="#i-theme-moon"/></svg>
+            </button>
             <button id="change-folder-btn" class="btn btn-sm">Change folder</button>
           </div>
 
@@ -125,6 +169,7 @@
                 id="search-input"
                 type="text"
                 placeholder="Search id, description, kind, owner, or tags"
+                aria-label="Search id, description, kind, owner, or tags"
               />
               <button id="add-new-btn" class="btn btn-primary">+ Add new</button>
             </div>
@@ -175,10 +220,83 @@
             class="mini-search tag-value-search"
             type="text"
             placeholder="Filter values&hellip;"
+            aria-label="Filter values"
             hidden
           />
           <div id="tags-list" class="tag-list-panel"></div>
           <p id="tags-empty" class="empty-state" hidden>No values in this category yet.</p>
+        </section>
+
+        <!-- UI Components: a new artifact kind (kind: ui-component) with a
+             real, interactive live preview, not a screenshot -- see
+             docs/ui-components-feature-design.md. Category tabs are the
+             component-type VALUES themselves (Buttons/Navbars/Cards/...),
+             not a dimension-picker the way Browse-by-tag's stack/role/
+             project tabs work -- there's only one relevant tag dimension
+             here (componentTypes). A vertical list, not a packed grid --
+             one full-width row per component (index/name/tag/description,
+             then a live preview), not a Pinterest-style tile wall; there's
+             no bin-packing problem to solve when every row is the same
+             width. Each row renders a live sandboxed iframe
+             (sandbox="allow-scripts", never allow-same-origin),
+             lazy-loaded via IntersectionObserver so an off-screen row
+             never eagerly compiles a preview it isn't showing yet. -->
+        <section id="view-ui-components" class="view" hidden>
+          <div id="ui-components-no-folder" class="hint-banner" hidden>
+            Select a project folder to browse UI components.
+          </div>
+          <div class="page-head">
+            <h2 class="section-title">UI Components</h2>
+            <div class="page-head-actions">
+              <span id="ui-components-count" class="count"></span>
+              <button id="ui-components-pull-all-btn" class="btn btn-sm" hidden></button>
+            </div>
+          </div>
+          <div id="ui-components-cat-tabs" class="tab-row" style="margin-bottom: 16px;"></div>
+          <div id="ui-components-list" class="ui-component-list"></div>
+          <p id="ui-components-empty" class="empty-state" hidden>No UI components yet -- Add New or Scan to propose one.</p>
+        </section>
+
+        <!-- Starter Kits (kind: template) and Backend Plugins
+             (kind: backend-plugin): single-kind slices of the same catalog
+             Browse already shows, their own sidebar destinations for the
+             same reason "Browse by tag" and "UI Components" are -- someone
+             who already knows what they want ("give me every backend
+             plugin") shouldn't have to land on the full unfiltered grid
+             and manually toggle a Kind chip first. Unlike UI Components,
+             neither kind here has a live-preview story or a sub-dimension
+             worth its own tab row, so this stays a plain grid reusing
+             Browse's own card markup (buildResCard) -- no chips, no
+             search box; kind is implicitly fixed by which sidebar item
+             got you here. See renderKindListPage in app.js. -->
+        <section id="view-starter-kits" class="view" hidden>
+          <div id="starter-kits-no-folder" class="hint-banner" hidden>
+            Select a project folder to browse starter kits.
+          </div>
+          <div class="page-head">
+            <h2 class="section-title">Starter Kits</h2>
+            <div class="page-head-actions">
+              <span id="starter-kits-count" class="count"></span>
+              <button id="starter-kits-pull-all-btn" class="btn btn-sm" hidden></button>
+            </div>
+          </div>
+          <div id="starter-kits-grid" class="grid"></div>
+          <p id="starter-kits-empty" class="empty-state" hidden>No starter kits match.</p>
+        </section>
+
+        <section id="view-backend-plugins" class="view" hidden>
+          <div id="backend-plugins-no-folder" class="hint-banner" hidden>
+            Select a project folder to browse backend plugins.
+          </div>
+          <div class="page-head">
+            <h2 class="section-title">Backend Plugins</h2>
+            <div class="page-head-actions">
+              <span id="backend-plugins-count" class="count"></span>
+              <button id="backend-plugins-pull-all-btn" class="btn btn-sm" hidden></button>
+            </div>
+          </div>
+          <div id="backend-plugins-grid" class="grid"></div>
+          <p id="backend-plugins-empty" class="empty-state" hidden>No backend plugins match.</p>
         </section>
 
         <!-- Tag folder: opened by picking a tag VALUE (e.g. "stack: python")
@@ -197,6 +315,7 @@
                 class="mini-search"
                 type="text"
                 placeholder="Search within this folder&hellip;"
+                aria-label="Search within this folder"
               />
               <button id="tag-folder-pull-all-btn" class="btn btn-sm" hidden></button>
             </div>
@@ -224,18 +343,19 @@
           </div>
           <p class="field-hint">
             Looks at <code>.claude/agents</code>, <code>.claude/skills</code>,
-            <code>.claude/commands</code>, and <code>.claude/rules</code> in the current project
-            folder for anything not yet tracked here and not already in the selected remote's
-            catalog.
+            <code>.claude/commands</code>, and <code>.claude/rules</code>, <code>src/</code> (for
+            reusable UI components), and the project itself (for a real, buildable starter-kit
+            candidate) in the current project folder for anything not yet tracked here and not
+            already in the selected remote's catalog.
           </p>
-          <p id="scan-empty" class="empty-state" hidden>No new agents/skills found.</p>
+          <p id="scan-empty" class="empty-state" hidden>No new content found.</p>
           <div id="scan-results" class="grouped-results"></div>
         </section>
 
         <!-- Detail -->
         <section id="view-detail" class="view" hidden>
           <button id="back-to-browse-btn" class="btn back-btn">&larr; Back to Browse</button>
-          <div class="card detail-card">
+          <div class="card">
             <div class="detail-header">
               <div class="detail-title-group">
                 <div id="detail-kind-icon" class="kind-swatch lg"></div>
@@ -248,6 +368,187 @@
               <button id="detail-action-btn" class="btn btn-primary" hidden></button>
             </div>
             <p id="detail-description" class="detail-description"></p>
+            <div id="detail-provenance-badge" class="provenance-badge"></div>
+
+            <div id="detail-connection-status" class="connection-status" hidden></div>
+
+            <!-- "How this works": a plain-language walkthrough of the
+                 whole install lifecycle for an artifact that actually has
+                 one (install_params/wiring_actions/post_install) -- filled
+                 in by renderLifecycleExplainer(entry) in app.js. Sits
+                 BELOW the live status chips above, collapsed by default,
+                 since it's reference/educational material -- the live
+                 status is the more actionable thing to see first, and this
+                 is one click away via its own <summary>. -->
+            <details id="detail-lifecycle-explainer" class="lifecycle-explainer" hidden>
+              <summary>How installing this works</summary>
+              <ol id="detail-lifecycle-steps" class="lifecycle-steps"></ol>
+            </details>
+
+            <!-- Top-level content tabs -- built dynamically per artifact
+                 by refreshDetailTabs() in app.js, one tab per section that
+                 actually has real content for THIS artifact (gated on file/
+                 field presence, never a `kind` check, same convention as
+                 every section below). Hidden entirely (no tab-row chrome
+                 at all) when at most one section applies -- the common
+                 case, e.g. a plain artifact with just a README. -->
+            <div id="detail-tabs-row" class="tab-row" hidden></div>
+            <!-- Documentation/Design/Components/Routes each resolve via
+                 their own RPC round-trip -- shown while any of them is
+                 still pending, so a section that ends up applicable
+                 doesn't just silently pop in with no warning it was
+                 coming. See refreshDetailTabs in app.js. -->
+            <div id="detail-tabs-loading" class="detail-tabs-loading" hidden>
+              <span class="spinner" aria-hidden="true"></span> Loading&hellip;
+            </div>
+
+            <div id="detail-tab-panels">
+              <!-- Live preview + variant tabs + generated props controls
+                   (Phase C) -- shown only for kind: ui-component artifacts.
+                   See renderDetail/loadDetailPreview in app.js. -->
+              <div id="detail-preview-section" hidden>
+                <div id="detail-preview-tabs" class="tab-row"></div>
+                <div id="detail-preview-frame" class="ui-component-preview-frame detail-preview-frame">
+                  <span class="ui-component-preview-loading">Loading preview&hellip;</span>
+                </div>
+                <div id="detail-preview-controls" class="controls-panel"></div>
+              </div>
+
+              <!-- Non-visual artifacts (Phase 7, kind: backend-plugin): a
+                   required-config checklist collecting the PROJECT's own
+                   install_params values, never the artifact's own
+                   defaults, plus Tier 2 wiring suggestions. Shown only
+                   when the manifest declares install_params/wiring_actions
+                   -- see renderDetail/renderInstallParamsSection in
+                   app.js. -->
+              <div id="detail-configuration-section" hidden>
+                <!-- Phase 12, "post-install health narrator": the persistent
+                     counterpart to the pullAndAutoWire toast, which fades
+                     after a few seconds -- shows that same plain-language
+                     summary (wiring applied/needsReview, build outcome,
+                     still-missing install params) for as long as this
+                     artifact's Detail view is open, so a person coming back
+                     to fill in a missing param still has the context for
+                     why. See renderPostInstallHealthBanner in app.js. -->
+                <div id="detail-post-install-health-banner" class="hint-banner" hidden></div>
+
+                <form id="detail-install-params-form" class="install-params-form">
+                  <div id="detail-install-params-fields"></div>
+                  <button type="submit" class="btn btn-primary btn-sm">Apply configuration</button>
+                </form>
+
+                <!-- Tier 2 of the wiring agent (Phase 7 item 6): a concrete,
+                     tailored suggestion per declared wiring_action -- never an
+                     auto-applied edit. See renderWiringSection in app.js. -->
+                <div id="detail-wiring-section" hidden>
+                  <div class="wiring-section-label">Wiring</div>
+                  <!-- Artifact-level (not per-action) -- hands off to a
+                       real interactive claude session via a real PTY.
+                       See openWireTerminal in app.js. -->
+                  <div id="detail-wiring-terminal-launcher"></div>
+                  <div id="detail-wiring-merge-all"></div>
+                  <div id="detail-wiring-actions"></div>
+                </div>
+              </div>
+
+              <!-- Real rendered markdown -- README.md and/or GUIDELINES.md's
+                   own full prose (structured tokens/rules from the latter
+                   are shown separately, under Design), each gated on real
+                   file presence, never a `kind` check, and each in its own
+                   sandboxed iframe (see renderMarkdownToSandboxedIframe in
+                   app.js). One shared tab regardless of artifact kind --
+                   a `kind: backend-plugin` artifact's README used to render
+                   in a separate section from every other kind's; there's no
+                   real reason for that split once every kind's README lands
+                   in the same place. -->
+              <div id="detail-documentation-section" hidden>
+                <div id="detail-readme-block" hidden>
+                  <div class="wiring-section-label">README</div>
+                  <div id="detail-readme" class="markdown-container"></div>
+                </div>
+                <div id="detail-guidelines-doc-block" hidden>
+                  <div class="wiring-section-label">Guidelines</div>
+                  <div id="detail-guidelines-doc" class="markdown-container"></div>
+                </div>
+              </div>
+
+              <!-- Phase 11 Detail-view task: design-kit's color tokens and
+                   type scale, gated on real GUIDELINES.md presence -- never
+                   a `kind: template` check. See renderDetail/
+                   renderDesignAndComponentsSections in app.js. -->
+              <div id="detail-design-section" hidden>
+                <div class="wiring-section-label">Color tokens</div>
+                <div id="detail-template-tokens" class="token-swatch-grid"></div>
+
+                <div class="wiring-section-label">Type scale</div>
+                <div id="detail-template-type-scale" class="type-sample-list"></div>
+
+                <div class="wiring-section-label">Layout rules</div>
+                <div id="detail-template-layout" class="layout-rules-strip"></div>
+              </div>
+
+              <!-- A live component grid, gated on real GUIDELINES.md
+                   presence -- split out from Design above into its own tab
+                   since grid content (potentially many component cards) is
+                   a different kind of thing to browse than a token list.
+                   See renderDetail/renderDesignAndComponentsSections in
+                   app.js. -->
+              <div id="detail-components-section" hidden>
+                <div class="template-theme-toggle-row">
+                  <div id="detail-template-theme-toggle" class="chip-picker"></div>
+                  <span class="template-theme-toggle-caption">
+                    Today's components have no dark-specific styling, so this won't change how they look yet.
+                  </span>
+                </div>
+                <div id="detail-template-grid" class="template-component-grid"></div>
+              </div>
+
+              <!-- Real route/page map for whole-app templates like the
+                   starter kit, parsed straight from the artifact's own
+                   src/routes.tsx -- gated on real file presence, never a
+                   `kind: template` check. See renderDetail/
+                   renderRoutesSection in app.js. -->
+              <div id="detail-routes-section" hidden>
+                <div id="detail-routes-tree" class="route-tree"></div>
+              </div>
+
+              <!-- Source-drift check: whether the real external project an
+                   artifact was extracted from (via the starter-kit-extractor/
+                   ui-component-extractor skills) has changed since
+                   extraction -- gated on real SOURCES.json presence at the
+                   payload root, never a `kind` check, same convention as
+                   every tab above. Distinct from #detail-drift-warning
+                   below: that one is about a LOCAL pulled copy vs. this
+                   project's own registry, not a third-party external source.
+                   See renderDetail/renderSourceDriftSection in app.js. -->
+              <div id="detail-source-drift-section" hidden>
+                <div class="wiring-section-label">Source drift</div>
+                <p class="source-drift-caption">
+                  This artifact was extracted from a real external project. Point at where that
+                  project sits locally to check whether its source has changed since extraction.
+                </p>
+                <button id="detail-check-source-drift-btn" class="btn btn-ghost btn-sm">
+                  Check for source drift
+                </button>
+                <div id="detail-source-drift-results" class="source-drift-results"></div>
+              </div>
+
+              <!-- Activity (Phase 12): a visible audit trail for the
+                   Tier-2 "AI wiring merge" flow above -- what was
+                   proposed, what got applied, what rolled back and why.
+                   The underlying .deliveryos/wiring-merge-log.jsonl
+                   already existed on disk; this is the first place it's
+                   ever shown. Gated on real log entries existing for THIS
+                   artifact, never a `kind` check, same convention as
+                   every tab above -- independent of Source drift (an
+                   artifact can have either, both, or neither). See
+                   renderDetail/renderActivitySection in app.js. -->
+              <div id="detail-activity-section" hidden>
+                <div class="wiring-section-label">Activity</div>
+                <div id="detail-activity-entries"></div>
+              </div>
+            </div>
+
             <div class="meta-grid">
               <div><span class="k">Kind</span><br /><span id="meta-kind" class="v"></span></div>
               <div><span class="k">Version</span><br /><span id="meta-version" class="v"></span></div>
@@ -263,6 +564,7 @@
             <div class="detail-secondary-actions">
               <button id="detail-open-folder-btn" class="btn btn-ghost btn-sm" hidden>Open folder</button>
               <button id="detail-edit-btn" class="btn btn-ghost btn-sm" hidden>Edit</button>
+              <button id="detail-remove-btn" class="btn btn-danger-ghost btn-sm" hidden>Remove</button>
             </div>
 
             <form id="detail-edit-form" class="edit-form" hidden>
@@ -281,6 +583,10 @@
               <div class="field">
                 <label>Stack</label>
                 <div id="edit-stacks-picker"></div>
+              </div>
+              <div class="field">
+                <label>Component type</label>
+                <div id="edit-component-types-picker"></div>
               </div>
               <p class="field-hint">Saving opens a PR against this field's manifest.yaml -- the payload/content is untouched.</p>
               <div class="edit-form-actions">
@@ -301,8 +607,41 @@
 
             <div id="detail-push-status" class="push-status" hidden>
               <p id="detail-push-status-text" class="push-status-text"></p>
+              <button id="detail-view-pr-btn" class="btn btn-ghost btn-sm">View PR</button>
               <button id="detail-check-push-status-btn" class="btn btn-ghost btn-sm">Check push status</button>
             </div>
+          </div>
+        </section>
+
+        <!-- Component detail: one component from a design-kit-shaped
+             artifact's grid, shown properly -- every real CSF variant as
+             tabs, a live props-controls panel, full usage-rule text. See
+             openComponentDetail in app.js. -->
+        <section id="view-component-detail" class="view" hidden>
+          <button id="back-to-component-grid-btn" class="btn back-btn">&larr; Back</button>
+          <div class="card">
+            <div class="detail-header">
+              <div class="detail-title">
+                <span id="component-detail-name" class="name"></span>
+              </div>
+              <!-- Same untracked single-component pull the Components-tab
+                   grid card used to offer -- moved here exclusively per
+                   direct user feedback (the grid card is a compact browse
+                   surface where "View details" is the one real action;
+                   Pull belongs in the fuller view once you're already
+                   looking at just one component). btn-ghost, not
+                   btn-primary -- this component's own real usage rule
+                   (shown right below) is literally "one primary per view,
+                   never two competing for attention." See
+                   openComponentDetail/wireEvents in app.js. -->
+              <button id="component-detail-pull-btn" class="btn btn-ghost btn-sm">Pull</button>
+            </div>
+            <p id="component-detail-usage-rule" class="component-detail-usage-rule"></p>
+            <div id="component-detail-tabs" class="tab-row"></div>
+            <div id="component-detail-frame" class="ui-component-preview-frame detail-preview-frame">
+              <span class="ui-component-preview-loading">Loading preview&hellip;</span>
+            </div>
+            <div id="component-detail-controls" class="controls-panel"></div>
           </div>
         </section>
 
@@ -319,7 +658,7 @@
              filled in and Review's per-field "Edit" jumps back to fix
              just one thing. -->
         <section id="view-addnew" class="view" hidden>
-          <button class="btn back-btn" data-view="browse">&larr; Back to Browse</button>
+          <button id="addnew-top-back-btn" class="btn back-btn">&larr; Back to Browse</button>
           <form id="addnew-form" class="card form-grid">
             <h2 class="section-title">Propose a new artifact</h2>
 
@@ -373,7 +712,11 @@
             <div class="wizard-step" data-step="description">
               <div class="field">
                 <label for="f-description">Description</label>
-                <textarea id="f-description" required rows="3"></textarea>
+                <div class="field-with-suggest">
+                  <textarea id="f-description" required rows="3"></textarea>
+                  <button type="button" id="suggest-metadata-btn" class="btn btn-sm btn-ghost suggest-btn">Suggest with Claude ✨</button>
+                </div>
+                <p class="field-hint">Reads the real payload code and proposes a description + component type via a real Claude call -- always reviewable/editable before proposing.</p>
               </div>
             </div>
 
@@ -408,6 +751,15 @@
               </div>
             </div>
 
+            <div class="wizard-step" data-step="component-types">
+              <div class="field">
+                <label>Component type</label>
+                <div id="f-component-types-picker"></div>
+                <p class="field-hint">For "UI Components" artifacts (e.g. "button", "navbar", "card") -- leave blank for every other kind.</p>
+                <button type="button" id="suggest-component-types-btn" class="btn btn-sm btn-ghost suggest-btn">Suggest with Claude ✨</button>
+              </div>
+            </div>
+
             <div class="wizard-step" data-step="install-target">
               <div class="field">
                 <label for="f-install-target">Install target (optional)</label>
@@ -424,6 +776,15 @@
               </div>
             </div>
 
+            <div class="wizard-step" data-step="install-params">
+              <div class="field">
+                <label>Install-time configuration (optional)</label>
+                <p class="field-hint">Detected automatically from real <code>process.env.X</code> usage in the payload you picked -- review and correct before proposing (a detected key name is reliable; the description and secret/required guesses are a starting point, not a fact). Add more by hand if anything's missing.</p>
+                <div id="install-params-list"></div>
+                <button type="button" id="install-params-add-btn" class="btn btn-sm btn-ghost">+ Add param</button>
+              </div>
+            </div>
+
             <div class="wizard-step" data-step="remote">
               <div class="field">
                 <label>Remote</label>
@@ -433,9 +794,45 @@
             </div>
 
             <div class="wizard-step" data-step="review" hidden>
+              <!-- Scan-time-only findings (import-escape flags, same-batch
+                   id-collision notices -- see scan/types.ts's
+                   ScanCandidate.warnings), populated by renderAddNewReview
+                   in app.js. Its own container, not nested inside
+                   .wizard-review below -- that box's bordered/
+                   overflow:hidden styling is sized for review-rows
+                   specifically. -->
+              <div id="addnew-review-warnings"></div>
               <div class="field">
                 <label>Review</label>
                 <div id="addnew-review" class="wizard-review"></div>
+              </div>
+              <!-- Only shown for kind: ui-component (see
+                   loadAddNewReviewPreview in app.js) -- a real live
+                   preview turns Review into a genuine visual check for a
+                   Scan-discovered component candidate, instead of just
+                   re-reading text fields (Phase 6, Phase D). Reuses
+                   .ui-component-preview-frame's own sizing/centering CSS
+                   as-is, same as Detail's own live preview does. -->
+              <div id="addnew-review-preview-section" class="field" hidden>
+                <label>Live preview</label>
+                <div id="addnew-review-preview-frame" class="ui-component-preview-frame">
+                  <span class="ui-component-preview-loading">Loading preview&hellip;</span>
+                </div>
+              </div>
+              <!-- Phase 11 item 3: the subjective counterpart to the
+                   mechanical self-nesting check above (that one lands in
+                   #addnew-review-warnings automatically, at Scan time --
+                   this one is a real API call, so it stays an explicit
+                   button, never automatic, same rule Phase 10's own
+                   "Suggest with Claude" already established). btn-accent
+                   here (not btn-ghost, unlike the Description step's own
+                   suggest buttons) -- DESIGN_SYSTEM.md reserves the AI
+                   accent color for genuinely AI-specific actions, and
+                   this is a real Claude call, not a plain form control. -->
+              <div id="addnew-review-anti-pattern-section" class="field" hidden>
+                <label>Design review</label>
+                <button type="button" id="addnew-review-suggest-anti-patterns-btn" class="btn btn-sm btn-accent">Suggest with Claude &#10024;</button>
+                <div id="addnew-review-anti-pattern-findings"></div>
               </div>
             </div>
 
@@ -492,15 +889,32 @@
             <span id="progress-status" class="progress-status">Working&hellip;</span>
           </div>
           <div id="progress-log" class="progress-log"></div>
+          <div id="build-fix-offers" class="build-fix-offers" hidden></div>
         </div>
           </main>
         </div>
       </div>
 
-      <div id="toast-stack" class="toast-stack"></div>
+      <div id="toast-stack" class="toast-stack" role="status" aria-live="polite"></div>
+
+      <!-- The embedded-terminal feature: a real, interactive claude
+           session running inside a real PTY (src-tauri/src/pty.rs),
+           rendered here via xterm.js. See openWireTerminal in app.js. -->
+      <div id="wire-terminal-overlay" class="wire-terminal-overlay" hidden>
+        <div class="wire-terminal-panel">
+          <div class="wire-terminal-header">
+            <span class="wire-terminal-title">Wire with Claude</span>
+            <span id="wire-terminal-status" class="wire-terminal-status"></span>
+            <button type="button" id="wire-terminal-close" class="btn btn-sm btn-ghost" aria-label="Close terminal">✕</button>
+          </div>
+          <div id="wire-terminal-container" class="wire-terminal-container"></div>
+        </div>
+      </div>
     </div>
 
     <script src="sidecar.js"></script>
+    <script src="vendor/marked.min.js"></script>
+    <script src="vendor/xterm.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

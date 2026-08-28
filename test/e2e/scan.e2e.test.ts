@@ -31,7 +31,7 @@ describe('scan e2e', () => {
   });
 
   async function registerAndClone(name: string): Promise<void> {
-    addRemoteEntry({ name, url: fixtureRemoteDir, addedAt: new Date().toISOString() });
+    await addRemoteEntry({ name, url: fixtureRemoteDir, addedAt: new Date().toISOString() });
     await cloneRemote(name, fixtureRemoteDir);
   }
 
@@ -179,7 +179,7 @@ describe('scan e2e', () => {
       const cwd = newScratchCwd('tracked');
 
       const artifact = TEST_ARTIFACTS.find((a) => a.id === 'lint-config')!;
-      pullArtifact(artifact.id, remoteName, cwd);
+      await pullArtifact(artifact.id, remoteName, cwd);
 
       // Same id as the just-pulled artifact, sitting directly in
       // .claude/agents -- already tracked, must not show up as a candidate.
@@ -201,4 +201,98 @@ describe('scan e2e', () => {
     const candidates = await scanForNewArtifacts(cwd, remoteName);
     expect(candidates).toEqual([]);
   });
+
+  it(
+    'finds a genuinely reusable React component under src/, alongside the existing agent/skill/command/rule kinds (Phase D)',
+    async () => {
+      // Real, end-to-end confirmation that detectUiComponentCandidates
+      // (unit-tested on its own in test/unit/detectUiComponents.test.ts)
+      // is actually wired into scanForNewArtifacts, not just implemented
+      // in isolation -- this is the integration point that test file
+      // deliberately doesn't cover.
+      const remoteName = 'scan-test-remote-ui-component';
+      await registerAndClone(remoteName);
+      const cwd = newScratchCwd('ui-component');
+
+      const componentDir = path.join(cwd, 'src', 'ui', 'Alert');
+      fs.mkdirSync(componentDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(componentDir, 'Alert.tsx'),
+        'export interface AlertProps { message: string; }\n' +
+          'export function Alert({ message }: AlertProps) { return <div>{message}</div>; }\n',
+        'utf-8',
+      );
+      // A plain page-level file with no Props type at all -- must NOT
+      // show up as a candidate; confirms this test isn't accidentally
+      // passing because ANY .tsx file under src/ gets picked up.
+      const pagesDir = path.join(cwd, 'src', 'pages');
+      fs.mkdirSync(pagesDir, { recursive: true });
+      fs.writeFileSync(path.join(pagesDir, 'Home.tsx'), 'export function Home() { return <div>Home</div>; }\n', 'utf-8');
+
+      const candidates = await scanForNewArtifacts(cwd, remoteName);
+      const alertCandidate = candidates.find((c) => c.id === 'alert');
+
+      expect(alertCandidate).toBeTruthy();
+      expect(alertCandidate?.kind).toBe('ui-component');
+      expect(alertCandidate?.payloadPath).toBe(componentDir);
+      expect(fs.existsSync(path.join(componentDir, 'preview.tsx'))).toBe(true);
+      expect(candidates.some((c) => c.id === 'home')).toBe(false);
+    },
+    30_000,
+  );
+
+  it(
+    'finds a genuine standalone project as a template candidate, alongside the existing agent kind, and excludes one whose id is already tracked (Phase D)',
+    async () => {
+      // Real, end-to-end confirmation that detectStarterKitCandidates
+      // (unit-tested on its own in test/unit/detectStarterKitCandidates.test.ts)
+      // is actually wired into scanForNewArtifacts, not just implemented
+      // in isolation.
+      const remoteName = 'scan-test-remote-starter-kit';
+      await registerAndClone(remoteName);
+      const cwd = newScratchCwd('starter-kit');
+
+      const appDir = path.join(cwd, 'my-new-app');
+      fs.mkdirSync(appDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(appDir, 'package.json'),
+        JSON.stringify({ name: 'my-new-app', scripts: { build: 'vite build' } }),
+        'utf-8',
+      );
+      fs.mkdirSync(path.join(appDir, 'src'), { recursive: true });
+      fs.writeFileSync(path.join(appDir, 'src', 'routes.tsx'), 'export const router = createBrowserRouter([]);', 'utf-8');
+
+      // Coexists in the same scan with an unrelated agent candidate.
+      const agentsDir = path.join(cwd, '.claude', 'agents');
+      fs.mkdirSync(agentsDir, { recursive: true });
+      fs.writeFileSync(path.join(agentsDir, 'unrelated-agent.md'), '# Unrelated\n', 'utf-8');
+
+      // A directory whose NAME matches an already-pulled artifact's real id
+      // (not its installTarget) -- same "id already tracked" convention the
+      // agent-kind test above uses -- must be excluded even though nobody
+      // asked to pull it as a template specifically.
+      await pullArtifact('lint-config', remoteName, cwd);
+      const alreadyTrackedDir = path.join(cwd, 'lint-config');
+      fs.mkdirSync(path.join(alreadyTrackedDir, 'src'), { recursive: true });
+      fs.writeFileSync(
+        path.join(alreadyTrackedDir, 'package.json'),
+        JSON.stringify({ name: 'lint-config', scripts: { build: 'vite build' } }),
+        'utf-8',
+      );
+      fs.writeFileSync(path.join(alreadyTrackedDir, 'src', 'routes.tsx'), '', 'utf-8');
+
+      const candidates = await scanForNewArtifacts(cwd, remoteName);
+      const appCandidate = candidates.find((c) => c.id === 'my-new-app');
+
+      expect(appCandidate).toMatchObject({
+        kind: 'template',
+        payloadPath: appDir,
+        installTarget: 'my-new-app',
+      });
+      expect(appCandidate?.description).toContain('src/routes.tsx');
+      expect(candidates.some((c) => c.id === 'unrelated-agent')).toBe(true);
+      expect(candidates.some((c) => c.id === 'lint-config')).toBe(false);
+    },
+    30_000,
+  );
 });

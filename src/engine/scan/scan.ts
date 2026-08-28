@@ -8,36 +8,38 @@ import { readLockfile } from '../lockfile/lockfile';
 import { guessDescriptionFromFrontmatter } from '../manifest/frontmatter';
 import { RemoteRegistryError } from '../errors';
 import { ProgressCallback } from '../pull/pull';
+import { ScanCandidate } from './types';
+import { detectUiComponentCandidates } from './detectUiComponents';
+import { detectStarterKitCandidates } from './detectStarterKitCandidates';
 
-/** One agent/skill/command/rule found on disk under `.claude/` that isn't
- * yet tracked in this project's lockfile and doesn't already exist (by id)
- * in the target remote's catalog -- a candidate to propose as a new
- * artifact via `push --new`. `description` is a best-effort guess from the
- * file's own frontmatter (see `guessDescriptionFromFrontmatter`), not a
- * guarantee -- review before pushing, same as Add New already asks.
- * Commands/rules commonly live in category subfolders
- * (`.claude/commands/java/foo.md`) -- `installTarget` preserves whatever
- * relative path was actually found, category subfolder included, so a
- * proposed command/rule pulls back to the exact same place. Rule files in
- * particular use a `paths: [glob, ...]` frontmatter convention, never
- * `description:` -- expect `description` to come back undefined for those
- * and need manual entry, same as any file with no frontmatter at all. */
-export interface ScanCandidate {
-  id: string;
-  kind: 'agent' | 'skill' | 'command' | 'rule';
-  payloadPath: string; // absolute path to the real file/folder on disk
-  installTarget: string; // relative to cwd, e.g. '.claude/agents/foo.md'
-  description?: string;
-}
+// Re-exported so existing callers that import `ScanCandidate` from this
+// module (its original home) keep working -- see `./types`'s own doc
+// comment for why the interface itself moved out of this file.
+export type { ScanCandidate };
 
 /**
- * Scans `<cwd>/.claude/agents`, `.claude/skills`, `.claude/commands`, and
- * `.claude/rules` for content not already tracked locally (the lockfile) or
- * already present (by id) in `remoteName`'s catalog, so it doesn't show up
- * as "new" if it was already pulled from there, or already proposed by
- * someone else. Fetches `remoteName` fresh first, the same way `push`
- * does, so "already exists" reflects the remote's current state, not a
- * possibly-stale local cache.
+ * Scans `<cwd>/.claude/agents`, `.claude/skills`, `.claude/commands`,
+ * `.claude/rules`, (Phase 6, Phase D) `<cwd>/src/**\/*.{tsx,jsx}` for
+ * structurally-reusable React components, and `<cwd>` itself (recursively,
+ * for a monorepo) for a real, standalone, buildable project worth
+ * proposing as a `kind: template` starter kit, for content not already
+ * tracked locally (the lockfile) or already present (by id) in
+ * `remoteName`'s catalog, so it doesn't show up as "new" if it was already
+ * pulled from there, or already proposed by someone else. Fetches
+ * `remoteName` fresh first, the same way `push` does, so "already exists"
+ * reflects the remote's current state, not a possibly-stale local cache.
+ *
+ * The `ui-component` and `template` detections are each structurally and
+ * conceptually different from the four markdown-backed kinds above them
+ * (a static TypeScript parse for a component-shaped export / a directory
+ * walk for real routing+build evidence, not a frontmatter/directory
+ * convention -- see `detectUiComponentCandidates`'s/
+ * `detectStarterKitCandidates`'s own doc comments and
+ * docs/ui-components-feature-design.md §6), which is why each is delegated
+ * to its own module entirely rather than inlined here like the other four
+ * -- this function's own job stays "orchestrate one `isNew` check and
+ * merge every kind's candidates," not "know how each kind is actually
+ * found."
  *
  * Deliberately does NOT try to guess `roles`/`teams`/`stacks` -- there's no
  * reliable folder-category signal for a single flat `.claude/agents/`
@@ -78,7 +80,7 @@ export async function scanForNewArtifacts(
 
   onProgress?.(
     'scan',
-    'Scanning .claude/agents, .claude/skills, .claude/commands, and .claude/rules for new artifacts...',
+    'Scanning .claude/agents, .claude/skills, .claude/commands, .claude/rules, and src/ for new artifacts...',
   );
   const candidates: ScanCandidate[] = [];
 
@@ -131,6 +133,8 @@ export async function scanForNewArtifacts(
 
   candidates.push(...scanMarkdownFilesRecursively(cwd, 'commands', 'command', isNew));
   candidates.push(...scanMarkdownFilesRecursively(cwd, 'rules', 'rule', isNew));
+  candidates.push(...detectUiComponentCandidates(cwd, isNew));
+  candidates.push(...detectStarterKitCandidates(cwd, isNew));
 
   return candidates;
 }

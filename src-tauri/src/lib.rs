@@ -1,7 +1,11 @@
 use serde::Deserialize;
-use tauri::Emitter;
+use tauri::path::BaseDirectory;
+use tauri::{Emitter, Manager};
 use tauri_plugin_shell::process::CommandEvent;
 use tauri_plugin_shell::ShellExt;
+
+mod pty;
+use pty::PtyState;
 
 /// Shape of a single response line the sidecar (`src/sidecar.ts`) writes to
 /// its stdout: either
@@ -44,10 +48,31 @@ async fn sidecar_call(
   command: String,
   args: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-  let sidecar_command = app
+  let mut sidecar_command = app
     .shell()
     .sidecar("deliveryos-engine")
     .map_err(|e| format!("failed to resolve sidecar: {e}"))?;
+
+  // The preview-compile feature (Phase 6) needs native esbuild's binary at
+  // runtime, but the sidecar ships as a Node SEA -- a single .exe with no
+  // node_modules for esbuild's default resolution to find. `esbuild.exe` is
+  // bundled as a separate Tauri resource specifically so it can be pointed
+  // at via ESBUILD_BINARY_PATH, esbuild's own documented escape hatch for
+  // exactly this "packaged unusually" scenario (see
+  // docs/phase-A-preview-packaging-spike.md). Note this is NOT purely a
+  // production-only concern -- `tauri dev` spawns the same `externalBin`
+  // sidecar .exe production does, so resolution needs to succeed there too,
+  // not just after a full `tauri build`. Resolution failing is handled by
+  // simply not setting the env var (rather than erroring the whole call)
+  // since this feature isn't wired into any real command yet -- once it is,
+  // an unset ESBUILD_BINARY_PATH in a context where node_modules genuinely
+  // isn't reachable will surface as esbuild's own clear runtime error, not
+  // a silent failure.
+  if let Ok(esbuild_path) = app.path().resolve("esbuild.exe", BaseDirectory::Resource) {
+    if esbuild_path.exists() {
+      sidecar_command = sidecar_command.env("ESBUILD_BINARY_PATH", esbuild_path.to_string_lossy().to_string());
+    }
+  }
 
   let (mut rx, mut child) = sidecar_command
     .spawn()
@@ -161,6 +186,7 @@ pub fn run() {
     .plugin(tauri_plugin_opener::init())
     .plugin(tauri_plugin_updater::Builder::new().build())
     .plugin(tauri_plugin_process::init())
+    .manage(PtyState::default())
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(
@@ -189,7 +215,26 @@ pub fn run() {
 
       Ok(())
     })
-    .invoke_handler(tauri::generate_handler![sidecar_call])
-    .run(tauri::generate_context!())
-    .expect("error while running tauri application");
+    .invoke_handler(tauri::generate_handler![
+      sidecar_call,
+      pty::pty_spawn,
+      pty::pty_write,
+      pty::pty_resize,
+      pty::pty_kill,
+    ])
+    .build(tauri::generate_context!())
+    .expect("error while building tauri application")
+    .run(|app_handle, event| {
+      // The embedded-terminal feature (pty.rs) can leave a real,
+      // long-lived `claude`/`deliveryos` process running -- unlike
+      // `sidecar_call`'s own per-request spawn-and-kill, nothing else
+      // guarantees this gets torn down when the app quits. Confirmed
+      // the hard way this needed an explicit hook: a plain
+      // `.run(tauri::generate_context!())` (the previous shape of this
+      // call) has no way to intercept shutdown at all.
+      if let tauri::RunEvent::ExitRequested { .. } = event {
+        let state = app_handle.state::<PtyState>();
+        pty::kill_running_session(&state);
+      }
+    });
 }

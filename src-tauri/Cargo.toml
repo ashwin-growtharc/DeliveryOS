@@ -32,3 +32,19 @@ tauri-plugin-process = "2"
 # not `tokio::time` -- needed directly (with the `time` feature) for the
 # auto-sync timer's `tokio::time::sleep` in lib.rs's setup() closure.
 tokio = { version = "1", features = ["time"] }
+# The embedded-terminal feature (pty.rs): a real pseudo-terminal, cross-
+# platform including Windows ConPTY. The wezterm project's own crate --
+# built on directly with bespoke commands here, not a third-party Tauri
+# terminal plugin, matching this codebase's own preference elsewhere this
+# session for understanding exactly what's running over a heavier
+# abstraction (see runClaudeSubprocess.ts's own doc comment on passing
+# over the Claude Agent SDK for the same reason).
+portable-pty = "0.8"
+# PTY output is raw bytes, not guaranteed to be UTF-8-boundary-aligned
+# per chunk (a multi-byte character or escape sequence can straddle two
+# reads) -- base64-encoding each chunk before it crosses the Tauri
+# event/JSON boundary avoids any lossy-UTF8 corruption at chunk edges;
+# the frontend decodes it back to raw bytes before handing them to
+# xterm.js, which -- like every other terminal-output consumer -- expects
+# the real original bytes, not a re-encoded/lossy approximation of them.
+base64 = "0.22"

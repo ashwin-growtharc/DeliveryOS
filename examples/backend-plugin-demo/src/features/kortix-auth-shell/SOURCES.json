@@ -1,0 +1,36 @@
+{
+  "sourceDescription": "kortix-ai/suna -- apps/web/src/features/auth + app/(auth)/auth (genericized -- see README.md)",
+  "recordedAt": "2026-08-25T10:54:31.056Z",
+  "entries": [
+    {
+      "payloadPath": "CodeInputLogic.ts",
+      "sourcePath": "features/auth/code-input-logic.ts",
+      "sourceHashAtExtraction": "sha256:9b5feb96fac22ed3fede8c4bec30edde2ce5e319eca6cebb4ca8d8487e295c51"
+    },
+    {
+      "payloadPath": "AuthPrimitives.tsx",
+      "sourcePath": "features/auth/auth-primitives.tsx",
+      "sourceHashAtExtraction": "sha256:8b75398a9a763b416dc6f1edf5e007d4b099ee4824907d5f33afb4ec8564c89e"
+    },
+    {
+      "payloadPath": "AuthShell.tsx",
+      "sourcePath": "features/auth/auth-card-shell.tsx",
+      "sourceHashAtExtraction": "sha256:d60bfbde3fc124b23f6b9ac6bad1409e2a2547e5a77f5d40d29fe10ac60e5b65"
+    },
+    {
+      "payloadPath": "PasswordInput.tsx",
+      "sourcePath": "app/(auth)/auth/page.tsx",
+      "sourceHashAtExtraction": "sha256:2a2fc18c2c9fc46aa51f56b323e32fdcb1b508a383b682ede4b6173c7dc392e8"
+    },
+    {
+      "payloadPath": "OAuthButton.tsx",
+      "sourcePath": "features/auth/google-signin.tsx",
+      "sourceHashAtExtraction": "sha256:fd5b1ead6f1a085a048478f73d797328c892997346a5c7a8bd4191ad39c729a8"
+    },
+    {
+      "payloadPath": "EmailAuthForm.tsx",
+      "sourcePath": "app/(auth)/auth/page.tsx",
+      "sourceHashAtExtraction": "sha256:2a2fc18c2c9fc46aa51f56b323e32fdcb1b508a383b682ede4b6173c7dc392e8"
+    }
+  ]
+}

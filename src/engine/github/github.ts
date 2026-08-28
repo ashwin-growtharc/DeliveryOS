@@ -9,7 +9,9 @@ import { GithubApiError, UnsupportedRemoteError } from '../errors';
 export interface GithubClient {
   rest: {
     repos: {
-      get(params: { owner: string; repo: string }): Promise<{ data: { default_branch: string } }>;
+      get(
+        params: { owner: string; repo: string },
+      ): Promise<{ data: { default_branch: string; private: boolean } }>;
     };
     pulls: {
       create(params: {
@@ -55,18 +57,30 @@ export function parseGithubUrl(url: string): { owner: string; repo: string } {
   );
 }
 
-/** Fetches the remote's current default branch name via the GitHub API. */
-export async function getDefaultBranch(
-  octokit: GithubClient,
-  owner: string,
-  repo: string,
-): Promise<string> {
+export interface RepoInfo {
+  defaultBranch: string;
+  isPrivate: boolean;
+}
+
+/**
+ * Fetches the remote's current default branch name AND its visibility via
+ * one GitHub API call. `isPrivate` exists specifically for Phase E's PR
+ * preview image: `raw.githubusercontent.com` does not serve private-repo
+ * content to an unauthenticated request -- confirmed by hand (a real push
+ * against a real private remote produced a PR body with a broken image
+ * link, a 404 on that exact URL) -- so `pushArtifact` needs to know this
+ * BEFORE building the PR body, not just at PR-open time, to decide whether
+ * embedding the image inline is even possible. Bundled into the same call
+ * `getDefaultBranch` used to make alone (rather than a second `repos.get`)
+ * so knowing this doesn't cost an extra round-trip.
+ */
+export async function fetchRepoInfo(octokit: GithubClient, owner: string, repo: string): Promise<RepoInfo> {
   try {
     const response = await octokit.rest.repos.get({ owner, repo });
-    return response.data.default_branch;
+    return { defaultBranch: response.data.default_branch, isPrivate: response.data.private };
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
-    throw new GithubApiError(`Failed to fetch the default branch for ${owner}/${repo}: ${detail}`);
+    throw new GithubApiError(`Failed to fetch repo info for ${owner}/${repo}: ${detail}`);
   }
 }
 

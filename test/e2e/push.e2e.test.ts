@@ -3,7 +3,13 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import simpleGit from 'simple-git';
-import { createTestRemote, teardownTestRemote, TEST_ARTIFACTS } from '../fixtures/testRemote';
+import { parse as parseYaml } from 'yaml';
+import {
+  createTestRemoteWithUiComponentArtifact,
+  teardownTestRemote,
+  TEST_ARTIFACTS,
+  UI_COMPONENT_ARTIFACT,
+} from '../fixtures/testRemote';
 import { addRemoteEntry } from '../../src/engine/remote/remoteRegistry';
 import { cloneRemote, cachePath } from '../../src/engine/remote/remoteCache';
 import { fetchAndReset } from '../../src/engine/git/git';
@@ -37,11 +43,11 @@ type FakeOctokit = GithubClient & {
   };
 };
 
-function makeFakeOctokit(): FakeOctokit {
+function makeFakeOctokit(isPrivate = false): FakeOctokit {
   return {
     rest: {
       repos: {
-        get: vi.fn().mockResolvedValue({ data: { default_branch: FAKE_DEFAULT_BRANCH } }),
+        get: vi.fn().mockResolvedValue({ data: { default_branch: FAKE_DEFAULT_BRANCH, private: isPrivate } }),
       },
       pulls: {
         create: vi.fn().mockResolvedValue({
@@ -56,7 +62,7 @@ function makeFakeOctokit(): FakeOctokit {
  * and clones it, so each test scenario gets its own isolated cache dir and
  * never observes branches created by another scenario. */
 async function registerAndClone(name: string, fixtureRemoteDir: string): Promise<void> {
-  addRemoteEntry({ name, url: FAKE_GITHUB_URL, addedAt: new Date().toISOString() });
+  await addRemoteEntry({ name, url: FAKE_GITHUB_URL, addedAt: new Date().toISOString() });
   await cloneRemote(name, fixtureRemoteDir);
 }
 
@@ -73,7 +79,11 @@ describe('push e2e', () => {
 
   beforeAll(async () => {
     originalEnv = process.env.DELIVERYOS_HOME;
-    fixtureRemoteDir = await createTestRemote();
+    // Includes the extra kind: ui-component artifact (UI_COMPONENT_ARTIFACT)
+    // on top of the usual 3 -- strictly additive, so every existing test
+    // below (which only ever looks up TEST_ARTIFACTS by id) is unaffected;
+    // it's just needed for the Phase E preview.png tests further down.
+    fixtureRemoteDir = await createTestRemoteWithUiComponentArtifact();
     deliveryOsHome = fs.mkdtempSync(path.join(os.tmpdir(), 'deliveryos-push-e2e-home-'));
     scratchRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'deliveryos-push-e2e-scratch-'));
     process.env.DELIVERYOS_HOME = deliveryOsHome;
@@ -102,7 +112,7 @@ describe('push e2e', () => {
 
       const artifact = TEST_ARTIFACTS.find((a) => !a.hasPostInstall && a.id === 'welcome-template')!;
       const cwd = newScratchCwd('edit');
-      pullArtifact(artifact.id, remoteName, cwd);
+      await pullArtifact(artifact.id, remoteName, cwd);
 
       const installTarget = path.join(cwd, artifact.installTarget);
       fs.writeFileSync(
@@ -146,6 +156,380 @@ describe('push e2e', () => {
   );
 
   it(
+    'edit mode: bumps the manifest version by default (patch) and commits manifest.yaml (Phase E)',
+    async () => {
+      // The real gap this closes: before Phase E, edit-mode push never
+      // touched manifest.yaml at all, so a payload edit's version never
+      // changed -- checkForUpdates/the preview cache (both keyed on
+      // version) could never detect a real edit, silently, forever.
+      const remoteName = 'test-remote-edit-version-bump';
+      await registerAndClone(remoteName, fixtureRemoteDir);
+
+      const artifact = TEST_ARTIFACTS.find((a) => !a.hasPostInstall && a.id === 'welcome-template')!;
+      const cwd = newScratchCwd('edit-version-bump');
+      await pullArtifact(artifact.id, remoteName, cwd);
+
+      fs.writeFileSync(
+        path.join(cwd, artifact.installTarget, 'README.md'),
+        '# welcome-template\n\nversion-bump test edit.\n',
+        'utf-8',
+      );
+
+      const octokit = makeFakeOctokit();
+      const result = await pushArtifact(artifact.id, {}, cwd, octokit);
+
+      const fixtureGit = simpleGit(fixtureRemoteDir);
+      const committedManifest = await fixtureGit.show([
+        `${result.branch}:artifacts/${artifact.id}/manifest.yaml`,
+      ]);
+      expect(parseYaml(committedManifest).version).toBe('1.0.1');
+
+      const call = octokit.rest.pulls.create.mock.calls[0][0];
+      expect(call.title).toContain('v1.0.0 -> v1.0.1');
+      expect(call.body).toContain('v1.0.0 -> v1.0.1');
+    },
+    30_000,
+  );
+
+  it(
+    'edit mode: an explicit --bump minor overrides the default patch bump (Phase E)',
+    async () => {
+      const remoteName = 'test-remote-edit-bump-minor';
+      await registerAndClone(remoteName, fixtureRemoteDir);
+
+      const artifact = TEST_ARTIFACTS.find((a) => !a.hasPostInstall && a.id === 'welcome-template')!;
+      const cwd = newScratchCwd('edit-bump-minor');
+      await pullArtifact(artifact.id, remoteName, cwd);
+
+      fs.writeFileSync(
+        path.join(cwd, artifact.installTarget, 'README.md'),
+        '# welcome-template\n\nminor bump test edit.\n',
+        'utf-8',
+      );
+
+      const octokit = makeFakeOctokit();
+      const result = await pushArtifact(artifact.id, { bump: 'minor' }, cwd, octokit);
+
+      const fixtureGit = simpleGit(fixtureRemoteDir);
+      const committedManifest = await fixtureGit.show([
+        `${result.branch}:artifacts/${artifact.id}/manifest.yaml`,
+      ]);
+      expect(parseYaml(committedManifest).version).toBe('1.1.0');
+    },
+    30_000,
+  );
+
+  it(
+    'edit mode: regenerates preview.png for a ui-component and embeds it in the PR body (Phase E)',
+    async () => {
+      const remoteName = 'test-remote-edit-preview-png';
+      await registerAndClone(remoteName, fixtureRemoteDir);
+
+      const cwd = newScratchCwd('edit-preview-png');
+      await pullArtifact(UI_COMPONENT_ARTIFACT.id, remoteName, cwd);
+
+      // A real visual edit -- changes what the rendered preview.png should
+      // look like, not just a comment/whitespace change.
+      const buttonPath = path.join(cwd, UI_COMPONENT_ARTIFACT.installTarget, 'Button.tsx');
+      fs.writeFileSync(
+        buttonPath,
+        fs.readFileSync(buttonPath, 'utf-8').replace('padding: \'8px 16px\'', 'padding: \'20px 40px\''),
+        'utf-8',
+      );
+
+      const octokit = makeFakeOctokit();
+      const result = await pushArtifact(UI_COMPONENT_ARTIFACT.id, {}, cwd, octokit);
+
+      const fixtureGit = simpleGit(fixtureRemoteDir);
+      // Confirms preview.png was actually committed as a real tracked path
+      // in this branch -- renderPreviewImage's own unit tests already
+      // verify real PNG magic bytes; this just proves it made it into the
+      // commit at all, which is the part push.ts itself is responsible for.
+      const lsTree = await fixtureGit.raw([
+        'ls-tree',
+        '-r',
+        '--name-only',
+        result.branch,
+        `artifacts/${UI_COMPONENT_ARTIFACT.id}/payload`,
+      ]);
+      expect(lsTree).toContain('preview.png');
+
+      const call = octokit.rest.pulls.create.mock.calls[0][0];
+      expect(call.body).toContain('### Preview');
+      expect(call.body).toContain(
+        `raw.githubusercontent.com/test-owner/test-repo/${result.branch}/artifacts/${UI_COMPONENT_ARTIFACT.id}/payload/preview.png`,
+      );
+    },
+    // Launches a real headless browser (renderPreviewImage) on top of this
+    // file's already-real git operations -- fast in isolation (~6s
+    // observed), but can run considerably longer under full-suite
+    // parallelism (multiple test files launching real browsers
+    // concurrently), so this gets a more generous timeout than this file's
+    // other, non-Playwright tests.
+    60_000,
+  );
+
+  it(
+    'propose-new mode: generates and commits preview.png for a ui-component payload with a preview.tsx (Phase E)',
+    async () => {
+      const remoteName = 'test-remote-new-preview-png';
+      await registerAndClone(remoteName, fixtureRemoteDir);
+
+      const payloadDir = fs.mkdtempSync(path.join(scratchRoot, 'new-ui-component-payload-'));
+      fs.writeFileSync(
+        path.join(payloadDir, 'Badge.tsx'),
+        `export interface BadgeProps {\n  label: string;\n}\n\nexport function Badge({ label }: BadgeProps) {\n  return <span>{label}</span>;\n}\n`,
+        'utf-8',
+      );
+      fs.writeFileSync(
+        path.join(payloadDir, 'preview.tsx'),
+        `import { Badge } from './Badge';\n\nexport const Default = () => <Badge label="New" />;\n`,
+        'utf-8',
+      );
+
+      const octokit = makeFakeOctokit();
+      const newId = 'test-badge-new';
+      const result = await pushArtifact(
+        newId,
+        {
+          remote: remoteName,
+          isNew: true,
+          payloadPath: payloadDir,
+          kind: 'ui-component',
+          owner: 'test-team',
+          description: 'A brand-new badge component',
+        },
+        newScratchCwd('new-preview-png'),
+        octokit,
+      );
+
+      const fixtureGit = simpleGit(fixtureRemoteDir);
+      const lsTree = await fixtureGit.raw([
+        'ls-tree', '-r', '--name-only', result.branch, `artifacts/${newId}/payload`,
+      ]);
+      expect(lsTree).toContain('preview.png');
+
+      const call = octokit.rest.pulls.create.mock.calls[0][0];
+      expect(call.body).toContain('### Preview');
+      expect(call.body).toContain(
+        `raw.githubusercontent.com/test-owner/test-repo/${result.branch}/artifacts/${newId}/payload/preview.png`,
+      );
+    },
+    // See the previous test's own comment on this same generous timeout.
+    60_000,
+  );
+
+  it(
+    'propose-new mode: install_params passed via options land in the real committed manifest (Phase 10 item 3)',
+    async () => {
+      const remoteName = 'test-remote-new-install-params';
+      await registerAndClone(remoteName, fixtureRemoteDir);
+
+      const payloadDir = fs.mkdtempSync(path.join(scratchRoot, 'new-backend-plugin-payload-'));
+      fs.writeFileSync(
+        path.join(payloadDir, 'auth.config.ts'),
+        'const secret = process.env.AUTH_SECRET;\nconst db = process.env.DATABASE_URL;\n',
+        'utf-8',
+      );
+
+      const octokit = makeFakeOctokit();
+      const newId = 'test-backend-plugin-new';
+      const result = await pushArtifact(
+        newId,
+        {
+          remote: remoteName,
+          isNew: true,
+          payloadPath: payloadDir,
+          kind: 'backend-plugin',
+          owner: 'test-team',
+          description: 'A brand-new backend plugin, with real install_params',
+          installParams: [
+            { key: 'AUTH_SECRET', description: 'Session signing secret', secret: true, required: true },
+            { key: 'DATABASE_URL', description: 'Postgres connection string', secret: true, required: true },
+          ],
+        },
+        newScratchCwd('new-install-params'),
+        octokit,
+      );
+
+      const fixtureGit = simpleGit(fixtureRemoteDir);
+      const manifestYaml = await fixtureGit.show([`${result.branch}:artifacts/${newId}/manifest.yaml`]);
+      const manifest = parseYaml(manifestYaml);
+
+      expect(manifest.install_params).toEqual([
+        { key: 'AUTH_SECRET', description: 'Session signing secret', secret: true, required: true },
+        { key: 'DATABASE_URL', description: 'Postgres connection string', secret: true, required: true },
+      ]);
+    },
+    60_000,
+  );
+
+  it(
+    'propose-new mode: omitting install_params entirely still works exactly as before (Phase 10 item 3, zero regression)',
+    async () => {
+      const remoteName = 'test-remote-new-no-install-params';
+      await registerAndClone(remoteName, fixtureRemoteDir);
+
+      const payloadDir = fs.mkdtempSync(path.join(scratchRoot, 'new-plain-payload-'));
+      fs.writeFileSync(path.join(payloadDir, 'index.js'), 'module.exports = 1;\n', 'utf-8');
+
+      const octokit = makeFakeOctokit();
+      const newId = 'test-plain-new';
+      const result = await pushArtifact(
+        newId,
+        {
+          remote: remoteName,
+          isNew: true,
+          payloadPath: payloadDir,
+          kind: 'skill',
+          owner: 'test-team',
+          description: 'A brand-new artifact with no install_params at all',
+        },
+        newScratchCwd('new-no-install-params'),
+        octokit,
+      );
+
+      const fixtureGit = simpleGit(fixtureRemoteDir);
+      const manifestYaml = await fixtureGit.show([`${result.branch}:artifacts/${newId}/manifest.yaml`]);
+      const manifest = parseYaml(manifestYaml);
+      // ManifestSchema defaults install_params to [] regardless -- this
+      // confirms omitting the new option doesn't change that
+      // already-established, correct behavior, not that the field
+      // vanishes entirely.
+      expect(manifest.install_params).toEqual([]);
+    },
+    60_000,
+  );
+
+  it(
+    'propose-new mode: a preview render failure never blocks the push itself, just omits the image (Phase E)',
+    async () => {
+      // Regression guard for a real, serious bug found by hand: adding
+      // playwright-core (needed for renderPreviewImage) as a real
+      // dependency of push.ts turned out to crash the ENTIRE packaged
+      // Node SEA sidecar on startup (playwright-core's own bundle does a
+      // dynamic require of its own package.json at import time, which
+      // Node's SEA require shim can't resolve at all -- confirmed
+      // empirically, including that marking it external doesn't help
+      // either, since SEA has zero external module resolution). Fixed by
+      // making the import lazy (see renderPreviewImage.ts's own doc
+      // comment) -- meaning the packaged app can still fail to render a
+      // preview at the exact moment a push needs one. This test proves
+      // maybeRenderPreviewImage's own catch (push.ts) genuinely absorbs
+      // ANY render failure, not just the ones this repo's dev machine
+      // happens to be able to reproduce -- a component whose preview.tsx
+      // has a real compile error (a syntax error, here) never reaches
+      // Playwright at all, but exercises the exact same catch path a
+      // Playwright-specific failure would.
+      const remoteName = 'test-remote-new-preview-failure';
+      await registerAndClone(remoteName, fixtureRemoteDir);
+
+      const payloadDir = fs.mkdtempSync(path.join(scratchRoot, 'new-ui-component-broken-preview-'));
+      fs.writeFileSync(
+        path.join(payloadDir, 'Broken.tsx'),
+        `export interface BrokenProps {\n  label: string;\n}\n\nexport function Broken({ label }: BrokenProps) {\n  return <span>{label}</span>;\n}\n`,
+        'utf-8',
+      );
+      // A genuine syntax error -- compilePreviewHtml itself throws before
+      // ever reaching Playwright, exercising maybeRenderPreviewImage's
+      // catch the same way a Playwright-specific failure would.
+      fs.writeFileSync(
+        path.join(payloadDir, 'preview.tsx'),
+        `import { Broken } from './Broken';\n\nexport const Default = () => <Broken label="New" (((( ;\n`,
+        'utf-8',
+      );
+
+      const octokit = makeFakeOctokit();
+      const newId = 'test-broken-preview';
+      const result = await pushArtifact(
+        newId,
+        {
+          remote: remoteName,
+          isNew: true,
+          payloadPath: payloadDir,
+          kind: 'ui-component',
+          owner: 'test-team',
+          description: 'A component whose preview fails to compile',
+        },
+        newScratchCwd('new-preview-failure'),
+        octokit,
+      );
+
+      // The push itself still succeeded -- a real PR opened.
+      expect(result.number).toBeGreaterThan(0);
+
+      const fixtureGit = simpleGit(fixtureRemoteDir);
+      const lsTree = await fixtureGit.raw([
+        'ls-tree', '-r', '--name-only', result.branch, `artifacts/${newId}/payload`,
+      ]);
+      expect(lsTree).toContain('Broken.tsx');
+      expect(lsTree).toContain('preview.tsx');
+      expect(lsTree).not.toContain('preview.png');
+
+      const call = octokit.rest.pulls.create.mock.calls[0][0];
+      expect(call.body).not.toContain('### Preview');
+    },
+    60_000,
+  );
+
+  it(
+    'propose-new mode against a PRIVATE repo: still generates+commits preview.png, but never embeds a raw.githubusercontent.com link (Phase E)',
+    async () => {
+      // Regression guard for a real bug found by hand: raw.githubusercontent.com
+      // does not serve private-repo content to an unauthenticated request (a
+      // real push against a real private remote produced a PR body with a
+      // broken image link -- confirmed via a direct curl returning 404). The
+      // fix has to know the repo is private BEFORE building the PR body, not
+      // just at PR-open time.
+      const remoteName = 'test-remote-new-preview-png-private';
+      await registerAndClone(remoteName, fixtureRemoteDir);
+
+      const payloadDir = fs.mkdtempSync(path.join(scratchRoot, 'new-ui-component-payload-private-'));
+      fs.writeFileSync(
+        path.join(payloadDir, 'Badge.tsx'),
+        `export interface BadgeProps {\n  label: string;\n}\n\nexport function Badge({ label }: BadgeProps) {\n  return <span>{label}</span>;\n}\n`,
+        'utf-8',
+      );
+      fs.writeFileSync(
+        path.join(payloadDir, 'preview.tsx'),
+        `import { Badge } from './Badge';\n\nexport const Default = () => <Badge label="New" />;\n`,
+        'utf-8',
+      );
+
+      const octokit = makeFakeOctokit(true); // isPrivate: true
+      const newId = 'test-badge-new-private';
+      const result = await pushArtifact(
+        newId,
+        {
+          remote: remoteName,
+          isNew: true,
+          payloadPath: payloadDir,
+          kind: 'ui-component',
+          owner: 'test-team',
+          description: 'A brand-new badge component (private repo)',
+        },
+        newScratchCwd('new-preview-png-private'),
+        octokit,
+      );
+
+      // preview.png is still generated and committed -- privacy only
+      // affects whether it can be EMBEDDED inline, not whether it exists.
+      const fixtureGit = simpleGit(fixtureRemoteDir);
+      const lsTree = await fixtureGit.raw([
+        'ls-tree', '-r', '--name-only', result.branch, `artifacts/${newId}/payload`,
+      ]);
+      expect(lsTree).toContain('preview.png');
+
+      const call = octokit.rest.pulls.create.mock.calls[0][0];
+      expect(call.body).toContain('### Preview');
+      expect(call.body).not.toContain('raw.githubusercontent.com');
+      expect(call.body).toContain(`artifacts/${newId}/payload/preview.png`);
+      expect(call.body).toContain('Files changed');
+    },
+    60_000,
+  );
+
+  it(
     'metadataEdit mode: edits description/roles/stacks without touching the payload, and only commits manifest.yaml',
     async () => {
       const remoteName = 'test-remote-metadata-edit';
@@ -153,7 +537,7 @@ describe('push e2e', () => {
 
       const artifact = TEST_ARTIFACTS.find((a) => !a.hasPostInstall && a.id === 'welcome-template')!;
       const cwd = newScratchCwd('metadata-edit');
-      pullArtifact(artifact.id, remoteName, cwd);
+      await pullArtifact(artifact.id, remoteName, cwd);
       // No local edits made at all -- a metadataEdit push must not require
       // (or even look at) any payload diff.
 
@@ -205,7 +589,7 @@ describe('push e2e', () => {
 
       const artifact = TEST_ARTIFACTS.find((a) => !a.hasPostInstall && a.id === 'welcome-template')!;
       const cwd = newScratchCwd('metadata-edit-noop');
-      pullArtifact(artifact.id, remoteName, cwd);
+      await pullArtifact(artifact.id, remoteName, cwd);
 
       await expect(
         pushArtifact(artifact.id, { metadataEdit: { description: 'Test artifact of kind template' } }, cwd, makeFakeOctokit()),
@@ -461,7 +845,7 @@ describe('push e2e', () => {
       await fetchAndReset(cachePath(remoteName));
 
       const pullCwd = newScratchCwd('propose-new-file-install-target-pull');
-      const pullResult = pullArtifact(id, remoteName, pullCwd);
+      const pullResult = await pullArtifact(id, remoteName, pullCwd);
 
       const installedPath = pullResult.installTarget;
       expect(fs.existsSync(installedPath)).toBe(true);
@@ -481,7 +865,7 @@ describe('push e2e', () => {
 
       const artifact = TEST_ARTIFACTS.find((a) => a.id === 'lint-config')!;
       const cwd = newScratchCwd('nochanges');
-      pullArtifact(artifact.id, remoteName, cwd);
+      await pullArtifact(artifact.id, remoteName, cwd);
       // Deliberately no edit made.
 
       const branchesBefore = (await simpleGit(fixtureRemoteDir).branch(['-a'])).all;
@@ -533,7 +917,7 @@ describe('push e2e', () => {
       // default branch.
       const artifactA = TEST_ARTIFACTS.find((a) => a.id === 'welcome-template')!;
       const cwdA = newScratchCwd('contamination-a');
-      pullArtifact(artifactA.id, remoteName, cwdA);
+      await pullArtifact(artifactA.id, remoteName, cwdA);
       fs.writeFileSync(
         path.join(cwdA, artifactA.installTarget, 'README.md'),
         '# welcome-template\n\nartifact A local edit.\n',

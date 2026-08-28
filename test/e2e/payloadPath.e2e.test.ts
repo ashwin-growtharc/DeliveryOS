@@ -53,7 +53,7 @@ function makeFakeOctokit(): FakeOctokit {
 }
 
 async function registerAndClone(name: string, fixtureRemoteDir: string): Promise<void> {
-  addRemoteEntry({ name, url: FAKE_GITHUB_URL, addedAt: new Date().toISOString() });
+  await addRemoteEntry({ name, url: FAKE_GITHUB_URL, addedAt: new Date().toISOString() });
   await cloneRemote(name, fixtureRemoteDir);
 }
 
@@ -93,7 +93,7 @@ describe('payload_path e2e', () => {
       await registerAndClone(remoteName, fixtureRemoteDir);
 
       const cwd = newScratchCwd('payloadpath-pull');
-      const result = pullArtifact(PAYLOAD_PATH_ARTIFACT.id, remoteName, cwd);
+      const result = await pullArtifact(PAYLOAD_PATH_ARTIFACT.id, remoteName, cwd);
 
       expect(result.manifest.payload_path).toBe(PAYLOAD_PATH_ARTIFACT.payloadPath);
 
@@ -135,7 +135,7 @@ describe('payload_path e2e', () => {
       expect(defaultBranch).toBeTruthy();
 
       const cwd = newScratchCwd('payloadpath-push');
-      pullArtifact(PAYLOAD_PATH_ARTIFACT.id, remoteName, cwd);
+      await pullArtifact(PAYLOAD_PATH_ARTIFACT.id, remoteName, cwd);
 
       const installTarget = path.resolve(cwd, PAYLOAD_PATH_ARTIFACT.installTarget);
       const editedContent = '# real file\n\nEDITED locally via DeliveryOS.\n';
@@ -160,7 +160,14 @@ describe('payload_path e2e', () => {
       ]);
       const diffFiles = diffOutput.split('\n').map((line) => line.trim()).filter(Boolean);
 
-      expect(diffFiles).toEqual([PAYLOAD_PATH_ARTIFACT.payloadPath]);
+      // Phase E: edit-mode push now always bumps + commits manifest.yaml
+      // alongside the payload diff (previously it never touched
+      // manifest.yaml at all -- see push.ts's own doc comment on
+      // PushOptions.bump) -- so the real payload_path file is no longer
+      // the ONLY changed path, just still the only PAYLOAD path.
+      expect(diffFiles.sort()).toEqual(
+        [`artifacts/${PAYLOAD_PATH_ARTIFACT.id}/manifest.yaml`, PAYLOAD_PATH_ARTIFACT.payloadPath].sort(),
+      );
       expect(
         diffFiles.some((f) => f.startsWith(`artifacts/${PAYLOAD_PATH_ARTIFACT.id}/payload/`)),
       ).toBe(false);

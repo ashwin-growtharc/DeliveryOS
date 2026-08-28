@@ -5,7 +5,15 @@ import * as path from 'path';
 import { spawn, ChildProcess } from 'child_process';
 import * as readline from 'readline';
 import simpleGit from 'simple-git';
-import { createTestRemote, teardownTestRemote, TEST_ARTIFACTS } from '../fixtures/testRemote';
+import {
+  createTestRemote,
+  createTestRemoteWithInstallParamsArtifact,
+  createTestRemoteWithSignedArtifact,
+  teardownTestRemote,
+  TEST_ARTIFACTS,
+  INSTALL_PARAMS_ARTIFACT,
+  SIGNED_ARTIFACT,
+} from '../fixtures/testRemote';
 import { addRemoteEntry } from '../../src/engine/remote/remoteRegistry';
 import { cloneRemote, cachePath } from '../../src/engine/remote/remoteCache';
 
@@ -524,7 +532,7 @@ describe('sidecar e2e', () => {
       // sidecar subprocess.
       const remoteName = 'sidecar-remote-push-wall';
       const fakeGithubUrl = 'https://github.com/deliveryos-qa-fake-owner/deliveryos-qa-fake-repo.git';
-      addRemoteEntry({ name: remoteName, url: fakeGithubUrl, addedAt: new Date().toISOString() });
+      await addRemoteEntry({ name: remoteName, url: fakeGithubUrl, addedAt: new Date().toISOString() });
       await cloneRemote(remoteName, fixtureRemoteDir);
 
       const cwd = newScratchCwd('push-wall');
@@ -577,7 +585,8 @@ describe('sidecar e2e', () => {
 
   it(
     'artifact.pull emits progress stages in order (resolve, copy, post_install, snapshot, '
-      + 'lockfile) before the final response, and the final response shape is untouched',
+      + 'install-params, lockfile) before the final response, and the final response shape '
+      + 'is untouched',
     async () => {
       const cwd = newScratchCwd('pull-progress');
       const session = new SidecarSession(cwd, deliveryOsHome);
@@ -603,9 +612,11 @@ describe('sidecar e2e', () => {
         const progressLines = session.takeProgressLines();
         expect(progressLines.map((p) => p.stage)).toEqual([
           'resolve',
+          'verify',
           'copy',
           'post_install',
           'snapshot',
+          'install-params',
           'lockfile',
         ]);
         for (const line of progressLines) {
@@ -648,7 +659,7 @@ describe('sidecar e2e', () => {
         expect(pullResp.ok).toBe(true);
 
         const stages = session.takeProgressLines().map((p) => p.stage);
-        expect(stages).toEqual(['resolve', 'copy', 'snapshot', 'lockfile']);
+        expect(stages).toEqual(['resolve', 'verify', 'copy', 'snapshot', 'install-params', 'lockfile']);
       } finally {
         await session.close();
       }
@@ -667,7 +678,7 @@ describe('sidecar e2e', () => {
       const remoteName = 'sidecar-remote-push-progress';
       const fakeGithubUrl =
         'https://github.com/deliveryos-qa-fake-owner/deliveryos-qa-fake-repo-progress.git';
-      addRemoteEntry({ name: remoteName, url: fakeGithubUrl, addedAt: new Date().toISOString() });
+      await addRemoteEntry({ name: remoteName, url: fakeGithubUrl, addedAt: new Date().toISOString() });
       await cloneRemote(remoteName, fixtureRemoteDir);
 
       const cwd = newScratchCwd('push-progress');
@@ -814,6 +825,338 @@ describe('sidecar e2e', () => {
         expect(progressLines.some((line) => line.stage === 'fetch')).toBe(true);
       } finally {
         await session.close();
+      }
+    },
+    30_000,
+  );
+
+  it(
+    'artifact.pull applies values passed as "values", and artifact.applyInstallParams configures the rest afterward without a re-pull',
+    async () => {
+      const installParamsRemoteDir = await createTestRemoteWithInstallParamsArtifact();
+      const cwd = newScratchCwd('install-params');
+      const session = new SidecarSession(cwd, deliveryOsHome);
+      try {
+        const addResp = await session.request('remote.add', {
+          url: installParamsRemoteDir,
+          name: 'sidecar-remote-install-params',
+        });
+        expect(addResp.ok).toBe(true);
+
+        // AUTH_URL is deliberately omitted here -- its manifest-declared
+        // default should apply on its own, exercising the same
+        // provided-value-wins-over-default rule both artifact.pull and
+        // artifact.applyInstallParams share via resolveInstallParamValues.
+        const pullResp = await session.request('artifact.pull', {
+          id: INSTALL_PARAMS_ARTIFACT.id,
+          remote: 'sidecar-remote-install-params',
+          cwd,
+          values: { AUTH_SECRET: 'from-pull' },
+        });
+        expect(pullResp.ok).toBe(true);
+        expect((pullResp.result as { missingRequiredParams: string[] }).missingRequiredParams)
+          .toEqual(['DATABASE_URL']);
+
+        let envContent = fs.readFileSync(path.join(cwd, '.env.local'), 'utf-8');
+        expect(envContent).toContain('AUTH_SECRET=from-pull');
+        expect(envContent).toContain('AUTH_URL=http://localhost:3000');
+        expect(envContent).not.toContain('DATABASE_URL');
+
+        // Now configure the still-missing value WITHOUT a re-pull -- the
+        // real point of this command existing at all (going back later to
+        // fix one value, from Detail, after already having pulled).
+        const applyResp = await session.request('artifact.applyInstallParams', {
+          id: INSTALL_PARAMS_ARTIFACT.id,
+          remote: 'sidecar-remote-install-params',
+          cwd,
+          values: { DATABASE_URL: 'postgres://from-apply' },
+        });
+        expect(applyResp.ok).toBe(true);
+        expect((applyResp.result as { missingRequiredParams: string[] }).missingRequiredParams)
+          .toEqual([]);
+
+        envContent = fs.readFileSync(path.join(cwd, '.env.local'), 'utf-8');
+        expect(envContent).toContain('DATABASE_URL=postgres://from-apply');
+        // The earlier values must survive untouched -- applyInstallParams
+        // only ever updates the keys it was actually given.
+        expect(envContent).toContain('AUTH_SECRET=from-pull');
+      } finally {
+        await session.close();
+        await teardownTestRemote(installParamsRemoteDir);
+      }
+    },
+    30_000,
+  );
+
+  it(
+    'artifact.readInstallParamValues returns only the REAL values already sitting in .env.local for THIS artifact\'s own declared install_params, never leaking an unrelated key or a manifest default that was never actually written',
+    async () => {
+      const installParamsRemoteDir = await createTestRemoteWithInstallParamsArtifact();
+      const cwd = newScratchCwd('read-install-param-values');
+      const session = new SidecarSession(cwd, deliveryOsHome);
+      try {
+        const addResp = await session.request('remote.add', {
+          url: installParamsRemoteDir,
+          name: 'sidecar-remote-read-install-params',
+        });
+        expect(addResp.ok).toBe(true);
+
+        // AUTH_SECRET provided this call; AUTH_URL takes its manifest
+        // default and gets persisted for real; DATABASE_URL stays
+        // genuinely unset (no value provided, no default declared).
+        const pullResp = await session.request('artifact.pull', {
+          id: INSTALL_PARAMS_ARTIFACT.id,
+          remote: 'sidecar-remote-read-install-params',
+          cwd,
+          values: { AUTH_SECRET: 'from-pull' },
+        });
+        expect(pullResp.ok).toBe(true);
+
+        // A key some OTHER artifact's own config wrote into the same
+        // project-root .env.local -- must never come back out of this
+        // call, since it isn't one of THIS manifest's own install_params.
+        fs.appendFileSync(path.join(cwd, '.env.local'), 'UNRELATED_OTHER_ARTIFACT_KEY=should-not-leak\n');
+
+        const readResp = await session.request('artifact.readInstallParamValues', {
+          id: INSTALL_PARAMS_ARTIFACT.id,
+          remote: 'sidecar-remote-read-install-params',
+          cwd,
+        });
+        expect(readResp.ok).toBe(true);
+        expect((readResp.result as { values: Record<string, string> }).values).toEqual({
+          AUTH_SECRET: 'from-pull',
+          AUTH_URL: 'http://localhost:3000',
+        });
+
+        // Configure the still-missing value without a re-pull -- the exact
+        // scenario this command exists for (Detail's Configuration tab
+        // pre-filling from a real value a PRIOR visit already saved).
+        const applyResp = await session.request('artifact.applyInstallParams', {
+          id: INSTALL_PARAMS_ARTIFACT.id,
+          remote: 'sidecar-remote-read-install-params',
+          cwd,
+          values: { DATABASE_URL: 'postgres://from-apply' },
+        });
+        expect(applyResp.ok).toBe(true);
+
+        const readResp2 = await session.request('artifact.readInstallParamValues', {
+          id: INSTALL_PARAMS_ARTIFACT.id,
+          remote: 'sidecar-remote-read-install-params',
+          cwd,
+        });
+        expect(readResp2.ok).toBe(true);
+        expect((readResp2.result as { values: Record<string, string> }).values).toEqual({
+          AUTH_SECRET: 'from-pull',
+          AUTH_URL: 'http://localhost:3000',
+          DATABASE_URL: 'postgres://from-apply',
+        });
+      } finally {
+        await session.close();
+        await teardownTestRemote(installParamsRemoteDir);
+      }
+    },
+    30_000,
+  );
+
+  it(
+    'artifact.readPayloadFile reads a real file out of an artifact\'s payload, and returns undefined (not an error) for one that doesn\'t exist',
+    async () => {
+      const cwd = newScratchCwd('read-payload-file');
+      const session = new SidecarSession(cwd, deliveryOsHome);
+      try {
+        const remoteName = 'sidecar-remote-read-payload';
+        const addResp = await session.request('remote.add', { url: fixtureRemoteDir, name: remoteName });
+        expect(addResp.ok).toBe(true);
+
+        const artifact = TEST_ARTIFACTS[0];
+        const readResp = await session.request('artifact.readPayloadFile', {
+          remote: remoteName,
+          id: artifact.id,
+          path: 'README.md',
+        });
+        expect(readResp.ok).toBe(true);
+        expect((readResp.result as { content?: string }).content).toContain(`# ${artifact.id}`);
+
+        const missingResp = await session.request('artifact.readPayloadFile', {
+          remote: remoteName,
+          id: artifact.id,
+          path: 'no-such-file.md',
+        });
+        expect(missingResp.ok).toBe(true);
+        expect((missingResp.result as { content?: string }).content).toBeUndefined();
+
+        // Real security boundary, not just a nicety -- a path-traversal
+        // attempt must be refused outright, the same discipline compile.ts's
+        // own import sandboxing already established for preview.tsx.
+        const escapeResp = await session.request('artifact.readPayloadFile', {
+          remote: remoteName,
+          id: artifact.id,
+          path: '../../../../package.json',
+        });
+        expect(escapeResp.ok).toBe(false);
+        expect(escapeResp.error?.message).toContain('outside');
+      } finally {
+        await session.close();
+      }
+    },
+    30_000,
+  );
+
+  it(
+    'artifact.resolveWiringActions resolves against the real project at cwd, absent vs. present, with no file ever written',
+    async () => {
+      const wiringRemoteDir = await createTestRemoteWithInstallParamsArtifact();
+      const cwd = newScratchCwd('resolve-wiring-actions');
+      const session = new SidecarSession(cwd, deliveryOsHome);
+      try {
+        const remoteName = 'sidecar-remote-wiring';
+        const addResp = await session.request('remote.add', { url: wiringRemoteDir, name: remoteName });
+        expect(addResp.ok).toBe(true);
+
+        // Neither auth.ts nor middleware.ts exists yet in this fresh
+        // project -- both actions should resolve to their whenAbsent
+        // variant.
+        const beforeResp = await session.request('artifact.resolveWiringActions', {
+          id: INSTALL_PARAMS_ARTIFACT.id,
+          remote: remoteName,
+          cwd,
+        });
+        expect(beforeResp.ok).toBe(true);
+        const before = beforeResp.result as Array<{
+          targetFile: string; targetFileExists: boolean; snippet?: string; instructions: string;
+        }>;
+        expect(before).toHaveLength(2);
+        const authAction = before.find((a) => a.targetFile === 'auth.ts')!;
+        expect(authAction.targetFileExists).toBe(false);
+        expect(authAction.snippet).toContain('NextAuth');
+        const middlewareAction = before.find((a) => a.targetFile === 'middleware.ts')!;
+        expect(middlewareAction.targetFileExists).toBe(false);
+        expect(middlewareAction.snippet).toContain('auth as middleware');
+
+        // Now seed a real middleware.ts in the project -- re-resolving
+        // must flip that ONE action to its whenPresent variant (merge
+        // guidance instructions, no whenPresent.snippet of its own) while
+        // auth.ts's own resolution is unaffected.
+        fs.writeFileSync(path.join(cwd, 'middleware.ts'), 'export default function middleware() {}', 'utf-8');
+
+        const afterResp = await session.request('artifact.resolveWiringActions', {
+          id: INSTALL_PARAMS_ARTIFACT.id,
+          remote: remoteName,
+          cwd,
+        });
+        expect(afterResp.ok).toBe(true);
+        const after = afterResp.result as Array<{
+          targetFile: string; targetFileExists: boolean; snippet?: string;
+          snippetIsFullFileReference?: boolean; instructions: string;
+        }>;
+        const authAfter = after.find((a) => a.targetFile === 'auth.ts')!;
+        expect(authAfter.targetFileExists).toBe(false);
+        const middlewareAfter = after.find((a) => a.targetFile === 'middleware.ts')!;
+        expect(middlewareAfter.targetFileExists).toBe(true);
+        // whenPresent declared no snippet of its own, so this falls back to
+        // whenAbsent's own canonical content -- a real reference for "Merge
+        // with Claude" to work from, not an absent value (see wiring.ts's
+        // own ResolvedWiringAction.snippet doc comment for why). Flagged
+        // via snippetIsFullFileReference so it's never mislabeled to the
+        // model as author-written merge guidance (see requestWiringMerge.ts).
+        expect(middlewareAfter.snippet).toContain('auth as middleware');
+        expect(middlewareAfter.snippetIsFullFileReference).toBe(true);
+        expect(middlewareAfter.instructions).toContain('Merge');
+
+        // Purely read-only -- resolving never creates/modifies auth.ts,
+        // and the middleware.ts we seeded by hand is untouched.
+        expect(fs.existsSync(path.join(cwd, 'auth.ts'))).toBe(false);
+        expect(fs.readFileSync(path.join(cwd, 'middleware.ts'), 'utf-8'))
+          .toBe('export default function middleware() {}');
+      } finally {
+        await session.close();
+        await teardownTestRemote(wiringRemoteDir);
+      }
+    },
+    30_000,
+  );
+
+  it(
+    'artifact.pullAndAutoWire (Phase 10 item 1) applies whenAbsent actions for real, leaves an existing file alone, and reports a build result',
+    async () => {
+      const remoteDir = await createTestRemoteWithInstallParamsArtifact();
+      const cwd = newScratchCwd('pull-and-auto-wire');
+      const session = new SidecarSession(cwd, deliveryOsHome);
+      try {
+        const remoteName = 'sidecar-remote-auto-wire';
+        const addResp = await session.request('remote.add', { url: remoteDir, name: remoteName });
+        expect(addResp.ok).toBe(true);
+
+        // Seed middleware.ts by hand first -- INSTALL_PARAMS_ARTIFACT
+        // declares whenPresent for this one, so it must be left
+        // completely untouched; auth.ts has no whenPresent, so it must
+        // get auto-created.
+        fs.writeFileSync(path.join(cwd, 'middleware.ts'), 'export default function middleware() {}', 'utf-8');
+        // A real, passing build command -- proves the "-and-test" half
+        // for real, not just that wiring got applied.
+        fs.writeFileSync(
+          path.join(cwd, 'package.json'),
+          JSON.stringify({ name: 'x', scripts: { build: 'node -e "console.log(1)"' } }),
+          'utf-8',
+        );
+
+        const resp = await session.request('artifact.pullAndAutoWire', {
+          id: INSTALL_PARAMS_ARTIFACT.id,
+          remote: remoteName,
+          cwd,
+          values: { AUTH_SECRET: 'x', DATABASE_URL: 'postgres://x' },
+        });
+
+        expect(resp.ok).toBe(true);
+        const result = resp.result as {
+          pullResult: { manifest: { id: string } };
+          wiring: { applied: string[]; needsReview: string[] };
+          build: { ran: boolean; command?: string; success?: boolean };
+        };
+        expect(result.pullResult.manifest.id).toBe(INSTALL_PARAMS_ARTIFACT.id);
+        expect(result.wiring.applied).toEqual(['auth.ts']);
+        expect(result.wiring.needsReview).toEqual(['middleware.ts']);
+        expect(result.build).toEqual({ ran: true, command: 'npm run build', success: true, output: expect.any(String) });
+
+        // Real, on-disk proof, not just the returned result.
+        expect(fs.existsSync(path.join(cwd, 'auth.ts'))).toBe(true);
+        expect(fs.readFileSync(path.join(cwd, 'middleware.ts'), 'utf-8'))
+          .toBe('export default function middleware() {}');
+      } finally {
+        await session.close();
+        await teardownTestRemote(remoteDir);
+      }
+    },
+    30_000,
+  );
+
+  it(
+    'artifact.pull refuses via the sidecar too (ok: false, real error surfaced), before any files are written, when a declared signature has no bundle on disk',
+    async () => {
+      const signedRemoteDir = await createTestRemoteWithSignedArtifact({
+        contentDigestMatchesPayload: true,
+        includeSignatureBundle: false,
+      });
+      const cwd = newScratchCwd('signed-nobundle');
+      const session = new SidecarSession(cwd, deliveryOsHome);
+      try {
+        const remoteName = 'sidecar-remote-signed-nobundle';
+        const addResp = await session.request('remote.add', { url: signedRemoteDir, name: remoteName });
+        expect(addResp.ok).toBe(true);
+
+        const pullResp = await session.request('artifact.pull', {
+          id: SIGNED_ARTIFACT.id,
+          remote: remoteName,
+          cwd,
+        });
+
+        expect(pullResp.ok).toBe(false);
+        expect(pullResp.error?.type).toBe('SignatureVerificationError');
+        expect(pullResp.error?.message).toContain('no signature bundle was found');
+        expect(fs.existsSync(path.join(cwd, SIGNED_ARTIFACT.installTarget))).toBe(false);
+      } finally {
+        await session.close();
+        await teardownTestRemote(signedRemoteDir);
       }
     },
     30_000,

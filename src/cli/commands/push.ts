@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import { pushArtifact, PushOptions } from '../../engine/push/push';
+import { VersionBumpKind, parseBumpKind as parseSharedBumpKind } from '../../engine/manifest/version';
 
 /** Splits a comma-separated --roles/--teams/--stacks flag into trimmed,
  * lowercased values -- lowercased so "python" and "Python" pushed on
@@ -28,7 +29,27 @@ export interface PushCommandFlags {
   roles?: string;
   teams?: string;
   stacks?: string;
+  componentTypes?: string;
   postInstall?: string;
+  bump?: string;
+}
+
+/** Thin CLI wrapper over the shared `parseBumpKind` (version.ts) -- same
+ * validation the sidecar's `artifact.push` handler now also runs, just
+ * re-worded here with the `--bump` flag name Commander users actually
+ * typed, since the shared function's own message (reused by both callers)
+ * can't assume it was reached via a CLI flag at all. Commander has no
+ * built-in enum-option validation, so an invalid value (a typo, e.g.
+ * `--bump pathc`) would otherwise silently fall through to `pushArtifact`'s
+ * own `options.bump ?? 'patch'` default as a plain string. Fails loudly
+ * here instead, before any network/git work starts. */
+function parseBumpKind(value?: string): VersionBumpKind | undefined {
+  try {
+    return parseSharedBumpKind(value);
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    throw new Error(`--${detail}`);
+  }
 }
 
 /** Maps raw commander flags onto the engine's PushOptions shape. Validation
@@ -46,8 +67,9 @@ export function toPushOptions(flags: PushCommandFlags): PushOptions {
   const roles = parseList(flags.roles);
   const teams = parseList(flags.teams);
   const stacks = parseList(flags.stacks);
+  const componentTypes = parseList(flags.componentTypes);
   const hasMetadataEdit =
-    !isNew && (flags.description !== undefined || roles !== undefined || teams !== undefined || stacks !== undefined);
+    !isNew && (flags.description !== undefined || roles !== undefined || teams !== undefined || stacks !== undefined || componentTypes !== undefined);
 
   return {
     remote: flags.remote,
@@ -62,10 +84,12 @@ export function toPushOptions(flags: PushCommandFlags): PushOptions {
     roles: isNew ? roles : undefined,
     teams: isNew ? teams : undefined,
     stacks: isNew ? stacks : undefined,
+    componentTypes: isNew ? componentTypes : undefined,
     postInstall: flags.postInstall,
     metadataEdit: hasMetadataEdit
-      ? { description: flags.description, roles, teams, stacks }
+      ? { description: flags.description, roles, teams, stacks, componentTypes }
       : undefined,
+    bump: parseBumpKind(flags.bump),
   };
 }
 
@@ -108,9 +132,21 @@ export function registerPushCommand(program: Command): void {
         + 'an already-tracked artifact\'s stacks tag.',
     )
     .option(
+      '--component-types <list>',
+      'Comma-separated component-category tag (e.g. "button,card"), for kind: ui-component '
+        + 'artifacts. With --new, seeds the new manifest; without --new, edits an '
+        + 'already-tracked artifact\'s componentTypes tag.',
+    )
+    .option(
       '--post-install <cmd>',
       'Shell command to run in install_target after a pull (--new only; e.g. "npm install", '
         + '"pip install -e \\".[dev]\\""). Omit if the project needs no setup step.',
+    )
+    .option(
+      '--bump <patch|minor|major>',
+      'Size of the version bump for a payload edit push (--new/metadata-only edits ignore '
+        + 'this entirely). Defaults to "patch" -- a real payload change always bumps the '
+        + 'version, this only lets you choose a bigger bump than the default.',
     )
     .action(async (id: string, flags: PushCommandFlags) => {
       const options = toPushOptions(flags);
