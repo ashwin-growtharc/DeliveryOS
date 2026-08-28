@@ -75,6 +75,30 @@ describe('checkSourceDrift', () => {
     expect(results[0].status).toBe('source-missing');
   });
 
+  it('treats a sourcePath that escapes sourceRoot as source-missing rather than reading the real outside file -- a real containment gap found via review', () => {
+    // A real file that genuinely exists OUTSIDE sourceRoot -- if the
+    // containment check weren't there, path.join would happily resolve
+    // "../secret.txt" straight to it and hash its real content.
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'deliveryos-check-drift-outside-'));
+    const secretFile = path.join(outsideDir, 'secret.txt');
+    fs.writeFileSync(secretFile, 'not meant to be read by this artifact');
+
+    try {
+      writeSourcesFile(payloadDir, 'kortix-ai/suna -- apps/web', [
+        {
+          payloadPath: 'components/Evil/Evil.tsx',
+          sourcePath: path.relative(sourceRoot, secretFile),
+          sourceAbsolutePath: secretFile,
+        },
+      ]);
+
+      const results = checkSourceDrift(payloadDir, sourceRoot);
+      expect(results[0].status).toBe('source-missing');
+    } finally {
+      fs.rmSync(outsideDir, { recursive: true, force: true });
+    }
+  });
+
   it('checks each entry independently across a mix of statuses', () => {
     const unchangedFile = path.join(sourceRoot, 'unchanged.tsx');
     const driftedFile = path.join(sourceRoot, 'drifted.tsx');

@@ -1,14 +1,14 @@
 import * as fs from 'fs';
-import * as path from 'path';
 import { readLockfile, upsertEntry } from '../lockfile/lockfile';
 import { findRemote } from '../remote/remoteRegistry';
 import { cachePath } from '../remote/remoteCache';
 import { fetchAndReset } from '../git/git';
 import { buildCatalog } from '../catalog/catalog';
 import { ProgressCallback } from '../pull/pull';
-import { pristinePath } from '../paths';
+import { pristinePath, resolveContainedPath } from '../paths';
 import { parseGithubUrl, getPullRequestStatus, createOctokit, GithubClient } from '../github/github';
 import { getGithubToken } from '../github/githubAuth';
+import { ManifestValidationError } from '../errors';
 
 /** One artifact whose registered remote currently has a newer version than
  * what's recorded in the cwd-scoped lockfile. */
@@ -175,16 +175,31 @@ export async function resolvePendingPushes(
         (candidate) => candidate.manifest.id === entry.id && candidate.remoteName === entry.remote,
       );
       if (match) {
-        const installTarget = path.resolve(cwd, match.manifest.install_target);
+        // install_target is untrusted manifest input -- same containment
+        // check pull.ts itself applies before ever resolving it, since a
+        // freshly-fetched remote's manifest could have changed this field
+        // to something that escapes cwd since it was first pulled.
+        const installTarget = resolveContainedPath(cwd, match.manifest.install_target);
+        if (!installTarget) {
+          throw new ManifestValidationError(
+            `Artifact "${entry.id}"'s install_target ("${match.manifest.install_target}") resolves `
+              + `outside the project -- refusing to resync after merge.`,
+          );
+        }
         const pristineTarget = pristinePath(cwd, entry.id);
         if (fs.existsSync(pristineTarget)) {
           fs.rmSync(pristineTarget, { recursive: true, force: true });
         }
         fs.cpSync(installTarget, pristineTarget, { recursive: true });
+        // Spreads the existing entry first (not a bare {id, version,
+        // remote}) so installTarget/wiredFiles survive a merge -- a real,
+        // confirmed bug: the closed-PR branch 3 lines below already spreads
+        // `...entry`, but this branch didn't, silently dropping both fields
+        // the moment a pushed edit's PR got merged.
         await upsertEntry(cwd, {
-          id: entry.id,
+          ...entry,
           version: match.manifest.version,
-          remote: entry.remote,
+          pendingPr: undefined,
         });
       }
     } else if (status.state === 'closed') {

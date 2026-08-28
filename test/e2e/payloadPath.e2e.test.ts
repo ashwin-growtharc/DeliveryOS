@@ -53,7 +53,7 @@ function makeFakeOctokit(): FakeOctokit {
 }
 
 async function registerAndClone(name: string, fixtureRemoteDir: string): Promise<void> {
-  addRemoteEntry({ name, url: FAKE_GITHUB_URL, addedAt: new Date().toISOString() });
+  await addRemoteEntry({ name, url: FAKE_GITHUB_URL, addedAt: new Date().toISOString() });
   await cloneRemote(name, fixtureRemoteDir);
 }
 

@@ -7,6 +7,25 @@
  */
 export type VersionBumpKind = 'patch' | 'minor' | 'major';
 
+const VALID_BUMP_KINDS: readonly VersionBumpKind[] = ['patch', 'minor', 'major'];
+
+/** Validates a raw `--bump`/RPC-arg string against the real
+ * `VersionBumpKind` union -- shared by the CLI's `push` command and the
+ * sidecar's `artifact.push` handler so both fail the same way on a typo
+ * (e.g. `--bump pathc`) instead of the sidecar silently letting a bad
+ * value fall all the way through to `bumpVersion`'s own runtime guard,
+ * surfacing many calls later as an unrelated `"version: Required"` schema
+ * error once the resulting `undefined` version fails manifest validation. */
+export function parseBumpKind(value?: string): VersionBumpKind | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!VALID_BUMP_KINDS.includes(value as VersionBumpKind)) {
+    throw new Error(`bump must be one of ${VALID_BUMP_KINDS.join(', ')} (got "${value}")`);
+  }
+  return value as VersionBumpKind;
+}
+
 /**
  * Advances a manifest `version` string (already known to match
  * `ManifestSchema`'s strict `/^\d+\.\d+\.\d+$/` regex -- see that schema's
@@ -39,5 +58,15 @@ export function bumpVersion(current: string, kind: VersionBumpKind): string {
       return `${major}.${minor + 1}.0`;
     case 'patch':
       return `${major}.${minor}.${patch + 1}`;
+    default:
+      // TypeScript's own exhaustiveness check considers this unreachable
+      // for a genuinely-VersionBumpKind-typed `kind` -- but the sidecar's
+      // `artifact.push` handler casts `args.options` without validating it
+      // first (unlike the CLI's own `parseBumpKind`), so a bad value from
+      // there reaches this function as a plain string at runtime. Failing
+      // loud here with a clear message beats silently returning `undefined`,
+      // which used to surface many calls later as an unrelated
+      // "version: Required" schema error.
+      throw new Error(`bumpVersion: "${kind}" is not a valid bump kind (expected patch, minor, or major)`);
   }
 }

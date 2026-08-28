@@ -88,7 +88,7 @@ describe('push CLI flags e2e', () => {
     '`push <id> --new --artifact-version <semver>` (parsed via the real Commander program) sets the committed manifest\'s version, with no silent no-op',
     async () => {
       const remoteName = 'test-remote-cli-flags';
-      addRemoteEntry({ name: remoteName, url: FAKE_GITHUB_URL, addedAt: new Date().toISOString() });
+      await addRemoteEntry({ name: remoteName, url: FAKE_GITHUB_URL, addedAt: new Date().toISOString() });
       await cloneRemote(remoteName, fixtureRemoteDir);
 
       const id = 'cli-flag-artifact';
@@ -147,7 +147,7 @@ describe('push CLI flags e2e', () => {
     '`push <id> --new --post-install <cmd>` sets the committed manifest\'s post_install field',
     async () => {
       const remoteName = 'test-remote-cli-flags-postinstall';
-      addRemoteEntry({ name: remoteName, url: FAKE_GITHUB_URL, addedAt: new Date().toISOString() });
+      await addRemoteEntry({ name: remoteName, url: FAKE_GITHUB_URL, addedAt: new Date().toISOString() });
       await cloneRemote(remoteName, fixtureRemoteDir);
 
       const id = 'cli-flag-post-install-artifact';
@@ -200,7 +200,7 @@ describe('push CLI flags e2e', () => {
     'propose-new WITHOUT --post-install omits the field entirely (no empty/null post_install written)',
     async () => {
       const remoteName = 'test-remote-cli-flags-no-postinstall';
-      addRemoteEntry({ name: remoteName, url: FAKE_GITHUB_URL, addedAt: new Date().toISOString() });
+      await addRemoteEntry({ name: remoteName, url: FAKE_GITHUB_URL, addedAt: new Date().toISOString() });
       await cloneRemote(remoteName, fixtureRemoteDir);
 
       const id = 'cli-flag-no-post-install-artifact';

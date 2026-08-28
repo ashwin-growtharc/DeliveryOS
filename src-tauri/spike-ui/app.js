@@ -5,13 +5,15 @@
 // triggers one is disabled with a "Working..." label for the duration.
 (function () {
   const call = window.DeliveryOS.call;
-  const { open: openDialog } = window.__TAURI__.dialog;
+  const { invoke } = window.__TAURI__.core;
+  const { open: openDialog, confirm: confirmDialog } = window.__TAURI__.dialog;
   const { revealItemInDir, openUrl } = window.__TAURI__.opener;
   const { listen } = window.__TAURI__.event;
   const { check } = window.__TAURI__.updater;
   const { relaunch } = window.__TAURI__.process;
 
   const PROJECT_DIR_KEY = 'deliveryos.projectDir';
+  const THEME_KEY = 'deliveryos.theme';
 
   // Display order + label for each of manifest.tags's own (plural) keys --
   // e.g. a `stacks: ['python']` tag shows under the "stack" category.
@@ -39,15 +41,36 @@
   // manifest schema, not a closed enum -- see ARCHITECTURE.md), so this is
   // a convenience lookup, not a whitelist: any kind not listed here falls
   // back to a neutral diamond glyph rather than a broken/missing icon.
+  // skill/command's fg used to be hardcoded hex (#8A5A2B / #2E5E82) --
+  // fine paired with sand-100/sky-100's own light-mode value, but those
+  // two tokens get a real DARK tint for dark mode (style.css's dark-mode
+  // blocks) while a fixed medium-brown/medium-blue text does not, dropping
+  // to ~2.2-2.5:1 contrast against the now-dark background (confirmed).
+  // --icon-fg-warm/--icon-fg-cool are the adaptive counterparts, defined
+  // alongside sand-100/sky-100 in style.css so the pairing stays legible
+  // in both themes. template/rust/javascript's fg stays hardcoded (below,
+  // and in STACK_ICON) since their bg (--gold-500) is a fixed, standalone
+  // saturated accent left unchanged across themes on purpose -- the fixed
+  // dark text pairs with it fine regardless of theme.
   const KIND_ICON = {
     agent: { icon: 'i-kind-agent', bg: 'var(--sage-100)', fg: 'var(--sage-700)' },
-    skill: { icon: 'i-kind-skill', bg: 'var(--sand-100)', fg: '#8A5A2B' },
-    command: { icon: 'i-kind-command', bg: 'var(--sky-100)', fg: '#2E5E82' },
+    skill: { icon: 'i-kind-skill', bg: 'var(--sand-100)', fg: 'var(--icon-fg-warm)' },
+    command: { icon: 'i-kind-command', bg: 'var(--sky-100)', fg: 'var(--icon-fg-cool)' },
     rule: { icon: 'i-kind-rule', bg: 'var(--sage-50)', fg: 'var(--primary-700)' },
     template: { icon: 'i-kind-template', bg: 'var(--gold-500)', fg: '#6B4A00' },
-    doc: { icon: 'i-kind-doc', bg: 'var(--surface-inset)', fg: 'var(--primary-700)' },
+    // A shade deeper than skill's own sand-100 -- stays in the same warm
+    // family (backend-plugin reads as "a utility kind," same spirit as
+    // skill) while remaining visually distinct at a glance, without
+    // introducing a new bg/fg token pair just for this one entry.
+    'backend-plugin': { icon: 'i-kind-backend-plugin', bg: 'var(--sand-200)', fg: 'var(--icon-fg-warm)' },
+    // Uses --ink (adaptive text), not --primary-700 (deliberately FIXED,
+    // brand-fill-only) -- surface-inset itself adapts to dark mode, and
+    // pairing it with fixed navy text has the exact same contrast problem
+    // skill/command's fg had, just via a token reference instead of a
+    // hardcoded hex.
+    doc: { icon: 'i-kind-doc', bg: 'var(--surface-inset)', fg: 'var(--ink)' },
   };
-  const KIND_ICON_FALLBACK = { icon: 'i-kind-default', bg: 'var(--surface-inset)', fg: 'var(--primary-700)' };
+  const KIND_ICON_FALLBACK = { icon: 'i-kind-default', bg: 'var(--surface-inset)', fg: 'var(--ink)' };
 
   /** Returns the inner HTML for a `.kind-swatch` element (a colored,
    * rounded icon tile) for `kind` -- append `' sm'`/`' lg'` to `sizeClass`
@@ -81,11 +104,11 @@
   // convenience, not an attempt to cover every possible value.
   const STACK_ICON = {
     python: { icon: 'i-lang-python', bg: 'var(--sage-100)', fg: 'var(--sage-700)' },
-    java: { icon: 'i-lang-java', bg: 'var(--sand-100)', fg: '#8A5A2B' },
+    java: { icon: 'i-lang-java', bg: 'var(--sand-100)', fg: 'var(--icon-fg-warm)' },
     rust: { icon: 'i-lang-rust', bg: 'var(--gold-500)', fg: '#6B4A00' },
-    typescript: { text: 'TS', bg: 'var(--sky-100)', fg: '#2E5E82' },
+    typescript: { text: 'TS', bg: 'var(--sky-100)', fg: 'var(--icon-fg-cool)' },
     javascript: { text: 'JS', bg: 'var(--gold-500)', fg: '#6B4A00' },
-    go: { text: 'Go', bg: 'var(--sky-100)', fg: '#2E5E82' },
+    go: { text: 'Go', bg: 'var(--sky-100)', fg: 'var(--icon-fg-cool)' },
     ruby: { text: 'Rb', bg: 'var(--danger-100)', fg: 'var(--danger-600)' },
   };
 
@@ -100,13 +123,13 @@
           : `<span class="tag-item-icon-text">${escapeHtml(entry.text)}</span>`;
         return { bg: entry.bg, fg: entry.fg, html };
       }
-      return { bg: 'var(--surface-inset)', fg: 'var(--primary-700)', html: '<svg><use href="#i-tag"/></svg>' };
+      return { bg: 'var(--surface-inset)', fg: 'var(--ink)', html: '<svg><use href="#i-tag"/></svg>' };
     }
     if (category === 'roles') {
       return { bg: 'var(--sage-100)', fg: 'var(--sage-700)', html: '<svg><use href="#i-role"/></svg>' };
     }
     // 'teams' (displayed as "project")
-    return { bg: 'var(--sky-100)', fg: '#2E5E82', html: '<svg><use href="#i-folder"/></svg>' };
+    return { bg: 'var(--sky-100)', fg: 'var(--icon-fg-cool)', html: '<svg><use href="#i-folder"/></svg>' };
   }
 
   const state = {
@@ -370,6 +393,10 @@
       renderTagsPage();
     } else if (view === 'ui-components') {
       renderUiComponentsPage();
+    } else if (view === 'starter-kits') {
+      renderStarterKitsPage();
+    } else if (view === 'backend-plugins') {
+      renderBackendPluginsPage();
     } else if (view === 'settings') {
       void loadRemotesForSettings();
     } else if (view === 'scan') {
@@ -762,6 +789,73 @@
     await bulkPull(pullable, btn, () => renderUiComponentsPage());
   }
 
+  // ---------- Starter Kits / Backend Plugins (single-kind sidebar pages) ----------
+  //
+  // Same idea as UI Components -- a sidebar shortcut into one kind of the
+  // catalog -- but neither `template` nor `backend-plugin` has a live-
+  // preview story or a sub-dimension worth its own tab row, so both share
+  // one plain-grid renderer instead of two more bespoke pages.
+
+  function visibleKindEntries(kind) {
+    return applyRemoteFilter(state.catalog.filter((entry) => entry.manifest.kind === kind));
+  }
+
+  /** Populates one kind-scoped page (count, grid, empty state, Pull all)
+   * from `ids`, an { noFolder, count, grid, empty, pullAllBtn } map of
+   * element ids -- see view-starter-kits/view-backend-plugins in
+   * index.html for the two real call sites. */
+  function renderKindListPage(kind, ids) {
+    $(ids.noFolder).hidden = Boolean(state.projectDir);
+
+    const entries = sortEntries(visibleKindEntries(kind));
+    $(ids.count).textContent = `${entries.length} artifact${entries.length === 1 ? '' : 's'}`;
+
+    const grid = $(ids.grid);
+    grid.innerHTML = '';
+    $(ids.empty).hidden = entries.length !== 0;
+
+    for (const entry of entries) {
+      grid.appendChild(buildResCard(entry));
+    }
+
+    renderPullAllButton($(ids.pullAllBtn), entries);
+  }
+
+  const STARTER_KITS_IDS = {
+    noFolder: 'starter-kits-no-folder',
+    count: 'starter-kits-count',
+    grid: 'starter-kits-grid',
+    empty: 'starter-kits-empty',
+    pullAllBtn: 'starter-kits-pull-all-btn',
+  };
+  const BACKEND_PLUGINS_IDS = {
+    noFolder: 'backend-plugins-no-folder',
+    count: 'backend-plugins-count',
+    grid: 'backend-plugins-grid',
+    empty: 'backend-plugins-empty',
+    pullAllBtn: 'backend-plugins-pull-all-btn',
+  };
+
+  function renderStarterKitsPage() {
+    renderKindListPage('template', STARTER_KITS_IDS);
+  }
+
+  function renderBackendPluginsPage() {
+    renderKindListPage('backend-plugin', BACKEND_PLUGINS_IDS);
+  }
+
+  async function handleStarterKitsPullAll() {
+    const btn = $(STARTER_KITS_IDS.pullAllBtn);
+    const pullable = visibleKindEntries('template').filter(isBulkPullable);
+    await bulkPull(pullable, btn, () => renderStarterKitsPage());
+  }
+
+  async function handleBackendPluginsPullAll() {
+    const btn = $(BACKEND_PLUGINS_IDS.pullAllBtn);
+    const pullable = visibleKindEntries('backend-plugin').filter(isBulkPullable);
+    await bulkPull(pullable, btn, () => renderBackendPluginsPage());
+  }
+
   /** The active category's rows, each a live sandboxed-iframe preview.
    * Lazy-rendered via IntersectionObserver -- a list of many components
    * shouldn't eagerly call preview.compile for every single one the
@@ -917,6 +1011,18 @@
     const frame = row.querySelector('.ui-component-preview-frame');
     try {
       const result = await call('preview.compile', { remote: entry.remoteName, id: entry.manifest.id });
+      // `row` can have been detached from the DOM (a category-tab switch
+      // re-renders the whole list via renderUiComponentsList's own
+      // `container.innerHTML = ''`) while this call was still in flight --
+      // without this check, a stale resolution would still spawn a real,
+      // live iframe and register a real window-level message listener for
+      // a row nothing shows anymore, which then keeps running and firing
+      // resize messages until some LATER re-render happens to sweep it up
+      // via uiComponentsListMessageHandlers. Nothing useful to attach to
+      // anymore, so just stop here.
+      if (!row.isConnected) {
+        return;
+      }
       const iframe = document.createElement('iframe');
       iframe.sandbox = 'allow-scripts';
       iframe.srcdoc = result.html;
@@ -1035,6 +1141,22 @@
   // calls, which use withBusy on the button itself instead).
   let sourceDriftRequestId = 0;
 
+  // Same request-token-guard discipline, for renderActivitySection's own
+  // async artifact.readWiringMergeLog call (Phase 12: a visible audit
+  // trail for the wiring-merge log).
+  let activityRequestId = 0;
+
+  // Same request-token-guard discipline, for renderInstallParamsSection's
+  // own async artifact.readInstallParamValues call (Phase 13: pre-filling
+  // the Configuration form from a REAL already-existing .env.local value,
+  // not just the manifest's own default).
+  let installParamsRequestId = 0;
+
+  // Same request-token-guard discipline, for renderConnectionStatusPanel's
+  // own async artifact.readInstallParamValues/resolveWiringActions calls
+  // (Phase 21).
+  let connectionStatusRequestId = 0;
+
   // Array-based counterpart to detailPreviewMessageHandler, for
   // renderMarkdownToSandboxedIframe's own iframes -- a single Documentation
   // tab can hold more than one (README.md AND GUIDELINES.md's own prose,
@@ -1075,6 +1197,14 @@
   // toggle can broadcast `setTheme` to every currently-mounted one without
   // needing to re-query the DOM.
   let detailTemplateIframes = [];
+  // Lazy-loads the grid the same way uiComponentsListObserver already does
+  // for the main UI Components list: a card's own compile call only fires
+  // once it actually scrolls into view, instead of every component in the
+  // design kit compiling at once the moment the tab opens. Re-created (via
+  // clearDetailTemplateListeners) each time the grid is rebuilt, same
+  // "disconnect the old one before observing a new set of cards" discipline
+  // as uiComponentsListObserver.
+  let detailTemplateObserver = null;
 
   // The template grid's currently-selected theme ('light' or 'dark') --
   // read by each card's handler on the harness's own 'ready' message (see
@@ -1083,11 +1213,19 @@
   // queuing logic needed.
   let currentTemplateTheme = 'light';
 
-  // Same request-token-guard discipline again, for Phase 10 item 2's
-  // "want help fixing this?" rows -- guards against a stale
-  // artifact.requestBuildFix response clobbering a newer render if a row
-  // is reused or Detail is closed/reopened mid-request.
-  let buildFixRequestId = 0;
+  // Note: renderBuildFixRow/renderWiringMergeRow each keep their OWN
+  // request-id counter as a variable local to that specific row's closure
+  // (declared inside the render function itself, not here) -- a single
+  // shared module-level counter used to guard EVERY row on the page at
+  // once, which meant clicking "Ask" on one row while a DIFFERENT row's
+  // request was still in flight silently discarded that other row's
+  // result the moment it resolved (both rows increment the same counter,
+  // so the first row's captured requestId immediately goes stale) --
+  // even though the two rows target unrelated files with nothing to do
+  // with each other. A per-row counter still protects against the
+  // original, intended case (the SAME row's own request being superseded
+  // by a second click before the first reply arrives) without that
+  // cross-row collision.
 
   /** Clears any live Detail-preview iframe/listener -- called both at the
    * top of loadDetailPreview (about to replace it with a new one) and
@@ -1116,6 +1254,10 @@
     }
     detailTemplateMessageHandlers = [];
     detailTemplateIframes = [];
+    if (detailTemplateObserver) {
+      detailTemplateObserver.disconnect();
+      detailTemplateObserver = null;
+    }
   }
 
   /** Detail view's live, INTERACTIVE preview (Phase C): variant tabs +
@@ -1227,10 +1369,377 @@
    * now always-visible regardless of kind, the latter lives in the
    * Documentation tab alongside every other kind's README, see
    * renderDetail/renderDocumentationTab.) */
-  function renderInstallParamsSection(entry) {
-    const { manifest } = entry;
+  /** Phase 12: the persistent counterpart to the pullAndAutoWire toast --
+   * that toast (see runArtifactAction) fades after a few seconds, so
+   * without this the healthSummary it showed would be gone the moment a
+   * user navigated away and back into Configuration to actually act on
+   * it (e.g. to fill in a still-missing install param). Only ever shows
+   * `lastAutoWireSummary` when its stashed key matches THIS entry -- a
+   * stale summary from a previously-viewed artifact must never leak into
+   * a different one's Detail view. */
+  function renderPostInstallHealthBanner(entry) {
+    const banner = $('detail-post-install-health-banner');
+    if (lastAutoWireSummary && lastAutoWireSummary.key === entryKey(entry)) {
+      banner.textContent = lastAutoWireSummary.summary;
+      banner.hidden = false;
+    } else {
+      banner.hidden = true;
+      banner.textContent = '';
+    }
+  }
 
+  /** Phase 21: "is this thing actually connected and working" at a glance,
+   * any time Detail is reopened -- not just in the moment right after a
+   * pull/merge/fix, which is the only time renderPostInstallHealthBanner
+   * above ever has anything to show (it's keyed off an in-memory value
+   * from THIS session's last action, gone the moment the app restarts or
+   * a different artifact was viewed in between). This recomputes the real
+   * current state from scratch every time: signed status straight off the
+   * manifest already in hand, install_params fulfillment and wiring
+   * resolution via the same RPCs the Configuration/Wiring sections already
+   * call. Only shown for a PULLED artifact that actually has
+   * install_params or wiring_actions to report on -- see renderDetail.
+   *
+   * Deliberately does NOT run the project's build automatically on every
+   * Detail open (a real build isn't free, and this can be reopened far
+   * more often than a pull happens) -- "Verify build" is an explicit,
+   * on-demand action via the new artifact.verifyBuild RPC, same
+   * runProjectBuild every other build-verify step already uses. */
+  /**
+   * "How this works": a plain-language, always-the-same-shape walkthrough
+   * of the install lifecycle, written for someone who has never used
+   * DeliveryOS before and doesn't know what a chip reading "Wired (0/4)"
+   * even means. Deliberately separate from renderConnectionStatusPanel
+   * right below it: that panel is the LIVE, numeric status ("3/3
+   * configured"); this one is the static, always-true explanation of
+   * what those numbers are even about. Keeping them apart means this
+   * function needs no RPC calls at all -- every row is either always true
+   * for an artifact with this shape, or true-when-it-happens (a build
+   * break, a file that already existed), never something that needs a
+   * live check to phrase correctly.
+   *
+   * Gated on real presence (install_params/wiring_actions/post_install),
+   * same "data, not kind" convention as every other Detail section --
+   * a plain `ui-component`/`template` pull has none of this lifecycle at
+   * all, so the panel simply doesn't apply.
+   */
+  function renderLifecycleExplainer(entry) {
+    const { manifest } = entry;
+    const panel = $('detail-lifecycle-explainer');
+    const hasInstallParams = manifest.install_params && manifest.install_params.length > 0;
+    const hasWiringActions = manifest.wiring_actions && manifest.wiring_actions.length > 0;
+    const hasSecrets = hasInstallParams && manifest.install_params.some((p) => p.secret);
+    const hasLifecycle = hasInstallParams || hasWiringActions || !!manifest.post_install;
+
+    if (!hasLifecycle) {
+      panel.hidden = true;
+      return;
+    }
+    panel.hidden = false;
+
+    const jump = (tab, scrollTo) => () => {
+      goToDetailTab(tab);
+      $(scrollTo)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+
+    // Plain language throughout -- no "install_params"/"wiring_actions"/
+    // "manifest," the same words a non-technical reader would use for
+    // what's actually happening, not this codebase's own internal names
+    // for it.
+    const steps = [
+      {
+        show: hasInstallParams || !!manifest.signature,
+        title: 'Before anything is copied in',
+        description: manifest.signature
+          ? "Its signature is checked first -- if it's been tampered with, nothing lands. Then you're asked for anything it needs (like a password or a URL) through a plain form, not a config file you have to hand-edit."
+          : "You're asked for anything it needs (like a password or a URL) through a plain form, not a config file you have to hand-edit.",
+        goTo: hasInstallParams ? jump('configuration', 'detail-install-params-fields') : null,
+      },
+      {
+        show: hasWiringActions,
+        title: 'New files get added for you',
+        description: 'Any new file this needs gets created automatically. If it changes how your project builds, that gets checked right away.',
+        goTo: jump('configuration', 'detail-wiring-actions'),
+      },
+      {
+        show: hasWiringActions,
+        title: "If a change breaks your build",
+        description: "You'll be shown a suggested fix in plain text. Nothing is applied until you say so, and if the fix doesn't actually fix it, your original file comes right back automatically.",
+        goTo: null,
+      },
+      {
+        show: hasWiringActions,
+        title: 'If a file already exists',
+        description: "It's never silently overwritten -- you're shown a suggested merge to review first, with the same automatic undo if it doesn't work out.",
+        goTo: jump('configuration', 'detail-wiring-actions'),
+      },
+      {
+        show: hasInstallParams || hasWiringActions,
+        title: 'A plain summary afterward',
+        description: "You'll see one summary of what worked and what's still on you -- not a wall of logs to decode.",
+        goTo: null,
+      },
+      {
+        show: hasWiringActions,
+        title: 'Everything is recorded',
+        description: 'Every suggested fix or merge -- applied or not -- is saved, so you can look back later at exactly what happened and why.',
+        goTo: jump('activity', 'detail-activity-entries'),
+      },
+      {
+        show: true,
+        title: 'Removing it later',
+        description: 'One click cleanly removes what this added -- it never leaves orphaned files behind.',
+        goTo: null,
+      },
+      {
+        show: hasSecrets,
+        title: 'Your secrets stay yours',
+        description: "If a value you type isn't excluded from git yet, you're warned immediately -- it's never silently left exposed.",
+        goTo: null,
+      },
+      {
+        show: hasInstallParams,
+        title: 'Changing a value later',
+        description: 'Go to Configuration any time to update what you typed in -- no need to remove and pull again.',
+        goTo: jump('configuration', 'detail-install-params-fields'),
+      },
+      {
+        show: hasInstallParams,
+        title: 'Reopening this form',
+        description: "It remembers what you already filled in -- you won't have to retype anything that's already set.",
+        goTo: jump('configuration', 'detail-install-params-fields'),
+      },
+      {
+        show: true,
+        title: 'When a new version comes out',
+        description: "Updating applies the real changes -- including removing files the new version no longer needs -- and refuses instead of guessing if you've edited something yourself.",
+        goTo: null,
+      },
+    ];
+
+    const list = $('detail-lifecycle-steps');
+    list.innerHTML = '';
+    for (const step of steps.filter((s) => s.show)) {
+      const li = document.createElement('li');
+      li.className = 'lifecycle-step';
+      const titleRow = document.createElement('div');
+      titleRow.className = 'lifecycle-step-title';
+      titleRow.textContent = step.title;
+      if (step.goTo) {
+        const link = document.createElement('button');
+        link.type = 'button';
+        link.className = 'lifecycle-step-link';
+        link.textContent = 'View →';
+        link.addEventListener('click', step.goTo);
+        titleRow.appendChild(link);
+      }
+      const descEl = document.createElement('div');
+      descEl.className = 'lifecycle-step-description';
+      descEl.textContent = step.description;
+      li.appendChild(titleRow);
+      li.appendChild(descEl);
+      list.appendChild(li);
+    }
+  }
+
+  async function renderConnectionStatusPanel(entry) {
+    const { manifest } = entry;
+    const panel = $('detail-connection-status');
+
+    if (entry.localStatus === 'not_pulled') {
+      // Bumps the counter too, not just hides the panel -- found by review:
+      // without this, a slow in-flight request for a previously-viewed
+      // PULLED artifact isn't caught by the stale-response check below (its
+      // captured requestId still matches the live counter), so it can
+      // render stale chips onto whatever not-pulled artifact the user has
+      // since navigated to, even though this exact branch just hid the
+      // panel for it.
+      ++connectionStatusRequestId;
+      panel.hidden = true;
+      panel.innerHTML = '';
+      return;
+    }
+
+    const requestId = ++connectionStatusRequestId;
+    const chips = [];
+
+    // A real loading cue while the two RPCs below are in flight -- same
+    // spinner+text pattern #detail-tabs-loading already uses, not a new
+    // one. Previously this panel just sat in whatever state it was until
+    // both awaits resolved, a real inconsistency next to every other
+    // async wait in Detail that DOES show this. Cleared the moment real
+    // chips are ready to render (panel.innerHTML = '' below).
+    panel.innerHTML = '<span class="spinner" aria-hidden="true"></span> Loading…';
+    panel.hidden = false;
+
+    // Signed/unsigned is deliberately NOT repeated here -- detail-provenance-badge
+    // right above already shows it, for every artifact regardless of kind
+    // or pulled state; this panel only adds what that badge doesn't cover.
+    if (manifest.install_params && manifest.install_params.length > 0) {
+      let configuredChip = { ok: null, label: 'Configuration -- could not check' };
+      try {
+        const { values } = await call('artifact.readInstallParamValues', {
+          id: manifest.id,
+          remote: entry.remoteName,
+          cwd: state.projectDir,
+        });
+        const filled = manifest.install_params.filter((p) => values[p.key]).length;
+        const total = manifest.install_params.length;
+        configuredChip = {
+          ok: filled === total,
+          label: `Configured (${filled}/${total})`,
+          // Only actionable when something's actually missing -- a fully
+          // configured chip has nowhere useful to jump to.
+          goTo: filled < total ? { tab: 'configuration', scrollTo: 'detail-install-params-fields' } : null,
+        };
+      } catch {
+        // Keep the "could not check" chip rather than silently omitting it.
+      }
+      if (requestId !== connectionStatusRequestId) return; // superseded while awaiting
+      chips.push(configuredChip);
+    }
+
+    if (manifest.wiring_actions && manifest.wiring_actions.length > 0) {
+      let wiredChip = { ok: null, label: 'Wiring -- could not check' };
+      try {
+        const resolved = await call('artifact.resolveWiringActions', {
+          id: manifest.id,
+          remote: entry.remoteName,
+          cwd: state.projectDir,
+        });
+        const total = resolved.length;
+        // alreadyWired excluded from "needs review" -- its real content
+        // already matches what this artifact would have written, so
+        // there's genuinely nothing to look at, same reasoning as why the
+        // Wiring section itself no longer offers "Merge with Claude" for it.
+        const needsReview = resolved.filter((a) => a.targetFileExists && !a.alreadyWired).length;
+        wiredChip = needsReview === 0
+          ? { ok: true, label: `Wired (${total}/${total})`, goTo: null }
+          : {
+            ok: false,
+            label: `Wired (${total - needsReview}/${total}, ${needsReview} need${needsReview === 1 ? 's' : ''} review) →`,
+            goTo: { tab: 'configuration', scrollTo: 'detail-wiring-actions' },
+          };
+      } catch {
+        // Keep the "could not check" chip rather than silently omitting it.
+      }
+      if (requestId !== connectionStatusRequestId) return; // superseded while awaiting
+      chips.push(wiredChip);
+    }
+
+    panel.innerHTML = '';
+    panel.hidden = false;
+    for (const chip of chips) {
+      // A chip with somewhere real to jump to is a real button, not just
+      // text -- found by direct user feedback: naming "4 need review"
+      // with no way to get there from this panel (which sits above the
+      // tabs, visible from Documentation same as any other tab) left
+      // people unable to find what it was talking about.
+      const el = document.createElement(chip.goTo ? 'button' : 'span');
+      if (chip.goTo) el.type = 'button';
+      el.className = `status-chip ${chip.ok === true ? 'ok' : chip.ok === false ? 'warn' : 'neutral'}${chip.goTo ? ' clickable' : ''}`;
+      el.textContent = chip.label;
+      if (chip.goTo) {
+        el.title = 'View details';
+        el.addEventListener('click', () => {
+          goToDetailTab(chip.goTo.tab);
+          // The tab switch above is synchronous DOM work; scrollIntoView
+          // needs the target's section to already be un-hidden, which it
+          // is by the time this next line runs.
+          $(chip.goTo.scrollTo)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+      }
+      panel.appendChild(el);
+    }
+
+    const buildChip = document.createElement('span');
+    buildChip.className = 'status-chip neutral';
+    buildChip.textContent = 'Build -- not checked yet';
+    panel.appendChild(buildChip);
+
+    const verifyBtn = document.createElement('button');
+    verifyBtn.type = 'button';
+    verifyBtn.className = 'btn btn-sm btn-ghost';
+    verifyBtn.textContent = 'Verify build';
+    verifyBtn.addEventListener('click', () => {
+      void withBusy(verifyBtn, 'Checking…', async () => {
+        // A chip that quietly changes text, next to a button whose own
+        // label goes right back to "Verify build" once it's done, reads
+        // as "I clicked it and nothing happened" if you were watching the
+        // button rather than the chip beside it -- direct user feedback.
+        // The toast is the same "something just happened" signal every
+        // other action in this app already uses; the chip stays too, as
+        // the persistent record for next time.
+        try {
+          const build = await call('artifact.verifyBuild', { cwd: state.projectDir });
+          if (!build.ran) {
+            buildChip.className = 'status-chip neutral';
+            buildChip.textContent = 'Build -- no build command found';
+            showToast('success', 'No build command was found for this project -- nothing to verify.');
+          } else if (build.success) {
+            buildChip.className = 'status-chip ok';
+            buildChip.textContent = 'Build passing';
+            showToast('success', 'Build passing.');
+          } else if (build.timedOut) {
+            buildChip.className = 'status-chip warn';
+            buildChip.textContent = 'Build timed out (may just be slow)';
+            showToast('error', 'The build was killed for running too long -- it may just be slow, or genuinely stuck.');
+          } else if (build.toolNotFound) {
+            buildChip.className = 'status-chip warn';
+            buildChip.textContent = 'Build tool not found on PATH';
+            showToast('error', "The build tool this project needs isn't installed or on PATH.");
+          } else {
+            buildChip.className = 'status-chip warn';
+            buildChip.textContent = 'Build failing';
+            showToast('error', `Build failing${build.output ? `: ${build.output.slice(0, 200)}` : '.'}`);
+          }
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          buildChip.className = 'status-chip warn';
+          buildChip.textContent = `Could not check -- ${message}`;
+          showToast('error', `Could not check the build -- ${message}`);
+        }
+      });
+    });
+    panel.appendChild(verifyBtn);
+  }
+
+  async function renderInstallParamsSection(entry) {
+    const { manifest } = entry;
+    const requestId = ++installParamsRequestId;
     const fieldsContainer = $('detail-install-params-fields');
+
+    // A REAL value already sitting in .env.local (from an earlier partial
+    // fill, or a prior pull) is more authoritative than the manifest
+    // author's own generic default -- same provided > existing > default
+    // precedence resolveInstallParamValues's own doc comment establishes,
+    // just applied to what the form DISPLAYS rather than what it writes.
+    // Skipped entirely when there are no install_params to prefill at all
+    // (e.g. an artifact with only wiring_actions) -- no point resolving
+    // the artifact and reading .env.local for nothing.
+    let existingValues = {};
+    if (manifest.install_params.length > 0) {
+      // Same spinner+text pattern renderConnectionStatusPanel/
+      // renderWiringSection already use -- this section previously showed
+      // nothing at all while the RPC below was in flight (or, worse, a
+      // PREVIOUS artifact's still-rendered fields), the one gap left when
+      // that pattern was applied to its two siblings.
+      fieldsContainer.innerHTML = '<span class="spinner" aria-hidden="true"></span> Loading…';
+      try {
+        const result = await call('artifact.readInstallParamValues', {
+          id: manifest.id,
+          remote: entry.remoteName,
+          cwd: state.projectDir,
+        });
+        existingValues = result.values ?? {};
+      } catch {
+        // Degrade to today's default-only prefill -- never let a failure
+        // to resolve the artifact/remote (or read .env.local) break the
+        // Configuration tab from rendering at all.
+      }
+      if (requestId !== installParamsRequestId) return; // superseded while awaiting
+    }
+
     fieldsContainer.innerHTML = '';
     for (const param of manifest.install_params) {
       const field = document.createElement('div');
@@ -1246,8 +1755,9 @@
       input.name = param.key;
       input.type = param.secret ? 'password' : 'text';
       input.placeholder = param.default ?? (param.secret ? '(secret -- never defaulted)' : '');
-      if (param.default !== undefined) {
-        input.value = param.default;
+      const prefill = existingValues[param.key] ?? param.default;
+      if (prefill !== undefined) {
+        input.value = prefill;
       }
       field.appendChild(label);
       field.appendChild(help);
@@ -1342,7 +1852,15 @@
     const iframe = document.createElement('iframe');
     iframe.sandbox = 'allow-scripts';
     iframe.className = 'markdown-frame';
-    iframe.srcdoc = buildMarkdownDocument(html);
+    // A real, confirmed dark-mode gap: this document's own <style> used to
+    // be hardcoded light-only colors with no background set at all (so it
+    // rendered on the browser's default white iframe canvas) -- harmless
+    // in light mode (the surrounding .markdown-frame container is white
+    // too) but a stark white rectangle inside an otherwise dark Detail
+    // card once dark mode shipped. Reflects the CURRENT theme at render
+    // time, same "syncs once, not live-reactive to a later toggle" scope
+    // as the template preview iframes' own theme sync.
+    iframe.srcdoc = buildMarkdownDocument(html, getEffectiveTheme());
     container.appendChild(iframe);
 
     const handler = (event) => {
@@ -1371,7 +1889,20 @@
    * injectContentHeightReporter (that one tracks a React #root's mount/
    * remount lifecycle; a static markdown document has no such lifecycle,
    * just a plain ResizeObserver on <body>). */
-  function buildMarkdownDocument(bodyHtml) {
+  function buildMarkdownDocument(bodyHtml, theme) {
+    // A real, confirmed dark-mode gap this closes: this document used to
+    // be hardcoded light-only colors with no explicit body background at
+    // all, so it rendered on the browser's default white iframe canvas
+    // regardless of the app's own theme -- fine in light mode (the
+    // surrounding .markdown-frame container is white too) but a stark
+    // white rectangle inside an otherwise dark Detail card in dark mode.
+    // Same exact hex values as style.css's own dark-mode token overrides
+    // (this sandboxed document can't reach the parent page's CSS custom
+    // properties, so the values are duplicated here rather than shared).
+    const isDark = theme === 'dark';
+    const colors = isDark
+      ? { bg: '#211C15', ink: '#F0EAE0', border: '#3A3226', codeBg: '#241F18', tableStripe: '#191510', accent: '#7A9955' }
+      : { bg: '#FFFCF2', ink: '#1E3C53', border: '#E0D9CE', codeBg: '#F6F1E9', tableStripe: '#FFFCF2', accent: '#ACC384' };
     return `<!doctype html>
 <html><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:;">
@@ -1387,7 +1918,8 @@
     font-family: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
     font-size: 14px;
     line-height: 1.65;
-    color: #1E3C53;
+    background: ${colors.bg};
+    color: ${colors.ink};
     padding: 4px 2px 20px;
     max-width: 760px;
     /* Found by review: a long unbroken token (a URL, hash, or path with
@@ -1404,24 +1936,24 @@
     margin: 1.4em 0 .5em;
   }
   h1 { font-size: 26px; margin-top: 0; }
-  h2 { font-size: 21px; border-bottom: 1px solid #E0D9CE; padding-bottom: .3em; }
+  h2 { font-size: 21px; border-bottom: 1px solid ${colors.border}; padding-bottom: .3em; }
   h3 { font-size: 17px; }
   p, ul, ol { margin: 0 0 1em; }
   ul, ol { padding-left: 1.4em; }
   li { margin-bottom: .3em; }
-  a { color: #1E3C53; text-decoration: underline; text-decoration-color: #C9BFAF; }
-  a:hover { text-decoration-color: #1E3C53; }
+  a { color: ${colors.ink}; text-decoration: underline; text-decoration-color: ${colors.border}; }
+  a:hover { text-decoration-color: ${colors.ink}; }
   code {
     font-family: 'JetBrains Mono', ui-monospace, Consolas, monospace;
     font-size: 12.5px;
-    background: #F6F1E9;
-    border: 1px solid #E0D9CE;
+    background: ${colors.codeBg};
+    border: 1px solid ${colors.border};
     border-radius: 4px;
     padding: 1px 5px;
   }
   pre {
-    background: #F6F1E9;
-    border: 1px solid #E0D9CE;
+    background: ${colors.codeBg};
+    border: 1px solid ${colors.border};
     border-radius: 8px;
     padding: 12px 14px;
     overflow-x: auto;
@@ -1430,15 +1962,15 @@
   blockquote {
     margin: 0 0 1em;
     padding: .2em 1em;
-    border-left: 3px solid #ACC384;
-    color: #1E3C53;
+    border-left: 3px solid ${colors.accent};
+    color: ${colors.ink};
     opacity: .85;
   }
   table { border-collapse: collapse; margin: 0 0 1em; width: 100%; }
-  th, td { border: 1px solid #E0D9CE; padding: 6px 10px; text-align: left; font-size: 13px; }
-  th { background: #F6F1E9; font-weight: 600; }
-  tr:nth-child(even) td { background: #FFFCF2; }
-  hr { border: none; border-top: 1px solid #E0D9CE; margin: 1.5em 0; }
+  th, td { border: 1px solid ${colors.border}; padding: 6px 10px; text-align: left; font-size: 13px; }
+  th { background: ${colors.codeBg}; font-weight: 600; }
+  tr:nth-child(even) td { background: ${colors.tableStripe}; }
+  hr { border: none; border-top: 1px solid ${colors.border}; margin: 1.5em 0; }
   img { max-width: 100%; }
 </style>
 </head><body>
@@ -1679,6 +2211,148 @@ ${bodyHtml}
     }
   }
 
+  /** Phase 12's "visible audit trail": the wiring-merge log
+   * (.deliveryos/wiring-merge-log.jsonl) already existed on disk the
+   * moment a merge was first applied, with nowhere in the UI to see it
+   * short of opening a dotfile by hand. Gated on real log entries
+   * existing for THIS artifact -- never a `kind` check, same "data
+   * presence, not kind" convention as every other Detail section here --
+   * resolved via artifact.readWiringMergeLog, already filtered to this
+   * artifact and ordered newest-first server-side. */
+  async function renderActivitySection(entry) {
+    if (!state.projectDir) {
+      detailTabState.activity = false;
+      return;
+    }
+
+    const requestId = ++activityRequestId;
+    // Two separate log files (merges vs. build-fixes -- see
+    // fixBuildFailure.ts/requestWiringMerge.ts's own doc comments for why
+    // they're not one), each read independently and merged here into one
+    // chronological feed -- a person watching this tab shouldn't need to
+    // know DeliveryOS happens to keep two files internally. One failing
+    // independently of the other still shows whatever the other one has,
+    // rather than losing the whole tab.
+    const [mergeEntries, buildFixEntries] = await Promise.all([
+      call('artifact.readWiringMergeLog', { cwd: state.projectDir, remote: entry.remoteName, id: entry.manifest.id })
+        .then((r) => r.entries)
+        .catch(() => []),
+      call('artifact.readBuildFixLog', { cwd: state.projectDir, remote: entry.remoteName, id: entry.manifest.id })
+        .then((r) => r.entries)
+        .catch(() => []),
+    ]);
+    if (requestId !== activityRequestId) return; // superseded while awaiting
+
+    const entries = [
+      ...mergeEntries.map((r) => ({ kind: 'merge', ...r })),
+      ...buildFixEntries.map((r) => ({ kind: 'build-fix', ...r })),
+    ].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+    detailTabState.activity = entries.length > 0;
+    refreshDetailTabs();
+    if (entries.length === 0) return;
+
+    const container = $('detail-activity-entries');
+    container.innerHTML = '';
+    for (const record of entries) {
+      container.appendChild(renderActivityEntry(record));
+    }
+  }
+
+  /** One wiring-merge log entry's own card. before/after are full file
+   * contents that could be long, so they're collapsed by default behind a
+   * real <details>/<summary> disclosure rather than more custom
+   * click-to-expand JS -- nothing like it exists yet in this codebase and
+   * it's the correct minimal-JS way to do this. */
+  /** `record.kind` is 'merge' (an existing file's AI-proposed merge,
+   * `.targetFile`/`.description`) or 'build-fix' (an AI-proposed fix for
+   * a build a plain auto-write just broke, `.filePath`/`.buildError`) --
+   * see renderActivitySection's merge of the two log files above. Same
+   * card shape either way; only the file-name field and the "why this
+   * happened" line differ. */
+  function renderActivityEntry(record) {
+    const isBuildFix = record.kind === 'build-fix';
+    const card = document.createElement('div');
+    card.className = 'wiring-action-card';
+
+    const header = document.createElement('div');
+    header.className = 'wiring-action-header';
+    const kindEl = document.createElement('span');
+    kindEl.className = 'wiring-action-kind';
+    kindEl.textContent = isBuildFix ? 'Build fix' : 'Merge';
+    const fileEl = document.createElement('code');
+    fileEl.textContent = isBuildFix ? record.filePath : record.targetFile;
+    const statusEl = document.createElement('span');
+    // No dedicated success/failure pill exists yet -- .exists/.absent are
+    // the closest read: "rolled back" is the one worth flagging (a real
+    // build failure reverted the write), same warning tone .exists
+    // already carries; "applied" is the unremarkable common case, same
+    // neutral tone .absent already carries.
+    statusEl.className = `wiring-action-status ${record.rolledBack ? 'exists' : 'absent'}`;
+    statusEl.textContent = record.rolledBack ? 'rolled back' : 'applied';
+    header.appendChild(kindEl);
+    header.appendChild(fileEl);
+    header.appendChild(statusEl);
+
+    const timeEl = document.createElement('div');
+    timeEl.className = 'wiring-action-instructions';
+    timeEl.textContent = new Date(record.timestamp).toLocaleString();
+
+    const descEl = document.createElement('div');
+    descEl.className = 'wiring-action-description';
+    // A build-fix record's "why" is the real build error it was reacting
+    // to; a merge record's is the wiring_action's own plain-language
+    // description -- both are the honest answer to "why did this happen,"
+    // just sourced from different places.
+    descEl.textContent = isBuildFix ? `Build error: ${record.buildError}` : record.description;
+
+    card.appendChild(header);
+    card.appendChild(timeEl);
+    card.appendChild(descEl);
+    card.appendChild(renderActivityDiffDisclosure('Before', record.before, 'After', record.after));
+
+    if (record.rolledBack && record.rebuildOutput) {
+      card.appendChild(renderActivitySnippetDisclosure('Rebuild output', record.rebuildOutput));
+    }
+
+    return card;
+  }
+
+  /** A single <details> holding both Before/After <pre> blocks together --
+   * one disclosure per entry, not two, since they're only ever meaningful
+   * read side by side. */
+  function renderActivityDiffDisclosure(beforeLabel, before, afterLabel, after) {
+    const details = document.createElement('details');
+    const summary = document.createElement('summary');
+    summary.textContent = 'Before / After';
+    details.appendChild(summary);
+
+    for (const [label, content] of [[beforeLabel, before], [afterLabel, after]]) {
+      const labelEl = document.createElement('div');
+      labelEl.className = 'wiring-section-label';
+      labelEl.textContent = label;
+      const pre = document.createElement('pre');
+      pre.className = 'wiring-action-snippet';
+      pre.textContent = content;
+      details.appendChild(labelEl);
+      details.appendChild(pre);
+    }
+
+    return details;
+  }
+
+  function renderActivitySnippetDisclosure(label, content) {
+    const details = document.createElement('details');
+    const summary = document.createElement('summary');
+    summary.textContent = label;
+    const pre = document.createElement('pre');
+    pre.className = 'wiring-action-snippet';
+    pre.textContent = content;
+    details.appendChild(summary);
+    details.appendChild(pre);
+    return details;
+  }
+
   /** Collects whatever was actually typed into the required-config
    * checklist (blank fields are simply omitted, not sent as empty-string
    * overwrites -- re-opening Detail without retyping an already-configured
@@ -1706,7 +2380,16 @@ ${bodyHtml}
           `Still missing required value(s): ${result.missingRequiredParams.join(', ')}.`,
         ));
       } else {
-        toastSuccess('Configuration applied.');
+        // Same real scope-boundary note the CLI's own `config` command has
+        // always printed on every call -- the app's Configuration tab had
+        // no way to tell a person the same thing until this was added.
+        toastSuccess(`Configuration applied. ${result.note ?? ''}`.trim());
+      }
+      // A real secrets-exposure risk -- this is specifically the "you just
+      // typed in a secret" moment, so it gets its own distinct toast, never
+      // folded quietly into the message above where it could be missed.
+      if (result.gitignoreWarning) {
+        toastError(new Error(result.gitignoreWarning));
       }
     } catch (err) {
       toastError(err);
@@ -1733,6 +2416,16 @@ ${bodyHtml}
       return;
     }
 
+    renderWireWithClaudeLauncher(entry);
+
+    // Same real loading cue as renderConnectionStatusPanel's own fix --
+    // #detail-tabs-loading's exact spinner+text pattern, not a new one.
+    // Previously this section stayed exactly as it was (hidden, or
+    // showing a PREVIOUS artifact's stale cards) until resolveWiringActions
+    // resolved, with no indication anything was happening.
+    section.hidden = false;
+    container.innerHTML = '<span class="spinner" aria-hidden="true"></span> Loading…';
+
     let resolved;
     try {
       resolved = await call('artifact.resolveWiringActions', {
@@ -1754,6 +2447,7 @@ ${bodyHtml}
 
     section.hidden = false;
     container.innerHTML = '';
+    const mergeControllers = [];
     for (const action of resolved) {
       const card = document.createElement('div');
       card.className = 'wiring-action-card';
@@ -1763,8 +2457,12 @@ ${bodyHtml}
       const fileEl = document.createElement('code');
       fileEl.textContent = action.targetFile;
       const statusEl = document.createElement('span');
-      statusEl.className = `wiring-action-status ${action.targetFileExists ? 'exists' : 'absent'}`;
-      statusEl.textContent = action.targetFileExists ? 'exists' : 'not found';
+      statusEl.className = `wiring-action-status ${action.alreadyWired ? 'ok' : action.placementAmbiguous ? 'ambiguous' : action.targetFileExists ? 'exists' : 'absent'}`;
+      statusEl.textContent = action.alreadyWired
+        ? 'already wired ✓'
+        : action.placementAmbiguous
+          ? 'placement ambiguous'
+          : action.targetFileExists ? 'exists' : 'not found';
       header.appendChild(fileEl);
       header.appendChild(statusEl);
 
@@ -1787,8 +2485,623 @@ ${bodyHtml}
         card.appendChild(snippetEl);
       }
 
+      // Backend plug-and-play: the target file already existing used to
+      // be a dead end -- "review it yourself," nothing else. Now offers
+      // a real, opt-in "Merge with Claude" row for exactly this case
+      // (never for a fresh file, which already got a safe, deterministic
+      // full-content whenAbsent.snippet with no ambiguity to resolve).
+      // Also never for a file that's already wired correctly (its real
+      // content already matches what this artifact would have written) --
+      // found via direct user testing: offering the button here just meant
+      // a wasted click and a wasted `claude` call for an outcome
+      // resolveWiringActions already knew in advance.
+      if (action.targetFileExists && !action.alreadyWired) {
+        const controller = renderWiringMergeRow(
+          action.targetFile,
+          action.description,
+          action.instructions,
+          action.snippet,
+          Boolean(action.snippetIsFullFileReference),
+          entry.remoteName,
+          entry.manifest.id,
+        );
+        card.appendChild(controller.row);
+        mergeControllers.push(controller);
+      }
+
+      // adaptSrcDirPath's own deterministic check (src/ vs. not) already
+      // resolved every OTHER case -- this is only reached when neither a
+      // root app/pages nor a src/app/src/pages exists yet to check
+      // against, a genuinely ambiguous placement no heuristic should
+      // silently guess at. `action.snippet` is still the real, fully-known
+      // whenAbsent content (see resolveWiringActions's own doc comment on
+      // why that's safe here) -- only the DESTINATION path is undecided.
+      if (action.placementAmbiguous) {
+        card.appendChild(
+          renderWiringPlacementRow(action.targetFile, action.description, action.snippet, entry.remoteName, entry.manifest.id),
+        );
+      }
+
       container.appendChild(card);
     }
+
+    // "Merge all with Claude" only earns its own row once there's more
+    // than one file to merge -- for exactly one, the per-file button
+    // above is already the whole interaction, and a second identical
+    // button next to it would just be noise.
+    const mergeAllContainer = $('detail-wiring-merge-all');
+    mergeAllContainer.innerHTML = '';
+    if (mergeControllers.length > 1) {
+      mergeAllContainer.appendChild(renderMergeAllControls(mergeControllers));
+    }
+  }
+
+  /** Builds one row's DOM for a single Tier-2 wiring_action whose target
+   * file already existed at pull time: a button that asks Claude to
+   * propose a merge, then either its own honest "can't determine a
+   * merge" reason, or the proposed full file content plus Apply/Discard.
+   * Mirrors renderBuildFixRow's exact ask/apply/discard shape. Nothing
+   * is written to disk, and nothing is logged, unless Apply is clicked.
+   *
+   * Returns a controller, not just the row element -- `renderMergeAllControls`
+   * drives `askForMerge`/`applyProposal` on every row in a batch, reusing
+   * this exact same ask/apply logic (same prompt, same audit-log entry,
+   * same rebuild-and-rollback) rather than a second, parallel code path
+   * that could drift from the single-file one. Clicking the row's own
+   * buttons and the batch controls calling these functions are genuinely
+   * the same call, not two implementations of the same idea. */
+  function renderWiringMergeRow(
+    targetFile,
+    description,
+    instructions,
+    guidanceSnippet,
+    guidanceSnippetIsFullFile,
+    remoteName,
+    artifactId,
+  ) {
+    const row = document.createElement('div');
+    row.className = 'build-fix-row';
+
+    // Scoped to THIS row alone (see the note above renderBuildFixRow's own
+    // shared-counter removal) -- guards only against this row's own second
+    // click superseding its first in-flight request, never a different row.
+    let wiringMergeRequestId = 0;
+    // The most recent successfully-proposed merge, if any -- what
+    // `applyProposal` (whether triggered by this row's own Apply button or
+    // by "Apply all") actually writes. Cleared on Discard or once applied.
+    let pendingMerge = null;
+    // Found by review: this row's own Apply button and "Apply all"
+    // (renderMergeAllControls) can both call `applyProposal` -- the
+    // button's own click handler disables ITSELF for the duration via
+    // `withBusy`, but a batch call bypasses that entirely, so without this
+    // flag a click on the row's own Apply button while a batch apply for
+    // the SAME row is still in flight would fire a second, concurrent
+    // `applyWiringMerge` for the same file (two racing build-verify runs,
+    // two audit-log entries for one real change).
+    let applyInFlight = false;
+
+    const askBtn = document.createElement('button');
+    askBtn.type = 'button';
+    askBtn.className = 'btn btn-sm btn-ghost';
+    askBtn.textContent = 'Merge with Claude ✨';
+    row.appendChild(askBtn);
+
+    const resultEl = document.createElement('div');
+    resultEl.className = 'build-fix-result';
+    resultEl.hidden = true;
+    row.appendChild(resultEl);
+
+    let applyBtn = null;
+    let discardBtn = null;
+
+    async function askForMerge() {
+      await withBusy(askBtn, 'Asking…', async () => {
+        const requestId = ++wiringMergeRequestId;
+        let merge;
+        try {
+          merge = await call('artifact.requestWiringMerge', {
+            cwd: state.projectDir,
+            targetFile,
+            description,
+            instructions,
+            guidanceSnippet,
+            guidanceSnippetIsFullFile,
+          });
+        } catch (err) {
+          if (requestId !== wiringMergeRequestId) return; // superseded while awaiting
+          resultEl.hidden = false;
+          resultEl.textContent = `Could not get a merge -- ${err instanceof Error ? err.message : String(err)}`;
+          return;
+        }
+        if (requestId !== wiringMergeRequestId) return; // superseded while awaiting
+
+        resultEl.hidden = false;
+        resultEl.innerHTML = '';
+
+        if (!merge.mergedFile) {
+          pendingMerge = null;
+          const reasonEl = document.createElement('div');
+          reasonEl.textContent = merge.reason || 'Claude could not determine a merge for this file.';
+          resultEl.appendChild(reasonEl);
+          return;
+        }
+
+        pendingMerge = merge;
+
+        const snippetEl = document.createElement('pre');
+        snippetEl.className = 'wiring-action-snippet';
+        snippetEl.textContent = merge.mergedFile;
+        resultEl.appendChild(snippetEl);
+
+        const actionsEl = document.createElement('div');
+        actionsEl.className = 'build-fix-actions';
+        applyBtn = document.createElement('button');
+        applyBtn.type = 'button';
+        applyBtn.className = 'btn btn-sm';
+        applyBtn.textContent = 'Apply';
+        discardBtn = document.createElement('button');
+        discardBtn.type = 'button';
+        discardBtn.className = 'btn btn-sm btn-ghost';
+        discardBtn.textContent = 'Discard';
+        actionsEl.appendChild(applyBtn);
+        actionsEl.appendChild(discardBtn);
+        resultEl.appendChild(actionsEl);
+        askBtn.hidden = true;
+
+        discardBtn.addEventListener('click', () => {
+          // Nothing written, nothing logged -- just clears the offer back
+          // to its starting state so it can be asked again if wanted.
+          pendingMerge = null;
+          resultEl.hidden = true;
+          resultEl.innerHTML = '';
+          askBtn.hidden = false;
+        });
+
+        applyBtn.addEventListener('click', () => void withBusy(applyBtn, 'Applying…', applyProposal));
+      });
+    }
+
+    async function applyProposal() {
+      // Returns `null` (not an error) when there's nothing to do OR when
+      // another call is already applying this exact row -- the caller
+      // (this row's own click handler, or a batch loop) treats `null` as
+      // "skip, no outcome to count," never as a failure.
+      if (!pendingMerge || !pendingMerge.mergedFile || applyInFlight) return null;
+      applyInFlight = true;
+      const merge = pendingMerge;
+      if (discardBtn) discardBtn.disabled = true;
+      try {
+        const outcome = await call('artifact.applyWiringMerge', {
+          cwd: state.projectDir,
+          targetFile,
+          mergedFile: merge.mergedFile,
+          description,
+          remote: remoteName,
+          id: artifactId,
+          costUsd: merge.costUsd,
+          durationMs: merge.durationMs,
+        });
+        pendingMerge = null;
+        const outcomeEl = document.createElement('div');
+        if (outcome.rolledBack) {
+          outcomeEl.textContent = `The merge didn't actually keep the project building -- your original file was restored.${outcome.build.output ? ` (${outcome.build.output})` : ''}`;
+        } else if (outcome.build.ran) {
+          outcomeEl.textContent = 'Merge applied -- the build still passes.';
+        } else {
+          outcomeEl.textContent = 'Merge applied (no build command detected to verify it).';
+        }
+        resultEl.innerHTML = '';
+        resultEl.appendChild(outcomeEl);
+        return outcome;
+      } catch (err) {
+        const errEl = document.createElement('div');
+        errEl.textContent = `Could not apply the merge -- ${err instanceof Error ? err.message : String(err)}`;
+        resultEl.innerHTML = '';
+        resultEl.appendChild(errEl);
+        throw err;
+      } finally {
+        applyInFlight = false;
+      }
+    }
+
+    askBtn.addEventListener('click', () => void askForMerge());
+
+    return {
+      row,
+      targetFile,
+      askForMerge,
+      hasProposal: () => Boolean(pendingMerge && pendingMerge.mergedFile),
+      applyProposal,
+    };
+  }
+
+  /** Builds one row's DOM for a single Tier-2 wiring_action reporting
+   * `placementAmbiguous` -- a button that asks Claude where this specific
+   * file should really go in THIS project, then either its own honest
+   * "no signal either way" reasoning, or the proposed path plus
+   * Apply/Discard. Mirrors `renderWiringMergeRow`'s exact ask/apply/discard
+   * shape, adapted for "decide a destination" instead of "propose a
+   * merge" -- `snippet` is already fully known (the manifest's own
+   * `whenAbsent.snippet`, never AI-generated here), so Apply only ever
+   * writes it to wherever Claude suggested, it never asks Claude to
+   * reproduce file content itself. Nothing is written to disk, and
+   * nothing is logged, unless Apply is clicked. */
+  function renderWiringPlacementRow(declaredPath, description, snippet, remoteName, artifactId) {
+    const row = document.createElement('div');
+    row.className = 'build-fix-row';
+
+    let placementRequestId = 0;
+    let pendingPlacement = null;
+
+    const askBtn = document.createElement('button');
+    askBtn.type = 'button';
+    askBtn.className = 'btn btn-sm btn-ghost';
+    askBtn.textContent = 'Ask Claude where this goes ✨';
+    row.appendChild(askBtn);
+
+    const resultEl = document.createElement('div');
+    resultEl.className = 'build-fix-result';
+    resultEl.hidden = true;
+    row.appendChild(resultEl);
+
+    askBtn.addEventListener('click', () => void withBusy(askBtn, 'Asking…', async () => {
+      const requestId = ++placementRequestId;
+      let placement;
+      try {
+        placement = await call('artifact.requestWiringPlacement', {
+          cwd: state.projectDir,
+          declaredPath,
+          description,
+        });
+      } catch (err) {
+        if (requestId !== placementRequestId) return; // superseded while awaiting
+        resultEl.hidden = false;
+        resultEl.textContent = `Could not get a placement suggestion -- ${err instanceof Error ? err.message : String(err)}`;
+        return;
+      }
+      if (requestId !== placementRequestId) return; // superseded while awaiting
+
+      resultEl.hidden = false;
+      resultEl.innerHTML = '';
+
+      if (!placement.suggestedPath) {
+        pendingPlacement = null;
+        const reasonEl = document.createElement('div');
+        reasonEl.textContent = placement.reasoning || 'Claude could not determine where this file should go.';
+        resultEl.appendChild(reasonEl);
+        return;
+      }
+
+      pendingPlacement = placement;
+
+      const pathEl = document.createElement('code');
+      pathEl.textContent = placement.suggestedPath;
+      resultEl.appendChild(pathEl);
+      if (placement.reasoning) {
+        const reasoningEl = document.createElement('div');
+        reasoningEl.className = 'wiring-action-instructions';
+        reasoningEl.textContent = placement.reasoning;
+        resultEl.appendChild(reasoningEl);
+      }
+
+      const actionsEl = document.createElement('div');
+      actionsEl.className = 'build-fix-actions';
+      const applyBtn = document.createElement('button');
+      applyBtn.type = 'button';
+      applyBtn.className = 'btn btn-sm';
+      applyBtn.textContent = 'Apply';
+      const discardBtn = document.createElement('button');
+      discardBtn.type = 'button';
+      discardBtn.className = 'btn btn-sm btn-ghost';
+      discardBtn.textContent = 'Discard';
+      actionsEl.appendChild(applyBtn);
+      actionsEl.appendChild(discardBtn);
+      resultEl.appendChild(actionsEl);
+      askBtn.hidden = true;
+
+      discardBtn.addEventListener('click', () => {
+        // Nothing written, nothing logged -- just clears the offer back
+        // to its starting state so it can be asked again if wanted.
+        pendingPlacement = null;
+        resultEl.hidden = true;
+        resultEl.innerHTML = '';
+        askBtn.hidden = false;
+      });
+
+      applyBtn.addEventListener('click', () => void withBusy(applyBtn, 'Applying…', async () => {
+        if (!pendingPlacement || !pendingPlacement.suggestedPath) return;
+        const placementToApply = pendingPlacement;
+        discardBtn.disabled = true;
+        try {
+          const outcome = await call('artifact.applyWiringPlacement', {
+            cwd: state.projectDir,
+            declaredPath,
+            suggestedPath: placementToApply.suggestedPath,
+            snippet,
+            description,
+            remote: remoteName,
+            id: artifactId,
+            reasoning: placementToApply.reasoning,
+            costUsd: placementToApply.costUsd,
+            durationMs: placementToApply.durationMs,
+          });
+          pendingPlacement = null;
+          const outcomeEl = document.createElement('div');
+          if (outcome.rolledBack) {
+            outcomeEl.textContent = `That placement didn't actually keep the project building -- the file was removed again.${outcome.build.output ? ` (${outcome.build.output})` : ''}`;
+          } else if (outcome.build.ran) {
+            outcomeEl.textContent = `Written to ${placementToApply.suggestedPath} -- the build still passes.`;
+          } else {
+            outcomeEl.textContent = `Written to ${placementToApply.suggestedPath} (no build command detected to verify it).`;
+          }
+          resultEl.innerHTML = '';
+          resultEl.appendChild(outcomeEl);
+        } catch (err) {
+          const errEl = document.createElement('div');
+          errEl.textContent = `Could not write the file -- ${err instanceof Error ? err.message : String(err)}`;
+          resultEl.innerHTML = '';
+          resultEl.appendChild(errEl);
+        }
+      }));
+    }));
+
+    return row;
+  }
+
+  /** "Merge all with Claude": batches the exact same ask/apply calls every
+   * per-file row already makes, just orchestrated across all of them from
+   * one button instead of N. Proposals are requested SEQUENTIALLY, not in
+   * parallel -- each is a real `claude` subprocess call, and running many
+   * at once is the same avoidable concurrent-heavy-process cost this app
+   * already moved away from for the template preview grid (Phase 18).
+   * Applying is sequential for a second, load-bearing reason: each
+   * `applyWiringMerge` reruns the WHOLE project's build to verify itself,
+   * and two of those racing at once against the same project would give
+   * an unreliable verify/rollback signal for both. One failure never stops
+   * the rest -- same "one artifact's failure doesn't abort the batch"
+   * rule `applyAvailableUpdates` already uses -- so a merge Claude can't
+   * figure out for one file doesn't block proposing or applying the
+   * others. Still requires exactly one human click before ANYTHING is
+   * written, same as the single-file flow; it just covers every file that
+   * click applies to. */
+  function renderMergeAllControls(controllers) {
+    const wrap = document.createElement('div');
+    wrap.className = 'build-fix-row';
+
+    const askAllBtn = document.createElement('button');
+    askAllBtn.type = 'button';
+    askAllBtn.className = 'btn btn-sm btn-ghost';
+    askAllBtn.textContent = `Merge all with Claude ✨ (${controllers.length} files)`;
+    wrap.appendChild(askAllBtn);
+
+    const statusEl = document.createElement('div');
+    statusEl.className = 'build-fix-result';
+    statusEl.hidden = true;
+    wrap.appendChild(statusEl);
+
+    const applyAllBtn = document.createElement('button');
+    applyAllBtn.type = 'button';
+    applyAllBtn.className = 'btn btn-sm';
+    applyAllBtn.textContent = 'Apply all proposed merges';
+    applyAllBtn.hidden = true;
+    wrap.appendChild(applyAllBtn);
+
+    askAllBtn.addEventListener('click', () => {
+      void withBusy(askAllBtn, 'Asking…', async () => {
+        // Hidden for the whole re-ask sweep, not just while genuinely
+        // empty -- found by review: re-running "Merge all" while a
+        // PREVIOUS sweep's "Apply all" was still showing left it clickable
+        // throughout the new sweep, so it could batch-apply a stale,
+        // pre-refresh proposal for a row the new sweep hadn't reached yet.
+        applyAllBtn.hidden = true;
+        statusEl.hidden = false;
+        let asked = 0;
+        for (const controller of controllers) {
+          statusEl.textContent = `Asking for ${controller.targetFile} (${asked + 1}/${controllers.length})…`;
+          await controller.askForMerge();
+          asked += 1;
+        }
+        const proposedCount = controllers.filter((c) => c.hasProposal()).length;
+        statusEl.textContent = `${proposedCount} of ${controllers.length} file${controllers.length === 1 ? '' : 's'} got a real proposed merge -- review each below.`;
+        applyAllBtn.hidden = proposedCount === 0;
+      });
+    });
+
+    applyAllBtn.addEventListener('click', () => {
+      void withBusy(applyAllBtn, 'Applying…', async () => {
+        let applied = 0;
+        let rolledBack = 0;
+        let failed = 0;
+        for (const controller of controllers) {
+          if (!controller.hasProposal()) continue;
+          try {
+            const outcome = await controller.applyProposal();
+            // null means "already being applied elsewhere" (this row's own
+            // Apply button, most likely) -- not counted here at all; the
+            // call that's actually doing the work reports the real outcome
+            // on that row itself.
+            if (!outcome) continue;
+            if (outcome.rolledBack) rolledBack += 1;
+            else applied += 1;
+          } catch {
+            failed += 1;
+          }
+        }
+        statusEl.textContent =
+          `${applied} merge${applied === 1 ? '' : 's'} applied, ${rolledBack} rolled back `
+          + `(broke the build), ${failed} failed to apply -- see each file's own result above.`;
+        applyAllBtn.hidden = true;
+      });
+    });
+
+    return wrap;
+  }
+
+  // --- Embedded terminal ("Wire with Claude") ---------------------------
+  //
+  // Hands off to a REAL interactive `claude` session, rendered inside the
+  // app's own window via xterm.js + a real PTY (src-tauri/src/pty.rs) --
+  // the in-app counterpart to `deliveryos wire-with-claude <id>`, which
+  // this literally runs: the Rust side knows nothing about DeliveryOS,
+  // Claude, or wiring at all, it just streams whatever command is asked
+  // to run in a real pseudo-terminal. See pty.rs's own doc comments for
+  // why this hands off to claude's own normal, already-trusted
+  // interactive permission model rather than a restricted, tool-granted
+  // subprocess (that was already tried once for a different feature and
+  // walked back after finding real security problems with it).
+  //
+  // v1 scope: one session at a time, matching pty.rs's own PtyState
+  // invariant -- opening a new one while another is running kills the
+  // old one first (the same thing a second `pty_spawn` call already does
+  // on the Rust side; wireTerminalState mirrors that on the JS side so
+  // the UI can't get out of sync with it).
+  let wireTerminalState = null; // { term, fitAddon, resizeObserver, unlistenOutput, unlistenExit, sessionActive }
+
+  function uint8ToBase64(bytes) {
+    let binary = '';
+    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    return btoa(binary);
+  }
+
+  function base64ToUint8(b64) {
+    const binary = atob(b64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+  }
+
+  /** Builds the artifact-level "Wire with Claude" launcher -- not tied to
+   * any single resolved wiring_action (unlike the merge/placement rows
+   * above), so rendered once per artifact rather than once per action. */
+  function renderWireWithClaudeLauncher(entry) {
+    const container = $('detail-wiring-terminal-launcher');
+    container.innerHTML = '';
+
+    const row = document.createElement('div');
+    row.className = 'build-fix-row';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn btn-sm';
+    btn.textContent = 'Wire with Claude →';
+    row.appendChild(btn);
+    container.appendChild(row);
+
+    btn.addEventListener('click', () => void withBusy(btn, 'Opening…', () => openWireTerminal(entry)));
+  }
+
+  /** Confirms, then opens the terminal overlay and starts a real PTY
+   * session running `deliveryos wire-with-claude <id>` in the real
+   * project. Nothing is spawned until the user explicitly confirms --
+   * same "one human click before anything real happens" rule every
+   * other AI-assist flow in this app already follows, just phrased as a
+   * native dialog here since this hands off to a session with real write
+   * access, not a single bounded proposal to review afterward. */
+  async function openWireTerminal(entry) {
+    const proceed = await confirmDialog(
+      'This hands off to a real, interactive claude session with real write access to '
+        + `"${state.projectDir}". Make sure any work you care about is committed or backed up first.`,
+      { title: 'Wire with Claude', kind: 'warning', okLabel: 'Continue', cancelLabel: 'Cancel' },
+    );
+    if (!proceed) return;
+
+    if (wireTerminalState) {
+      await closeWireTerminal({ silent: true });
+    }
+
+    const overlay = $('wire-terminal-overlay');
+    const statusEl = $('wire-terminal-status');
+    const container = $('wire-terminal-container');
+    container.innerHTML = '';
+    overlay.hidden = false;
+    statusEl.textContent = 'Starting…';
+
+    const term = new Terminal({
+      // A fixed dark theme, not synced to the app's own light/dark mode
+      // -- every mainstream embedded-terminal UI does this; simpler than
+      // keeping a second theme system in sync, and not what this feature
+      // is about.
+      theme: { background: '#181a20', foreground: '#e6e6e6' },
+      fontFamily: '"JetBrains Mono", monospace',
+      fontSize: 13,
+      cursorBlink: true,
+      allowProposedApi: true,
+    });
+    const fitAddon = new FitAddon.FitAddon();
+    term.loadAddon(fitAddon);
+    term.open(container);
+    fitAddon.fit();
+
+    const unlistenOutput = await listen('pty-output', (event) => {
+      term.write(base64ToUint8(event.payload));
+    });
+    const unlistenExit = await listen('pty-exit', () => {
+      if (!wireTerminalState) return;
+      wireTerminalState.sessionActive = false;
+      statusEl.textContent = 'Session ended';
+    });
+
+    const resizeObserver = new ResizeObserver(() => {
+      fitAddon.fit();
+      void invoke('pty_resize', { rows: term.rows, cols: term.cols }).catch(() => {});
+    });
+    resizeObserver.observe(container);
+
+    term.onData((data) => {
+      const bytes = new TextEncoder().encode(data);
+      void invoke('pty_write', { data: uint8ToBase64(bytes) }).catch(() => {});
+    });
+
+    wireTerminalState = { term, fitAddon, resizeObserver, unlistenOutput, unlistenExit, sessionActive: true };
+
+    const args = ['wire-with-claude', entry.manifest.id];
+    if (entry.remoteName) args.push('--remote', entry.remoteName);
+
+    try {
+      await invoke('pty_spawn', {
+        cwd: state.projectDir,
+        command: 'deliveryos',
+        args,
+        rows: term.rows,
+        cols: term.cols,
+      });
+      statusEl.textContent = 'Running';
+      term.focus();
+    } catch (err) {
+      statusEl.textContent = 'Could not start';
+      term.write(`\r\nCould not start: ${err instanceof Error ? err.message : String(err)}\r\n`);
+      wireTerminalState.sessionActive = false;
+    }
+  }
+
+  /** Tears down the terminal overlay -- confirms first if a session is
+   * still genuinely running (closing mid-session kills a real process,
+   * same "confirm before a real, hard-to-undo action" rule as opening
+   * one). `silent` skips both the confirm and the fade-out, used when
+   * `openWireTerminal` replaces an already-finished/already-confirmed
+   * previous session rather than the user explicitly closing one. */
+  async function closeWireTerminal(opts = {}) {
+    if (!wireTerminalState) return;
+    if (wireTerminalState.sessionActive && !opts.silent) {
+      const proceed = await confirmDialog('A claude session is still running. Close it and end the session?', {
+        title: 'Wire with Claude',
+        kind: 'warning',
+        okLabel: 'End session',
+        cancelLabel: 'Keep it open',
+      });
+      if (!proceed) return;
+    }
+
+    const { term, resizeObserver, unlistenOutput, unlistenExit } = wireTerminalState;
+    resizeObserver.disconnect();
+    unlistenOutput();
+    unlistenExit();
+    term.dispose();
+    wireTerminalState = null;
+
+    await invoke('pty_kill', {}).catch(() => {});
+
+    $('wire-terminal-overlay').hidden = true;
+    $('wire-terminal-container').innerHTML = '';
   }
 
   /** Phase 11 Detail-view task: renders design-kit's color tokens/type
@@ -1886,12 +3199,37 @@ ${bodyHtml}
     }
     if (requestId !== detailTemplateRequestId) return; // superseded while awaiting
 
-    await Promise.all(
-      components.map((component) =>
-        loadTemplateComponentPreview(grid, entry, component, requestId, guidelines.usageRules || {}),
-      ),
-    );
-    if (requestId !== detailTemplateRequestId) return; // superseded while awaiting
+    // Lazy, same as the main UI Components list: build every card's shell
+    // now (so the grid lays out immediately), but only actually compile a
+    // component's preview once its card scrolls into view -- opening a
+    // ~30-component design kit no longer fires that many concurrent
+    // compiles at once just because the tab was opened.
+    if (detailTemplateObserver) {
+      detailTemplateObserver.disconnect();
+    }
+    const contextByFrame = new Map();
+    const observer = new IntersectionObserver((observedEntries) => {
+      for (const observedEntry of observedEntries) {
+        if (!observedEntry.isIntersecting) {
+          continue;
+        }
+        const frame = observedEntry.target;
+        observer.unobserve(frame);
+        const ctx = contextByFrame.get(frame);
+        if (ctx) {
+          void mountTemplateComponentPreview(frame, ctx.entry, ctx.component, ctx.requestId);
+        }
+      }
+    });
+    detailTemplateObserver = observer;
+
+    for (const component of components) {
+      const frame = buildTemplateComponentCard(grid, entry, component, requestId, guidelines.usageRules || {});
+      if (!frame) continue; // superseded while building
+      contextByFrame.set(frame, { entry, component, requestId });
+      observer.observe(frame);
+    }
+    if (requestId !== detailTemplateRequestId) return; // superseded while building
 
     renderTemplateLayoutRules(guidelines.layoutRules);
   }
@@ -2114,16 +3452,15 @@ ${bodyHtml}
     });
   }
 
-  /** Compiles and mounts ONE component's live preview inside the template
-   * grid -- clones loadUiComponentPreview's own per-card iframe pattern
-   * (own contentHeight resize handler scoped via event.source, no
-   * innerHTML for artifact-controlled text) rather than a single shared
-   * listener, since the grid hosts N of these at once. Also applies the
-   * template section's currently-active theme on the harness's own
-   * 'ready' message (see compile.ts's setTheme handling) -- this is what
-   * makes a card that finishes loading AFTER the toggle was already
-   * flipped self-sync correctly. */
-  async function loadTemplateComponentPreview(grid, entry, component, requestId, usageRules) {
+  /** Builds and appends ONE component's card shell -- header, "View
+   * details" button, usage-rule caption, and an empty "Loading preview…"
+   * frame -- WITHOUT compiling or mounting its preview yet. Split out of
+   * what used to be loadTemplateComponentPreview so the grid can lay out
+   * and show every card's shell immediately while deferring the actual
+   * compile (mountTemplateComponentPreview) until each card scrolls into
+   * view. Returns the frame element to observe, or null if superseded
+   * before attaching. */
+  function buildTemplateComponentCard(grid, entry, component, requestId, usageRules) {
     const card = document.createElement('div');
     card.className = 'wiring-action-card template-component-card';
 
@@ -2159,9 +3496,22 @@ ${bodyHtml}
       card.appendChild(captionEl);
     }
 
-    if (requestId !== detailTemplateRequestId) return; // superseded before attaching
+    if (requestId !== detailTemplateRequestId) return null; // superseded before attaching
     grid.appendChild(card);
+    return frame;
+  }
 
+  /** Compiles and mounts ONE component's live preview into an already-built
+   * card's frame (see buildTemplateComponentCard) once it has actually
+   * scrolled into view -- clones loadUiComponentPreview's own per-card
+   * iframe pattern (own contentHeight resize handler scoped via
+   * event.source, no innerHTML for artifact-controlled text) rather than a
+   * single shared listener, since the grid hosts N of these at once. Also
+   * applies the template section's currently-active theme on the harness's
+   * own 'ready' message (see compile.ts's setTheme handling) -- this is
+   * what makes a card that finishes loading AFTER the toggle was already
+   * flipped self-sync correctly. */
+  async function mountTemplateComponentPreview(frame, entry, component, requestId) {
     try {
       const result = await call('preview.compilePayloadComponent', {
         remote: entry.remoteName,
@@ -2223,7 +3573,7 @@ ${bodyHtml}
    * first, never to expand the candidate set to some other file guessed
    * from the error text. Falls back to showing every applied file if
    * none of their paths/basenames are mentioned in the error at all. */
-  function renderBuildFixOffers(appliedFiles, buildErrorText) {
+  function renderBuildFixOffers(appliedFiles, buildErrorText, entry) {
     const container = $('build-fix-offers');
     container.innerHTML = '';
 
@@ -2239,17 +3589,29 @@ ${bodyHtml}
 
     container.hidden = false;
     for (const filePath of candidates) {
-      container.appendChild(renderBuildFixRow(filePath, buildErrorText));
+      container.appendChild(renderBuildFixRow(filePath, buildErrorText, entry));
     }
   }
 
   /** Builds one row's DOM for a single candidate file: a button that asks
    * for a fix, then either the model's own honest "can't determine a
    * fix" reason, or the proposed content plus Apply/Discard. Nothing is
-   * written to disk, and nothing is logged, unless Apply is clicked. */
-  function renderBuildFixRow(filePath, buildErrorText) {
+   * written to disk, and nothing is logged, unless Apply is clicked.
+   * `entry` (the artifact this fix offer came from) is threaded through
+   * only so Apply can attribute the resulting audit-log entry to it --
+   * same reasoning as applyWiringMerge's own remote/id params. */
+  function renderBuildFixRow(filePath, buildErrorText, entry) {
     const row = document.createElement('div');
     row.className = 'build-fix-row';
+
+    // Scoped to THIS row alone -- a shared module-level counter here used
+    // to let clicking "Ask" on one file's row silently discard a
+    // DIFFERENT file's row's still-in-flight result the moment it
+    // resolved (both rows incremented the same counter, immediately
+    // staling the other's captured requestId), even though the two rows
+    // target unrelated files. This still guards the originally-intended
+    // case -- this row's own second click superseding its first request.
+    let buildFixRequestId = 0;
 
     const askBtn = document.createElement('button');
     askBtn.type = 'button';
@@ -2329,6 +3691,8 @@ ${bodyHtml}
                 buildError: buildErrorText,
                 costUsd: fix.costUsd,
                 durationMs: fix.durationMs,
+                remote: entry ? entry.remoteName : undefined,
+                id: entry ? entry.manifest.id : undefined,
               });
               const outcomeEl = document.createElement('div');
               if (outcome.rolledBack) {
@@ -2482,10 +3846,21 @@ ${bodyHtml}
       return { label: 'Push', action: 'push' };
     }
     if (status === 'update_available') {
-      // Pulling always overwrites install_target with current upstream
-      // content, so "Update" is just a pull under a friendlier label --
-      // no separate update codepath needed.
-      return { label: 'Update', action: 'pull' };
+      // A real, confirmed bug in the old "Update is just a pull under a
+      // friendlier label" shortcut: pull always OVERWRITES/ADDS files from
+      // the new payload, but never DELETES a file the new version actually
+      // REMOVED -- that stale file would silently survive in the project
+      // forever. artifact.applyUpdate (Phase 16) fixes this (diffs the old
+      // pristine snapshot against the new payload to find removed files)
+      // and re-verifies no local edit snuck in since the last check, rather
+      // than trusting this button's own client-side state. Artifacts that
+      // declare wiring_actions keep going through the existing
+      // pullAndAutoWire path instead (below) -- applyUpdate deliberately
+      // doesn't attempt to auto-apply a NEW wiring_action a version bump
+      // might have added, so the wiring-aware path stays how it already
+      // was rather than losing that behavior.
+      const hasWiring = entry.manifest.wiring_actions && entry.manifest.wiring_actions.length > 0;
+      return { label: 'Update', action: hasWiring ? 'pull' : 'applyUpdate' };
     }
     if (status === 'both_changed') {
       // No default one-click action: pulling here would silently discard
@@ -2543,16 +3918,39 @@ ${bodyHtml}
       await beginProgress();
       let succeeded = 0;
       const failures = [];
+      // Every artifact pulled here shares the same `cwd`/`.gitignore`, so a
+      // warning from one is the exact same warning every other would also
+      // produce -- a single aggregated toast at the end is the right call,
+      // not one per artifact (which would just be the same message N times).
+      let gitignoreWarning;
       for (let i = 0; i < pullable.length; i += 1) {
         const entry = pullable[i];
-        btn.textContent = `Pulling ${i + 1}/${pullable.length}: ${entry.manifest.id}`;
+        // Same real bug fix as the single-artifact "Update" button: an
+        // already-pulled entry here means displayStatus is 'update_available'
+        // (isBulkPullable's only other eligible status besides 'not_pulled'),
+        // and a plain pull never deletes a file the new version removed --
+        // applyUpdate does. Bulk pull already doesn't special-case
+        // wiring_actions even for 'not_pulled' entries (a deliberate existing
+        // simplification, not something this changes).
+        const isUpdate = displayStatus(entry) === 'update_available';
+        btn.textContent = `${isUpdate ? 'Updating' : 'Pulling'} ${i + 1}/${pullable.length}: ${entry.manifest.id}`;
         try {
-          await call('artifact.pull', {
-            id: entry.manifest.id,
-            remote: entry.remoteName,
-            cwd: state.projectDir,
-          });
-          succeeded += 1;
+          if (isUpdate) {
+            const [result] = await call('artifact.applyUpdate', { id: entry.manifest.id, cwd: state.projectDir });
+            if (result && !result.applied) {
+              failures.push(`${entry.manifest.id}: ${result.reason}`);
+              continue;
+            }
+            succeeded += 1;
+          } else {
+            const result = await call('artifact.pull', {
+              id: entry.manifest.id,
+              remote: entry.remoteName,
+              cwd: state.projectDir,
+            });
+            succeeded += 1;
+            gitignoreWarning = gitignoreWarning || result.gitignoreWarning;
+          }
         } catch (err) {
           failures.push(`${entry.manifest.id}: ${err instanceof Error ? err.message : String(err)}`);
         }
@@ -2560,7 +3958,13 @@ ${bodyHtml}
       endProgress(failures.length === 0);
 
       if (succeeded > 0) {
-        toastSuccess(`Pulled ${succeeded} artifact${succeeded === 1 ? '' : 's'}`);
+        // "Pulled" (not "processed"/"handled") stays the right word even
+        // for the update_available entries in this batch -- pulling IS
+        // literally what applyUpdate does under the hood, just more safely.
+        toastSuccess(`Pulled/updated ${succeeded} artifact${succeeded === 1 ? '' : 's'}`);
+      }
+      if (gitignoreWarning) {
+        toastError(new Error(gitignoreWarning));
       }
       for (const failure of failures) {
         toastError(new Error(failure));
@@ -2706,6 +4110,41 @@ ${bodyHtml}
     }
   }
 
+  /** Builds one Browse-style `.res-card` element for `entry` -- shared by
+   * Browse's own grid and the kind-scoped Starter Kits/Backend Plugins
+   * pages (see renderKindListPage) so all three stay visually identical
+   * by construction rather than three copies that can silently drift.
+   * The whole card is the click target -- Pull/Push moved into Detail,
+   * so there's no inner action button to carve out a stopPropagation()
+   * exception for anymore. */
+  function buildResCard(entry) {
+    const card = document.createElement('div');
+    card.className = 'res-card';
+
+    const status = displayStatus(entry);
+    card.innerHTML = `
+      <div class="row1">
+        ${kindSwatchHtml(entry.manifest.kind)}
+        <div>
+          <div class="name"></div>
+          <div class="kind-label"></div>
+        </div>
+      </div>
+      <div class="summary"></div>
+      <div class="row2">
+        <span class="meta"></span>
+        <span class="badge ${status}"></span>
+      </div>
+    `;
+    card.querySelector('.name').textContent = entry.manifest.id;
+    card.querySelector('.kind-label').textContent = entry.manifest.kind;
+    card.querySelector('.summary').textContent = entry.manifest.description;
+    card.querySelector('.meta').textContent = `v${entry.manifest.version} · ${entry.manifest.owner}`;
+    card.querySelector('.badge').textContent = STATUS_LABELS[status];
+    card.addEventListener('click', () => openDetail(entry));
+    return card;
+  }
+
   function renderCards() {
     const grid = $('card-grid');
     renderBrowsePullAllButton();
@@ -2719,49 +4158,38 @@ ${bodyHtml}
         : 'No artifacts match.';
 
     for (const entry of entries) {
-      const card = document.createElement('div');
-      card.className = 'res-card';
-
-      const status = displayStatus(entry);
-      card.innerHTML = `
-        <div class="row1">
-          ${kindSwatchHtml(entry.manifest.kind)}
-          <div>
-            <div class="name"></div>
-            <div class="kind-label"></div>
-          </div>
-        </div>
-        <div class="summary"></div>
-        <div class="row2">
-          <span class="meta"></span>
-          <span class="badge ${status}"></span>
-        </div>
-      `;
-      card.querySelector('.name').textContent = entry.manifest.id;
-      card.querySelector('.kind-label').textContent = entry.manifest.kind;
-      card.querySelector('.summary').textContent = entry.manifest.description;
-      card.querySelector('.meta').textContent = `v${entry.manifest.version} · ${entry.manifest.owner}`;
-      card.querySelector('.badge').textContent = STATUS_LABELS[status];
-
-      // The whole card is the click target now -- Pull/Push moved into
-      // Detail, so there's no inner action button to carve out a
-      // stopPropagation() exception for anymore.
-      card.addEventListener('click', () => openDetail(entry));
-
-      grid.appendChild(card);
+      grid.appendChild(buildResCard(entry));
     }
   }
 
-  /** Runs `action` ('pull' or 'push') for `entry`, driving the shared
-   * progress/log panel (see beginProgress/endProgress) around the call.
-   * The single call site for both actions everywhere they can be
-   * triggered one-at-a-time: Detail's action button, and a row's own
-   * inline button inside a Tag Folder view. */
+  /** Runs `action` ('pull', 'push', or 'applyUpdate') for `entry`, driving
+   * the shared progress/log panel (see beginProgress/endProgress) around
+   * the call. The single call site for all three actions everywhere they
+   * can be triggered one-at-a-time: Detail's action button, and a row's
+   * own inline button inside a Tag Folder view. */
   async function runArtifactAction(entry, action, button) {
     await withBusy(button, 'Working...', async () => {
       await beginProgress();
       try {
-        if (action === 'pull') {
+        if (action === 'applyUpdate') {
+          const [result] = await call('artifact.applyUpdate', {
+            id: entry.manifest.id,
+            cwd: state.projectDir,
+          });
+          if (!result) {
+            // Its own client-side availableVersion was stale (someone/
+            // something else already resolved it) -- nothing to report as
+            // an error, just nothing left to do.
+            toastSuccess(`"${entry.manifest.id}" is already up to date.`);
+          } else if (result.applied) {
+            toastSuccess(
+              `Updated "${entry.manifest.id}" ${result.previousVersion} -> ${result.availableVersion}.`
+                + (result.note ? ` ${result.note}` : ''),
+            );
+          } else {
+            toastError(new Error(result.reason));
+          }
+        } else if (action === 'pull') {
           // Phase 10 item 1: only artifacts that actually declare
           // wiring_actions opt into the auto-apply-and-test path -- every
           // other artifact (the overwhelming majority) keeps using the
@@ -2770,30 +4198,42 @@ ${bodyHtml}
           // already established.
           const hasWiring = entry.manifest.wiring_actions && entry.manifest.wiring_actions.length > 0;
           if (hasWiring) {
-            const { pullResult, wiring, build } = await call('artifact.pullAndAutoWire', {
+            const { pullResult, wiring, build, healthSummary } = await call('artifact.pullAndAutoWire', {
               id: entry.manifest.id,
               remote: entry.remoteName,
               cwd: state.projectDir,
             });
-            const parts = [`Pulled ${pullResult.manifest.id}`];
-            if (wiring.applied.length > 0) {
-              parts.push(`applied ${wiring.applied.length} wiring action${wiring.applied.length === 1 ? '' : 's'} automatically`);
+            // Phase 12: one coherent plain-language read of everything
+            // that happened (wiring applied/needsReview, build outcome,
+            // AND any still-missing install params -- the toast this
+            // replaces silently never mentioned that last one at all),
+            // computed once in the engine so this and the persistent
+            // Detail banner below always agree.
+            toastSuccess(healthSummary);
+            lastAutoWireSummary = { key: entryKey(entry), summary: healthSummary };
+            // A real secrets-exposure risk gets its OWN toast, additional
+            // to the calm health summary above -- never folded into it,
+            // where it could easily get missed among routine wiring/build
+            // news.
+            if (pullResult.gitignoreWarning) {
+              toastError(new Error(pullResult.gitignoreWarning));
             }
-            if (wiring.needsReview.length > 0) {
-              parts.push(`${wiring.needsReview.length} still need${wiring.needsReview.length === 1 ? 's' : ''} manual review (${wiring.needsReview.join(', ')})`);
-            }
-            if (build.ran) {
-              parts.push(build.success ? 'build passed' : 'build FAILED -- see progress log');
-            }
-            toastSuccess(parts.join('; '));
             if (build.ran && !build.success) {
               // Surface the real build output where it's actually visible
               // -- reuses the existing progress log rather than inventing
               // a new UI surface for this.
               appendProgressLine('build', build.output || 'Build failed.');
               // Phase 10 item 2: offer to try fixing one of the files this
-              // same pull just auto-wired -- never any other file.
-              renderBuildFixOffers(wiring.applied, build.output || '');
+              // same pull just auto-wired -- never any other file. Never
+              // offered for a timeout or a missing build tool (Phase 13's
+              // timeout work) -- neither is a real code problem an AI
+              // file-edit could fix (it can't repair a hung process or
+              // make a missing tool exist on this machine), so offering it
+              // here would just waste a real API call on something it
+              // fundamentally can't address.
+              if (!build.timedOut && !build.toolNotFound) {
+                renderBuildFixOffers(wiring.applied, build.output || '', entry);
+              }
             }
           } else {
             const result = await call('artifact.pull', {
@@ -2802,6 +4242,9 @@ ${bodyHtml}
               cwd: state.projectDir,
             });
             toastSuccess(`Pulled ${result.manifest.id}`);
+            if (result.gitignoreWarning) {
+              toastError(new Error(result.gitignoreWarning));
+            }
           }
         } else {
           const result = await call('artifact.push', {
@@ -2965,6 +4408,59 @@ ${bodyHtml}
     });
   }
 
+  /** Detail's Remove button handler (Phase 13's uninstall): confirm-gated,
+   * same tone as the "discard local edit and re-sync" confirm above --
+   * names the artifact and says plainly what's about to happen, since
+   * deleting real installed files is not reversible from inside the app.
+   * Uses the same withBusy/beginProgress/loadCatalog+refreshDetailIfShown
+   * shape as runArtifactAction/handleCheckPushStatus, so this artifact's
+   * card and Detail view both reflect its now-not_pulled status the exact
+   * same way a fresh pull's own catalog refresh already does. The
+   * manual-review follow-up (filesNeedingManualReview/envParamsStillSet)
+   * gets its OWN toast, same posture as pullResult.gitignoreWarning
+   * elsewhere in this file -- never folded into the success toast, where
+   * it could easily get missed among routine "removed" news. */
+  async function handleRemoveArtifact(entry) {
+    if (
+      !window.confirm(
+        `This will delete ${entry.manifest.id}'s installed files from this project and stop ` +
+          `tracking it in DeliveryOS. This cannot be undone. Continue?`,
+      )
+    ) {
+      return;
+    }
+
+    const btn = $('detail-remove-btn');
+    await withBusy(btn, 'Removing...', async () => {
+      await beginProgress();
+      try {
+        const result = await call('artifact.remove', {
+          id: entry.manifest.id,
+          cwd: state.projectDir,
+        });
+        endProgress(true);
+        toastSuccess(`Removed ${entry.manifest.id}.`);
+
+        const followUps = [];
+        if (result.filesNeedingManualReview.length > 0) {
+          followUps.push(`files needing manual review: ${result.filesNeedingManualReview.join(', ')}`);
+        }
+        if (result.envParamsStillSet.length > 0) {
+          followUps.push(`.env.local values still set: ${result.envParamsStillSet.join(', ')}`);
+        }
+        if (followUps.length > 0) {
+          toastError(new Error(`Not fully cleaned up automatically -- ${followUps.join('; ')}.`));
+        }
+
+        await loadCatalog();
+        refreshDetailIfShown(entry);
+      } catch (err) {
+        endProgress(false);
+        toastError(err);
+      }
+    });
+  }
+
   /** Detail's Edit form submit handler: pushes a metadata-only edit
    * (description/roles/teams/stacks), never touching the artifact's
    * payload/content at all. Uses the same shared progress panel and
@@ -3049,10 +4545,24 @@ ${bodyHtml}
       progressUnlisten();
       progressUnlisten = null;
     }
-    progressUnlisten = await listen('sidecar-progress', (event) => {
-      const { stage, message } = event.payload;
-      appendProgressLine(stage, message);
-    });
+    try {
+      progressUnlisten = await listen('sidecar-progress', (event) => {
+        const { stage, message } = event.payload;
+        appendProgressLine(stage, message);
+      });
+    } catch (err) {
+      // Every call site does `await beginProgress()` BEFORE its own try
+      // block (deliberately -- see this function's own doc comment about
+      // closing the race before the real sidecar call goes out), so a
+      // rejection here would otherwise propagate out of beginProgress
+      // itself, skip every caller's endProgress(false) in its catch
+      // block, and leave the panel stuck showing "Working…" forever.
+      // Caught here instead: progress LINES just won't stream live for
+      // this action (a real but narrow degradation -- listen() itself
+      // failing is rare), but the action itself still runs and still
+      // reaches its own endProgress() normally either way.
+      progressUnlisten = null;
+    }
   }
 
   /** Marks the progress panel as finished (success or failure) and tears
@@ -3093,6 +4603,8 @@ ${bodyHtml}
     browse: '← Back to Browse',
     'tag-folder': '← Back to Tag Folder',
     'ui-components': '← Back to UI Components',
+    'starter-kits': '← Back to Starter Kits',
+    'backend-plugins': '← Back to Backend Plugins',
   };
 
   function openDetail(entry) {
@@ -3149,14 +4661,20 @@ ${bodyHtml}
   // Documentation lead (per direct user feedback: the concrete, visual
   // "what does this look like" content first), Preview/Configuration/
   // Routes follow.
+  // 'configuration' sits first -- for a backend-plugin it's the entire
+  // point of the artifact (install_params + Wiring), yet it used to sit
+  // 5th, behind three tabs that are frequently irrelevant to a plugin
+  // (Design/Components/Documentation are template/ui-component-oriented).
+  // Every other tab's relative order is unchanged.
   const DETAIL_TAB_DEFS = [
+    { key: 'configuration', label: 'Configuration', panelId: 'detail-configuration-section' },
     { key: 'design', label: 'Design', panelId: 'detail-design-section' },
     { key: 'components', label: 'Components', panelId: 'detail-components-section' },
     { key: 'documentation', label: 'Documentation', panelId: 'detail-documentation-section' },
     { key: 'preview', label: 'Preview', panelId: 'detail-preview-section' },
-    { key: 'configuration', label: 'Configuration', panelId: 'detail-configuration-section' },
     { key: 'routes', label: 'Routes', panelId: 'detail-routes-section' },
     { key: 'sourceDrift', label: 'Source drift', panelId: 'detail-source-drift-section' },
+    { key: 'activity', label: 'Activity', panelId: 'detail-activity-section' },
   ];
 
   // The only keys that resolve via an RPC round-trip -- preview/
@@ -3164,7 +4682,28 @@ ${bodyHtml}
   // already in hand. Used to show a real loading indicator while any of
   // these is still pending, so a tab that ends up applicable doesn't
   // just silently pop in with no warning it was coming.
-  const DETAIL_ASYNC_TAB_KEYS = ['documentation', 'design', 'components', 'routes', 'sourceDrift'];
+  const DETAIL_ASYNC_TAB_KEYS = ['documentation', 'design', 'components', 'routes', 'sourceDrift', 'activity'];
+
+  // Deliberately SEPARATE from DETAIL_TAB_DEFS's own display order
+  // (Configuration leads there, per direct user feedback above) -- this is
+  // only the priority used to pick a default ACTIVE tab when no real user
+  // preference exists yet. Found via review: reusing display order for
+  // both purposes silently regressed an earlier, separately-fixed bug
+  // (see the "no real preference yet" branch in refreshDetailTabs() below)
+  // the moment Configuration's display position moved to first -- Design
+  // must still win as the default tab once it resolves and applies, even
+  // though Configuration now displays to its left.
+  const DETAIL_DEFAULT_TAB_PRIORITY = [
+    'design', 'components', 'documentation', 'configuration', 'preview', 'routes', 'sourceDrift', 'activity',
+  ];
+
+  function firstByDefaultPriority(applicableDefs) {
+    for (const key of DETAIL_DEFAULT_TAB_PRIORITY) {
+      const match = applicableDefs.find((def) => def.key === key);
+      if (match) return match.key;
+    }
+    return applicableDefs[0].key;
+  }
 
   let detailTabState = {};
   let detailActiveTabKey = null;
@@ -3188,6 +4727,14 @@ ${bodyHtml}
   // actually changes; detailTabState itself still gets recomputed fresh
   // every render regardless (content may have genuinely changed).
   let detailShownEntryKey = null;
+
+  // Phase 12: the post-install health summary a pullAndAutoWire call just
+  // produced, stashed here (not just toasted) so it's still visible after
+  // the toast itself fades -- session-only, keyed by entryKey so it's
+  // never shown against a DIFFERENT artifact's Detail view. Cleared
+  // implicitly by the key mismatch check in renderPostInstallHealthBanner,
+  // same pattern detailShownEntryKey itself uses above.
+  let lastAutoWireSummary = null;
 
   function resetDetailTabState(entry) {
     detailTabState = {};
@@ -3231,19 +4778,22 @@ ${bodyHtml}
       // absent" would silently steal focus the instant ANY other tab
       // happened to resolve first.
       if (detailTabState[detailActiveTabKey] === false) {
-        detailActiveTabKey = applicable[0].key;
+        detailActiveTabKey = firstByDefaultPriority(applicable);
         detailActiveTabIsUserChosen = false;
       }
     } else {
-      // No real preference yet -- always track DETAIL_TAB_DEFS's own
-      // display order, recomputed fresh on every call. Direct user
-      // feedback: Configuration (always synchronous) used to "win" by
-      // simply being known before Design/Components (which need a real
-      // RPC round-trip) -- once Design/Components resolve and turn out
-      // applicable, THIS is what makes the view correctly switch to
-      // Design (the intended first tab) instead of getting stuck on
-      // whichever tab merely happened to resolve first.
-      detailActiveTabKey = applicable[0].key;
+      // No real preference yet -- always track DETAIL_DEFAULT_TAB_PRIORITY,
+      // recomputed fresh on every call (deliberately NOT DETAIL_TAB_DEFS's
+      // own display order -- see that constant's own doc comment for why
+      // the two must stay separate). Direct user feedback: Configuration
+      // (always synchronous) used to "win" by simply being known before
+      // Design/Components (which need a real RPC round-trip) -- once
+      // Design/Components resolve and turn out applicable, THIS is what
+      // makes the view correctly switch to Design (the intended default)
+      // instead of getting stuck on whichever tab merely happened to
+      // resolve first, or on Configuration's own new, purely-visual lead
+      // position.
+      detailActiveTabKey = firstByDefaultPriority(applicable);
     }
 
     // What's actually SHOWN right now, as distinct from the preference
@@ -3268,13 +4818,21 @@ ${bodyHtml}
       const tab = document.createElement('button');
       tab.className = `tab${def.key === displayKey ? ' active' : ''}`;
       tab.textContent = def.label;
-      tab.addEventListener('click', () => {
-        detailActiveTabKey = def.key;
-        detailActiveTabIsUserChosen = true;
-        refreshDetailTabs();
-      });
+      tab.addEventListener('click', () => goToDetailTab(def.key));
       tabsRow.appendChild(tab);
     }
+  }
+
+  /** Switches Detail to a specific tab programmatically -- the same
+   * click-a-tab-button path (a real user preference, sticky across
+   * re-renders), just reachable from code too. Used by the tab buttons
+   * themselves and by renderConnectionStatusPanel's "needs review" chips,
+   * which jump straight to Configuration rather than just naming a count
+   * and leaving you to go find it yourself. */
+  function goToDetailTab(key) {
+    detailActiveTabKey = key;
+    detailActiveTabIsUserChosen = true;
+    refreshDetailTabs();
   }
 
   function renderDetail(entry) {
@@ -3364,9 +4922,12 @@ ${bodyHtml}
     const hasWiringActions = manifest.wiring_actions && manifest.wiring_actions.length > 0;
     detailTabState.configuration = hasInstallParams || hasWiringActions;
     if (detailTabState.configuration) {
+      renderPostInstallHealthBanner(entry);
       void renderInstallParamsSection(entry);
       void renderWiringSection(entry);
     }
+    renderLifecycleExplainer(entry);
+    void renderConnectionStatusPanel(entry);
 
     refreshDetailTabs();
 
@@ -3394,6 +4955,11 @@ ${bodyHtml}
     // resolves" posture as Routes above -- an extracted artifact can have
     // a README, GUIDELINES.md, routes.tsx, SOURCES.json, all four, or none.
     void renderSourceDriftSection(entry);
+
+    // Activity (Phase 12): the wiring-merge log's own entries for this
+    // artifact, independently gated -- an artifact can have source-drift
+    // data, activity data, both, or neither.
+    void renderActivitySection(entry);
 
     $('detail-install-path').textContent = entry.installTarget;
 
@@ -3441,6 +5007,18 @@ ${bodyHtml}
     $('edit-cancel-btn').onclick = () => {
       editForm.hidden = true;
     };
+
+    // Remove (Phase 13's uninstall): same "needs an existing lockfile
+    // entry" gate as Open folder/Edit above -- nothing to back out of a
+    // project that was never pulled into it.
+    const removeBtn = $('detail-remove-btn');
+    if (entry.localStatus !== 'not_pulled') {
+      removeBtn.hidden = false;
+      removeBtn.onclick = () => void handleRemoveArtifact(entry);
+    } else {
+      removeBtn.hidden = true;
+      removeBtn.onclick = null;
+    }
 
     const actionBtn = $('detail-action-btn');
     const action = actionButtonFor(entry);
@@ -4026,6 +5604,15 @@ ${bodyHtml}
     const row = document.createElement('div');
     row.className = 'design-fix-row';
 
+    // Scoped to THIS row alone -- same request-token-guard shape
+    // renderBuildFixRow/renderWiringMergeRow use, closing the gap between
+    // this function's own doc comment (which already claimed to mirror
+    // renderBuildFixRow's structure) and what the code actually did.
+    // Guards against a stale artifact.requestAntiPatternFix response
+    // clobbering a newer render if this row is reused or the wizard
+    // navigates away and back mid-request.
+    let designFixRequestId = 0;
+
     const banner = document.createElement('div');
     banner.className = 'hint-banner-ai';
     banner.textContent = finding;
@@ -4044,14 +5631,17 @@ ${bodyHtml}
 
     askBtn.addEventListener('click', () => {
       void withBusy(askBtn, 'Asking…', async () => {
+        const requestId = ++designFixRequestId;
         let fix;
         try {
           fix = await call('artifact.requestAntiPatternFix', { payloadPath, finding });
         } catch (err) {
+          if (requestId !== designFixRequestId) return; // superseded while awaiting
           resultEl.hidden = false;
           resultEl.textContent = `Could not get a fix -- ${err instanceof Error ? err.message : String(err)}`;
           return;
         }
+        if (requestId !== designFixRequestId) return; // superseded while awaiting
 
         resultEl.hidden = false;
         resultEl.innerHTML = '';
@@ -5055,6 +6645,59 @@ ${bodyHtml}
     }
   }
 
+  // ---------- theme ----------
+  // index.html's own inline head script already applies a saved choice
+  // (via the `data-theme` attribute) before first paint, to avoid a flash
+  // of the wrong theme -- this section only needs to keep the toggle
+  // button's own icon/label in sync and handle the click itself.
+
+  /** No explicit `data-theme` attribute means "following the OS
+   * preference" -- resolves that down to the actual theme in effect right
+   * now, since the toggle always flips relative to what's ACTUALLY
+   * showing, not just whatever was last explicitly chosen. */
+  function getEffectiveTheme() {
+    const explicit = document.documentElement.getAttribute('data-theme');
+    if (explicit === 'dark' || explicit === 'light') {
+      return explicit;
+    }
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  }
+
+  function updateThemeToggleButton() {
+    const btn = $('theme-toggle-btn');
+    const isDark = getEffectiveTheme() === 'dark';
+    // Sun while dark (click it to go back to light), moon while light --
+    // the icon always names the theme clicking it will switch TO.
+    btn.querySelector('use').setAttribute('href', isDark ? '#i-theme-sun' : '#i-theme-moon');
+    const label = isDark ? 'Switch to light mode' : 'Switch to dark mode';
+    btn.setAttribute('aria-label', label);
+    btn.title = label;
+  }
+
+  function toggleTheme() {
+    const next = getEffectiveTheme() === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    try {
+      localStorage.setItem(THEME_KEY, next);
+    } catch (err) {
+      // localStorage unavailable -- the choice just won't survive a
+      // restart; the toggle itself still works for this session.
+    }
+    updateThemeToggleButton();
+  }
+
+  function initTheme() {
+    updateThemeToggleButton();
+    // Only matters before the user has ever made an explicit choice: keep
+    // the button's icon tracking a live OS theme change rather than only
+    // whatever `prefers-color-scheme` was at page load.
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+      if (!document.documentElement.getAttribute('data-theme')) {
+        updateThemeToggleButton();
+      }
+    });
+  }
+
   // ---------- wiring ----------
 
   function wireEvents() {
@@ -5067,6 +6710,8 @@ ${bodyHtml}
       btn.addEventListener('click', () => showView(btn.dataset.view));
     }
 
+    $('wire-terminal-close').addEventListener('click', () => void closeWireTerminal());
+    $('theme-toggle-btn').addEventListener('click', () => toggleTheme());
     $('change-folder-btn').addEventListener('click', () => void changeFolder());
     $('refresh-btn').addEventListener('click', () => void refreshCatalogFromRemotes());
     $('check-artifact-updates-btn').addEventListener('click', () => void handleCheckForArtifactUpdates());
@@ -5075,6 +6720,8 @@ ${bodyHtml}
     $('browse-pull-all-btn').addEventListener('click', () => void handleBrowsePullAll());
     $('tag-folder-pull-all-btn').addEventListener('click', () => void handleTagFolderPullAll());
     $('ui-components-pull-all-btn').addEventListener('click', () => void handleUiComponentsPullAll());
+    $('starter-kits-pull-all-btn').addEventListener('click', () => void handleStarterKitsPullAll());
+    $('backend-plugins-pull-all-btn').addEventListener('click', () => void handleBackendPluginsPullAll());
     $('back-to-browse-btn').addEventListener('click', () => {
       // Tag Folder needs its own dedicated re-open (category + value), not
       // just a generic showView -- 'tags' alone would land on the
@@ -5180,13 +6827,20 @@ ${bodyHtml}
     // Enter anywhere in the form advances to the next step instead of
     // submitting early -- except inside a tag picker's own text input,
     // where Enter already means "commit this chip, keep typing the next
-    // one" (see createTagPicker), and except on the Review step, where
-    // Enter doing nothing is safer than accidentally proposing something.
+    // one" (see createTagPicker), except on the Review step, where Enter
+    // doing nothing is safer than accidentally proposing something, and
+    // except when a BUTTON itself has focus -- a real, confirmed bug:
+    // Back/Review/"Choose file…"/"+ Add param"/"Suggest with Claude" all
+    // live inside this same form, so without this exclusion, tabbing to
+    // any of them and pressing Enter (a button's own native activation
+    // key) got hijacked into "go to next step" instead, making every one
+    // of those buttons unreachable via keyboard.
     $('addnew-form').addEventListener('keydown', (ev) => {
       if (ev.key !== 'Enter') {
         return;
       }
-      if (ev.target.classList.contains('tag-picker-input') || ev.target.tagName === 'TEXTAREA') {
+      if (ev.target.classList.contains('tag-picker-input') || ev.target.tagName === 'TEXTAREA'
+        || ev.target.tagName === 'BUTTON') {
         return;
       }
       if (ADDNEW_STEPS[wizardStepIndex] === 'review') {
@@ -5202,6 +6856,7 @@ ${bodyHtml}
   }
 
   async function init() {
+    initTheme();
     initTagPickers();
     wireEvents();
 

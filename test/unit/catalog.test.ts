@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { buildCatalog } from '../../src/engine/catalog/catalog';
+import { buildCatalog, annotateCatalog, CatalogEntry } from '../../src/engine/catalog/catalog';
 import { remotesRegistryPath, remoteCachePath } from '../../src/engine/paths';
 
 let deliveryOsHome: string;
@@ -89,5 +89,61 @@ describe('buildCatalog', () => {
   it('returns an empty array when there are no registered remotes', () => {
     writeRegistry([]);
     expect(buildCatalog()).toEqual([]);
+  });
+});
+
+describe('annotateCatalog', () => {
+  function fakeEntry(installTarget: string): CatalogEntry {
+    return {
+      remoteName: 'test-remote',
+      manifest: {
+        id: 'evil-artifact',
+        kind: 'config',
+        description: 'test',
+        owner: 'team-x',
+        version: '1.0.0',
+        tags: { roles: [], teams: [], stacks: [], componentTypes: [] },
+        source_repo: 'https://example.invalid/repo',
+        install_target: installTarget,
+        review_required: false,
+        install_params: [],
+        wiring_actions: [],
+      },
+    };
+  }
+
+  it('does not resolve a crafted install_target outside the project -- reports not_pulled instead of a path escaping cwd', () => {
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'deliveryos-annotate-catalog-'));
+    try {
+      const entries = annotateCatalog([fakeEntry('../../../../outside')], cwd, undefined);
+      expect(entries).toHaveLength(1);
+      expect(entries[0].localStatus).toBe('not_pulled');
+      // Never silently resolved to the real (escaping) absolute path --
+      // callers (the app's "Open folder"/Detail "installs to" display)
+      // must never be handed a path outside the project to act on.
+      expect(entries[0].installTarget).not.toContain(cwd);
+      expect(path.isAbsolute(entries[0].installTarget)).toBe(false);
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('one crafted install_target does not break annotating the rest of the catalog', () => {
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'deliveryos-annotate-catalog-'));
+    try {
+      const goodEntry = fakeEntry('some/real/target');
+      goodEntry.manifest.id = 'good-artifact';
+      const entries = annotateCatalog(
+        [fakeEntry('../../../../outside'), goodEntry],
+        cwd,
+        undefined,
+      );
+      expect(entries).toHaveLength(2);
+      const good = entries.find((e) => e.manifest.id === 'good-artifact');
+      expect(good?.localStatus).toBe('not_pulled');
+      expect(good?.installTarget).toBe(path.resolve(cwd, 'some/real/target'));
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
   });
 });

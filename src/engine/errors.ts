@@ -108,3 +108,43 @@ export class DesignFixError extends DeliveryOsError {}
  * silently reporting an empty result (same posture as
  * `PristineSnapshotMissingError`). */
 export class SourcesFileMissingError extends DeliveryOsError {}
+
+/** Thrown when `removeArtifact` (Phase 13's uninstall) is asked to remove an
+ * id with no lockfile entry in this project (never pulled, or already
+ * removed) -- there's nothing recorded to safely back out, so this fails
+ * hard and loud rather than silently no-op'ing. Also thrown when an old-shape
+ * lockfile entry (no recorded `installTarget`) can no longer fall back to
+ * resolving one via the manifest either (remote unregistered, artifact
+ * deleted from the catalog) -- naming the real problem rather than guessing
+ * a path to delete. */
+export class ArtifactNotPulledError extends DeliveryOsError {}
+
+/** Thrown when a project's `lock.json` exists but can't be parsed as JSON --
+ * hand-corrupted, truncated by a crash mid-write (writeLockfile's own
+ * write-temp-then-rename is meant to prevent this, but the file could
+ * still be edited by hand afterward), or written by something else
+ * entirely. Every lockfile-touching command (`pull`, `push`, `remove`,
+ * `list`, ...) reads through this, so failing with a clear, named error
+ * here beats a raw `SyntaxError` stack trace surfacing from deep inside
+ * whichever command happened to run first. */
+export class LockfileCorruptError extends DeliveryOsError {}
+
+/** Thrown when a backend-plugin's Tier-2 "AI wiring merge" flow fails
+ * outright: the real `claude` CLI subprocess call fails, returns
+ * something that can't be parsed as the requested JSON shape, or a
+ * caller hands `applyWiringMerge` a `targetFile` that resolves outside
+ * the installing project's own `cwd` -- same containment check
+ * `applyBuildFix` already relies on. Never thrown for an honest "I
+ * can't determine a merge" response, or for a merge that gets applied
+ * but doesn't actually keep the project building -- that's a real,
+ * reported rollback, not an error. */
+export class WiringMergeError extends DeliveryOsError {}
+
+/** Thrown when the AI-assisted wiring-placement fallback
+ * (`suggestWiringPlacement`) fails outright: the real `claude` CLI
+ * subprocess call fails, or returns something that can't be parsed as
+ * the requested JSON shape. Never thrown for an honest "I can't
+ * determine where this goes" response (`suggested_path: null` is a
+ * valid, expected outcome) -- same posture as `WiringMergeError`/
+ * `BuildFixError`. */
+export class WiringPlacementError extends DeliveryOsError {}

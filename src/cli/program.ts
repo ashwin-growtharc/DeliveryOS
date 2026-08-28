@@ -3,10 +3,15 @@ import { registerRemoteCommand } from './commands/remoteAdd';
 import { registerListCommand } from './commands/list';
 import { registerPullCommand } from './commands/pull';
 import { registerPushCommand } from './commands/push';
+import { registerRemoveCommand } from './commands/remove';
+import { registerConfigCommand } from './commands/config';
 import { registerCheckUpdatesCommand } from './commands/checkUpdates';
+import { registerCheckPendingPushesCommand } from './commands/checkPendingPushes';
 import { registerCheckDriftCommand } from './commands/checkDrift';
 import { registerScanCommand } from './commands/scan';
 import { registerWiringCommand } from './commands/wiring';
+import { registerWireCommand } from './commands/wire';
+import { registerScaffoldBackendPluginCommand } from './commands/scaffoldBackendPlugin';
 
 export function buildProgram(): Command {
   const program = new Command();
@@ -20,10 +25,15 @@ export function buildProgram(): Command {
   registerListCommand(program);
   registerPullCommand(program);
   registerPushCommand(program);
+  registerRemoveCommand(program);
+  registerConfigCommand(program);
   registerCheckUpdatesCommand(program);
+  registerCheckPendingPushesCommand(program);
   registerCheckDriftCommand(program);
   registerScanCommand(program);
   registerWiringCommand(program);
+  registerWireCommand(program);
+  registerScaffoldBackendPluginCommand(program);
 
   return program;
 }

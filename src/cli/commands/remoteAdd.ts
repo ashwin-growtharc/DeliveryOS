@@ -5,6 +5,7 @@ import {
   findRemote,
   removeRemoteEntry,
   deriveNameFromUrl,
+  listRemotes,
 } from '../../engine/remote/remoteRegistry';
 import { cloneRemote, cachePath } from '../../engine/remote/remoteCache';
 import { RemoteRegistryError } from '../../engine/errors';
@@ -20,7 +21,7 @@ export async function runRemoteAdd(gitUrl: string, nameOption: string | undefine
   }
 
   const dest = await cloneRemote(name, gitUrl);
-  addRemoteEntry({ name, url: gitUrl, addedAt: new Date().toISOString() });
+  await addRemoteEntry({ name, url: gitUrl, addedAt: new Date().toISOString() });
 
   console.log(`Added remote "${name}" (${gitUrl}) -> ${dest}`);
 }
@@ -31,13 +32,32 @@ export async function runRemoteAdd(gitUrl: string, nameOption: string | undefine
  * pull/push against this remote again (until it's re-added) goes away.
  * The cache directory not existing at all (e.g. it was already deleted by
  * hand) is not an error -- there's simply nothing extra to clean up. */
-export function runRemoteRemove(name: string): void {
-  removeRemoteEntry(name); // throws RemoteRegistryError if not registered
+export async function runRemoteRemove(name: string): Promise<void> {
+  await removeRemoteEntry(name); // throws RemoteRegistryError if not registered
   const dest = cachePath(name);
   if (fs.existsSync(dest)) {
     fs.rmSync(dest, { recursive: true, force: true });
   }
   console.log(`Removed remote "${name}"`);
+}
+
+/** Prints every registered remote -- the CLI's only prior way to see this
+ * was reading `~/.deliveryos/remotes.json` by hand, even though the
+ * sidecar's own `remote.list` RPC has always had this (a real CLI/sidecar
+ * parity gap: the app can list its own remotes, a CLI-only user couldn't). */
+export function runRemoteList(json: boolean): void {
+  const remotes = listRemotes();
+  if (json) {
+    console.log(JSON.stringify(remotes));
+    return;
+  }
+  if (remotes.length === 0) {
+    console.log('No remotes registered.');
+    return;
+  }
+  for (const remote of remotes) {
+    console.log(`${remote.name}  ${remote.url}  (added ${remote.addedAt})`);
+  }
 }
 
 export function registerRemoteCommand(program: Command): void {
@@ -54,8 +74,16 @@ export function registerRemoteCommand(program: Command): void {
   remote
     .command('remove <name>')
     .description("Unregister a remote and delete its local cache clone (doesn't touch any project's pulled files)")
-    .action((name: string) => {
-      runRemoteRemove(name);
+    .action(async (name: string) => {
+      await runRemoteRemove(name);
+    });
+
+  remote
+    .command('list')
+    .description('List every registered remote')
+    .option('--json', 'Output as JSON instead of a human-readable listing')
+    .action((options: { json?: boolean }) => {
+      runRemoteList(Boolean(options.json));
     });
 }
 

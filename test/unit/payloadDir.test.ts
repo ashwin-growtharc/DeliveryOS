@@ -71,6 +71,37 @@ describe('resolvePayloadDir', () => {
     const payloadDir = writeArtifact(remoteCachePath('test-remote'), 'design-kit', 'artifacts/design-kit/payload');
     expect(resolvePayloadDir('test-remote', 'design-kit')).toBe(payloadDir);
   });
+
+  it('refuses a payload_path that resolves outside the remote clone, never returning a path outside it', () => {
+    // Same untrusted-manifest-field threat model as pull.ts/push.ts's own
+    // payload_path containment checks -- a malicious remote's manifest.yaml
+    // could set payload_path to escape its own clone directory entirely.
+    // Deliberately writes ONLY the manifest (never calls writeArtifact,
+    // which would otherwise mkdirSync the escaping payload_path itself
+    // for real, outside this test's own tmp dir).
+    writeRegistry(['test-remote']);
+    const remoteCacheDir = remoteCachePath('test-remote');
+    fs.mkdirSync(path.join(remoteCacheDir, 'artifacts', 'evil-kit'), { recursive: true });
+    fs.writeFileSync(
+      path.join(remoteCacheDir, 'artifacts', 'evil-kit', 'manifest.yaml'),
+      [
+        'id: evil-kit',
+        'kind: template',
+        'description: Test template',
+        'owner: team-x',
+        'version: 1.0.0',
+        'source_repo: https://example.invalid/repo',
+        'install_target: some/target',
+        'review_required: false',
+        'payload_path: ../../../../etc/passwd',
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+    expect(() => resolvePayloadDir('test-remote', 'evil-kit')).toThrow(
+      /payload_path.*resolves outside the remote's own directory/,
+    );
+  });
 });
 
 describe('resolveWithinPayloadDir', () => {

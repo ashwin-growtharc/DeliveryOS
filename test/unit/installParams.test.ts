@@ -7,6 +7,7 @@ import {
   applyInstallParams,
   readExistingEnvValues,
   applyEnvExamplePlaceholders,
+  checkEnvLocalGitignoreCoverage,
 } from '../../src/engine/pull/installParams';
 import { InstallParam } from '../../src/engine/manifest/schema';
 
@@ -299,5 +300,82 @@ describe('applyEnvExamplePlaceholders (Tier 1 of the wiring agent, Phase 7 item 
     applyInstallParams(cwd, { DATABASE_URL: 'postgres://real' });
     const exampleContent = fs.readFileSync(path.join(cwd, '.env.example'), 'utf-8');
     expect(exampleContent).not.toContain('DATABASE_URL');
+  });
+});
+
+describe('checkEnvLocalGitignoreCoverage', () => {
+  let cwd: string;
+
+  beforeEach(() => {
+    cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'deliveryos-gitignore-coverage-test-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  });
+
+  it('warns when there is no .gitignore at all', () => {
+    const warning = checkEnvLocalGitignoreCoverage(cwd);
+    expect(warning).toBeDefined();
+    expect(warning).toContain('.gitignore');
+  });
+
+  it('does not warn when .gitignore covers .env.local directly', () => {
+    fs.writeFileSync(path.join(cwd, '.gitignore'), 'node_modules\n.env.local\n', 'utf-8');
+    expect(checkEnvLocalGitignoreCoverage(cwd)).toBeUndefined();
+  });
+
+  it('does not warn when .gitignore covers it via a broader ".env*" pattern', () => {
+    fs.writeFileSync(path.join(cwd, '.gitignore'), '.env*\n', 'utf-8');
+    expect(checkEnvLocalGitignoreCoverage(cwd)).toBeUndefined();
+  });
+
+  it('does not warn when .gitignore covers it via a broader "*.local" pattern', () => {
+    fs.writeFileSync(path.join(cwd, '.gitignore'), '*.local\n', 'utf-8');
+    expect(checkEnvLocalGitignoreCoverage(cwd)).toBeUndefined();
+  });
+
+  it('warns when .gitignore exists but has only unrelated entries', () => {
+    fs.writeFileSync(path.join(cwd, '.gitignore'), 'node_modules\ndist/\n*.log\n', 'utf-8');
+    const warning = checkEnvLocalGitignoreCoverage(cwd);
+    expect(warning).toBeDefined();
+  });
+
+  it('never throws, even against a directory that does not exist', () => {
+    const missingDir = path.join(cwd, 'does-not-exist');
+    expect(() => checkEnvLocalGitignoreCoverage(missingDir)).not.toThrow();
+  });
+});
+
+describe('applyInstallParams return shape (gitignore coverage warning)', () => {
+  let cwd: string;
+
+  beforeEach(() => {
+    cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'deliveryos-apply-install-params-warning-test-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  });
+
+  it('does NOT even attempt the gitignore check when values is {} -- no warning, even in a directory with clearly no coverage', () => {
+    // This same directory (no .gitignore at all) WOULD warn if values were
+    // non-empty -- see the next test. The absence of a warning here proves
+    // the "only check when something was actually written" gate worked,
+    // not that the directory happened to be safely covered.
+    const result = applyInstallParams(cwd, {});
+    expect(result.gitignoreWarning).toBeUndefined();
+    expect(fs.existsSync(path.join(cwd, '.gitignore'))).toBe(false);
+  });
+
+  it('returns a gitignoreWarning when a real value was written and .env.local is not covered', () => {
+    const result = applyInstallParams(cwd, { AUTH_SECRET: 'real-secret-value' });
+    expect(result.gitignoreWarning).toBeDefined();
+  });
+
+  it('returns no gitignoreWarning when a real value was written but .env.local IS covered', () => {
+    fs.writeFileSync(path.join(cwd, '.gitignore'), '.env.local\n', 'utf-8');
+    const result = applyInstallParams(cwd, { AUTH_SECRET: 'real-secret-value' });
+    expect(result.gitignoreWarning).toBeUndefined();
   });
 });

@@ -20,8 +20,30 @@
   --sand-100: #F6E8CC; --sand-200: #EDD9B3; --sand-500: #DBC6AB;
   /* additional warm tones */
   --gold-500: #FBD17E; --sky-100: #DBE8F4;
-  /* primary -- navy teal */
+  /* Text-on-tint pair for icon swatches sitting on --sand-100 (kindSwatch's
+     skill/java entries in app.js) -- a fixed hex fg used to pair fine with
+     sand-100's light value, but sand-100 itself gets a real dark tint for
+     dark mode (below), and a medium warm-brown text stopped being legible
+     against it (~2.2:1 contrast, confirmed). Adaptive so both stay paired. */
+  --icon-fg-warm: #8A5A2B;
+  /* Same pairing problem, for --sky-100 (command/typescript/go entries). */
+  --icon-fg-cool: #2E5E82;
+  /* primary -- navy teal. Fixed brand-identity color, deliberately NOT
+     redefined for dark mode: it's only ever used as a solid fill (button/
+     chip backgrounds) with white text on top, which stays legible on a
+     dark page. Body/UI text uses --ink instead (below), which does
+     adapt -- see the dark-mode blocks at the end of this file. */
   --primary-700: #1E3C53; --primary-800: #162D3F; --primary-900: #0E1E2B;
+  /* Generic UI text color. Equal to primary-700 in light mode (so this
+     introduces no visual change here), but a distinct token so dark mode
+     can turn text light without also turning brand-fill buttons light. */
+  --ink: var(--primary-700);
+  --text-secondary: #6E6455;
+  /* Same stack `code, .mono` already sets directly below -- defined as a
+     token too since 5 other rules reference `var(--font-mono, monospace)`
+     and, with no --font-mono ever defined, were silently falling back to
+     the bare generic monospace fallback instead of the real font. */
+  --font-mono: 'JetBrains Mono', ui-monospace, Consolas, monospace;
   /* AI accent colors -- AI-specific elements only, see rule comments below */
   --accent-500: #7A00DF; --accent-600: #6600B8; --cyan-500: #0693E3; --cyan-600: #0577B8; --mint-500: #00D084;
   /* status */
@@ -33,6 +55,76 @@
   --gradient-mint: linear-gradient(135deg, #00D084, #0693E3);
   --shadow-1: 0 1px 3px rgb(0 0 0/0.04); --shadow-2: 0 4px 12px rgb(0 0 0/0.08);
   --radius-md: .5rem; --radius-lg: 1rem; --radius-xl: 1.25rem; --radius-pill: 31.25rem;
+}
+
+/* ---------- dark mode ----------
+ * Defaults to the OS preference (prefers-color-scheme) until the user
+ * makes an explicit choice via the sidebar toggle (app.js), at which
+ * point a `data-theme` attribute on <html> wins in both directions --
+ * same "media query sets the default, an explicit attribute overrides
+ * it either way" pattern used for themeable web content generally.
+ *
+ * A genuine dark palette, not an inversion: surfaces keep the app's warm
+ * (not cold blue-black) character, and every pale accent tint
+ * (sage-100, sand-100/200, sky-100, success/warning/danger-100) gets its
+ * own darkened panel color, with success/warning/danger-600 lightened to
+ * match -- otherwise those badges/banners would keep rendering as bright
+ * light-mode patches on an otherwise dark page. --primary-700/800/900
+ * (brand-fill buttons/chips, white text on top) and the saturated
+ * standalone accents (gold-500, danger-500, accent-500/600, cyan-500/600,
+ * mint-500, sage-500/700, sand-500) are left unchanged in both themes --
+ * already vivid enough to read on a dark surface, and changing them would
+ * dilute the brand identity they exist to carry. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface: #15181B; --surface-secondary: #15181B; --surface-tertiary: #0F1214; --surface-inset: #0A0C0D;
+    --card: #1F2427;
+    --border: #343B3F; --border-strong: #454D51; --border-subtle: #0A0C0D;
+    --ink: #ECE9E2;
+    --text-secondary: #918F89;
+    --sage-100: #17261A;
+    --sand-100: #2C2013; --sand-200: #382A18;
+    --sky-100: #10202C;
+    --icon-fg-warm: #E3BD87; --icon-fg-cool: #9AC7EA;
+    --success-100: #163B22; --success-600: #6EE0A0;
+    --warning-100: #3D2907; --warning-600: #F2B24E;
+    --danger-100: #45170F; --danger-600: #FF8A66;
+    --shadow-1: 0 1px 3px rgb(0 0 0/0.4); --shadow-2: 0 4px 16px rgb(0 0 0/0.55);
+  }
+}
+
+:root[data-theme="dark"] {
+  --surface: #15181B; --surface-secondary: #15181B; --surface-tertiary: #0F1214; --surface-inset: #0A0C0D;
+  --card: #1F2427;
+  --border: #343B3F; --border-strong: #454D51; --border-subtle: #0A0C0D;
+  --ink: #ECE9E2;
+  --text-secondary: #918F89;
+  --sage-100: #17261A;
+  --sand-100: #2C2013; --sand-200: #382A18;
+  --sky-100: #10202C;
+  --icon-fg-warm: #E3BD87; --icon-fg-cool: #9AC7EA;
+  --success-100: #163B22; --success-600: #6EE0A0;
+  --warning-100: #3D2907; --warning-600: #F2B24E;
+  --danger-100: #45170F; --danger-600: #FF8A66;
+  --shadow-1: 0 1px 3px rgb(0 0 0/0.4); --shadow-2: 0 4px 16px rgb(0 0 0/0.55);
+}
+
+/* Forces light mode even when the OS prefers dark -- an explicit
+   opposite choice has to win over the media query, not just add to it. */
+:root[data-theme="light"] {
+  --surface: #FFFCF2; --surface-secondary: #FFFCF2; --surface-tertiary: #F6F1E9; --surface-inset: #EDE6DA;
+  --card: #FFFFFF;
+  --border: #E0D9CE; --border-strong: #C9BFAF; --border-subtle: #EDE6DA;
+  --ink: #1E3C53;
+  --text-secondary: #6E6455;
+  --sage-100: #EAF4DB;
+  --sand-100: #F6E8CC; --sand-200: #EDD9B3;
+  --sky-100: #DBE8F4;
+  --icon-fg-warm: #8A5A2B; --icon-fg-cool: #2E5E82;
+  --success-100: #DCF8E6; --success-600: #236D40;
+  --warning-100: #FFF4E0; --warning-600: #9C5D00;
+  --danger-100: #FFE5E0; --danger-600: #A2341F;
+  --shadow-1: 0 1px 3px rgb(0 0 0/0.04); --shadow-2: 0 4px 12px rgb(0 0 0/0.08);
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -58,7 +150,7 @@ body {
   margin: 0;
   font-family: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
   background: var(--surface);
-  color: var(--primary-700);
+  color: var(--ink);
   line-height: 1.5;
   font-size: 14px;
   /* A global safety net: fixing each individual long-unbreakable-string
@@ -94,7 +186,7 @@ button {
 
 input, textarea, select {
   font: inherit;
-  color: var(--primary-700);
+  color: var(--ink);
 }
 
 /* Accessibility: visible keyboard focus on every interactive element, 2px
@@ -102,7 +194,7 @@ input, textarea, select {
  * section. `:focus-visible` (not `:focus`) so mouse/touch clicks don't get
  * a ring, only keyboard/programmatic focus. */
 :focus-visible {
-  outline: 2px solid var(--primary-700);
+  outline: 2px solid var(--ink);
   outline-offset: 2px;
 }
 
@@ -142,7 +234,7 @@ input, textarea, select {
 .sidebar-brand {
   font-family: 'EB Garamond', Georgia, serif;
   font-size: 23px;
-  color: var(--primary-700);
+  color: var(--ink);
   padding: 0 8px 22px;
   letter-spacing: .2px;
 }
@@ -159,7 +251,7 @@ input, textarea, select {
   gap: 10px;
   padding: 9px 12px;
   border-radius: var(--radius-md);
-  color: var(--primary-700);
+  color: var(--ink);
   opacity: .7;
   font-weight: 500;
   font-size: 13.5px;
@@ -181,7 +273,7 @@ input, textarea, select {
 .sidebar-item.active {
   opacity: 1;
   background: var(--sage-100);
-  color: var(--primary-700);
+  color: var(--ink);
   font-weight: 600;
 }
 
@@ -229,7 +321,7 @@ input, textarea, select {
 
 .folder-path {
   font-family: 'JetBrains Mono', monospace;
-  color: var(--primary-700);
+  color: var(--ink);
   background: var(--surface-tertiary);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -257,7 +349,7 @@ input, textarea, select {
   border-radius: var(--radius-md);
   padding: 7px 14px;
   cursor: pointer;
-  color: var(--primary-700);
+  color: var(--ink);
   transition: background .1s ease, opacity .1s ease, box-shadow .15s ease;
 }
 
@@ -294,7 +386,7 @@ input, textarea, select {
 }
 
 .btn-ghost {
-  color: var(--primary-700);
+  color: var(--ink);
   border-color: transparent;
   background: transparent;
 }
@@ -306,6 +398,21 @@ input, textarea, select {
 .btn-sm {
   font-size: 12px;
   padding: 5px 11px;
+}
+
+/* A button whose only content is one .glyph icon (currently: the theme
+   toggle) -- square padding instead of .btn-sm's text-shaped padding, so
+   the icon sits centered rather than off-balance. */
+.btn-icon-only {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+}
+
+.btn-icon-only .glyph {
+  width: 16px;
+  height: 16px;
 }
 
 .btn-danger-ghost {
@@ -359,7 +466,7 @@ input, textarea, select {
 }
 
 .empty-state {
-  color: var(--primary-700);
+  color: var(--ink);
   opacity: .6;
   font-size: 13.5px;
   padding: 24px 4px;
@@ -443,7 +550,7 @@ input, textarea, select {
   border-radius: var(--radius-md);
   padding: 8px 12px;
   background: var(--card);
-  color: var(--primary-700);
+  color: var(--ink);
   font-size: 13px;
   flex-shrink: 0;
 }
@@ -474,7 +581,7 @@ input, textarea, select {
   padding: 5px 12px;
   border-radius: var(--radius-md);
   border: 1px solid var(--border);
-  color: var(--primary-700);
+  color: var(--ink);
   opacity: .75;
   background: var(--card);
   cursor: pointer;
@@ -509,7 +616,7 @@ input, textarea, select {
   padding: 9px 15px 11px;
   font-size: 13.5px;
   font-weight: 500;
-  color: var(--primary-700);
+  color: var(--ink);
   opacity: .5;
   cursor: pointer;
   white-space: nowrap;
@@ -522,7 +629,7 @@ input, textarea, select {
 .tab-row .tab.active {
   opacity: 1;
   font-weight: 600;
-  border-bottom-color: var(--primary-700);
+  border-bottom-color: var(--ink);
 }
 
 .page-head {
@@ -911,7 +1018,7 @@ input, textarea, select {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: .04em;
-  color: var(--primary-700);
+  color: var(--ink);
   margin-bottom: 8px;
 }
 
@@ -1056,7 +1163,7 @@ input, textarea, select {
 
 .badge.not_pulled {
   background: var(--surface-inset);
-  color: var(--primary-700);
+  color: var(--ink);
   opacity: .8;
 }
 
@@ -1078,7 +1185,7 @@ input, textarea, select {
  * rule. */
 .badge.update_available {
   background: var(--sand-200);
-  color: var(--primary-800);
+  color: var(--ink);
   opacity: 1;
 }
 
@@ -1156,7 +1263,7 @@ input, textarea, select {
 }
 
 .meta-grid .k {
-  color: var(--primary-700);
+  color: var(--ink);
   opacity: .55;
   font-size: 11.5px;
   font-weight: 500;
@@ -1177,7 +1284,7 @@ input, textarea, select {
   border-radius: var(--radius-md);
   padding: 2px 9px;
   margin: 3px 5px 0 0;
-  color: var(--primary-700);
+  color: var(--ink);
   opacity: .85;
 }
 
@@ -1197,7 +1304,7 @@ input, textarea, select {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: 9px 11px;
-  color: var(--primary-700);
+  color: var(--ink);
   opacity: .85;
   word-break: break-all;
 }
@@ -1257,7 +1364,7 @@ input, textarea, select {
 
 .push-status-text {
   font-size: 13px;
-  color: var(--primary-700);
+  color: var(--ink);
   margin: 0 0 10px;
 }
 
@@ -1285,6 +1392,141 @@ input, textarea, select {
 .provenance-badge.unsigned {
   background: var(--warning-100);
   color: var(--warning-600);
+}
+
+/* Detail's "How this works" explainer -- a plain-language, always-static
+ * walkthrough of the install lifecycle, sitting above the live
+ * "Connection status" chips below it. A native <details> (open by
+ * default) rather than custom show/hide JS, matching the Activity tab's
+ * own before/after disclosures -- free keyboard/accessibility behavior,
+ * no extra state to manage. See renderLifecycleExplainer in app.js. */
+.lifecycle-explainer {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-tertiary);
+  padding: 10px 14px;
+  margin: 0 0 14px;
+}
+
+.lifecycle-explainer summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 13px;
+  padding: 2px 0;
+}
+
+.lifecycle-explainer[open] summary {
+  margin-bottom: 8px;
+}
+
+.lifecycle-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.lifecycle-step {
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.lifecycle-step:first-child {
+  padding-top: 0;
+  border-top: none;
+}
+
+.lifecycle-step-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 12.5px;
+}
+
+.lifecycle-step-description {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+  line-height: 1.45;
+}
+
+.lifecycle-step-link {
+  flex-shrink: 0;
+  border: none;
+  background: none;
+  color: var(--accent-600);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+}
+
+.lifecycle-step-link:hover {
+  text-decoration: underline;
+}
+
+/* Detail's "Connection status" panel (Phase 21) -- a row of at-a-glance
+ * chips (signed, configured, wired, build) plus the "Verify build" button,
+ * always visible for a pulled backend-plugin-shaped artifact so the
+ * question "is this actually connected and working" has an answer any
+ * time Detail is reopened, not just right after a pull. See
+ * renderConnectionStatusPanel in app.js. Boxed with the same visual
+ * weight as .lifecycle-explainer below it -- this is the live, actionable
+ * status, so it should read at least as prominently as the static
+ * lifecycle reference text, not as bare unboxed pills. */
+.connection-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
+  margin: 0 0 14px;
+}
+
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .2px;
+  padding: 4px 10px;
+  border-radius: var(--radius-md);
+}
+
+.status-chip.ok {
+  background: var(--success-100);
+  color: var(--success-600);
+}
+
+.status-chip.warn {
+  background: var(--warning-100);
+  color: var(--warning-600);
+}
+
+.status-chip.neutral {
+  background: var(--surface-tertiary);
+  border: 1px solid var(--border);
+  color: var(--ink);
+  opacity: .85;
+}
+
+/* A chip rendered as a real <button> (something needs review, and has a
+ * real place to jump to) -- same chip look, but obviously interactive. */
+.status-chip.clickable {
+  border: none;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.status-chip.clickable:hover {
+  filter: brightness(1.12);
 }
 
 /* Holds one real, sandboxed markdown iframe (see
@@ -1372,7 +1614,7 @@ input, textarea, select {
 .route-node-path {
   font-family: 'JetBrains Mono', monospace;
   font-size: 12px;
-  color: var(--primary-700);
+  color: var(--ink);
 }
 
 .route-node-error-note {
@@ -1485,6 +1727,17 @@ input, textarea, select {
   border-radius: var(--radius-md);
 }
 
+/* Activity tab only: which of the two underlying logs (merge vs.
+   build-fix) this entry came from -- a category, never a status, so it
+   stays visually quieter than .wiring-action-status's colored pills. */
+.wiring-action-kind {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .2px;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
 .wiring-action-status.absent {
   background: var(--surface-inset);
   opacity: .7;
@@ -1493,6 +1746,16 @@ input, textarea, select {
 .wiring-action-status.exists {
   background: var(--warning-100);
   color: var(--warning-600);
+}
+
+.wiring-action-status.ok {
+  background: var(--success-100);
+  color: var(--success-600);
+}
+
+.wiring-action-status.ambiguous {
+  background: var(--danger-100);
+  color: var(--danger-600);
 }
 
 .wiring-action-description {
@@ -1696,14 +1959,26 @@ input, textarea, select {
   font-weight: 500;
 }
 
+/* inline-flex, not inline-block: this gets dropped as a bare
+ * `<span class="spinner"></span> Loading…` into plain, non-flex
+ * containers in several places (e.g. #detail-wiring-actions,
+ * #detail-install-params-fields) -- without an explicit display here it
+ * stays the default `inline`, which ignores width/height and collapses
+ * to a barely-visible sliver instead of the 14px ring every other call
+ * site (inside an already-flex parent, where an inline child gets
+ * blockified for free) shows correctly. Setting it here fixes every
+ * call site at once rather than requiring each new one to remember to
+ * wrap it in a flex container. */
 .spinner {
+  display: inline-flex;
   width: 14px;
   height: 14px;
   border-radius: 50%;
   border: 2px solid var(--border-strong);
-  border-top-color: var(--primary-700);
+  border-top-color: var(--ink);
   animation: spin .7s linear infinite;
   flex-shrink: 0;
+  vertical-align: middle;
 }
 
 @keyframes spin {
@@ -1909,7 +2184,7 @@ input, textarea, select {
 .chip.tag-picker-suggestion {
   border: 1px dashed var(--border-strong);
   background: transparent;
-  color: var(--primary-700);
+  color: var(--ink);
   opacity: .8;
 }
 
@@ -1929,13 +2204,13 @@ input, textarea, select {
   border: 1px solid var(--border);
   border-radius: var(--radius-pill);
   padding: 3px 6px 3px 10px;
-  color: var(--primary-700);
+  color: var(--ink);
 }
 
 .tag-chip-remove {
   border: none;
   background: transparent;
-  color: var(--primary-700);
+  color: var(--ink);
   opacity: .55;
   cursor: pointer;
   font-size: 14px;
@@ -1955,7 +2230,7 @@ input, textarea, select {
   padding: 4px 2px;
   background: transparent;
   font-size: 13px;
-  color: var(--primary-700);
+  color: var(--ink);
 }
 
 .payload-picker {
@@ -2050,7 +2325,7 @@ input, textarea, select {
   font-family: 'EB Garamond', Georgia, serif;
   font-size: 22px;
   font-weight: 400;
-  color: var(--primary-700);
+  color: var(--ink);
   opacity: 1;
   margin-bottom: 12px;
 }
@@ -2297,4 +2572,66 @@ input, textarea, select {
   .btn {
     transition: none;
   }
+}
+
+/* Embedded terminal ("Wire with Claude") -- a real xterm.js instance
+   streaming a real PTY session (src-tauri/src/pty.rs). Fixed dark theme
+   throughout, deliberately not tied to --surface/light-dark tokens --
+   see openWireTerminal's own comment on why (every mainstream embedded-
+   terminal UI is dark regardless of the host app's own theme). */
+.wire-terminal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(10, 12, 13, 0.55);
+  padding: 32px;
+}
+
+.wire-terminal-panel {
+  width: min(960px, 100%);
+  height: min(560px, 85vh);
+  display: flex;
+  flex-direction: column;
+  background: #181a20;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.45);
+}
+
+.wire-terminal-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: #10121600;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.wire-terminal-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e6e6e6;
+}
+
+.wire-terminal-status {
+  font-size: 12px;
+  color: #8a8f98;
+  margin-right: auto;
+}
+
+.wire-terminal-header .btn {
+  color: #e6e6e6;
+}
+
+.wire-terminal-container {
+  flex: 1;
+  min-height: 0;
+  padding: 8px 10px;
+}
+
+.wire-terminal-container .xterm {
+  height: 100%;
 }

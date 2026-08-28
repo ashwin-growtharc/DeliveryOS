@@ -122,6 +122,13 @@ export const ManifestSchema = z.object({
   review_required: z.boolean(),
   // Shell command run in install_target after the payload copy, if present.
   post_install: z.string().optional(),
+  // Shell command run in install_target during `deliveryos remove`, before
+  // any files are deleted, if present -- the symmetric teardown half of
+  // post_install (e.g. stopping a local dev service post_install started).
+  // Unlike post_install, a failing post_remove never blocks the removal
+  // itself (see removeArtifact.ts's own doc comment for why) -- it's
+  // reported, not fatal.
+  post_remove: z.string().optional(),
   // Install-time parameters a Pull needs to collect from the installing
   // project before the artifact is meaningfully usable (Phase 7's first
   // real gap -- post_install alone has no concept of values at all).

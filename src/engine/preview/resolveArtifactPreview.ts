@@ -65,3 +65,39 @@ export async function compileLocalPreview(payloadDir: string): Promise<CompiledP
   const previewEntryPath = findPreviewEntryFile(payloadDir);
   return compilePreviewHtml(previewEntryPath);
 }
+
+/**
+ * Resolves and compiles (with caching) the live preview for ONE component
+ * inside an already-pulled/pushed `kind: template` artifact's own
+ * `components/<Name>/` folder -- e.g. one card in kortix-design-kit's
+ * component grid.
+ *
+ * Unlike the Scan-candidate case `compileLocalPreview` exists for, this
+ * content DOES have a stable identity: `componentDir` sits inside a real
+ * remote's real artifact at a real version, it just wasn't wired up to the
+ * cache `compileArtifactPreview` already uses for a whole artifact's own
+ * top-level preview. Confirmed the real cost of skipping it: opening a
+ * ~30-component design kit's grid fired that many concurrent uncached
+ * compiles, each esbuild + Tailwind JIT + docgen from scratch, every time
+ * the tab was opened -- this is what actually made the grid slow to load.
+ * `subKey` is the component's full path RELATIVE TO THE PAYLOAD ROOT
+ * (e.g. `components__forms__Input`, `/` replaced since `previewCachePath`
+ * requires a single path segment), not just the folder's own basename --
+ * a design kit that organizes components into category subfolders (e.g.
+ * `components/forms/Input` and `components/data/Input`) would otherwise
+ * collide on the same cache slot for two DIFFERENT components that merely
+ * share a leaf folder name, silently serving one's cached HTML under the
+ * other's name. Confirmed real: `listArtifactPayloadComponents` already
+ * supports nested category folders, this just wasn't accounted for here.
+ */
+export async function compileTemplateComponentPreview(
+  remoteName: string,
+  id: string,
+  componentDir: string,
+): Promise<CompiledPreview> {
+  const { manifest } = resolveArtifact(id, remoteName);
+  const previewEntryPath = findPreviewEntryFile(componentDir);
+  const payloadDir = resolvePayloadDir(remoteName, id);
+  const relativeToPayload = path.relative(payloadDir, componentDir).split(path.sep).join('__');
+  return getOrCompilePreview(remoteName, id, manifest.version, previewEntryPath, relativeToPayload);
+}

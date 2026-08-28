@@ -46,7 +46,7 @@ function listRealFiles(dir: string, relativeTo: string): string[] {
     const absolute = path.join(dir, entry.name);
     if (entry.isDirectory()) {
       results.push(...listRealFiles(absolute, relativeTo));
-    } else if (entry.isFile() && !EXCLUDED_FILENAMES.has(entry.name)) {
+    } else if (entry.isFile() && !EXCLUDED_FILENAMES.has(entry.name.toLowerCase())) {
       results.push(path.relative(relativeTo, absolute));
     }
   }

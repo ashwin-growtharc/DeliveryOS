@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { pushArtifact, PushOptions } from '../../engine/push/push';
-import { VersionBumpKind } from '../../engine/manifest/version';
+import { VersionBumpKind, parseBumpKind as parseSharedBumpKind } from '../../engine/manifest/version';
 
 /** Splits a comma-separated --roles/--teams/--stacks flag into trimmed,
  * lowercased values -- lowercased so "python" and "Python" pushed on
@@ -34,21 +34,22 @@ export interface PushCommandFlags {
   bump?: string;
 }
 
-const VALID_BUMP_KINDS: readonly string[] = ['patch', 'minor', 'major'];
-
-/** Validates `--bump`'s raw string value against the real
- * `VersionBumpKind` union -- Commander has no built-in enum-option
- * validation, so an invalid value (a typo, e.g. `--bump pathc`) would
- * otherwise silently fall through to `pushArtifact`'s own `options.bump ??
- * 'patch'` default as a plain string, defeating the point of asking for a
- * bigger bump at all. Fails loudly here instead, before any network/git
- * work starts. */
+/** Thin CLI wrapper over the shared `parseBumpKind` (version.ts) -- same
+ * validation the sidecar's `artifact.push` handler now also runs, just
+ * re-worded here with the `--bump` flag name Commander users actually
+ * typed, since the shared function's own message (reused by both callers)
+ * can't assume it was reached via a CLI flag at all. Commander has no
+ * built-in enum-option validation, so an invalid value (a typo, e.g.
+ * `--bump pathc`) would otherwise silently fall through to `pushArtifact`'s
+ * own `options.bump ?? 'patch'` default as a plain string. Fails loudly
+ * here instead, before any network/git work starts. */
 function parseBumpKind(value?: string): VersionBumpKind | undefined {
-  if (value === undefined) return undefined;
-  if (!VALID_BUMP_KINDS.includes(value)) {
-    throw new Error(`--bump must be one of ${VALID_BUMP_KINDS.join(', ')} (got "${value}")`);
+  try {
+    return parseSharedBumpKind(value);
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    throw new Error(`--${detail}`);
   }
-  return value as VersionBumpKind;
 }
 
 /** Maps raw commander flags onto the engine's PushOptions shape. Validation

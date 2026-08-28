@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as properLockfile from 'proper-lockfile';
 import { lockfilePath, projectDeliveryOsDir } from '../paths';
 import { LockFile, LockEntry } from './types';
+import { LockfileCorruptError } from '../errors';
 
 const EMPTY_LOCKFILE: LockFile = { version: 1, entries: [] };
 
@@ -13,7 +14,13 @@ export function readLockfile(cwd: string): LockFile {
     return { version: 1, entries: [] };
   }
   const raw = fs.readFileSync(filePath, 'utf-8');
-  const parsed = JSON.parse(raw) as LockFile;
+  let parsed: LockFile;
+  try {
+    parsed = JSON.parse(raw) as LockFile;
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    throw new LockfileCorruptError(`Failed to parse lockfile "${filePath}": ${detail}`);
+  }
   if (!parsed.entries || !Array.isArray(parsed.entries)) {
     return { ...EMPTY_LOCKFILE };
   }
@@ -77,6 +84,37 @@ export async function upsertEntry(cwd: string, entry: LockEntry): Promise<void> 
     } else {
       lockfile.entries.push(entry);
     }
+    writeLockfile(cwd, lockfile);
+  } finally {
+    await release();
+  }
+}
+
+/**
+ * Removes an entry by id, if present -- the other half of `upsertEntry`,
+ * needed by `removeArtifact` (Phase 13's uninstall) to drop a lockfile
+ * entry once its real files have already been deleted from disk. Same
+ * real inter-process lock, same read-modify-write-under-lock shape as
+ * `upsertEntry` above (see its own doc comment for why the lock exists at
+ * all -- the race it guards against applies just as much to a delete as
+ * to an upsert). A no-op (not an error) when `id` isn't present, so a
+ * caller that already confirmed the entry exists via `readLockfile`
+ * doesn't need to handle a surprise failure here too.
+ */
+export async function removeEntry(cwd: string, id: string): Promise<void> {
+  const dir = projectDeliveryOsDir(cwd);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  const filePath = lockfilePath(cwd);
+
+  const release = await properLockfile.lock(filePath, {
+    realpath: false,
+    retries: { retries: 20, minTimeout: 25, maxTimeout: 500 },
+  });
+  try {
+    const lockfile = readLockfile(cwd);
+    lockfile.entries = lockfile.entries.filter((e) => e.id !== id);
     writeLockfile(cwd, lockfile);
   } finally {
     await release();

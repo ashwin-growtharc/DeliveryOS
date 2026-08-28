@@ -532,7 +532,7 @@ describe('sidecar e2e', () => {
       // sidecar subprocess.
       const remoteName = 'sidecar-remote-push-wall';
       const fakeGithubUrl = 'https://github.com/deliveryos-qa-fake-owner/deliveryos-qa-fake-repo.git';
-      addRemoteEntry({ name: remoteName, url: fakeGithubUrl, addedAt: new Date().toISOString() });
+      await addRemoteEntry({ name: remoteName, url: fakeGithubUrl, addedAt: new Date().toISOString() });
       await cloneRemote(remoteName, fixtureRemoteDir);
 
       const cwd = newScratchCwd('push-wall');
@@ -678,7 +678,7 @@ describe('sidecar e2e', () => {
       const remoteName = 'sidecar-remote-push-progress';
       const fakeGithubUrl =
         'https://github.com/deliveryos-qa-fake-owner/deliveryos-qa-fake-repo-progress.git';
-      addRemoteEntry({ name: remoteName, url: fakeGithubUrl, addedAt: new Date().toISOString() });
+      await addRemoteEntry({ name: remoteName, url: fakeGithubUrl, addedAt: new Date().toISOString() });
       await cloneRemote(remoteName, fixtureRemoteDir);
 
       const cwd = newScratchCwd('push-progress');
@@ -889,6 +889,76 @@ describe('sidecar e2e', () => {
   );
 
   it(
+    'artifact.readInstallParamValues returns only the REAL values already sitting in .env.local for THIS artifact\'s own declared install_params, never leaking an unrelated key or a manifest default that was never actually written',
+    async () => {
+      const installParamsRemoteDir = await createTestRemoteWithInstallParamsArtifact();
+      const cwd = newScratchCwd('read-install-param-values');
+      const session = new SidecarSession(cwd, deliveryOsHome);
+      try {
+        const addResp = await session.request('remote.add', {
+          url: installParamsRemoteDir,
+          name: 'sidecar-remote-read-install-params',
+        });
+        expect(addResp.ok).toBe(true);
+
+        // AUTH_SECRET provided this call; AUTH_URL takes its manifest
+        // default and gets persisted for real; DATABASE_URL stays
+        // genuinely unset (no value provided, no default declared).
+        const pullResp = await session.request('artifact.pull', {
+          id: INSTALL_PARAMS_ARTIFACT.id,
+          remote: 'sidecar-remote-read-install-params',
+          cwd,
+          values: { AUTH_SECRET: 'from-pull' },
+        });
+        expect(pullResp.ok).toBe(true);
+
+        // A key some OTHER artifact's own config wrote into the same
+        // project-root .env.local -- must never come back out of this
+        // call, since it isn't one of THIS manifest's own install_params.
+        fs.appendFileSync(path.join(cwd, '.env.local'), 'UNRELATED_OTHER_ARTIFACT_KEY=should-not-leak\n');
+
+        const readResp = await session.request('artifact.readInstallParamValues', {
+          id: INSTALL_PARAMS_ARTIFACT.id,
+          remote: 'sidecar-remote-read-install-params',
+          cwd,
+        });
+        expect(readResp.ok).toBe(true);
+        expect((readResp.result as { values: Record<string, string> }).values).toEqual({
+          AUTH_SECRET: 'from-pull',
+          AUTH_URL: 'http://localhost:3000',
+        });
+
+        // Configure the still-missing value without a re-pull -- the exact
+        // scenario this command exists for (Detail's Configuration tab
+        // pre-filling from a real value a PRIOR visit already saved).
+        const applyResp = await session.request('artifact.applyInstallParams', {
+          id: INSTALL_PARAMS_ARTIFACT.id,
+          remote: 'sidecar-remote-read-install-params',
+          cwd,
+          values: { DATABASE_URL: 'postgres://from-apply' },
+        });
+        expect(applyResp.ok).toBe(true);
+
+        const readResp2 = await session.request('artifact.readInstallParamValues', {
+          id: INSTALL_PARAMS_ARTIFACT.id,
+          remote: 'sidecar-remote-read-install-params',
+          cwd,
+        });
+        expect(readResp2.ok).toBe(true);
+        expect((readResp2.result as { values: Record<string, string> }).values).toEqual({
+          AUTH_SECRET: 'from-pull',
+          AUTH_URL: 'http://localhost:3000',
+          DATABASE_URL: 'postgres://from-apply',
+        });
+      } finally {
+        await session.close();
+        await teardownTestRemote(installParamsRemoteDir);
+      }
+    },
+    30_000,
+  );
+
+  it(
     'artifact.readPayloadFile reads a real file out of an artifact\'s payload, and returns undefined (not an error) for one that doesn\'t exist',
     async () => {
       const cwd = newScratchCwd('read-payload-file');
@@ -965,8 +1035,8 @@ describe('sidecar e2e', () => {
 
         // Now seed a real middleware.ts in the project -- re-resolving
         // must flip that ONE action to its whenPresent variant (merge
-        // guidance, no snippet) while auth.ts's own resolution is
-        // unaffected.
+        // guidance instructions, no whenPresent.snippet of its own) while
+        // auth.ts's own resolution is unaffected.
         fs.writeFileSync(path.join(cwd, 'middleware.ts'), 'export default function middleware() {}', 'utf-8');
 
         const afterResp = await session.request('artifact.resolveWiringActions', {
@@ -976,13 +1046,21 @@ describe('sidecar e2e', () => {
         });
         expect(afterResp.ok).toBe(true);
         const after = afterResp.result as Array<{
-          targetFile: string; targetFileExists: boolean; snippet?: string; instructions: string;
+          targetFile: string; targetFileExists: boolean; snippet?: string;
+          snippetIsFullFileReference?: boolean; instructions: string;
         }>;
         const authAfter = after.find((a) => a.targetFile === 'auth.ts')!;
         expect(authAfter.targetFileExists).toBe(false);
         const middlewareAfter = after.find((a) => a.targetFile === 'middleware.ts')!;
         expect(middlewareAfter.targetFileExists).toBe(true);
-        expect(middlewareAfter.snippet).toBeUndefined();
+        // whenPresent declared no snippet of its own, so this falls back to
+        // whenAbsent's own canonical content -- a real reference for "Merge
+        // with Claude" to work from, not an absent value (see wiring.ts's
+        // own ResolvedWiringAction.snippet doc comment for why). Flagged
+        // via snippetIsFullFileReference so it's never mislabeled to the
+        // model as author-written merge guidance (see requestWiringMerge.ts).
+        expect(middlewareAfter.snippet).toContain('auth as middleware');
+        expect(middlewareAfter.snippetIsFullFileReference).toBe(true);
         expect(middlewareAfter.instructions).toContain('Merge');
 
         // Purely read-only -- resolving never creates/modifies auth.ts,
