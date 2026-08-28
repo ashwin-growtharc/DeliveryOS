@@ -268,10 +268,6 @@ changes by hand.
 | [docs/skills.md](docs/skills.md) | The six Claude Code skills: what each does, and how to get them |
 | [docs/release-process.md](docs/release-process.md) | Runbook for cutting a signed release with working auto-update |
 
-`docs/` also holds working notes — demo scripts, spike write-ups, phase
-retros and roadmap research. They're kept for reference, not as documentation
-of the current system.
-
 ---
 
 **Relationship to ArcOS:** standalone project, not an ArcOS extension. It

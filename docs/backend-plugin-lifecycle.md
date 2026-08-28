@@ -2,9 +2,8 @@
 
 Every stage below is real, shipped behavior — grounded in the actual
 engine code, CLI commands, and desktop app, not aspirational. See
-[docs/backend-plugin-walkthrough.md](backend-plugin-walkthrough.md) for
-real screenshots of most of this, and [ARCHITECTURE.md](../ARCHITECTURE.md)
-for how `backend-plugin` fits into the rest of the artifact model.
+[ARCHITECTURE.md](../ARCHITECTURE.md) for how `backend-plugin` fits into
+the rest of the artifact model.
 
 | Stage | What happens |
 |---|---|
