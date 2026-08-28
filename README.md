@@ -189,8 +189,12 @@ Right-click anywhere in the app window and choose **Inspect**, or press
 since the app's UI is a webview. Useful panels:
 
 - **Console** — JS errors from the frontend (`src-tauri/spike-ui/*.js`).
-- **Network** — not used; the app never makes HTTP calls, it talks to the
-  sidecar over stdio, so you won't see engine activity here.
+- **Network** — near-empty by design. Engine activity never appears here: the
+  frontend talks to the sidecar over stdio, not HTTP. Fonts don't appear
+  either — they're vendored locally (`vendor/fonts.css`), so the app renders
+  identically offline. The one thing that does reach the network is the
+  auto-updater's check against its releases endpoint, and that runs in the
+  Rust host rather than the webview, so it won't show up in this panel.
 
 **Sidecar/engine-side output** doesn't show up in DevTools at all — it's a
 separate OS process. To see it:

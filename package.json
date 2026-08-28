@@ -9,17 +9,18 @@
     "node": ">=22.12.0"
   },
   "scripts": {
-    "prepare": "node scripts/generate-vendored-react-runtime.mjs && node scripts/generate-vendored-libraries.mjs && node scripts/generate-vendored-tailwind-preflight.mjs && node scripts/generate-vendored-marked.mjs && node scripts/generate-vendored-xterm.mjs",
-    "prebuild": "node scripts/generate-vendored-react-runtime.mjs && node scripts/generate-vendored-libraries.mjs && node scripts/generate-vendored-tailwind-preflight.mjs && node scripts/generate-vendored-marked.mjs && node scripts/generate-vendored-xterm.mjs",
+    "prepare": "node scripts/generate-vendored-react-runtime.mjs && node scripts/generate-vendored-libraries.mjs && node scripts/generate-vendored-tailwind-preflight.mjs && node scripts/generate-vendored-marked.mjs && node scripts/generate-vendored-xterm.mjs && node scripts/generate-vendored-fonts.mjs",
+    "prebuild": "node scripts/generate-vendored-react-runtime.mjs && node scripts/generate-vendored-libraries.mjs && node scripts/generate-vendored-tailwind-preflight.mjs && node scripts/generate-vendored-marked.mjs && node scripts/generate-vendored-xterm.mjs && node scripts/generate-vendored-fonts.mjs",
     "build": "tsc -p tsconfig.json",
     "dev": "tsx src/index.ts",
-    "pretypecheck": "node scripts/generate-vendored-react-runtime.mjs && node scripts/generate-vendored-libraries.mjs && node scripts/generate-vendored-tailwind-preflight.mjs && node scripts/generate-vendored-marked.mjs && node scripts/generate-vendored-xterm.mjs",
+    "pretypecheck": "node scripts/generate-vendored-react-runtime.mjs && node scripts/generate-vendored-libraries.mjs && node scripts/generate-vendored-tailwind-preflight.mjs && node scripts/generate-vendored-marked.mjs && node scripts/generate-vendored-xterm.mjs && node scripts/generate-vendored-fonts.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --max-warnings 0",
-    "pretest": "node scripts/generate-vendored-react-runtime.mjs && node scripts/generate-vendored-libraries.mjs && node scripts/generate-vendored-tailwind-preflight.mjs && node scripts/generate-vendored-marked.mjs && node scripts/generate-vendored-xterm.mjs",
+    "pretest": "node scripts/generate-vendored-react-runtime.mjs && node scripts/generate-vendored-libraries.mjs && node scripts/generate-vendored-tailwind-preflight.mjs && node scripts/generate-vendored-marked.mjs && node scripts/generate-vendored-xterm.mjs && node scripts/generate-vendored-fonts.mjs",
     "test": "vitest run",
     "ui:contrast": "node scripts/ui/audit-contrast.mjs",
     "ui:themes": "node scripts/ui/check-theme-matrix.mjs",
+    "ui:fonts": "node scripts/ui/check-fonts-offline.mjs",
     "lint:css": "node scripts/ui/lint-tokens.mjs",
     "ui:screenshots": "node scripts/ui/screenshot-views.mjs",
     "build:sidecar": "node scripts/build-sidecar.mjs",
@@ -28,7 +29,8 @@
     "generate:vendored-libraries": "node scripts/generate-vendored-libraries.mjs",
     "generate:vendored-tailwind-preflight": "node scripts/generate-vendored-tailwind-preflight.mjs",
     "generate:vendored-marked": "node scripts/generate-vendored-marked.mjs",
-    "generate:vendored-xterm": "node scripts/generate-vendored-xterm.mjs"
+    "generate:vendored-xterm": "node scripts/generate-vendored-xterm.mjs",
+    "generate:vendored-fonts": "node scripts/generate-vendored-fonts.mjs"
   },
   "dependencies": {
     "@octokit/rest": "^22.0.1",
@@ -50,6 +52,9 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@fontsource/eb-garamond": "^5.3.0",
+    "@fontsource/ibm-plex-sans": "^5.3.0",
+    "@fontsource/jetbrains-mono": "^5.3.0",
     "@radix-ui/react-accordion": "^1.2.20",
     "@radix-ui/react-alert-dialog": "^1.1.23",
     "@radix-ui/react-avatar": "^1.2.6",
