@@ -179,7 +179,7 @@ export async function resolvePendingPushes(
         // check pull.ts itself applies before ever resolving it, since a
         // freshly-fetched remote's manifest could have changed this field
         // to something that escapes cwd since it was first pulled.
-        const installTarget = resolveContainedPath(cwd, match.manifest.install_target);
+        const installTarget = resolveContainedPath(cwd, match.manifest.install_target, { allowRoot: false });
         if (!installTarget) {
           throw new ManifestValidationError(
             `Artifact "${entry.id}"'s install_target ("${match.manifest.install_target}") resolves `

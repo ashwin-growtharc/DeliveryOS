@@ -35,6 +35,42 @@ describe('ManifestSchema', () => {
     }
   });
 
+  // Regression guard for the whole-project-delete bug. `pull` copies the
+  // payload OVER install_target and `remove` recursively DELETES it, so an
+  // install_target naming the consuming project's own root means "overwrite,
+  // then later delete, the user's entire project". Caught here at the trust
+  // boundary, in addition to resolveContainedPath's allowRoot: false at each
+  // use site.
+  describe('install_target', () => {
+    it('rejects every spelling of the project root', () => {
+      const bs = String.fromCharCode(92);
+      for (const install_target of ['.', './', '.' + bs, 'sub/..', './sub/../.', './/']) {
+        const result = ManifestSchema.safeParse({ ...baseManifest, install_target });
+        expect(result.success, `expected ${JSON.stringify(install_target)} to be rejected`).toBe(false);
+      }
+    });
+
+    it('rejects a path that escapes the project root', () => {
+      for (const install_target of ['..', '../elsewhere', 'a/../../elsewhere']) {
+        const result = ManifestSchema.safeParse({ ...baseManifest, install_target });
+        expect(result.success, `expected ${JSON.stringify(install_target)} to be rejected`).toBe(false);
+      }
+    });
+
+    it('still accepts ordinary subdirectory targets', () => {
+      for (const install_target of [
+        'design-kit',
+        'some/target',
+        './src/lib/auth',
+        'src/app/api/auth',
+        '.claude/agents/my-agent.md',
+      ]) {
+        const result = ManifestSchema.safeParse({ ...baseManifest, install_target });
+        expect(result.success, `expected ${JSON.stringify(install_target)} to be accepted`).toBe(true);
+      }
+    });
+  });
+
   it('rejects a malformed (non-semver) version', () => {
     const result = ManifestSchema.safeParse({ ...baseManifest, version: 'v1' });
     expect(result.success).toBe(false);

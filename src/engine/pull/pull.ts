@@ -159,11 +159,14 @@ export async function pullArtifact(
   // for real is a judgment call for the Wiring section's own AI-assist
   // flow, not something the synchronous pull path guesses at.
   const effectiveInstallTarget = adaptSrcDirPath(cwd, manifest.install_target) ?? manifest.install_target;
-  const installTarget = resolveContainedPath(cwd, effectiveInstallTarget);
+  const installTarget = resolveContainedPath(cwd, effectiveInstallTarget, { allowRoot: false });
   if (!installTarget) {
     throw new ManifestValidationError(
-      `Artifact "${manifest.id}"'s install_target ("${manifest.install_target}") resolves outside the `
-        + `project -- refusing to install.`,
+      `Artifact "${manifest.id}"'s install_target ("${manifest.install_target}") does not resolve to a `
+        + `directory inside the project -- refusing to install. An install_target must name a real `
+        + `subdirectory: it may not escape the project, and it may not be the project root itself `
+        + `(".", "./", or an empty path), because installing and later removing this artifact would `
+        + `then operate on the whole project.`,
     );
   }
 

@@ -458,7 +458,7 @@ export async function pushArtifact(
     // documents: an unchecked value here would let a crafted manifest
     // point a routine edit-mode push's diff/pristine-comparison at a
     // location outside the project entirely.
-    const installTarget = resolveContainedPath(cwd, manifest.install_target);
+    const installTarget = resolveContainedPath(cwd, manifest.install_target, { allowRoot: false });
     if (!installTarget) {
       throw new ManifestValidationError(
         `Artifact "${id}"'s install_target ("${manifest.install_target}") resolves outside the project -- `

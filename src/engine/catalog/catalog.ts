@@ -119,7 +119,7 @@ export function annotateCatalog(
     // catalog, not just artifacts the user chose to pull. One bad manifest
     // degrades to `not_pulled` for that entry alone; it never breaks
     // listing the rest of the catalog.
-    const installTarget = resolveContainedPath(cwd, manifest.install_target);
+    const installTarget = resolveContainedPath(cwd, manifest.install_target, { allowRoot: false });
     const lockEntry = lockfile.entries.find((e) => e.id === manifest.id);
 
     let localStatus: LocalStatus;

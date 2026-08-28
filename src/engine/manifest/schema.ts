@@ -1,4 +1,18 @@
+import path from 'node:path';
 import { z } from 'zod';
+
+/** Normalizes a manifest-declared relative path to a comparable form:
+ * POSIX separators, no leading `./`, no trailing slash. Returns `''` for
+ * anything that denotes the root itself (".", "./", "a/.."), which is the
+ * case `install_target` must reject. Purely lexical -- it never touches the
+ * filesystem, so it is safe to run inside a zod schema. The real
+ * containment check still happens at each use site against a real root. */
+function normalizeRelative(value: string): string {
+  const normalized = path.posix.normalize(value.replace(/\\/g, '/'));
+  if (normalized === '.' || normalized === './' || normalized === '/') return '';
+  return normalized.replace(/\/+$/, '');
+}
+
 
 /**
  * One install-time value a `backend-plugin` artifact (or any future kind
@@ -109,7 +123,28 @@ export const ManifestSchema = z.object({
     })
     .default({}),
   source_repo: z.string().min(1),
-  install_target: z.string().min(1),
+  // Where the payload is installed inside the CONSUMING project, relative
+  // to that project's root.
+  //
+  // Refuses any value that names the project root itself (".", "./", "",
+  // trailing-slash and `a/..`-style variants are all normalized before the
+  // check). That is not a style rule -- `pull` copies the payload over this
+  // path and `remove` recursively DELETES it, so a root install_target means
+  // "overwrite, then later delete, the user's entire project". Rejected here
+  // at the trust boundary as well as at each use site (see
+  // `resolveContainedPath`'s `allowRoot: false`), so a bad manifest is caught
+  // when it is parsed rather than only when it is acted on.
+  install_target: z
+    .string()
+    .min(1)
+    .refine((value) => normalizeRelative(value) !== '', {
+      message:
+        'install_target may not be the project root (".", "./", or equivalent) -- '
+        + 'it must name a subdirectory, because pull writes over it and remove deletes it',
+    })
+    .refine((value) => !normalizeRelative(value).startsWith('..'), {
+      message: 'install_target may not escape the project root',
+    }),
   // Optional escape hatch from the artifacts/<id>/payload/ convention: when
   // set, points directly at the artifact's real payload location, relative
   // to the remote's root (same relativity convention as install_target) --

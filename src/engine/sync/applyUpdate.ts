@@ -145,7 +145,7 @@ export async function applyAvailableUpdates(
       continue;
     }
 
-    const installTarget = resolveContainedPath(cwd, manifest.install_target);
+    const installTarget = resolveContainedPath(cwd, manifest.install_target, { allowRoot: false });
     if (!installTarget) {
       report(false, `The new version's install_target resolves outside the project -- refusing to update.`);
       continue;

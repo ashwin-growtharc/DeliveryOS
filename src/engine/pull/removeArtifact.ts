@@ -140,36 +140,31 @@ export async function removeArtifact(
     );
   }
 
-  // Prefer the real path recorded at pull time; an old-shape entry (pulled
-  // before installTarget was recorded) falls back to resolving it fresh via
-  // the manifest -- same function pull.ts itself uses. If that ALSO fails
-  // (remote unregistered, artifact deleted from the catalog), fail loud and
-  // honest rather than guess a path to delete.
-  let rawInstallTarget: string;
-  // Set only by the fallback branch below, when it had to resolve the
-  // manifest anyway to recover a never-recorded installTarget -- reused
-  // by resolvedManifest further down instead of resolving it a second
-  // time (found via review: the fallback's own already-resolved manifest
-  // was being silently discarded, contradicting this file's own doc
-  // comment that resolution happens "ONCE... and reused for both").
-  let manifestFromInstallTargetFallback: ReturnType<typeof resolveArtifact>['manifest'] | undefined;
-  if (entry.installTarget) {
-    rawInstallTarget = entry.installTarget;
-  } else {
-    let resolved;
-    try {
-      resolved = resolveArtifact(id, entry.remote);
-    } catch (err) {
-      const detail = err instanceof Error ? err.message : String(err);
-      throw new ArtifactNotPulledError(
-        `"${id}"'s install location was never recorded (pulled before this was tracked), and it can no `
-          + `longer be resolved from its manifest either: ${detail}. Nothing was removed -- locate and `
-          + `delete its installed files manually, then remove its lockfile entry by hand.`,
-      );
-    }
-    rawInstallTarget = resolved.manifest.install_target;
-    manifestFromInstallTargetFallback = resolved.manifest;
+  // Only ever the real path recorded at pull time. An old-shape entry
+  // (pulled before installTarget was recorded) REFUSES rather than falling
+  // back to re-reading `install_target` from the manifest.
+  //
+  // That fallback used to exist and was a genuine trust bug: `install_target`
+  // is a remote-controlled, MUTABLE field, and this function feeds whatever
+  // it resolves to straight into a recursive delete. Re-reading it at removal
+  // time meant whoever controls the remote -- not DeliveryOS, and not the
+  // user -- decided what got deleted, and could change that decision after
+  // the artifact was already installed. `resolveContainedPath` was the only
+  // guard, and it permitted the project root itself.
+  //
+  // Re-pulling is cheap and records a real `installTarget`, so refusing costs
+  // the user one command and removes the whole class of problem. This is
+  // exactly the posture ArtifactNotPulledError already documents.
+  if (!entry.installTarget) {
+    throw new ArtifactNotPulledError(
+      `"${id}"'s install location was never recorded in lock.json (it was pulled before DeliveryOS `
+        + `tracked that). Nothing was removed. Re-pull it (\`deliveryos pull ${id}\`) so the real `
+        + `install location is recorded, then remove it -- or delete its files manually and drop its `
+        + `lockfile entry by hand. DeliveryOS will not infer a delete target from the artifact's `
+        + `current manifest, because that value lives on the remote and can change after install.`,
+    );
   }
+  const rawInstallTarget: string = entry.installTarget;
 
   // Defense in depth, same posture as the wiredFiles re-validation just
   // below: `lock.json` is a plain project-local JSON file a person could
@@ -181,11 +176,13 @@ export async function removeArtifact(
   // PRIMARY thing being removed, so a failed containment check fails loud
   // rather than quietly reporting "removed: false" for what looks like a
   // normal, successful no-op.
-  const installTarget = resolveContainedPath(cwd, rawInstallTarget);
+  const installTarget = resolveContainedPath(cwd, rawInstallTarget, { allowRoot: false });
   if (!installTarget) {
     throw new ArtifactNotPulledError(
-      `"${id}"'s recorded install location ("${rawInstallTarget}") resolves outside this project -- `
-        + `refusing to delete it. Nothing was removed; check lock.json by hand before retrying.`,
+      `"${id}"'s recorded install location ("${rawInstallTarget}") does not resolve to a directory `
+        + `inside this project -- refusing to delete it. It either escapes the project, or it IS the `
+        + `project root, which would delete everything. Nothing was removed; check lock.json by hand `
+        + `before retrying.`,
     );
   }
 
@@ -203,19 +200,13 @@ export async function removeArtifact(
   // wiredFiles is already the authoritative record of what DeliveryOS
   // itself created, so a real removal still completes even without this.
   //
-  // Genuinely reuses the fallback branch's own resolution above when it
-  // already ran (an old-shape lockfile entry) -- only resolves fresh here
-  // for the normal case, where entry.installTarget already existed and
-  // nothing above needed the manifest yet.
+  // Always resolved fresh here: nothing above needs the manifest any more
+  // now that the install location comes only from the lockfile.
   let resolvedManifest: ReturnType<typeof resolveArtifact>['manifest'] | undefined;
-  if (manifestFromInstallTargetFallback) {
-    resolvedManifest = manifestFromInstallTargetFallback;
-  } else {
-    try {
-      resolvedManifest = resolveArtifact(id, entry.remote).manifest;
-    } catch {
-      resolvedManifest = undefined;
-    }
+  try {
+    resolvedManifest = resolveArtifact(id, entry.remote).manifest;
+  } catch {
+    resolvedManifest = undefined;
   }
 
   let postRemoveOutput: string | undefined;

@@ -140,11 +140,27 @@ export function previewCacheRoot(): string {
  * containment check can guard any other untrusted manifest-supplied path
  * -- `install_target`, `payload_path` -- against `../../..` or an absolute
  * path escaping whichever root it's meant to stay inside (a project's
- * `cwd` for `install_target`, a remote's cache clone for `payload_path`). */
-export function resolveContainedPath(root: string, candidate: string): string | undefined {
+ * `cwd` for `install_target`, a remote's cache clone for `payload_path`).
+ *
+ * `root` itself counts as contained by default -- correct for
+ * `payload_path`, where a whole-repo artifact legitimately points at the
+ * cache clone's own root. It is NOT correct for `install_target`, where
+ * resolving to the project's own `cwd` means "install over / delete the
+ * entire project": `removeArtifact` feeds this straight into a recursive
+ * delete, so an `install_target` of `"."` would take the user's whole
+ * project with it. Those call sites pass `{ allowRoot: false }`. */
+export function resolveContainedPath(
+  root: string,
+  candidate: string,
+  options: { allowRoot?: boolean } = {},
+): string | undefined {
+  const { allowRoot = true } = options;
   const resolvedRoot = path.resolve(root);
   const resolved = path.resolve(resolvedRoot, candidate);
   if (resolved !== resolvedRoot && !resolved.startsWith(resolvedRoot + path.sep)) {
+    return undefined;
+  }
+  if (!allowRoot && resolved === resolvedRoot) {
     return undefined;
   }
   return resolved;

@@ -39,6 +39,39 @@ describe('resolveContainedPath', () => {
     const insideAbsolute = path.join(root, 'nested', 'file.txt');
     expect(resolveContainedPath(root, insideAbsolute)).toBe(insideAbsolute);
   });
+
+  // Regression guard for the whole-project-delete bug: `removeArtifact`
+  // feeds this function's result straight into a recursive delete, so a
+  // candidate resolving to `root` ITSELF used to mean "delete the user's
+  // entire project". Root stays contained by default (payload_path
+  // legitimately points at a remote clone's own root); install_target's
+  // call sites opt out with allowRoot: false.
+  describe('allowRoot: false', () => {
+    const root = path.resolve('some', 'project', 'root');
+
+    it('rejects every spelling of root itself', () => {
+      // `dotBackslash` is built rather than written literally so the test source stays free of escape ambiguity.
+      const dotBackslash = '.' + String.fromCharCode(92);
+      for (const candidate of ['.', './', dotBackslash, 'sub/..', './sub/../.', root]) {
+        expect(resolveContainedPath(root, candidate, { allowRoot: false })).toBeUndefined();
+      }
+    });
+
+    it('still resolves a genuine subdirectory', () => {
+      expect(resolveContainedPath(root, 'design-kit', { allowRoot: false }))
+        .toBe(path.resolve(root, 'design-kit'));
+      expect(resolveContainedPath(root, './src/lib/auth', { allowRoot: false }))
+        .toBe(path.resolve(root, 'src/lib/auth'));
+    });
+
+    it('still rejects an escape, same as with allowRoot left on', () => {
+      expect(resolveContainedPath(root, '../../elsewhere', { allowRoot: false })).toBeUndefined();
+    });
+
+    it('leaves the default behaviour unchanged (root is contained)', () => {
+      expect(resolveContainedPath(root, '.')).toBe(path.resolve(root));
+    });
+  });
 });
 
 describe('remoteCachePath', () => {
