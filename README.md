@@ -19,11 +19,37 @@ deliveryos pull email-code-auth
 ```
 npm install
 npm run build
+npm link          # puts `deliveryos` on your PATH
 ```
 
-Node 22.12+ and the `gh` CLI (`gh auth login` once). The desktop app also
-needs Rust and, on Windows, MSVC Build Tools — see
-[REQUIREMENTS.md](REQUIREMENTS.md).
+Node 22.12+ and the `gh` CLI (`gh auth login` once, for `push`).
+
+Without `npm link` there is no `deliveryos` command — run it as
+`node dist/index.js <command>` instead, or `npm run dev -- <command>` to run
+straight from TypeScript without building.
+
+## Running it
+
+There are two front ends over the same engine. **Neither is a web app — there
+is no server and no localhost.**
+
+**The CLI** is a terminal command:
+
+```
+deliveryos list
+deliveryos pull email-code-auth
+```
+
+**The desktop app** is a native window:
+
+```
+npm run build && npm run build:sidecar
+cd src-tauri && npx tauri dev
+```
+
+It needs Rust and, on Windows, MSVC Build Tools — see
+[REQUIREMENTS.md](REQUIREMENTS.md). More detail in
+[Desktop app](#desktop-app) below.
 
 ## CLI
 
@@ -122,14 +148,12 @@ The remote registry and cache live in `~/.deliveryos` (override with
 The same engine in a Tauri shell, talking to the engine as a bundled sidecar
 process over stdio.
 
-```
-npm run build && npm run build:sidecar
-cd src-tauri && npx tauri dev
-```
+Launch it with the commands under [Running it](#running-it) above.
 
-Live-reloads on frontend changes. After editing anything under `src/`, re-run
-`npm run build:sidecar` and restart. On Windows, put Rust's `~/.cargo/bin` on
-`PATH` first.
+`tauri dev` live-reloads on frontend changes. After editing anything under
+`src/` you must re-run `npm run build:sidecar` and restart — the engine is a
+separate compiled binary, not loaded from source. On Windows, put Rust's
+`~/.cargo/bin` on `PATH` first.
 
 Build an installer with `npx tauri build` — produces an `.msi` and an NSIS
 `.exe` under `src-tauri/target/*/release/bundle/`.
