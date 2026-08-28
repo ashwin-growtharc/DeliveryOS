@@ -157,8 +157,15 @@ files living elsewhere in the repo instead of duplicating them under
 `payload/` — that's how a repo with its own existing layout becomes a remote
 without restructuring.
 
-`install_target` must name a real subdirectory. It may not be `"."` or the
-project root: `pull` writes over that path and `remove` deletes it.
+`install_target` is relative to the project root and may not escape it. It
+*may* be the project root itself — the right shape for a scaffold artifact
+whose whole job is to drop config files at the top level — and `pull` installs
+one correctly.
+
+Support stops there, though. A root-target artifact still lists as
+`not_pulled` after a successful pull, and `push` and `remove` both refuse it
+outright, because diffing or deleting the project root would take the user's
+entire project with it. Treat a root `install_target` as install-only for now.
 
 The remote registry and cache live in `~/.deliveryos` (override with
 `DELIVERYOS_HOME`). The per-project lockfile is `.deliveryos/lock.json`.
@@ -191,20 +198,32 @@ npm run build:cli       # -> build/deliveryos-cli.exe
 cd src-tauri && npx tauri build
 ```
 
-Output, under `src-tauri/target/x86_64-pc-windows-msvc/release/bundle/`:
+Output, under `src-tauri/target/release/bundle/`:
 
 | File | What it is |
 |---|---|
 | `nsis/deliveryos_<version>_x64-setup.exe` | **The one to distribute.** Per-user install, no admin rights, and it puts `deliveryos` on the user's PATH. |
-| `nsis/deliveryos_<version>_x64-setup.exe.sig` | Detached signature the auto-updater checks |
 | `msi/deliveryos_<version>_x64_en-US.msi` | Also produced — **don't ship it** |
-| `msi/deliveryos_<version>_x64_en-US.msi.sig` | Its signature |
+| `<each of the above>.sig` | Detached signature the auto-updater checks. Only produced when the signing env vars are set — see [docs/release-process.md](docs/release-process.md). An unsigned local build has no `.sig` files at all. |
+
+**Check the version in the filename before you ship it.** Only a plain
+`npx tauri build` writes to `target/release/bundle/`; passing
+`--target x86_64-pc-windows-msvc` writes to
+`target/x86_64-pc-windows-msvc/release/bundle/` instead. Both paths can
+exist side by side, and the one you didn't just build holds a stale
+installer that looks exactly as legitimate as the fresh one.
 
 **Ship the NSIS `.exe`, not the MSI.** The CLI-onto-PATH step runs from
 `src-tauri/nsis/path-hook.nsh` via `bundle.windows.nsis.installerHooks`, and
 that mechanism is NSIS-only. Someone who installs the MSI gets the app but no
 `deliveryos` command, with nothing telling them so. WiX has an equivalent
 (`fragmentPaths` + an `<Environment>` element); it isn't built yet.
+
+The PATH hook compiles and the installer builds, but the *runtime* behaviour —
+that `deliveryos` really lands on PATH on install and is cleanly removed on
+uninstall — has not been verified end to end on a clean machine. Walk
+[docs/manual-smoke-test-cli-install.md](docs/manual-smoke-test-cli-install.md)
+once before relying on it in front of anyone.
 
 Signing and the `latest.json` the updater expects are covered in
 [docs/release-process.md](docs/release-process.md). Neither installer is
