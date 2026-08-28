@@ -377,6 +377,64 @@
     container.appendChild(wrap);
   }
 
+  /** Fills `container` with a shape-matched loading skeleton.
+   *
+   * `shape` names what is coming, so the placeholder resembles it:
+   *   'chips'  a row of short status pills   (connection status)
+   *   'fields' stacked label + input pairs   (install params / configuration)
+   *   'cards'  a few tall blocks             (wiring actions)
+   *
+   * This replaces three separate "spinner + Loading..." blocks that used to
+   * appear simultaneously when opening one artifact. Their markup was
+   * identical -- the code comments even say "same pattern" -- but they
+   * rendered into three differently-styled containers, so a single action
+   * produced three competing spinners in three places and no sense of what
+   * was actually loading. Skeletons recede instead of competing, and because
+   * they are shaped like the real content nothing jumps when it arrives. */
+  function renderSkeleton(container, shape, count = 3) {
+    container.innerHTML = '';
+    const group = document.createElement('div');
+    group.className = 'skeleton-group';
+    // Announced as busy rather than as content: a screen reader should hear
+    // "loading", not read out a pile of empty placeholder boxes.
+    group.setAttribute('aria-busy', 'true');
+    group.setAttribute('aria-live', 'polite');
+    group.setAttribute('aria-label', 'Loading');
+
+    if (shape === 'chips') {
+      const row = document.createElement('div');
+      row.style.display = 'flex';
+      row.style.gap = 'var(--space-2)';
+      for (let i = 0; i < count; i += 1) {
+        const chip = document.createElement('span');
+        chip.className = 'skeleton skeleton-line';
+        chip.style.width = `${70 + i * 24}px`;
+        chip.style.height = '20px';
+        chip.style.marginBottom = '0';
+        row.appendChild(chip);
+      }
+      group.appendChild(row);
+    } else if (shape === 'fields') {
+      for (let i = 0; i < count; i += 1) {
+        const label = document.createElement('div');
+        label.className = 'skeleton skeleton-line';
+        label.style.width = '120px';
+        group.appendChild(label);
+        const input = document.createElement('div');
+        input.className = 'skeleton skeleton-block';
+        input.style.height = '36px';
+        group.appendChild(input);
+      }
+    } else {
+      for (let i = 0; i < count; i += 1) {
+        const block = document.createElement('div');
+        block.className = 'skeleton skeleton-block';
+        group.appendChild(block);
+      }
+    }
+    container.appendChild(group);
+  }
+
   /** The message text out of any thrown value, for display. */
   function errorText(err) {
     return err instanceof Error ? err.message : String(err);
@@ -1731,7 +1789,7 @@
     // both awaits resolved, a real inconsistency next to every other
     // async wait in Detail that DOES show this. Cleared the moment real
     // chips are ready to render (panel.innerHTML = '' below).
-    panel.innerHTML = '<span class="spinner" aria-hidden="true"></span> Loading…';
+    renderSkeleton(panel, 'chips', 3);
     panel.hidden = false;
 
     // Signed/unsigned is deliberately NOT repeated here -- detail-provenance-badge
@@ -1886,7 +1944,7 @@
       // nothing at all while the RPC below was in flight (or, worse, a
       // PREVIOUS artifact's still-rendered fields), the one gap left when
       // that pattern was applied to its two siblings.
-      fieldsContainer.innerHTML = '<span class="spinner" aria-hidden="true"></span> Loading…';
+      renderSkeleton(fieldsContainer, 'fields', 2);
       try {
         const result = await call('artifact.readInstallParamValues', {
           id: manifest.id,
@@ -2600,7 +2658,7 @@ ${bodyHtml}
     // showing a PREVIOUS artifact's stale cards) until resolveWiringActions
     // resolved, with no indication anything was happening.
     section.hidden = false;
-    container.innerHTML = '<span class="spinner" aria-hidden="true"></span> Loading…';
+    renderSkeleton(container, 'cards', 2);
 
     let resolved;
     try {
@@ -2655,10 +2713,24 @@ ${bodyHtml}
       card.appendChild(instructionsEl);
 
       if (action.snippet) {
+        // Collapsed by default. A backend-plugin routinely declares three or
+        // four wiring actions, and rendering every snippet expanded turned
+        // this section into an undifferentiated wall of code you had to scroll
+        // past to reach the actions -- the file path and status, which are the
+        // things you actually scan, were lost in it. The summary line carries
+        // the useful facts (which file, how many lines) so the code is one
+        // click away rather than always in the way.
+        const lineCount = action.snippet.split('\n').length;
+        const disclosure = document.createElement('details');
+        disclosure.className = 'wiring-action-code';
+        const summary = document.createElement('summary');
+        summary.textContent = `Show the ${lineCount}-line snippet`;
+        disclosure.appendChild(summary);
         const snippetEl = document.createElement('pre');
         snippetEl.className = 'wiring-action-snippet';
         snippetEl.textContent = action.snippet;
-        card.appendChild(snippetEl);
+        disclosure.appendChild(snippetEl);
+        card.appendChild(disclosure);
       }
 
       // Backend plug-and-play: the target file already existing used to
@@ -5104,7 +5176,11 @@ ${bodyHtml}
     $('meta-kind').textContent = manifest.kind;
     $('meta-version').textContent = manifest.version;
     $('meta-owner').textContent = manifest.owner;
-    $('meta-refresh').textContent = manifest.refresh || '—';
+    // Hidden entirely when the artifact declares no refresh policy, which is
+    // most of them. It used to render an em-dash -- a row whose only content
+    // was "there is nothing here", taking up the same space as a real fact.
+    $('meta-refresh').textContent = manifest.refresh || '';
+    $('meta-refresh-item').hidden = !manifest.refresh;
 
     const tags = manifest.tags || { roles: [], teams: [], stacks: [], componentTypes: [] };
     const pills = [
@@ -5113,9 +5189,10 @@ ${bodyHtml}
       ...(tags.stacks || []).map((s) => `stack: ${s}`),
       ...(tags.componentTypes || []).map((c) => `component: ${c}`),
     ];
-    $('meta-tags').innerHTML = pills.length
-      ? pills.map((p) => `<span class="tag-pill">${escapeHtml(p)}</span>`).join('')
-      : '<span class="tag-pill">none</span>';
+    // Same reasoning as Refresh above: an artifact with no tags shows no Tags
+    // row, rather than a pill whose text is "none".
+    $('meta-tags').innerHTML = pills.map((p) => `<span class="tag-pill">${escapeHtml(p)}</span>`).join('');
+    $('meta-tags-item').hidden = pills.length === 0;
 
     // Provenance badge: honest about what's actually been verified. No
     // artifact has a real signature yet (Phase 7's item 3, the actual
@@ -5214,7 +5291,8 @@ ${bodyHtml}
     // data, activity data, both, or neither.
     void renderActivitySection(entry);
 
-    $('detail-install-path').textContent = entry.installTarget;
+    $('detail-install-path').textContent = entry.installTarget ?? '';
+    $('meta-install-item').hidden = !entry.installTarget;
 
     const openFolderBtn = $('detail-open-folder-btn');
     if (entry.localStatus !== 'not_pulled') {

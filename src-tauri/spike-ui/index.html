@@ -405,6 +405,31 @@
             <p id="detail-description" class="detail-description"></p>
             <div id="detail-provenance-badge" class="provenance-badge"></div>
 
+            <!-- The artifact's identity: what it is, which version, who owns
+                 it, and where it lands. This used to sit at the very BOTTOM of
+                 the view, below Configuration, Wiring, Documentation, Design,
+                 Components, Routes, Source drift and Activity -- so the first
+                 questions anyone asks about an artifact were answered last,
+                 after scrolling past everything you could DO with it. It also
+                 rendered an em-dash placeholder row for a refresh policy most
+                 artifacts do not have. Each item now hides itself when empty
+                 (see renderDetailMeta in app.js). -->
+            <dl class="detail-meta-strip">
+              <div class="detail-meta-item"><dt>Kind</dt><dd id="meta-kind"></dd></div>
+              <div class="detail-meta-item"><dt>Version</dt><dd id="meta-version"></dd></div>
+              <div class="detail-meta-item"><dt>Owner</dt><dd id="meta-owner"></dd></div>
+              <div class="detail-meta-item" id="meta-refresh-item" hidden>
+                <dt>Refresh</dt><dd id="meta-refresh"></dd>
+              </div>
+              <div class="detail-meta-item detail-meta-item--wide" id="meta-install-item" hidden>
+                <dt>Installs to</dt>
+                <dd id="detail-install-path" class="install-path"></dd>
+              </div>
+              <div class="detail-meta-item detail-meta-item--wide" id="meta-tags-item">
+                <dt>Tags</dt><dd id="meta-tags"></dd>
+              </div>
+            </dl>
+
             <div id="detail-connection-status" class="connection-status" hidden></div>
 
             <!-- "How this works": a plain-language walkthrough of the
@@ -584,18 +609,6 @@
               </div>
             </div>
 
-            <div class="meta-grid">
-              <div><span class="k">Kind</span><br /><span id="meta-kind" class="v"></span></div>
-              <div><span class="k">Version</span><br /><span id="meta-version" class="v"></span></div>
-              <div><span class="k">Owner</span><br /><span id="meta-owner" class="v"></span></div>
-              <div><span class="k">Refresh</span><br /><span id="meta-refresh" class="v"></span></div>
-              <div style="grid-column:1/-1;">
-                <span class="k">Tags</span><br />
-                <span id="meta-tags"></span>
-              </div>
-            </div>
-            <div class="install-path-label">Installs to</div>
-            <div id="detail-install-path" class="install-path"></div>
             <div class="detail-secondary-actions">
               <button id="detail-open-folder-btn" class="btn btn-ghost btn-sm" hidden>Open folder</button>
               <button id="detail-edit-btn" class="btn btn-ghost btn-sm" hidden>Edit</button>

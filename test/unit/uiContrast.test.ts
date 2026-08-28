@@ -134,6 +134,12 @@ function auditContrast(): Row[] {
 
   root.walkRules((rule) => {
     if (rule.selector.startsWith(':root') || rule.selector.includes('@')) return;
+    // A @keyframes STEP is a rule whose selector is '0%' / '50%' / 'from',
+    // and its `opacity` is animation state, not text colour. Skipping only
+    // selectors containing '@' misses them, because the at-rule is the
+    // PARENT -- which is how a skeleton pulse keyframe got reported as a
+    // text rule failing contrast at 3.11:1.
+    if (rule.parent && rule.parent.type === 'atrule' && /keyframes/i.test(rule.parent.name)) return;
     const selector = rule.selector.replace(/\s+/g, ' ').trim();
     if (EXEMPT.test(selector)) return;
 
