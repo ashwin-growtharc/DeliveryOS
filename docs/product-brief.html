@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DeliveryOS Product Brief</title>
+<meta name="description" content="What DeliveryOS is for, who uses it, and one day of using it. Written for a non-technical reader.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+
+<style>
+  /* --- reset --- */
+  *, *::before, *::after { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body, h1, h2, h3, h4, p, dl, dd, figure { margin: 0; }
+  img, svg { max-width: 100%; display: block; }
+
+  /* --- tokens: light --- */
+  :root {
+    --ground:  #F1F3F1;
+    --surface: #FBFCFB;
+    --raise:   #E9EDEA;
+    --ink:     #16293A;
+    --muted:   #5D6E7B;
+    --faint:   #8496A1;
+    --accent:  #0E7C6B;
+    --accent-soft: #DCEAE6;
+    --signal:  #A94E2C;
+    --rule:    #D6DCD8;
+    --rule-strong: #BAC4BE;
+
+    --measure: 34rem;
+    --s1: 0.5rem;   --s2: 0.875rem; --s3: 1.375rem;
+    --s4: 2.125rem; --s5: 3.25rem;  --s6: 5rem;
+  }
+
+  /* --- tokens: dark (system preference) --- */
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:  #101A22;
+      --surface: #17232D;
+      --raise:   #1E2C37;
+      --ink:     #E3EAE7;
+      --muted:   #9BABB5;
+      --faint:   #7A8B96;
+      --accent:  #46C0A6;
+      --accent-soft: #17332F;
+      --signal:  #E0906A;
+      --rule:    #27353F;
+      --rule-strong: #3A4A55;
+    }
+  }
+
+  /* --- tokens: dark (explicit) --- */
+  :root[data-theme="dark"] {
+    --ground:  #101A22;
+    --surface: #17232D;
+    --raise:   #1E2C37;
+    --ink:     #E3EAE7;
+    --muted:   #9BABB5;
+    --faint:   #7A8B96;
+    --accent:  #46C0A6;
+    --accent-soft: #17332F;
+    --signal:  #E0906A;
+    --rule:    #27353F;
+    --rule-strong: #3A4A55;
+  }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "Public Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 17px;
+    line-height: 1.65;
+    padding: var(--s5) var(--s3) var(--s6);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page { max-width: var(--measure); margin: 0 auto; }
+  .wide { max-width: 46rem; margin: 0 auto; }
+
+  p { margin: 0 0 var(--s3); }
+  strong { font-weight: 650; color: var(--ink); }
+  em { font-style: italic; }
+
+  code {
+    font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 0.86em;
+    background: var(--raise);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    padding: 0.08em 0.34em;
+    color: var(--ink);
+  }
+
+  .eyebrow {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.7rem;
+    font-weight: 500;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--faint);
+    margin: 0 0 var(--s2);
+  }
+
+  /* --- masthead --- */
+  .masthead { margin-bottom: var(--s5); }
+  .masthead h1 {
+    font-family: "Newsreader", ui-serif, Georgia, serif;
+    font-weight: 500;
+    font-size: clamp(2.4rem, 6.5vw, 3.4rem);
+    line-height: 1.05;
+    letter-spacing: -0.018em;
+    text-wrap: balance;
+    margin: 0 0 var(--s3);
+  }
+  .standfirst {
+    font-family: "Newsreader", ui-serif, Georgia, serif;
+    font-size: 1.2rem;
+    line-height: 1.55;
+    color: var(--muted);
+    margin: 0 0 var(--s3);
+  }
+  .meta {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.74rem;
+    color: var(--faint);
+    border-top: 1px solid var(--rule);
+    padding-top: var(--s2);
+    line-height: 1.7;
+    margin: 0;
+  }
+
+  /* --- sections --- */
+  section { margin-top: var(--s6); }
+  .sec-head {
+    display: flex;
+    align-items: baseline;
+    gap: var(--s2);
+    margin-bottom: var(--s4);
+    padding-bottom: var(--s2);
+    border-bottom: 2px solid var(--ink);
+  }
+  .sec-num {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--accent);
+    flex: none;
+    padding-top: 0.35em;
+  }
+  .sec-head h2 {
+    font-family: "Newsreader", ui-serif, Georgia, serif;
+    font-weight: 500;
+    font-size: clamp(1.6rem, 4vw, 2rem);
+    line-height: 1.15;
+    letter-spacing: -0.012em;
+    text-wrap: balance;
+  }
+
+  h3 {
+    font-family: "Public Sans", sans-serif;
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: var(--s4) 0 var(--s2);
+  }
+
+  .lead { font-size: 1.06rem; }
+
+  /* --- contrast pair --- */
+  .pair {
+    display: grid;
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    overflow: hidden;
+    margin: var(--s4) 0;
+  }
+  @media (min-width: 40rem) { .pair { grid-template-columns: 1fr 1fr; } }
+  .pane { background: var(--surface); padding: var(--s3); }
+  .pane p:last-child { margin-bottom: 0; }
+  .pane-label {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    margin: 0 0 var(--s2);
+  }
+  .pane.now .pane-label { color: var(--signal); }
+  .pane.next .pane-label { color: var(--accent); }
+
+  /* --- the two verbs --- */
+  .verbs { display: grid; gap: var(--s2); margin: var(--s4) 0; }
+  .verb {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: var(--s2);
+    align-items: baseline;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--accent);
+    border-radius: 3px;
+    padding: var(--s2) var(--s3);
+  }
+  .verb b {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .verb span { color: var(--muted); font-size: 0.96rem; }
+
+  /* --- persona cards --- */
+  .types { display: grid; gap: var(--s3); margin: var(--s4) 0; }
+  @media (min-width: 46rem) { .types { grid-template-columns: 1fr 1fr; align-items: start; } }
+  .type {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: var(--s3);
+  }
+  .type-tag {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--faint);
+    margin: 0 0 var(--s1);
+  }
+  .type h4 {
+    font-family: "Newsreader", ui-serif, Georgia, serif;
+    font-weight: 600;
+    font-size: 1.32rem;
+    line-height: 1.2;
+    margin: 0 0 var(--s2);
+  }
+  .type > p { font-size: 0.96rem; color: var(--muted); }
+  .facts { border-top: 1px solid var(--rule); margin-top: var(--s2); }
+  .fact {
+    display: grid;
+    grid-template-columns: 6.5rem 1fr;
+    gap: var(--s2);
+    padding: var(--s2) 0;
+    border-bottom: 1px solid var(--rule);
+    font-size: 0.92rem;
+  }
+  .fact:last-child { border-bottom: 0; }
+  .fact dt {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--faint);
+    padding-top: 0.32em;
+  }
+  .fact dd { margin: 0; color: var(--ink); }
+
+  .thresholds {
+    background: var(--accent-soft);
+    border-radius: 4px;
+    padding: var(--s3);
+    margin: var(--s3) 0 0;
+  }
+  .thresholds p:last-child { margin-bottom: 0; }
+  .thresholds .eyebrow { color: var(--accent); }
+
+  /* --- journey timeline --- */
+  .timeline { margin: var(--s4) 0; border-left: 2px solid var(--rule-strong); }
+  .beat {
+    display: grid;
+    gap: var(--s1);
+    padding: 0 0 var(--s4) var(--s3);
+    position: relative;
+  }
+  .beat::before {
+    content: "";
+    position: absolute;
+    left: -5px; top: 0.6em;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--rule-strong);
+  }
+  .beat.key::before { background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .beat:last-child { padding-bottom: 0; }
+  .when {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .beat.quiet .when { color: var(--faint); }
+  .what {
+    font-family: "Newsreader", ui-serif, Georgia, serif;
+    font-size: 1.16rem;
+    line-height: 1.35;
+    font-weight: 500;
+  }
+  .beat p { margin: var(--s1) 0 0; font-size: 0.97rem; color: var(--muted); }
+
+  .punch {
+    border-left: 3px solid var(--accent);
+    background: var(--surface);
+    border-radius: 0 4px 4px 0;
+    padding: var(--s3);
+    margin: var(--s4) 0;
+  }
+  .punch p:last-child { margin-bottom: 0; }
+
+  /* --- status --- */
+  .status { margin-top: var(--s6); border-top: 2px solid var(--ink); padding-top: var(--s3); }
+  .status h2 {
+    font-family: "Newsreader", ui-serif, Georgia, serif;
+    font-weight: 500;
+    font-size: 1.5rem;
+    margin: 0 0 var(--s3);
+  }
+  .rows {
+    display: grid;
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .row { background: var(--surface); padding: var(--s3); display: grid; gap: var(--s1); }
+  .row-tag {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    margin: 0;
+  }
+  .row.on   .row-tag { color: var(--accent); }
+  .row.open .row-tag { color: var(--signal); }
+  .row.off  .row-tag { color: var(--faint); }
+  .row p { margin: 0; font-size: 0.97rem; color: var(--muted); }
+  .row p strong { color: var(--ink); }
+
+  footer {
+    margin-top: var(--s5);
+    padding-top: var(--s2);
+    border-top: 1px solid var(--rule);
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.72rem;
+    color: var(--faint);
+    line-height: 1.8;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
+
+  @media print {
+    body { background: #fff; color: #000; padding: 0; font-size: 11pt; }
+    section { break-inside: avoid-page; }
+  }
+</style>
+</head>
+<body>
+
+<div class="wide">
+  <header class="masthead">
+    <p class="eyebrow">DeliveryOS &middot; Product brief</p>
+    <h1>Copy-paste is a dead end.</h1>
+    <p class="standfirst">Every team builds its own pile of reusable things, and almost none of it is shared. The hard part was never taking a copy &mdash; it's giving one back.</p>
+    <p class="meta">
+      For anyone who needs to understand DeliveryOS without reading code.<br>
+      Companion to ARCHITECTURE.md (how it's built) and PLAN.md (what's next).
+    </p>
+  </header>
+</div>
+
+<div class="page">
+
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">01</span>
+      <h2>What we're trying to do</h2>
+    </div>
+
+    <p class="lead">Every team builds its own pile of internal reusable things &mdash; AI agents and skills, coding rules, starter projects, design systems, whole backend features like email login. Almost none of it is shared. It lives on one person's laptop, or three levels deep in a Slack thread.</p>
+
+    <p>So the same work gets done again and again. One engineer writes a good code-reviewer agent; three other teams build their own slightly worse version over the next quarter, because there was no way to find out the first one existed.</p>
+
+    <p>And where something <em>is</em> copied, the copy starts drifting immediately. Whoever took it has no way to send a fix back, so the original never improves and the two versions diverge until neither is trusted.</p>
+
+    <div class="pair">
+      <div class="pane now">
+        <p class="pane-label">Today</p>
+        <p>Scattered across laptops and Slack. Nobody knows what exists. Copies go stale. Only people who already know git can contribute a fix.</p>
+      </div>
+      <div class="pane next">
+        <p class="pane-label">With DeliveryOS</p>
+        <p>One place to look. One click to get a working copy, setup included. One click to propose an improvement &mdash; no git knowledge required.</p>
+      </div>
+    </div>
+
+    <h3>The insight</h3>
+    <p>Reuse doesn't fail because taking a copy is hard. It fails because <strong>giving something back is hard.</strong> A copy-paste is a dead end: the moment you improve it, your improvement is stranded in your own project.</p>
+
+    <h3>So we built one shelf, with two buttons</h3>
+    <div class="verbs">
+      <div class="verb"><b>Pull</b><span>Take a working copy into your project, with any setup it needs already run for you.</span></div>
+      <div class="verb"><b>Push</b><span>Send an improvement back as a real pull request against whoever owns it.</span></div>
+    </div>
+
+    <p>Nothing merges silently &mdash; a human always reviews. Once merged, the next person who pulls gets your fix automatically, without doing anything.</p>
+
+    <p>The design is deliberately indifferent to <em>what</em> is being shared. A two-line checklist, an AI agent, a design system and an entire codebase all move through the same two buttons. That's the point: one mechanism covers the whole long tail of things worth reusing, rather than a separate tool per category.</p>
+
+    <h3>What it is not</h3>
+    <p>Not a package manager &mdash; these are things you're meant to edit, not depend on. Not a wiki &mdash; a wiki holds descriptions of work; this holds the work. And not a new place to store code: everything lives in ordinary git repos that teams already own.</p>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">02</span>
+      <h2>Who it's for</h2>
+    </div>
+
+    <p class="lead">Two types of person use this, and they want almost opposite things from it. Designing for one without the other breaks it.</p>
+
+    <div class="types">
+      <article class="type">
+        <p class="type-tag">Type 1</p>
+        <h4>The developer</h4>
+        <p>Ships client projects on a schedule. Comfortable with git. Usually starting something new, usually behind.</p>
+        <dl class="facts">
+          <div class="fact"><dt>Wants</dt><dd>To not write something that already exists somewhere in the org</dd></div>
+          <div class="fact"><dt>Doesn't want</dt><dd>To become the person who curates a reusable-component library</dd></div>
+          <div class="fact"><dt>Today</dt><dd>Asks in Slack, gets no answer in ten minutes, writes their own</dd></div>
+        </dl>
+      </article>
+
+      <article class="type">
+        <p class="type-tag">Type 2</p>
+        <h4>The non-technical person</h4>
+        <p>Handed a starter kit or an AI helper. May never have opened a terminal. Uses the desktop app, never the command line.</p>
+        <dl class="facts">
+          <div class="fact"><dt>Wants</dt><dd>A working copy of the thing, without a setup guide</dd></div>
+          <div class="fact"><dt>Doesn't want</dt><dd>To discover they need git, Node, or a walkthrough first</dd></div>
+          <div class="fact"><dt>Today</dt><dd>Waits for someone technical to have time for them</dd></div>
+        </dl>
+      </article>
+    </div>
+
+    <div class="thresholds">
+      <p class="eyebrow">The two thresholds the product lives or dies by</p>
+      <p><strong>They reuse something only if finding it is faster than writing it.</strong> Thirty seconds of searching is fine. Ten minutes of reading someone else's README to work out whether it fits is not &mdash; they'll just write it themselves.</p>
+      <p><strong>They contribute a fix back only if it costs almost nothing.</strong> They found the bug while doing something else. If sending it back means forking an unfamiliar repo, learning its conventions and writing up a description, they'll fix it locally and move on. Every time.</p>
+      <p>That's why setup runs automatically on pull, and why push writes the pull request description for them.</p>
+    </div>
+
+    <h3>What Type 2 unlocks</h3>
+    <p>Because improvements go back as an ordinary pull request, <strong>a non-technical person can suggest a fix to a real codebase without knowing what git is.</strong> They click one button; a developer on the owning team sees a normal PR. That's a contributor the org simply didn't have before.</p>
+
+    <h3>And the person on the other end</h3>
+    <p>Whoever owns the thing being shared barely uses DeliveryOS at all. They just receive a pull request in a repo they already watch, reviewed under their own existing rules. Deliberately so &mdash; giving them a review queue of their own would mean adding a person's job to the product.</p>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">03</span>
+      <h2>One small journey</h2>
+    </div>
+
+    <p class="lead">Following <strong>Type 1, the developer.</strong> They start a new client app on Monday. It needs email login &mdash; the kind where you get a six-digit code in your inbox.</p>
+
+    <p>Without DeliveryOS that's most of two days: pick a library, wire it up, build the code-sending part, get the environment variables right, and find out on Tuesday what they got wrong.</p>
+
+    <div class="timeline">
+      <div class="beat">
+        <span class="when">Mon 9:12am</span>
+        <span class="what">They look first.</span>
+        <p>They open DeliveryOS and type &ldquo;auth&rdquo;. <code>email-code-auth</code> comes up &mdash; owned by another team, already used in two other projects. They can see what it installs and what it will need from them before committing to anything.</p>
+      </div>
+
+      <div class="beat">
+        <span class="when">Mon 9:14am</span>
+        <span class="what">They pull it.</span>
+        <p>The files land in their project. It asks for the two values it needs &mdash; a secret and a URL &mdash; in a plain form rather than a config file to hand-edit, and writes them where they belong. It creates the files that don't exist yet, leaves the ones that do alone and says which those were, then re-runs the build to confirm nothing broke.</p>
+      </div>
+
+      <div class="beat key">
+        <span class="when">Mon 9:23am</span>
+        <span class="what">Back on the actual client work.</span>
+        <p>Eleven minutes, not two days.</p>
+      </div>
+
+      <div class="beat quiet">
+        <span class="when">Wednesday</span>
+        <span class="what">They find a bug.</span>
+        <p>The code email mishandles addresses with a <code>+</code> in them. It's a two-line fix, and they make it in their own project because they need it working now.</p>
+      </div>
+
+      <div class="beat">
+        <span class="when">Wed 4:40pm</span>
+        <span class="what">They send it back.</span>
+        <p>One click on Push. DeliveryOS works out what changed against what was originally pulled, writes the description, and opens a real pull request against the owning team's repo. It took under a minute &mdash; which is the only reason it happened at all.</p>
+      </div>
+
+      <div class="beat key">
+        <span class="when">Next week</span>
+        <span class="what">Someone else pulls it.</span>
+        <p>The owning team reviewed and merged the fix. The next person to pull <code>email-code-auth</code> gets the corrected version and never hits the bug.</p>
+      </div>
+    </div>
+
+    <div class="punch">
+      <p><strong>That last step is the whole product.</strong> Everything before it is a nicer way to copy files &mdash; worth something, but not much. The reason to build this is that the fourth team needing email login gets something <em>better</em> than the first team had, instead of the fourth slightly-different copy of it.</p>
+    </div>
+
+    <h3>The same journey for Type 2</h3>
+    <p>A non-technical person doing this never sees a terminal. The first two steps are the same clicks in the desktop app. The difference is the last one: when they hit something wrong and click Push, they have just opened a professional code review on a real codebase &mdash; something that was previously closed to them entirely.</p>
+  </section>
+
+  <section class="status">
+    <h2>Where this actually is today</h2>
+    <p>Stated plainly, because a brief that oversells is worth less than no brief.</p>
+
+    <div class="rows">
+      <div class="row on">
+        <p class="row-tag">Built and working</p>
+        <p><strong>The full loop above.</strong> Browse, pull with setup and configuration, edit, and push as a real GitHub pull request. Two ways in &mdash; a command line and a desktop app. It runs against a real catalog of 234 artifacts.</p>
+      </div>
+      <div class="row open">
+        <p class="row-tag">The open question</p>
+        <p><strong>Adoption, not capability.</strong> Nearly every push so far has been the build team testing its own loop, not another engineer solving their own problem. Getting one engineer outside the build team through a real pull&ndash;edit&ndash;push cycle, on work they'd have done anyway, is the highest-priority item on the plan &mdash; ahead of any new feature. Until that happens once, the value described here is a well-founded expectation rather than a demonstrated result.</p>
+      </div>
+      <div class="row off">
+        <p class="row-tag">Not yet built</p>
+        <p><strong>Usage tracking</strong> &mdash; so &ldquo;is this working&rdquo; can be answered with a number instead of an impression.</p>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    DeliveryOS &middot; docs/product-brief.html<br>
+    Product lens only. No implementation detail &mdash; see ARCHITECTURE.md for that.
+  </footer>
+
+</div>
+
+</body>
+</html>
