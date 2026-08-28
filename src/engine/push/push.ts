@@ -10,7 +10,7 @@ import { ManifestSchema, Manifest, InstallParam } from '../manifest/schema';
 import { bumpVersion, VersionBumpKind } from '../manifest/version';
 import { renderPreviewImage } from '../preview/renderPreviewImage';
 import { findPreviewEntryFile } from '../preview/resolveArtifactPreview';
-import { pristinePath, resolveContainedPath } from '../paths';
+import { pristinePath, resolveContainedPath, isRootInstall, readPayloadFootprint } from '../paths';
 import { computeChangedFiles, listPayloadFiles } from './diff';
 import { buildBranchName } from './branchName';
 import {
@@ -468,7 +468,11 @@ export async function pushArtifact(
       // documents: an unchecked value here would let a crafted manifest
       // point a routine edit-mode push's diff/pristine-comparison at a
       // location outside the project entirely.
-      const installTarget = resolveContainedPath(cwd, manifest.install_target, { allowRoot: false });
+      // allowRoot stays TRUE: a root install_target is a legitimate scaffold
+      // shape, and refusing it here meant such an artifact could be pulled but
+      // never contributed back. Nothing here deletes -- this path only diffs --
+      // so the fix is to narrow the diff, not to refuse. See isRootInstall.
+      const installTarget = resolveContainedPath(cwd, manifest.install_target);
       if (!installTarget) {
         throw new ManifestValidationError(
           `Artifact "${id}"'s install_target ("${manifest.install_target}") resolves outside the project -- `
@@ -476,9 +480,21 @@ export async function pushArtifact(
         );
       }
       const pristine = pristinePath(cwd, id);
+      // At the project root, only the top-level entries the payload provided
+      // are this artifact's -- without that scope a push would propose the
+      // user's entire project as the new payload.
+      const rootInstall = isRootInstall(cwd, installTarget);
+      const topLevelScope = rootInstall ? readPayloadFootprint(pristine) : undefined;
+      if (rootInstall && !topLevelScope) {
+        throw new ManifestValidationError(
+          `Artifact "${id}" installs at the project root, and its pristine snapshot is missing, so there `
+            + `is no record of which files belong to it -- refusing to push rather than guess at the whole `
+            + `project. Re-pull it (\`deliveryos pull ${id}\`) to rebuild the snapshot, then push.`,
+        );
+      }
 
       onProgress?.('diff', `Diffing "${id}" against its pristine snapshot...`);
-      const changedFiles = computeChangedFiles(installTarget, pristine);
+      const changedFiles = computeChangedFiles(installTarget, pristine, { topLevelScope });
       if (changedFiles.length === 0) {
         throw new NoLocalChangesError(
           `No local changes detected for "${id}" -- its files are byte-for-byte identical to the pristine snapshot taken at pull time. Nothing to push.`,

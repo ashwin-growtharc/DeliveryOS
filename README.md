@@ -159,13 +159,18 @@ without restructuring.
 
 `install_target` is relative to the project root and may not escape it. It
 *may* be the project root itself — the right shape for a scaffold artifact
-whose whole job is to drop config files at the top level — and `pull` installs
-one correctly.
+whose whole job is to drop config files at the top level.
 
-Support stops there, though. A root-target artifact still lists as
-`not_pulled` after a successful pull, and `push` and `remove` both refuse it
-outright, because diffing or deleting the project root would take the user's
-entire project with it. Treat a root `install_target` as install-only for now.
+A root-target artifact works through the whole lifecycle: pull, status, push,
+update and remove. Every one of those is scoped to the artifact's own
+**footprint** — the top-level entries its payload provided, recorded in the
+pristine snapshot at pull time — so the rest of your project is never reported
+as part of the artifact, and never deleted along with it.
+
+The one case that refuses is a root-target artifact whose pristine snapshot has
+gone missing: without it there is no record of which files belong to the
+artifact, and `push`/`remove` will not guess at the project root. Re-pull to
+rebuild the snapshot.
 
 The remote registry and cache live in `~/.deliveryos` (override with
 `DELIVERYOS_HOME`). The per-project lockfile is `.deliveryos/lock.json`.

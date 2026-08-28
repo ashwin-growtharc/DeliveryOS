@@ -4,7 +4,7 @@ import { execSync } from 'child_process';
 import { buildCatalog, CatalogEntry } from '../catalog/catalog';
 import { cachePath } from '../remote/remoteCache';
 import { upsertEntry, readLockfile } from '../lockfile/lockfile';
-import { pristinePath, resolveContainedPath, adaptSrcDirPath } from '../paths';
+import { pristinePath, resolveContainedPath, adaptSrcDirPath, isRootInstall } from '../paths';
 import {
   ArtifactResolutionError,
   ManifestValidationError,
@@ -121,6 +121,47 @@ export function resolveArtifact(
  * real timeout path with a real hung command in milliseconds instead of
  * actually waiting out the production constant.
  */
+/**
+ * Records the pristine (as-pulled) snapshot an artifact's later status checks,
+ * `push` diffs and updates all compare against.
+ *
+ * Shared by `pullArtifact` and `applyAvailableUpdates` because BOTH have to
+ * handle the root-install case identically, and only pull used to: a plain
+ * `fs.cpSync(installTarget, pristineTarget)` is impossible for a root install
+ * (the snapshot lives at <cwd>/.deliveryos/pristine/<id>, inside the directory
+ * being copied, and Node rejects that with ERR_FS_CP_EINVAL) and wrong even if
+ * it worked (it would snapshot the user's ENTIRE project as if it were the
+ * artifact, so every unrelated file they own would later read as part of it).
+ * A `filter` does not help -- Node checks self-containment before the filter
+ * runs.
+ *
+ * So for a root install it copies only the top-level entries the payload
+ * actually provided, taken FROM `installTarget` so post_install's own generated
+ * output is still captured. That snapshot is what `readPayloadFootprint` later
+ * reads back as the artifact's authoritative footprint at the project root.
+ */
+export function writePristineSnapshot(
+  cwd: string,
+  installTarget: string,
+  payloadSrc: string,
+  pristineTarget: string,
+): void {
+  if (fs.existsSync(pristineTarget)) {
+    fs.rmSync(pristineTarget, { recursive: true, force: true });
+  }
+  if (isRootInstall(cwd, installTarget)) {
+    fs.mkdirSync(pristineTarget, { recursive: true });
+    for (const entry of fs.readdirSync(payloadSrc)) {
+      const installed = path.join(installTarget, entry);
+      if (fs.existsSync(installed)) {
+        fs.cpSync(installed, path.join(pristineTarget, entry), { recursive: true });
+      }
+    }
+    return;
+  }
+  fs.cpSync(installTarget, pristineTarget, { recursive: true });
+}
+
 export async function pullArtifact(
   id: string,
   remoteName: string | undefined,
@@ -307,32 +348,7 @@ export async function pullArtifact(
   // though the user hasn't touched anything yet.
   onProgress?.('snapshot', 'Recording installed state...');
   const pristineTarget = pristinePath(cwd, manifest.id);
-  if (fs.existsSync(pristineTarget)) {
-    fs.rmSync(pristineTarget, { recursive: true, force: true });
-  }
-  if (installTarget === path.resolve(cwd)) {
-    // ROOT install_target (a scaffold that writes config files at the project
-    // root). Copying installTarget wholesale is both impossible and wrong
-    // here: impossible because the snapshot lives at
-    // <cwd>/.deliveryos/pristine/<id>, inside the directory being copied, and
-    // Node rejects that with ERR_FS_CP_EINVAL; wrong because it would
-    // snapshot the user's ENTIRE project as if it were the artifact, so every
-    // unrelated file they own would later read as part of it.
-    //
-    // A `filter` does not help -- Node checks self-containment before the
-    // filter runs. So copy only the top-level entries the payload actually
-    // provided, taken FROM installTarget so post_install's own output is still
-    // captured (the reasoning above still applies to those paths).
-    fs.mkdirSync(pristineTarget, { recursive: true });
-    for (const entry of fs.readdirSync(payloadSrc)) {
-      const installed = path.join(installTarget, entry);
-      if (fs.existsSync(installed)) {
-        fs.cpSync(installed, path.join(pristineTarget, entry), { recursive: true });
-      }
-    }
-  } else {
-    fs.cpSync(installTarget, pristineTarget, { recursive: true });
-  }
+  writePristineSnapshot(cwd, installTarget, payloadSrc, pristineTarget);
 
   // Deliberately after the pristine snapshot above, and writes to `cwd`
   // itself (`.env.local`), never into `installTarget` -- see

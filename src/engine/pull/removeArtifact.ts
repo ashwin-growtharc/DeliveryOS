@@ -1,10 +1,11 @@
 import * as fs from 'fs';
+import * as path from 'path';
 import { execSync } from 'child_process';
 import { readLockfile, removeEntry } from '../lockfile/lockfile';
 import { resolveArtifact, POST_INSTALL_MAX_BUFFER_BYTES } from './pull';
 import { resolveContainedTargetFile, resolveWiringActions } from './wiring';
 import { readExistingEnvValues } from './installParams';
-import { pristinePath, resolveContainedPath } from '../paths';
+import { pristinePath, resolveContainedPath, isRootInstall, readPayloadFootprint } from '../paths';
 import { ArtifactNotPulledError } from '../errors';
 import { isExecError, isToolNotFoundError, rmDirWithRetry } from '../execHelpers';
 
@@ -180,13 +181,31 @@ export async function removeArtifact(
   // PRIMARY thing being removed, so a failed containment check fails loud
   // rather than quietly reporting "removed: false" for what looks like a
   // normal, successful no-op.
-  const installTarget = resolveContainedPath(cwd, rawInstallTarget, { allowRoot: false });
+  const installTarget = resolveContainedPath(cwd, rawInstallTarget);
   if (!installTarget) {
     throw new ArtifactNotPulledError(
-      `"${id}"'s recorded install location ("${rawInstallTarget}") does not resolve to a directory `
-        + `inside this project -- refusing to delete it. It either escapes the project, or it IS the `
-        + `project root, which would delete everything. Nothing was removed; check lock.json by hand `
-        + `before retrying.`,
+      `"${id}"'s recorded install location ("${rawInstallTarget}") escapes this project -- refusing to `
+        + `delete it. Nothing was removed; check lock.json by hand before retrying.`,
+    );
+  }
+
+  // A ROOT install_target used to be refused outright here, which left a
+  // scaffold artifact installable but never removable. It is refused no
+  // longer -- but the whole-directory delete below absolutely must not run at
+  // the project root, so removal is narrowed to the exact top-level entries the
+  // payload provided, recorded in the pristine snapshot at pull time.
+  //
+  // Without that snapshot the footprint is unknowable, and the only safe
+  // answer at the project root is to refuse: there is no guess here that isn't
+  // "delete some or all of the user's project".
+  const rootInstall = isRootInstall(cwd, installTarget);
+  const rootFootprint = rootInstall ? readPayloadFootprint(pristinePath(cwd, id)) : undefined;
+  if (rootInstall && !rootFootprint) {
+    throw new ArtifactNotPulledError(
+      `"${id}" installs at the project root, and its pristine snapshot is missing, so there is no `
+        + `record of which files belong to it -- refusing to delete anything rather than guess at your `
+        + `whole project. Nothing was removed. Re-pull it to rebuild the snapshot, then remove it, or `
+        + `delete its files by hand and drop its lockfile entry.`,
     );
   }
 
@@ -234,7 +253,19 @@ export async function removeArtifact(
     // rest of removal (wired files, pristine snapshot, lockfile entry)
     // still needs to complete even when this one step doesn't.
     try {
-      await rmDirWithRetry(installTarget);
+      if (rootInstall) {
+        // Never the root directory itself -- only the entries this artifact
+        // actually put there. rmDirWithRetry handles a plain file as happily
+        // as a directory (fs.rmSync with recursive+force underneath).
+        for (const name of rootFootprint ?? []) {
+          const owned = path.join(installTarget, name);
+          if (fs.existsSync(owned)) {
+            await rmDirWithRetry(owned);
+          }
+        }
+      } else {
+        await rmDirWithRetry(installTarget);
+      }
       removedInstallTarget = true;
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);

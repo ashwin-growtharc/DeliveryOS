@@ -120,6 +120,45 @@ export function pristinePath(cwd: string, id: string): string {
   return path.join(pristineDir(cwd), id);
 }
 
+/**
+ * True when an artifact's resolved `install_target` IS the project root.
+ *
+ * That is a legitimate shape -- a scaffold artifact whose whole job is to drop
+ * config files at the top level (eslint.config.js, .prettierrc, ...) has
+ * nowhere else to put them, and `pullArtifact` installs one correctly. But it
+ * breaks the assumption every OTHER consumer makes, that `installTarget` is a
+ * directory containing nothing but the artifact: at the project root the
+ * directory is the user's ENTIRE project, and only the handful of top-level
+ * entries the payload actually provided belong to the artifact.
+ *
+ * Every call site that reads, diffs or deletes `installTarget` has to narrow it
+ * back down with `readPayloadFootprint` -- see its doc comment.
+ */
+export function isRootInstall(cwd: string, installTarget: string): boolean {
+  return path.resolve(installTarget) === path.resolve(cwd);
+}
+
+/**
+ * The top-level entry names a ROOT-install artifact actually owns, read off its
+ * pristine snapshot.
+ *
+ * `pullArtifact` deliberately builds that snapshot from the payload's own
+ * top-level entries for exactly this case (copying the whole of `installTarget`
+ * is both impossible and wrong at the project root -- see its comment), which
+ * makes the snapshot the authoritative record of the artifact's footprint.
+ *
+ * `undefined` means the snapshot is missing entirely -- a stale or
+ * pre-upgrade pull. The footprint is then genuinely unknowable, and callers
+ * must refuse rather than guess: guessing at the project root means either
+ * reporting the user's whole project as artifact content, or deleting it.
+ */
+export function readPayloadFootprint(pristineDir: string): string[] | undefined {
+  if (!fs.existsSync(pristineDir)) {
+    return undefined;
+  }
+  return fs.readdirSync(pristineDir);
+}
+
 /** Root directory for cached compiled UI-component previews (Phase 6).
  * Deliberately global (under `deliveryOsHome()`, alongside
  * `remotesCacheRoot()`), NOT cwd-scoped like `pristineDir` -- a compiled

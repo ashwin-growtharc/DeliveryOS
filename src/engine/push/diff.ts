@@ -105,7 +105,45 @@ export function listPayloadFiles(root: string): string[] {
  * disk (a stale/pre-upgrade pull), and diffing against nothing would
  * incorrectly report every file as "added". The fix is always to re-pull.
  */
-export function computeChangedFiles(installTarget: string, pristineDir: string): ChangedFile[] {
+/**
+ * `listFilesRecursive`, restricted to a given set of top-level entry names.
+ *
+ * Only used for a ROOT `install_target`, where `root` is the user's entire
+ * project rather than a directory holding nothing but the artifact. An
+ * unrestricted walk there would do two wrong things at once: report every
+ * unrelated file in the project as artifact content, and read the whole tree
+ * (node_modules included) on every single catalog.list. Restricting the WALK
+ * -- rather than listing everything and filtering afterwards -- is what avoids
+ * the second.
+ */
+function listFilesUnderTopLevel(root: string, topLevel: string[]): string[] {
+  const result: string[] = [];
+  for (const name of topLevel) {
+    // Same unconditional skip listFilesRecursive applies, and it matters more
+    // here: at the project root a `.git` entry is the real repository.
+    if (name === '.git') {
+      continue;
+    }
+    const fullPath = path.join(root, name);
+    if (!fs.existsSync(fullPath)) {
+      continue;
+    }
+    if (fs.statSync(fullPath).isDirectory()) {
+      for (const relPath of listFilesRecursive(fullPath)) {
+        result.push(`${name}/${relPath}`);
+      }
+    } else {
+      result.push(name);
+    }
+  }
+  return result;
+}
+
+export function computeChangedFiles(
+  installTarget: string,
+  pristineDir: string,
+  options: { topLevelScope?: string[] } = {},
+): ChangedFile[] {
   if (!fs.existsSync(pristineDir)) {
     throw new PristineSnapshotMissingError(
       `No pristine snapshot found at "${pristineDir}" for this artifact. This can happen if it was pulled before DeliveryOS tracked pristine snapshots. Re-pull it first: \`deliveryos pull <id>\`.`,
@@ -118,8 +156,17 @@ export function computeChangedFiles(installTarget: string, pristineDir: string):
   // since it's the one that actually reflects what's currently on disk.
   const isIgnored = loadIgnoreFilter(installTarget);
 
-  const currentFiles = new Set(listFilesRecursive(installTarget).filter((p) => !isIgnored(p)));
-  const pristineFiles = new Set(listFilesRecursive(pristineDir).filter((p) => !isIgnored(p)));
+  // `topLevelScope` is set only for a root install_target, where it narrows
+  // both walks to the entries the payload actually provided. Absent (every
+  // normal subdirectory install), the whole tree IS the artifact and both
+  // walks stay unrestricted exactly as before.
+  const { topLevelScope } = options;
+  const listFiles = (root: string): string[] => (
+    topLevelScope ? listFilesUnderTopLevel(root, topLevelScope) : listFilesRecursive(root)
+  );
+
+  const currentFiles = new Set(listFiles(installTarget).filter((p) => !isIgnored(p)));
+  const pristineFiles = new Set(listFiles(pristineDir).filter((p) => !isIgnored(p)));
   const allPaths = Array.from(new Set([...currentFiles, ...pristineFiles])).sort();
 
   const changes: ChangedFile[] = [];
