@@ -1,6 +1,9 @@
 # UI Components in DeliveryOS — Feature Design (Brainstorm Draft)
 
-**Status:** brainstorm / not yet planned into phases. **Owner:** unassigned.
+**Status:** SHIPPED. This was the design brainstorm; the feature landed as
+Phase 6 and has its own sidebar destination in the app. Kept for the
+reasoning, not as a description of what exists — see the app itself, or
+[CHANGELOG.md](../CHANGELOG.md).
 **Related:** [ARCHITECTURE.md](../ARCHITECTURE.md) (kind system, manifest,
 Pull/Push model), [DESIGN_SYSTEM.md](../DESIGN_SYSTEM.md) (visual language
 this reuses).

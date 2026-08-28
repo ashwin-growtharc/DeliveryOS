@@ -7,16 +7,17 @@ below (the 5-layer model, profiles/role-based routing, the `reference`/
 `dataset`/`snippet`/`config` kinds, "ArcOS as a remote") was the original
 plan and was **not** built as described, superseded by a different, simpler
 shape that emerged during actual implementation. **For what's actually true
-today, see [PLAN.md](PLAN.md)** (phase-by-phase status, current through
-Phase 14) **and [README.md](README.md)** (real CLI usage). §4.1 and §8 below
+today, see [PLAN.md](PLAN.md)** (current status) **and
+[README.md](README.md)** (real CLI usage). §4.1 and §8 below
 have brief corrections pointing at that reality where the drift is most
 likely to mislead; the rest of this document is left as-written, historical
 context only.
 
 **Implementation status (real, current):** far past Phase 0 -- Phases 0
-through 14 are done (manifest engine, push/PR automation, the Tauri desktop
-app, Claude Code integration, backend-plugin/ui-component support, dark
-mode). See [PLAN.md](PLAN.md) for the actual phase list; §8's table below is
+through 32 are done (manifest engine, push/PR automation, the Tauri desktop
+app, Claude Code integration, backend-plugin/ui-component support, dark mode,
+`wire-with-claude` and an embedded terminal). See [PLAN.md](PLAN.md) for the
+actual status; §8's table below is
 the ORIGINAL 6-phase plan and stops at "Phase 5 — Polish," several phases
 short of where the project actually is. **Name:** DeliveryOS (decided).
 **Origin:** grew out of exploring ArcOS's catalog/distribution model; scoped out
@@ -254,7 +255,7 @@ Four everyday processes, each drawn out step by step.
 
 ### 5.3 Who sees what — two filters, not one
 
-ArcOS's own [ADR-0006](../docs/adr/0006-profiles-and-routing.md) uses two
+ArcOS's own ADR-0006 (ArcOS `docs/adr/0006-profiles-and-routing.md`, a sibling repo) uses two
 filters together, not just one — worth copying that shape rather than
 stopping at profiles alone:
 
@@ -314,11 +315,11 @@ that noise automatically, with no extra action from the person.
 | Audience | Whole org, eventually — not just engineers | Must work for non-technical roles (HR, sales, exec, finance), not just developers. |
 | Primary interface | Desktop app | A terminal UI was considered and rejected — it still requires terminal comfort most non-engineering roles won't have. A pure web UI was considered next, but writing files to a user's machine from a browser tab isn't possible, so a local companion process would be needed anyway. Since something has to be installed locally either way, the UI and the local engine access are combined into one installable app instead of split into two things (a web page plus a separate background agent). |
 | Desktop app framework | Tauri (revised from Electron) | Ease of install across the whole org was named the deciding constraint, and Tauri wins on exactly that: no bundled Chromium, so the installer is single-digit MB instead of 150MB+, installs faster, and uses far less background memory once running — all of which matter more the more machines this rolls out to. The cost is narrow: Tauri's native shell is Rust, so whoever builds/maintains that thin layer needs to know Rust; the UI and engine stay web-tech either way. |
-| Engine language | TypeScript / Node, not Python | The desktop app's UI is web-tech, so the shared engine (manifest parsing, remote sync, lockfile, push-as-PR) is written in TypeScript. **One consequence of the Electron → Tauri switch:** Electron's native process is Node, so the engine could run natively in-process; Tauri's native shell is Rust, which can't run TypeScript directly. The engine instead runs as a small bundled background process (a "sidecar") that Tauri's Rust shell launches and communicates with — same engine code, same CLI, just one extra moving part instead of a fully in-process call. **Note this is not the same argument ArcOS considered and rejected in [ADR-0004](../docs/adr/0004-tooling-language-and-tri-target-build.md).** ArcOS rejected TypeScript because "we publish to Claude Code, we don't modify it" — Claude Code being TypeScript was irrelevant to a plugin publisher. DeliveryOS's reason is different and still valid: DeliveryOS's UI is inherently web-tech, and keeping the engine in the same language as the CLI avoids maintaining two implementations. Two different projects, two different — non-contradictory — conclusions. |
+| Engine language | TypeScript / Node, not Python | The desktop app's UI is web-tech, so the shared engine (manifest parsing, remote sync, lockfile, push-as-PR) is written in TypeScript. **One consequence of the Electron → Tauri switch:** Electron's native process is Node, so the engine could run natively in-process; Tauri's native shell is Rust, which can't run TypeScript directly. The engine instead runs as a small bundled background process (a "sidecar") that Tauri's Rust shell launches and communicates with — same engine code, same CLI, just one extra moving part instead of a fully in-process call. **Note this is not the same argument ArcOS considered and rejected in ADR-0004 (ArcOS `docs/adr/0004-tooling-language-and-tri-target-build.md`, a sibling repo).** ArcOS rejected TypeScript because "we publish to Claude Code, we don't modify it" — Claude Code being TypeScript was irrelevant to a plugin publisher. DeliveryOS's reason is different and still valid: DeliveryOS's UI is inherently web-tech, and keeping the engine in the same language as the CLI avoids maintaining two implementations. Two different projects, two different — non-contradictory — conclusions. |
 | Storage backend | Git (no custom database/server) | Free version history, free review via PRs, no new infrastructure to run. Same call ArcOS already made successfully. |
 | How "contribute back" works | `push` = branch + commit + PR against the owning repo, never a direct write to main | Preserves whatever review bar each resource's owning repo already has (e.g., ArcOS's "core changes need 2 reviewers" rule keeps applying). |
 | Artifact typing | Open/extensible `kind` vocabulary, not a closed enum | DeliveryOS's whole point is not knowing every future resource type in advance — unlike ArcOS, which deliberately locks its enum down. |
-| Data discipline | No customer data in any DeliveryOS-shared remote, ever | Same hard rule ArcOS enforces ([docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md)), carried over explicitly rather than assumed — matters more for DeliveryOS than for ArcOS since `doc`/`dataset` kinds make it much easier to tempt someone into uploading a real client deliverable. Protects future productization the same way it protects ArcOS's H3 option. |
+| Data discipline | No customer data in any DeliveryOS-shared remote, ever | Same hard rule ArcOS enforces (docs/ARCHITECTURE.md (ArcOS `docs/ARCHITECTURE.md`, a sibling repo)), carried over explicitly rather than assumed — matters more for DeliveryOS than for ArcOS since `doc`/`dataset` kinds make it much easier to tempt someone into uploading a real client deliverable. Protects future productization the same way it protects ArcOS's H3 option. |
 
 ## 7. Resource manifest (draft shape)
 
@@ -344,11 +345,12 @@ review_required: true
 
 **Correction (real, current state):** this table is the ORIGINAL 6-phase
 plan (0 through 5) and is now badly out of date -- the real project has
-continued through Phase 14 (see [PLAN.md](PLAN.md) for the authoritative,
-current phase list: UI Components, Tier 0 hardening, backend plug-and-play
-artifacts, two rounds of Claude Code integration, a design-kit bundle, and
-dark mode all shipped after "Phase 5 — Polish" below). Left unedited past
-this note as the original plan's own record.
+continued through Phase 32 (see [PLAN.md](PLAN.md) for the authoritative,
+current status: UI Components, Tier 0 hardening, backend plug-and-play
+artifacts, Claude Code integration, design-kit bundles, dark mode,
+`wire-with-claude` and an embedded terminal all shipped after "Phase 5 —
+Polish" below). Left unedited past this note as the original plan's own
+record.
 
 **Phases 0–2 are the MVP/POC.** Single developer, no auth system, no UI —
 just proving the core loop (pull, edit, push, review, merge) works end to
@@ -491,7 +493,7 @@ current dependency.
 
 ### 10.3 TypeScript vs. Python — two different questions
 
-[ADR-0004](../docs/adr/0004-tooling-language-and-tri-target-build.md)
+ADR-0004 (ArcOS `docs/adr/0004-tooling-language-and-tri-target-build.md`, a sibling repo)
 deliberately kept ArcOS's own tooling in Python, rejecting a rewrite in
 TypeScript "to align with Claude Code" as pure cost with no payload benefit.
 DeliveryOS's choice of TypeScript (§6) is not the same question — it follows from
@@ -502,14 +504,14 @@ each other.
 
 ### 10.4 Two filters, not one, for "who sees what"
 
-[ADR-0006](../docs/adr/0006-profiles-and-routing.md) combines install-time
+ADR-0006 (ArcOS `docs/adr/0006-profiles-and-routing.md`, a sibling repo) combines install-time
 **profiles** (who you are) with runtime **tag routing** based on the current
 project's detected stack (who you are *and* what you're currently in). Folded
 into §5.3 above — DeliveryOS's team/review layer now uses the same two-filter shape.
 
 ### 10.5 "No customer data, ever"
 
-[docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md) treats this as a hard rule,
+docs/ARCHITECTURE.md (ArcOS `docs/ARCHITECTURE.md`, a sibling repo) treats this as a hard rule,
 not a risk to monitor — customer artifacts live in customer-specific repos
 that depend on ArcOS, never the reverse. Carried into DeliveryOS's decisions table
 (§6) explicitly, since DeliveryOS's `doc`/`dataset` kinds make the temptation to
