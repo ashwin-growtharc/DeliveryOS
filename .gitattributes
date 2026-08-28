@@ -1,0 +1,18 @@
+# Normalize line endings to LF in the repository regardless of a developer
+# machine's own core.autocrlf setting. Several generated/vendored files
+# here (vendoredLibraries.generated.ts, xterm.js/css, marked.min.js, etc.)
+# get rewritten by local build scripts with plain \n -- on a machine with
+# core.autocrlf=true (the Windows default) and no .gitattributes, that made
+# every one of them show as "modified" after any build even though the
+# content never actually changed (confirmed via `git diff -w` showing zero
+# real diff, LF-vs-CRLF only).
+* text=auto eol=lf
+
+# Real binary assets -- never text-normalized, regardless of the blanket
+# rule above.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.woff binary
+*.woff2 binary
