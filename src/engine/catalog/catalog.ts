@@ -1,8 +1,7 @@
 import { listRemotes } from '../remote/remoteRegistry';
-import { cachePath } from '../remote/remoteCache';
+import { cachePath, refreshRemoteCache } from '../remote/remoteCache';
 import { discoverManifests } from '../manifest/parser';
 import { Manifest } from '../manifest/schema';
-import { fetchAndReset } from '../git/git';
 import { readLockfile } from '../lockfile/lockfile';
 import { computeChangedFiles } from '../push/diff';
 import { pristinePath, resolveContainedPath } from '../paths';
@@ -71,7 +70,7 @@ export async function refreshCatalog(
   for (const remote of listRemotes()) {
     onProgress?.('fetch', `Fetching latest from ${remote.name}...`);
     try {
-      await fetchAndReset(cachePath(remote.name));
+      await refreshRemoteCache(remote.name);
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
       onProgress?.('fetch', `Could not refresh "${remote.name}", skipping: ${detail}`);

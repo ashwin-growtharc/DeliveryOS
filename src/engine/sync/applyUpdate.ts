@@ -3,8 +3,7 @@ import * as path from 'path';
 import { execSync } from 'child_process';
 import { readLockfile, upsertEntry } from '../lockfile/lockfile';
 import { findRemote } from '../remote/remoteRegistry';
-import { cachePath } from '../remote/remoteCache';
-import { fetchAndReset } from '../git/git';
+import { cachePath, refreshRemoteCache } from '../remote/remoteCache';
 import { buildCatalog } from '../catalog/catalog';
 import { computeChangedFiles, listFilesRecursive } from '../push/diff';
 import { pristinePath, resolveContainedPath } from '../paths';
@@ -74,7 +73,7 @@ export async function applyAvailableUpdates(
       continue;
     }
     onProgress?.('fetch', `Fetching latest from ${name}...`);
-    await fetchAndReset(cachePath(name));
+    await refreshRemoteCache(name);
   }
 
   const catalog = buildCatalog();

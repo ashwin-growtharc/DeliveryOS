@@ -3,7 +3,7 @@ import * as path from 'path';
 import { stringify as stringifyYaml } from 'yaml';
 import { readLockfile, upsertEntry } from '../lockfile/lockfile';
 import { findRemote } from '../remote/remoteRegistry';
-import { cachePath } from '../remote/remoteCache';
+import { cachePath, withRemoteCacheLock } from '../remote/remoteCache';
 import { resolveArtifact, ProgressCallback } from '../pull/pull';
 import { buildCatalog } from '../catalog/catalog';
 import { ManifestSchema, Manifest, InstallParam } from '../manifest/schema';
@@ -215,383 +215,415 @@ export async function pushArtifact(
   // inside each branch, only after that branch's own local-only checks
   // have already passed, and its `defaultBranch` is reused directly at
   // PR-open time below instead of fetching it a second time.
-  const client = octokit ?? (await createOctokit(getGithubToken()));
+  // Everything below mutates the shared remote cache clone at
+  // ~/.deliveryos/remotes/<name>, so it runs under an exclusive
+  // inter-process lock. Without it, the desktop app's 20-minute auto-sync
+  // tick landing between the staging step and the commit ran a
+  // `git reset --hard` and silently discarded the staged edit -- a lost
+  // update, not a crash. See withRemoteCacheLock's own doc comment.
+  return withRemoteCacheLock(remoteName, async () => {
+    try {
+    const client = octokit ?? (await createOctokit(getGithubToken()));
 
-  // Refresh the local cache to the remote's current tip before branching,
-  // diffing, or collision-checking against it.
-  onProgress?.('fetch', `Fetching remote "${remoteName}"...`);
-  await fetchAndReset(cachePath(remoteName));
+    // Refresh the local cache to the remote's current tip before branching,
+    // diffing, or collision-checking against it.
+    onProgress?.('fetch', `Fetching remote "${remoteName}"...`);
+    // Direct call, not refreshRemoteCache: this already runs inside
+    // withRemoteCacheLock above, and proper-lockfile is not reentrant.
+    await fetchAndReset(cachePath(remoteName));
 
-  const branchName = buildBranchName(id);
-  const cacheDir = cachePath(remoteName);
-  const identity = await getCommitIdentity(cacheDir);
+    const branchName = buildBranchName(id);
+    const cacheDir = cachePath(remoteName);
+    const identity = await getCommitIdentity(cacheDir);
 
-  let commitMessage: string;
-  let filesToCommit: string[];
-  let prTitle: string;
-  let defaultBranch: string;
-  let prBody: string;
+    let commitMessage: string;
+    let filesToCommit: string[];
+    let prTitle: string;
+    let defaultBranch: string;
+    let prBody: string;
 
-  if (options.isNew) {
-    if (!options.payloadPath || !options.kind || !options.owner || !options.description) {
-      throw new PushModeConflictError(
-        '--new requires --path, --kind, --owner, and --description.',
-      );
-    }
-
-    // Collision check: the id must not already exist in this remote's
-    // just-refreshed catalog.
-    onProgress?.('diff', `Checking "${id}" is not already taken in remote "${remoteName}"...`);
-    const catalog = buildCatalog();
-    const collision = catalog.find(
-      (entry) => entry.remoteName === remoteName && entry.manifest.id === id,
-    );
-    if (collision) {
-      throw new IdCollisionError(
-        `Artifact id "${id}" already exists in remote "${remoteName}" (owner: ${collision.manifest.owner}, version: ${collision.manifest.version}). Choose a different id, or drop --new to push an edit to the existing artifact.`,
-      );
-    }
-
-    // Only fetched now, after the collision check -- see this function's
-    // own comment above `client`'s construction for why.
-    const repoInfo = await fetchRepoInfo(client, ghOwner, ghRepo);
-    defaultBranch = repoInfo.defaultBranch;
-    const isPrivateRepo = repoInfo.isPrivate;
-
-    if (!fs.existsSync(options.payloadPath)) {
-      throw new ManifestValidationError(`--path "${options.payloadPath}" does not exist`);
-    }
-    // `listFilesRecursive`/`listPayloadFiles` return [''] as a sentinel for a
-    // single-file root (see its own doc comment) -- normalize that into the
-    // file's real basename here, once, so every downstream use (the actual
-    // copy below, the git commit path list, and the PR body's "new files"
-    // list) refers to a real path instead of an empty string.
-    const payloadIsFile = fs.statSync(options.payloadPath).isFile();
-    // `listPayloadFiles` (not the raw `listFilesRecursive`) for a directory
-    // payload: proposing a whole project folder (e.g. a template/scaffold,
-    // not just a single doc) would otherwise copy EVERYTHING underneath it
-    // verbatim, including a nested `.git/` (which git would try to treat as
-    // an embedded repo/gitlink rather than plain files once committed here)
-    // and whatever the project's own .gitignore excludes (node_modules/,
-    // build output, caches). listFilesRecursive alone already skips `.git`
-    // unconditionally at the walk level; listPayloadFiles adds the
-    // .gitignore filtering on top.
-    const payloadFiles = payloadIsFile
-      ? [path.basename(options.payloadPath)]
-      : listPayloadFiles(options.payloadPath);
-
-    // A single-file payload gets `payload_path` pointing at a real, stable
-    // location (`files/<id>/<basename>`) instead of the standard
-    // `artifacts/<id>/payload/` wrapper. This matters the moment
-    // `install_target` is itself a file path (e.g. `.claude/agents/<id>.md`,
-    // as `deliveryos scan` sets for a discovered agent): pullArtifact's
-    // `fs.cpSync` creates `install_target` as a DIRECTORY when the payload
-    // source is a directory, even one containing just a single file -- the
-    // exact bug found and fixed for the growtharc-ai-helpers agent import.
-    // Directory payloads keep the standard convention unchanged; a
-    // directory-shaped `install_target` has no such mismatch to avoid.
-    const payloadPathOverride = payloadIsFile ? `files/${id}/${payloadFiles[0]}` : undefined;
-
-    const candidateManifest = {
-      id,
-      kind: options.kind,
-      description: options.description,
-      owner: options.owner,
-      version: options.version ?? '1.0.0',
-      tags: {
-        roles: options.roles ?? [],
-        teams: options.teams ?? [],
-        stacks: options.stacks ?? [],
-        componentTypes: options.componentTypes ?? [],
-      },
-      source_repo: remoteEntry.url,
-      install_target: options.installTarget ?? id,
-      review_required: Boolean(options.reviewRequired),
-      // Every project has its own setup step (pip/npm/cargo/none at all) --
-      // DeliveryOS doesn't know or care which; it just runs whatever's here,
-      // in install_target, after the payload lands. Omitted entirely (not
-      // an empty string) when the proposer doesn't set one, so pull's
-      // `if (manifest.post_install)` check skips it cleanly.
-      ...(options.postInstall ? { post_install: options.postInstall } : {}),
-      ...(payloadPathOverride ? { payload_path: payloadPathOverride } : {}),
-      ...(options.installParams && options.installParams.length > 0
-        ? { install_params: options.installParams }
-        : {}),
-    };
-
-    const result = ManifestSchema.safeParse(candidateManifest);
-    if (!result.success) {
-      const issues = result.error.issues
-        .map((issue) => `${issue.path.join('.') || '<root>'}: ${issue.message}`)
-        .join('; ');
-      throw new ManifestValidationError(`Manifest built from --new flags failed validation: ${issues}`);
-    }
-    const manifest: Manifest = result.data;
-
-    onProgress?.('stage', `Staging payload files for "${id}"...`);
-    const artifactDir = path.join(cacheDir, 'artifacts', id);
-    fs.mkdirSync(artifactDir, { recursive: true });
-    // Single-file payloads (e.g. a lone `.md` skill) have no sibling
-    // directory a preview.tsx could possibly live in -- preview.png
-    // generation only ever applies to the directory-payload branch below.
-    let previewImageGitPath: string | undefined;
-    if (payloadIsFile) {
-      const fileDestDir = path.join(cacheDir, 'files', id);
-      fs.mkdirSync(fileDestDir, { recursive: true });
-      fs.copyFileSync(options.payloadPath, path.join(fileDestDir, payloadFiles[0]));
-    } else {
-      const payloadDestDir = path.join(artifactDir, 'payload');
-      fs.mkdirSync(payloadDestDir, { recursive: true });
-      // Copied file-by-file (reusing the same helper edit-mode push already
-      // uses) rather than one bulk `fs.cpSync` of the whole source
-      // directory, so what's physically copied always matches `payloadFiles`
-      // exactly -- a bulk recursive copy would re-introduce everything
-      // `listPayloadFiles` just filtered out.
-      for (const relPath of payloadFiles) {
-        copyFileInto(options.payloadPath, payloadDestDir, relPath);
-      }
-      previewImageGitPath = await maybeRenderPreviewImage(payloadDestDir, `artifacts/${id}/payload`, onProgress);
-    }
-    fs.writeFileSync(path.join(artifactDir, 'manifest.yaml'), stringifyYaml(manifest), 'utf-8');
-
-    const payloadGitRoot = payloadPathOverride ? `files/${id}` : `artifacts/${id}/payload`;
-    filesToCommit = [
-      `artifacts/${id}/manifest.yaml`,
-      ...payloadFiles.map((relPath) => path.posix.join(payloadGitRoot, relPath)),
-      ...(previewImageGitPath ? [previewImageGitPath] : []),
-    ];
-    commitMessage = `DeliveryOS push: propose new artifact ${id}`;
-
-    const content = buildProposeNewPrContent({
-      id,
-      kind: manifest.kind,
-      owner: manifest.owner,
-      version: manifest.version,
-      installTarget: manifest.install_target,
-      tags: manifest.tags,
-      gitUserName: identity.name,
-      gitUserEmail: identity.email,
-      payloadFiles,
-      payloadRoot: payloadPathOverride ? `files/${id}` : undefined,
-      previewImageGitPath,
-      previewImageUrl:
-        previewImageGitPath && !isPrivateRepo
-          ? `https://raw.githubusercontent.com/${ghOwner}/${ghRepo}/${branchName}/${previewImageGitPath}`
-          : undefined,
-    });
-    prTitle = content.title;
-    prBody = content.body;
-  } else if (options.metadataEdit) {
-    // Metadata-only edit: description/roles/teams/stacks changed via
-    // Detail's Edit button, payload untouched entirely. `resolveArtifact`
-    // reads from `buildCatalog()`, which reads the cache `fetchAndReset`
-    // just refreshed above -- `entry.manifest` is already the remote's
-    // current state, not a possibly-stale local read.
-    const entry = resolveArtifact(id, remoteName);
-    const { manifest: current } = entry;
-
-    const before: MetadataFields = {
-      description: current.description,
-      roles: current.tags.roles,
-      teams: current.tags.teams,
-      stacks: current.tags.stacks,
-      componentTypes: current.tags.componentTypes,
-    };
-    const after: MetadataFields = {
-      description: options.metadataEdit.description ?? before.description,
-      roles: options.metadataEdit.roles ?? before.roles,
-      teams: options.metadataEdit.teams ?? before.teams,
-      stacks: options.metadataEdit.stacks ?? before.stacks,
-      componentTypes: options.metadataEdit.componentTypes ?? before.componentTypes,
-    };
-
-    if (JSON.stringify(before) === JSON.stringify(after)) {
-      throw new NoLocalChangesError(
-        `No metadata changes for "${id}" -- description/roles/teams/stacks/componentTypes are all identical to what's currently on the remote.`,
-      );
-    }
-
-    // Only fetched now, after the no-op check -- see this function's own
-    // comment above `client`'s construction for why. Metadata edits never
-    // touch the preview image, so only `defaultBranch` is needed here.
-    defaultBranch = (await fetchRepoInfo(client, ghOwner, ghRepo)).defaultBranch;
-
-    const updatedManifest = {
-      ...current,
-      description: after.description,
-      tags: { roles: after.roles, teams: after.teams, stacks: after.stacks, componentTypes: after.componentTypes },
-    };
-    const validated = ManifestSchema.safeParse(updatedManifest);
-    if (!validated.success) {
-      const issues = validated.error.issues
-        .map((issue) => `${issue.path.join('.') || '<root>'}: ${issue.message}`)
-        .join('; ');
-      throw new ManifestValidationError(`Metadata edit for "${id}" failed validation: ${issues}`);
-    }
-
-    onProgress?.('stage', `Staging metadata changes for "${id}"...`);
-    const manifestPath = path.join(cacheDir, 'artifacts', id, 'manifest.yaml');
-    fs.writeFileSync(manifestPath, stringifyYaml(validated.data), 'utf-8');
-
-    filesToCommit = [`artifacts/${id}/manifest.yaml`];
-    commitMessage = `DeliveryOS push: update ${id} metadata`;
-
-    const content = buildMetadataEditPrContent({
-      id,
-      kind: current.kind,
-      owner: current.owner,
-      version: current.version,
-      gitUserName: identity.name,
-      gitUserEmail: identity.email,
-      before,
-      after,
-    });
-    prTitle = content.title;
-    prBody = content.body;
-  } else {
-    const entry = resolveArtifact(id, remoteName);
-    const { manifest } = entry;
-    // manifest.install_target is untrusted (the artifact author's own
-    // manifest, not something DeliveryOS controls) -- same containment
-    // check pull.ts already applies before ever writing there, and the
-    // same reasoning this file's own payload_path check below already
-    // documents: an unchecked value here would let a crafted manifest
-    // point a routine edit-mode push's diff/pristine-comparison at a
-    // location outside the project entirely.
-    const installTarget = resolveContainedPath(cwd, manifest.install_target, { allowRoot: false });
-    if (!installTarget) {
-      throw new ManifestValidationError(
-        `Artifact "${id}"'s install_target ("${manifest.install_target}") resolves outside the project -- `
-          + `refusing to push.`,
-      );
-    }
-    const pristine = pristinePath(cwd, id);
-
-    onProgress?.('diff', `Diffing "${id}" against its pristine snapshot...`);
-    const changedFiles = computeChangedFiles(installTarget, pristine);
-    if (changedFiles.length === 0) {
-      throw new NoLocalChangesError(
-        `No local changes detected for "${id}" -- its files are byte-for-byte identical to the pristine snapshot taken at pull time. Nothing to push.`,
-      );
-    }
-
-    // Only fetched now, after the no-local-changes check -- see this
-    // function's own comment above `client`'s construction for why.
-    const repoInfo = await fetchRepoInfo(client, ghOwner, ghRepo);
-    defaultBranch = repoInfo.defaultBranch;
-    const isPrivateRepo = repoInfo.isPrivate;
-
-    // If the manifest this was pulled from set `payload_path`, the real
-    // file/directory lives there in the remote's repo, not under
-    // artifacts/<id>/payload/ -- write the diff back to that same real
-    // location so the resulting git diff lands on the real file, not a
-    // shadow copy. Absent: unchanged (artifacts/<id>/payload/).
-    //
-    // `payload_path` is untrusted (the manifest's own author wrote it, not
-    // something DeliveryOS controls) -- containment-checked against
-    // `cacheDir` for the same reason `pull.ts` checks it before reading:
-    // an unchecked value here would let a crafted manifest turn a routine
-    // edit-mode push into writes/deletes (a few lines below) anywhere
-    // `fs.rmSync`/`copyFileInto` can reach outside the remote's own clone.
-    let payloadDestDir: string;
-    if (manifest.payload_path) {
-      const contained = resolveContainedPath(cacheDir, manifest.payload_path);
-      if (!contained) {
-        throw new ManifestValidationError(
-          `Artifact "${id}"'s payload_path ("${manifest.payload_path}") resolves outside the remote's `
-            + `own directory -- refusing to push.`,
+    if (options.isNew) {
+      if (!options.payloadPath || !options.kind || !options.owner || !options.description) {
+        throw new PushModeConflictError(
+          '--new requires --path, --kind, --owner, and --description.',
         );
       }
-      payloadDestDir = contained;
-    } else {
-      payloadDestDir = path.join(cacheDir, 'artifacts', id, 'payload');
-    }
-    const payloadDestGitRoot = manifest.payload_path ?? `artifacts/${id}/payload`;
-    onProgress?.('stage', `Staging ${changedFiles.length} changed file(s) for "${id}"...`);
-    for (const change of changedFiles) {
-      if (change.status === 'deleted') {
-        fs.rmSync(path.join(payloadDestDir, change.relPath), { force: true });
+
+      // Collision check: the id must not already exist in this remote's
+      // just-refreshed catalog.
+      onProgress?.('diff', `Checking "${id}" is not already taken in remote "${remoteName}"...`);
+      const catalog = buildCatalog();
+      const collision = catalog.find(
+        (entry) => entry.remoteName === remoteName && entry.manifest.id === id,
+      );
+      if (collision) {
+        throw new IdCollisionError(
+          `Artifact id "${id}" already exists in remote "${remoteName}" (owner: ${collision.manifest.owner}, version: ${collision.manifest.version}). Choose a different id, or drop --new to push an edit to the existing artifact.`,
+        );
+      }
+
+      // Only fetched now, after the collision check -- see this function's
+      // own comment above `client`'s construction for why.
+      const repoInfo = await fetchRepoInfo(client, ghOwner, ghRepo);
+      defaultBranch = repoInfo.defaultBranch;
+      const isPrivateRepo = repoInfo.isPrivate;
+
+      if (!fs.existsSync(options.payloadPath)) {
+        throw new ManifestValidationError(`--path "${options.payloadPath}" does not exist`);
+      }
+      // `listFilesRecursive`/`listPayloadFiles` return [''] as a sentinel for a
+      // single-file root (see its own doc comment) -- normalize that into the
+      // file's real basename here, once, so every downstream use (the actual
+      // copy below, the git commit path list, and the PR body's "new files"
+      // list) refers to a real path instead of an empty string.
+      const payloadIsFile = fs.statSync(options.payloadPath).isFile();
+      // `listPayloadFiles` (not the raw `listFilesRecursive`) for a directory
+      // payload: proposing a whole project folder (e.g. a template/scaffold,
+      // not just a single doc) would otherwise copy EVERYTHING underneath it
+      // verbatim, including a nested `.git/` (which git would try to treat as
+      // an embedded repo/gitlink rather than plain files once committed here)
+      // and whatever the project's own .gitignore excludes (node_modules/,
+      // build output, caches). listFilesRecursive alone already skips `.git`
+      // unconditionally at the walk level; listPayloadFiles adds the
+      // .gitignore filtering on top.
+      const payloadFiles = payloadIsFile
+        ? [path.basename(options.payloadPath)]
+        : listPayloadFiles(options.payloadPath);
+
+      // A single-file payload gets `payload_path` pointing at a real, stable
+      // location (`files/<id>/<basename>`) instead of the standard
+      // `artifacts/<id>/payload/` wrapper. This matters the moment
+      // `install_target` is itself a file path (e.g. `.claude/agents/<id>.md`,
+      // as `deliveryos scan` sets for a discovered agent): pullArtifact's
+      // `fs.cpSync` creates `install_target` as a DIRECTORY when the payload
+      // source is a directory, even one containing just a single file -- the
+      // exact bug found and fixed for the growtharc-ai-helpers agent import.
+      // Directory payloads keep the standard convention unchanged; a
+      // directory-shaped `install_target` has no such mismatch to avoid.
+      const payloadPathOverride = payloadIsFile ? `files/${id}/${payloadFiles[0]}` : undefined;
+
+      const candidateManifest = {
+        id,
+        kind: options.kind,
+        description: options.description,
+        owner: options.owner,
+        version: options.version ?? '1.0.0',
+        tags: {
+          roles: options.roles ?? [],
+          teams: options.teams ?? [],
+          stacks: options.stacks ?? [],
+          componentTypes: options.componentTypes ?? [],
+        },
+        source_repo: remoteEntry.url,
+        install_target: options.installTarget ?? id,
+        review_required: Boolean(options.reviewRequired),
+        // Every project has its own setup step (pip/npm/cargo/none at all) --
+        // DeliveryOS doesn't know or care which; it just runs whatever's here,
+        // in install_target, after the payload lands. Omitted entirely (not
+        // an empty string) when the proposer doesn't set one, so pull's
+        // `if (manifest.post_install)` check skips it cleanly.
+        ...(options.postInstall ? { post_install: options.postInstall } : {}),
+        ...(payloadPathOverride ? { payload_path: payloadPathOverride } : {}),
+        ...(options.installParams && options.installParams.length > 0
+          ? { install_params: options.installParams }
+          : {}),
+      };
+
+      const result = ManifestSchema.safeParse(candidateManifest);
+      if (!result.success) {
+        const issues = result.error.issues
+          .map((issue) => `${issue.path.join('.') || '<root>'}: ${issue.message}`)
+          .join('; ');
+        throw new ManifestValidationError(`Manifest built from --new flags failed validation: ${issues}`);
+      }
+      const manifest: Manifest = result.data;
+
+      onProgress?.('stage', `Staging payload files for "${id}"...`);
+      const artifactDir = path.join(cacheDir, 'artifacts', id);
+      fs.mkdirSync(artifactDir, { recursive: true });
+      // Single-file payloads (e.g. a lone `.md` skill) have no sibling
+      // directory a preview.tsx could possibly live in -- preview.png
+      // generation only ever applies to the directory-payload branch below.
+      let previewImageGitPath: string | undefined;
+      if (payloadIsFile) {
+        const fileDestDir = path.join(cacheDir, 'files', id);
+        fs.mkdirSync(fileDestDir, { recursive: true });
+        fs.copyFileSync(options.payloadPath, path.join(fileDestDir, payloadFiles[0]));
       } else {
-        copyFileInto(installTarget, payloadDestDir, change.relPath);
+        const payloadDestDir = path.join(artifactDir, 'payload');
+        fs.mkdirSync(payloadDestDir, { recursive: true });
+        // Copied file-by-file (reusing the same helper edit-mode push already
+        // uses) rather than one bulk `fs.cpSync` of the whole source
+        // directory, so what's physically copied always matches `payloadFiles`
+        // exactly -- a bulk recursive copy would re-introduce everything
+        // `listPayloadFiles` just filtered out.
+        for (const relPath of payloadFiles) {
+          copyFileInto(options.payloadPath, payloadDestDir, relPath);
+        }
+        previewImageGitPath = await maybeRenderPreviewImage(payloadDestDir, `artifacts/${id}/payload`, onProgress);
+      }
+      fs.writeFileSync(path.join(artifactDir, 'manifest.yaml'), stringifyYaml(manifest), 'utf-8');
+
+      const payloadGitRoot = payloadPathOverride ? `files/${id}` : `artifacts/${id}/payload`;
+      filesToCommit = [
+        `artifacts/${id}/manifest.yaml`,
+        ...payloadFiles.map((relPath) => path.posix.join(payloadGitRoot, relPath)),
+        ...(previewImageGitPath ? [previewImageGitPath] : []),
+      ];
+      commitMessage = `DeliveryOS push: propose new artifact ${id}`;
+
+      const content = buildProposeNewPrContent({
+        id,
+        kind: manifest.kind,
+        owner: manifest.owner,
+        version: manifest.version,
+        installTarget: manifest.install_target,
+        tags: manifest.tags,
+        gitUserName: identity.name,
+        gitUserEmail: identity.email,
+        payloadFiles,
+        payloadRoot: payloadPathOverride ? `files/${id}` : undefined,
+        previewImageGitPath,
+        previewImageUrl:
+          previewImageGitPath && !isPrivateRepo
+            ? `https://raw.githubusercontent.com/${ghOwner}/${ghRepo}/${branchName}/${previewImageGitPath}`
+            : undefined,
+      });
+      prTitle = content.title;
+      prBody = content.body;
+    } else if (options.metadataEdit) {
+      // Metadata-only edit: description/roles/teams/stacks changed via
+      // Detail's Edit button, payload untouched entirely. `resolveArtifact`
+      // reads from `buildCatalog()`, which reads the cache `fetchAndReset`
+      // just refreshed above -- `entry.manifest` is already the remote's
+      // current state, not a possibly-stale local read.
+      const entry = resolveArtifact(id, remoteName);
+      const { manifest: current } = entry;
+
+      const before: MetadataFields = {
+        description: current.description,
+        roles: current.tags.roles,
+        teams: current.tags.teams,
+        stacks: current.tags.stacks,
+        componentTypes: current.tags.componentTypes,
+      };
+      const after: MetadataFields = {
+        description: options.metadataEdit.description ?? before.description,
+        roles: options.metadataEdit.roles ?? before.roles,
+        teams: options.metadataEdit.teams ?? before.teams,
+        stacks: options.metadataEdit.stacks ?? before.stacks,
+        componentTypes: options.metadataEdit.componentTypes ?? before.componentTypes,
+      };
+
+      if (JSON.stringify(before) === JSON.stringify(after)) {
+        throw new NoLocalChangesError(
+          `No metadata changes for "${id}" -- description/roles/teams/stacks/componentTypes are all identical to what's currently on the remote.`,
+        );
+      }
+
+      // Only fetched now, after the no-op check -- see this function's own
+      // comment above `client`'s construction for why. Metadata edits never
+      // touch the preview image, so only `defaultBranch` is needed here.
+      defaultBranch = (await fetchRepoInfo(client, ghOwner, ghRepo)).defaultBranch;
+
+      const updatedManifest = {
+        ...current,
+        description: after.description,
+        tags: { roles: after.roles, teams: after.teams, stacks: after.stacks, componentTypes: after.componentTypes },
+      };
+      const validated = ManifestSchema.safeParse(updatedManifest);
+      if (!validated.success) {
+        const issues = validated.error.issues
+          .map((issue) => `${issue.path.join('.') || '<root>'}: ${issue.message}`)
+          .join('; ');
+        throw new ManifestValidationError(`Metadata edit for "${id}" failed validation: ${issues}`);
+      }
+
+      onProgress?.('stage', `Staging metadata changes for "${id}"...`);
+      const manifestPath = path.join(cacheDir, 'artifacts', id, 'manifest.yaml');
+      fs.writeFileSync(manifestPath, stringifyYaml(validated.data), 'utf-8');
+
+      filesToCommit = [`artifacts/${id}/manifest.yaml`];
+      commitMessage = `DeliveryOS push: update ${id} metadata`;
+
+      const content = buildMetadataEditPrContent({
+        id,
+        kind: current.kind,
+        owner: current.owner,
+        version: current.version,
+        gitUserName: identity.name,
+        gitUserEmail: identity.email,
+        before,
+        after,
+      });
+      prTitle = content.title;
+      prBody = content.body;
+    } else {
+      const entry = resolveArtifact(id, remoteName);
+      const { manifest } = entry;
+      // manifest.install_target is untrusted (the artifact author's own
+      // manifest, not something DeliveryOS controls) -- same containment
+      // check pull.ts already applies before ever writing there, and the
+      // same reasoning this file's own payload_path check below already
+      // documents: an unchecked value here would let a crafted manifest
+      // point a routine edit-mode push's diff/pristine-comparison at a
+      // location outside the project entirely.
+      const installTarget = resolveContainedPath(cwd, manifest.install_target, { allowRoot: false });
+      if (!installTarget) {
+        throw new ManifestValidationError(
+          `Artifact "${id}"'s install_target ("${manifest.install_target}") resolves outside the project -- `
+            + `refusing to push.`,
+        );
+      }
+      const pristine = pristinePath(cwd, id);
+
+      onProgress?.('diff', `Diffing "${id}" against its pristine snapshot...`);
+      const changedFiles = computeChangedFiles(installTarget, pristine);
+      if (changedFiles.length === 0) {
+        throw new NoLocalChangesError(
+          `No local changes detected for "${id}" -- its files are byte-for-byte identical to the pristine snapshot taken at pull time. Nothing to push.`,
+        );
+      }
+
+      // Only fetched now, after the no-local-changes check -- see this
+      // function's own comment above `client`'s construction for why.
+      const repoInfo = await fetchRepoInfo(client, ghOwner, ghRepo);
+      defaultBranch = repoInfo.defaultBranch;
+      const isPrivateRepo = repoInfo.isPrivate;
+
+      // If the manifest this was pulled from set `payload_path`, the real
+      // file/directory lives there in the remote's repo, not under
+      // artifacts/<id>/payload/ -- write the diff back to that same real
+      // location so the resulting git diff lands on the real file, not a
+      // shadow copy. Absent: unchanged (artifacts/<id>/payload/).
+      //
+      // `payload_path` is untrusted (the manifest's own author wrote it, not
+      // something DeliveryOS controls) -- containment-checked against
+      // `cacheDir` for the same reason `pull.ts` checks it before reading:
+      // an unchecked value here would let a crafted manifest turn a routine
+      // edit-mode push into writes/deletes (a few lines below) anywhere
+      // `fs.rmSync`/`copyFileInto` can reach outside the remote's own clone.
+      let payloadDestDir: string;
+      if (manifest.payload_path) {
+        const contained = resolveContainedPath(cacheDir, manifest.payload_path);
+        if (!contained) {
+          throw new ManifestValidationError(
+            `Artifact "${id}"'s payload_path ("${manifest.payload_path}") resolves outside the remote's `
+              + `own directory -- refusing to push.`,
+          );
+        }
+        payloadDestDir = contained;
+      } else {
+        payloadDestDir = path.join(cacheDir, 'artifacts', id, 'payload');
+      }
+      const payloadDestGitRoot = manifest.payload_path ?? `artifacts/${id}/payload`;
+      onProgress?.('stage', `Staging ${changedFiles.length} changed file(s) for "${id}"...`);
+      for (const change of changedFiles) {
+        if (change.status === 'deleted') {
+          fs.rmSync(path.join(payloadDestDir, change.relPath), { force: true });
+        } else {
+          copyFileInto(installTarget, payloadDestDir, change.relPath);
+        }
+      }
+
+      // Real payload content changed (guaranteed by the NoLocalChangesError
+      // check above) -- bump the manifest's version and write it back, the
+      // actual Phase E fix: edit-mode push never touched manifest.yaml at
+      // all before this, so `checkForUpdates`/the preview cache (both keyed
+      // on version) could never detect a real edit, silently forever. See
+      // PushOptions.bump's own doc comment for why this defaults to 'patch'
+      // rather than requiring an explicit choice.
+      const previousVersion = manifest.version;
+      const newVersion = bumpVersion(previousVersion, options.bump ?? 'patch');
+      const updatedManifest = { ...manifest, version: newVersion };
+      const validatedManifest = ManifestSchema.safeParse(updatedManifest);
+      if (!validatedManifest.success) {
+        const issues = validatedManifest.error.issues
+          .map((issue) => `${issue.path.join('.') || '<root>'}: ${issue.message}`)
+          .join('; ');
+        throw new ManifestValidationError(`Version bump for "${id}" produced an invalid manifest: ${issues}`);
+      }
+      const manifestPath = path.join(cacheDir, 'artifacts', id, 'manifest.yaml');
+      fs.writeFileSync(manifestPath, stringifyYaml(validatedManifest.data), 'utf-8');
+
+      const previewImageGitPath = await maybeRenderPreviewImage(payloadDestDir, payloadDestGitRoot, onProgress);
+
+      filesToCommit = [
+        `artifacts/${id}/manifest.yaml`,
+        ...changedFiles.map((change) => path.posix.join(payloadDestGitRoot, change.relPath)),
+        ...(previewImageGitPath ? [previewImageGitPath] : []),
+      ];
+      commitMessage = `DeliveryOS push: update ${id}`;
+
+      const content = buildEditPrContent({
+        id,
+        kind: manifest.kind,
+        owner: manifest.owner,
+        version: newVersion,
+        previousVersion,
+        gitUserName: identity.name,
+        gitUserEmail: identity.email,
+        changedFiles,
+        payloadRoot: manifest.payload_path,
+        previewImageGitPath,
+        previewImageUrl:
+          previewImageGitPath && !isPrivateRepo
+            ? `https://raw.githubusercontent.com/${ghOwner}/${ghRepo}/${branchName}/${previewImageGitPath}`
+            : undefined,
+      });
+      prTitle = content.title;
+      prBody = content.body;
+    }
+
+    onProgress?.('branch', `Creating branch "${branchName}"...`);
+    await createBranch(cacheDir, branchName);
+    onProgress?.('commit', 'Committing changes...');
+    await commitPaths(cacheDir, filesToCommit, commitMessage, identity);
+    onProgress?.('push', `Pushing branch "${branchName}"...`);
+    await pushBranch(cacheDir, branchName);
+
+    onProgress?.('pr-open', 'Opening pull request...');
+    const opened = await openPullRequest(client, {
+      owner: ghOwner,
+      repo: ghRepo,
+      head: branchName,
+      base: defaultBranch,
+      title: prTitle,
+      body: prBody,
+    });
+
+    // Record the opened PR against this artifact's lockfile entry so its real
+    // outcome (still open / merged / closed-unmerged) can be checked later via
+    // resolvePendingPushes -- pushing doesn't otherwise touch local state at
+    // all (the edit isn't accepted upstream just because a PR was opened for
+    // it), so without this there would be no way to later tell whether a push
+    // was ever followed up on. Propose-new has no pre-existing lockfile entry
+    // to attach this to -- out of scope here, tracked only for edit-mode.
+    if (!options.isNew && lockEntry) {
+      await upsertEntry(cwd, { ...lockEntry, pendingPr: { number: opened.number, url: opened.url } });
+    }
+
+    return { url: opened.url, number: opened.number, branch: branchName };
+    } finally {
+      // Leave the cache on the remote's real tip, never parked on the
+      // branch this push just created.
+      //
+      // Without this, a successful push left the cache checked out on
+      // `deliveryos/<id>/<ts>` with the UNMERGED payload committed, and
+      // nothing ever reset it. Every subsequent read that doesn't fetch
+      // first -- `list`, `pull`, `config`, `wiring`, `catalog.list`, every
+      // preview compile -- then read that unmerged branch as if it were
+      // the remote's real state. A `pull` immediately after a `push`
+      // installed the user's own unreviewed PR content.
+      //
+      // Best-effort: a failure here must not mask the real outcome of the
+      // push (the PR is already open at this point), and the next
+      // fetchAndReset would recover the cache anyway.
+      try {
+        await fetchAndReset(cachePath(remoteName));
+      } catch {
+        // Cache left as-is; the next refresh resets it.
       }
     }
-
-    // Real payload content changed (guaranteed by the NoLocalChangesError
-    // check above) -- bump the manifest's version and write it back, the
-    // actual Phase E fix: edit-mode push never touched manifest.yaml at
-    // all before this, so `checkForUpdates`/the preview cache (both keyed
-    // on version) could never detect a real edit, silently forever. See
-    // PushOptions.bump's own doc comment for why this defaults to 'patch'
-    // rather than requiring an explicit choice.
-    const previousVersion = manifest.version;
-    const newVersion = bumpVersion(previousVersion, options.bump ?? 'patch');
-    const updatedManifest = { ...manifest, version: newVersion };
-    const validatedManifest = ManifestSchema.safeParse(updatedManifest);
-    if (!validatedManifest.success) {
-      const issues = validatedManifest.error.issues
-        .map((issue) => `${issue.path.join('.') || '<root>'}: ${issue.message}`)
-        .join('; ');
-      throw new ManifestValidationError(`Version bump for "${id}" produced an invalid manifest: ${issues}`);
-    }
-    const manifestPath = path.join(cacheDir, 'artifacts', id, 'manifest.yaml');
-    fs.writeFileSync(manifestPath, stringifyYaml(validatedManifest.data), 'utf-8');
-
-    const previewImageGitPath = await maybeRenderPreviewImage(payloadDestDir, payloadDestGitRoot, onProgress);
-
-    filesToCommit = [
-      `artifacts/${id}/manifest.yaml`,
-      ...changedFiles.map((change) => path.posix.join(payloadDestGitRoot, change.relPath)),
-      ...(previewImageGitPath ? [previewImageGitPath] : []),
-    ];
-    commitMessage = `DeliveryOS push: update ${id}`;
-
-    const content = buildEditPrContent({
-      id,
-      kind: manifest.kind,
-      owner: manifest.owner,
-      version: newVersion,
-      previousVersion,
-      gitUserName: identity.name,
-      gitUserEmail: identity.email,
-      changedFiles,
-      payloadRoot: manifest.payload_path,
-      previewImageGitPath,
-      previewImageUrl:
-        previewImageGitPath && !isPrivateRepo
-          ? `https://raw.githubusercontent.com/${ghOwner}/${ghRepo}/${branchName}/${previewImageGitPath}`
-          : undefined,
-    });
-    prTitle = content.title;
-    prBody = content.body;
-  }
-
-  onProgress?.('branch', `Creating branch "${branchName}"...`);
-  await createBranch(cacheDir, branchName);
-  onProgress?.('commit', 'Committing changes...');
-  await commitPaths(cacheDir, filesToCommit, commitMessage, identity);
-  onProgress?.('push', `Pushing branch "${branchName}"...`);
-  await pushBranch(cacheDir, branchName);
-
-  onProgress?.('pr-open', 'Opening pull request...');
-  const opened = await openPullRequest(client, {
-    owner: ghOwner,
-    repo: ghRepo,
-    head: branchName,
-    base: defaultBranch,
-    title: prTitle,
-    body: prBody,
   });
-
-  // Record the opened PR against this artifact's lockfile entry so its real
-  // outcome (still open / merged / closed-unmerged) can be checked later via
-  // resolvePendingPushes -- pushing doesn't otherwise touch local state at
-  // all (the edit isn't accepted upstream just because a PR was opened for
-  // it), so without this there would be no way to later tell whether a push
-  // was ever followed up on. Propose-new has no pre-existing lockfile entry
-  // to attach this to -- out of scope here, tracked only for edit-mode.
-  if (!options.isNew && lockEntry) {
-    await upsertEntry(cwd, { ...lockEntry, pendingPr: { number: opened.number, url: opened.url } });
-  }
-
-  return { url: opened.url, number: opened.number, branch: branchName };
 }
