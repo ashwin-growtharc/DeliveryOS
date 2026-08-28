@@ -187,6 +187,10 @@
             <button id="change-folder-btn" class="btn btn-sm">Change folder</button>
           </div>
 
+          <!-- The single scrolling region. Everything outside it (the
+               sidebar, the context strip) stays pinned, so scrolling a long
+               view no longer carries the navigation off screen. -->
+          <div class="content-scroll">
           <main id="main">
         <!-- Browse -->
         <section id="view-browse" class="view">
@@ -923,6 +927,7 @@
           <div id="build-fix-offers" class="build-fix-offers" hidden></div>
         </div>
           </main>
+          </div>
         </div>
       </div>
 
@@ -931,12 +936,27 @@
       <!-- The embedded-terminal feature: a real, interactive claude
            session running inside a real PTY (src-tauri/src/pty.rs),
            rendered here via xterm.js. See openWireTerminal in app.js. -->
-      <div id="wire-terminal-overlay" class="wire-terminal-overlay" hidden>
+      <!-- The app's only modal. It had none of the semantics a modal needs:
+           no role, no aria-modal, no Escape, no backdrop click, no focus trap
+           and no focus restore -- its single exit was the close button. It
+           covers the whole viewport at z-index 2000 and runs a real
+           interactive shell, so being unable to leave it by any normal means
+           is the worst place in the app for that gap. -->
+      <div
+        id="wire-terminal-overlay"
+        class="wire-terminal-overlay"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="wire-terminal-title"
+        hidden
+      >
         <div class="wire-terminal-panel">
           <div class="wire-terminal-header">
-            <span class="wire-terminal-title">Wire with Claude</span>
+            <span id="wire-terminal-title" class="wire-terminal-title">Wire with Claude</span>
             <span id="wire-terminal-status" class="wire-terminal-status"></span>
-            <button type="button" id="wire-terminal-close" class="btn btn-sm btn-ghost" aria-label="Close terminal">✕</button>
+            <button type="button" id="wire-terminal-close" class="btn btn-sm btn-ghost" aria-label="Close terminal">
+              <svg class="glyph" aria-hidden="true"><use href="#i-close" /></svg>
+            </button>
           </div>
           <div id="wire-terminal-container" class="wire-terminal-container"></div>
         </div>

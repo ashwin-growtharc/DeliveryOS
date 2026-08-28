@@ -228,6 +228,22 @@
     return document.getElementById(id);
   }
 
+  /** Scrolls the content region back to its top.
+   *
+   * Both view-switching paths used to call window.scrollTo(0, 0). That worked
+   * while the whole PAGE scrolled -- but the page no longer scrolls: the shell
+   * is pinned to the viewport and `.content-scroll` is the one scrolling
+   * region, so scrolling the window is now a silent no-op. Without this,
+   * switching views would land you wherever the previous view was scrolled to,
+   * which is exactly the bug showView's own comment records having fixed
+   * once already. */
+  function scrollContentToTop() {
+    const region = document.querySelector('.content-scroll');
+    if (region) region.scrollTop = 0;
+    // Belt and braces for any context where the page itself can still scroll.
+    window.scrollTo(0, 0);
+  }
+
   function entryKey(entry) {
     return `${entry.manifest.id}::${entry.remoteName}`;
   }
@@ -389,12 +405,42 @@
    * call would capture "Working..." as its own "original" label and leave
    * the button stuck on it forever once both calls finish. */
   async function withBusy(button, busyLabel, fn) {
+    // The button KEEPS its own label and gains a spinner. It used to have its
+    // label replaced with a generic word, which is why several buttons in
+    // flight at once all read "Working..." and you could not tell which action
+    // was actually running -- reported directly as "3 different loading
+    // buttons in a single screen which I don't know what is loading".
+    //
+    // There were 28 call sites using 11 different busy labels, five of them
+    // the contentless "Working...", and the same word spelled two ways
+    // ('Checking...' four times, 'Checking…' once). Keeping the real
+    // label makes all of that moot: "Pull" stays "Pull" and simply shows it is
+    // working, so the running action names itself.
+    //
+    // `busyLabel` is still accepted -- every call site passes one -- but it is
+    // now used only for assistive tech, via aria-label, rather than being
+    // shown. That keeps a screen reader's announcement specific without
+    // making the visible UI ambiguous.
     if (button.dataset.idleLabel === undefined) {
       button.dataset.idleLabel = button.textContent;
     }
     button._busyCount = (button._busyCount || 0) + 1;
-    button.disabled = true;
-    button.textContent = busyLabel;
+
+    if (button._busyCount === 1) {
+      button.disabled = true;
+      // aria-busy is the standard signal that this control's content is being
+      // updated; the label stays readable rather than being swapped out.
+      button.setAttribute('aria-busy', 'true');
+      if (busyLabel) {
+        button.dataset.idleAriaLabel = button.getAttribute('aria-label') ?? '';
+        button.setAttribute('aria-label', `${button.dataset.idleLabel.trim()} — ${busyLabel}`);
+      }
+      const spinner = document.createElement('span');
+      spinner.className = 'spinner btn-spinner';
+      spinner.setAttribute('aria-hidden', 'true');
+      button.prepend(spinner);
+    }
+
     try {
       return await fn();
     } finally {
@@ -402,7 +448,14 @@
       if (button._busyCount <= 0) {
         button._busyCount = 0;
         button.disabled = false;
-        button.textContent = button.dataset.idleLabel;
+        button.removeAttribute('aria-busy');
+        const restored = button.dataset.idleAriaLabel;
+        if (restored !== undefined) {
+          if (restored) button.setAttribute('aria-label', restored);
+          else button.removeAttribute('aria-label');
+          delete button.dataset.idleAriaLabel;
+        }
+        button.querySelector('.btn-spinner')?.remove();
       }
     }
   }
@@ -470,7 +523,7 @@
     // content is now much shorter per-tab than the old one-long-scroll
     // layout, so landing mid-page reads as genuinely broken rather than
     // just "a bit off").
-    window.scrollTo(0, 0);
+    scrollContentToTop();
     if (view === 'browse') {
       void loadCatalog();
     } else if (view === 'tags') {
@@ -3135,6 +3188,10 @@ ${bodyHtml}
     const statusEl = $('wire-terminal-status');
     const container = $('wire-terminal-container');
     container.innerHTML = '';
+    // Remember where focus came from so closing can put it back, and start
+    // listening for Escape/Tab only while the overlay is actually open.
+    wireTerminalReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    document.addEventListener('keydown', handleWireTerminalKeydown, true);
     overlay.hidden = false;
     statusEl.textContent = 'Starting…';
 
@@ -3202,6 +3259,54 @@ ${bodyHtml}
    * one). `silent` skips both the confirm and the fade-out, used when
    * `openWireTerminal` replaces an already-finished/already-confirmed
    * previous session rather than the user explicitly closing one. */
+  /** The element focus should return to when the terminal overlay closes.
+   * Captured at open time, because focus is inside the overlay by then and
+   * the browser will drop it to <body> otherwise -- which silently loses a
+   * keyboard user's place in the page. */
+  let wireTerminalReturnFocus = null;
+
+  /** Keeps Tab inside the open overlay.
+   *
+   * The overlay covers the viewport at z-index 2000, but nothing stopped Tab
+   * walking out of it into the page behind -- which is still fully
+   * interactive, just visually dimmed. A keyboard user could tab to controls
+   * they cannot see and act on the app underneath a modal shell running a
+   * live terminal. */
+  function trapWireTerminalFocus(ev) {
+    if (ev.key !== 'Tab') return;
+    const overlay = $('wire-terminal-overlay');
+    if (overlay.hidden) return;
+    const focusable = overlay.querySelectorAll(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]),'
+      + ' textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    );
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    // The xterm canvas takes focus itself and is not in the list above, so
+    // only wrap when focus is genuinely on an edge control.
+    if (!ev.shiftKey && document.activeElement === last) {
+      ev.preventDefault();
+      first.focus();
+    } else if (ev.shiftKey && document.activeElement === first) {
+      ev.preventDefault();
+      last.focus();
+    }
+  }
+
+  /** Escape closes the overlay, the way every modal is expected to.
+   * Deliberately routed through closeWireTerminal so it still asks for
+   * confirmation when a claude session is genuinely still running -- Escape
+   * should be an exit, not a way to skip a warning. */
+  function handleWireTerminalKeydown(ev) {
+    if (ev.key === 'Escape' && !$('wire-terminal-overlay').hidden) {
+      ev.preventDefault();
+      void closeWireTerminal();
+      return;
+    }
+    trapWireTerminalFocus(ev);
+  }
+
   async function closeWireTerminal(opts = {}) {
     if (!wireTerminalState) return;
     if (wireTerminalState.sessionActive && !opts.silent) {
@@ -3225,6 +3330,12 @@ ${bodyHtml}
 
     $('wire-terminal-overlay').hidden = true;
     $('wire-terminal-container').innerHTML = '';
+    document.removeEventListener('keydown', handleWireTerminalKeydown, true);
+    // Put focus back where it was, rather than letting it fall to <body>.
+    if (wireTerminalReturnFocus && wireTerminalReturnFocus.isConnected) {
+      wireTerminalReturnFocus.focus();
+    }
+    wireTerminalReturnFocus = null;
   }
 
   /** Phase 11 Detail-view task: renders design-kit's color tokens/type
@@ -4786,7 +4897,7 @@ ${bodyHtml}
     }
     // Same scroll-reset showView already does -- openDetail/
     // openComponentDetail both navigate via THIS function, not showView.
-    window.scrollTo(0, 0);
+    scrollContentToTop();
   }
 
   /** Detail's top-level content tabs -- reuses the exact `.tab-row`/`.tab`/
@@ -6116,6 +6227,12 @@ ${bodyHtml}
     const stepEls = document.querySelectorAll('#addnew-form .wizard-step');
     const currentStep = ADDNEW_STEPS[wizardStepIndex];
 
+    // Let CSS tell the two modes apart. A field label is styled as a step
+    // TITLE only in wizard mode, where it genuinely is one; in flat mode all
+    // 13 are on screen at once and must read as labels, not as thirteen
+    // headings larger than the card title above them.
+    $('addnew-form').classList.toggle('addnew-wizard-mode', addNewWizardMode);
+
     if (!addNewWizardMode) {
       for (const stepEl of stepEls) {
         stepEl.hidden = stepEl.dataset.step === 'review';
@@ -6896,6 +7013,12 @@ ${bodyHtml}
     }
 
     $('wire-terminal-close').addEventListener('click', () => void closeWireTerminal());
+    // Clicking the dimmed backdrop closes, the way a modal is expected to.
+    // Guarded on the target being the overlay ITSELF so a click that lands on
+    // the panel (or a drag that ends outside it) does not close the session.
+    $('wire-terminal-overlay').addEventListener('mousedown', (ev) => {
+      if (ev.target === ev.currentTarget) void closeWireTerminal();
+    });
     $('theme-toggle-btn').addEventListener('click', () => toggleTheme());
     $('change-folder-btn').addEventListener('click', () => void changeFolder());
     $('refresh-btn').addEventListener('click', () => void refreshCatalogFromRemotes());
