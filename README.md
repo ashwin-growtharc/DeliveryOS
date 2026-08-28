@@ -1,253 +1,279 @@
 # DeliveryOS
 
-An internal artifact-sharing platform: browse, pull, and propose changes to
-shared resources (AI agents/skills, starter templates, whole projects) as
-real GitHub pull requests — via a CLI or a desktop app, both backed by the
-same engine. See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design and
-[PLAN.md](PLAN.md) for what's built vs. planned per phase.
+Share code across your org without copy-paste. Register a git repo as a
+**remote**, pull an **artifact** out of it into your project, edit it, and
+propose the change back as a real GitHub pull request.
 
-**Status:** the core loop (pull, edit, propose as a PR) and the desktop app
-are both done and in real use. What's shipped:
+An artifact is anything worth reusing: a Claude Code agent or skill, a design
+system, a starter template, a whole backend feature. Two front ends — a CLI
+and a desktop app — over one engine.
 
-- **Engine + CLI** — register a git remote, list/pull/push artifacts, all
-  verified against real GitHub.
-- **Desktop app** — Browse, Pull, Push, Settings, Scan, Add New, a live
-  progress log, all built on the same engine via a sidecar process.
-- **UI Components** — live sandboxed-preview cards for pushed React/TS or
-  plain-HTML components, with variant tabs and a generated props panel.
-- **Starter Kits and Backend Plugins** — two more sidebar shortcuts into
-  a single kind of the catalog (`template` and `backend-plugin`), for
-  going straight to "every backend plugin" without a manual Kind-chip
-  toggle on Browse.
-- **Design kits & whole-project templates** — a `kind: template` bundle
-  (e.g. a design system, or a full starter kit) pulls as one unit, with a
-  Detail view showing its color tokens, component grid, and route map.
-- **Backend plug-and-play artifacts** (`kind: backend-plugin`) — install-time
-  config collection, signature verification before any files are written,
-  a wiring agent that applies mechanical setup and suggests (never
-  silently applies) edits to existing project files, a symmetric
-  `post_remove` teardown step for uninstall, and a `.claude/skills/
-  backend-plugin-authoring` skill for writing one correctly.
-- **`deliveryos wire-with-claude <id>`** — hands the last mile (wiring a
-  pulled backend-plugin into the rest of your project) to a real,
-  interactive Claude Code session with the artifact's actual pulled
-  paths already in context; the desktop app runs the same thing in a
-  terminal embedded directly in its own window.
-- **Claude Code integration** — a skill that checks the catalog before
-  generating new code, pulls a match, wires it in, and verifies the build
-  (`deliveryos-check-first`); a companion skill for checking DeliveryOS's
-  own health (`deliveryos-status`); and the same check→pull→wire→test loop
-  wired directly into the app's own Pull button and Add New's autofill.
-- **Scan** — finds reusable content already sitting in a project (agents,
-  skills, commands, rules, UI components, whole starter-kit-shaped
-  projects) and proposes it as a new artifact.
-
-See [CHANGELOG.md](CHANGELOG.md) for what shipped and when, and
-[PLAN.md](PLAN.md) for what's next.
-
-**Relationship to ArcOS:** standalone project, not an ArcOS extension.
-Physically nested inside the `arc_os` folder for convenience only — its own
-git repo, no code/dependency relationship.
+```
+deliveryos remote add https://github.com/your-org/catalog.git
+deliveryos list
+deliveryos pull email-code-auth
+```
 
 ## Setup
 
 ```
 npm install
 npm run build
+npm link          # puts `deliveryos` on your PATH
 ```
 
-See [REQUIREMENTS.md](REQUIREMENTS.md) for what needs to be installed on the
-machine first (Node version, `gh` CLI, and — for the desktop app only — Rust
-+ MSVC Build Tools on Windows).
+Node 22.12+ and the `gh` CLI (`gh auth login` once, for `push`).
+
+Without `npm link` there is no `deliveryos` command — run it as
+`node dist/index.js <command>` instead, or `npm run dev -- <command>` to run
+straight from TypeScript without building.
+
+## Running it
+
+There are two front ends over the same engine. **Neither is a web app — there
+is no server and no localhost.**
+
+**The CLI** is a terminal command:
+
+```
+deliveryos list
+deliveryos pull email-code-auth
+```
+
+**The desktop app** is a native window:
+
+```
+npm run build && npm run build:sidecar
+cd src-tauri && npx tauri dev
+```
+
+It needs Rust and, on Windows, MSVC Build Tools — see
+[REQUIREMENTS.md](REQUIREMENTS.md). More detail in
+[Desktop app](#desktop-app) below.
 
 ## CLI
 
+### Remotes
+
+| Command | What it does |
+|---|---|
+| `remote add <git-url> [--name <name>]` | Register a git-backed remote |
+| `remote list [--json]` | List registered remotes |
+| `remote remove <name>` | Unregister a remote and delete its local cache |
+
+### Using artifacts
+
+| Command | What it does |
+|---|---|
+| `list [--remote <name>] [--json]` | List available artifacts, with local status |
+| `pull <id> [--set KEY=VALUE] [--no-wire]` | Pull an artifact into the current project |
+| `remove <id>` | Remove a previously-pulled artifact |
+| `config <id> --set KEY=VALUE` | Change an install param without re-pulling |
+| `check-updates [--apply]` | Check for newer versions; `--apply` updates eligible ones |
+
+### Contributing back
+
+| Command | What it does |
+|---|---|
+| `push <id> [--bump patch\|minor\|major]` | Propose your local edits as a PR |
+| `push <id> --description <text>` | Metadata-only edit — no payload touched, no version bump |
+| `push <id> --new --path <dir> --kind <kind> --owner <owner> --description <text>` | Propose a brand-new artifact |
+| `scan -r <remote>` | Find reusable content already in your project and print a ready-to-run `push` for each |
+
+`push --new` also accepts `--install-target`, `--artifact-version`,
+`--review-required`, `--post-install`, and `--roles`/`--teams`/`--stacks`/
+`--component-types`. Run `deliveryos push --help` for the full list.
+
+### Backend plugins
+
+| Command | What it does |
+|---|---|
+| `wiring <id> [--json]` | Show the artifact's wiring suggestions against this project |
+| `wire-with-claude <id>` | Hand the wiring to a real interactive Claude Code session |
+| `scaffold-backend-plugin --path <dir> --consumer-file <file>` | Draft `install_params`/`wiring_actions` for you to review |
+
+### Maintenance
+
+| Command | What it does |
+|---|---|
+| `check-pending-pushes` | Ask GitHub what actually happened to your open PRs |
+| `check-drift <id> -r <remote> -s <path>` | Has the artifact's original external source changed? |
+
+## Claude Code skills
+
+DeliveryOS ships six skills, in two groups.
+
+**Authoring** — one per artifact kind, for turning something you already have
+into a pullable artifact. They live in this repo's `.claude/skills/`:
+`ui-component-extractor`, `feature-extractor`, `starter-kit-extractor`,
+`backend-plugin-authoring`.
+
+**Usage** — for driving DeliveryOS from Claude Code. Published as artifacts,
+so pull them into whichever project you want them in:
+
 ```
-deliveryos remote add <git-url> [--name <name>]   # register a git-backed remote
-deliveryos remote list [--json]                    # list registered remotes
-deliveryos remote remove <name>                    # unregister a remote and delete its local cache clone
-deliveryos list [--remote <name>] [--json]         # list available artifacts (localStatus included)
-deliveryos pull <id> [--remote <name>] [--set KEY=VALUE ...] [--no-wire]  # pull an artifact locally
-deliveryos remove <id>                             # remove a previously-pulled artifact
-deliveryos config <id> [--remote <name>] --set KEY=VALUE  # rotate/configure install_params without a re-pull
-
-deliveryos push <id> [--remote <name>] [--bump patch|minor|major]  # push a local edit as a PR
-deliveryos push <id> --description <text> [--roles a,b] [--teams a,b] \
-  [--stacks a,b] [--component-types a,b]            # metadata-only edit (no --new, no payload touched)
-deliveryos push <id> --new --remote <name> --path <dir> --kind <kind> \
-  --owner <owner> --description <text> [--install-target <path>] \
-  [--artifact-version <semver>] [--review-required] \
-  [--roles a,b] [--teams a,b] [--stacks a,b] \
-  [--component-types a,b] [--post-install <cmd>]    # propose a new artifact as a PR
-
-deliveryos check-updates [--apply]                 # check for newer versions; --apply actually updates every eligible one
-deliveryos check-pending-pushes                    # check GitHub for the real state of pushed edits still awaiting PR resolution
-deliveryos check-drift <id> -r <remote> -s <path>  # check whether an extracted artifact's real external source has changed
-deliveryos scan -r <remote>                        # find installable content not yet tracked, print a ready-to-edit push command per candidate
-deliveryos wiring <id> [--remote <name>] [--json]  # show an artifact's Tier-2 wiring suggestions, resolved against the current project
-deliveryos wire-with-claude <id> [--remote <name>] # hand an already-pulled backend-plugin's wiring to a real interactive claude session
-deliveryos scaffold-backend-plugin --path <dir> --consumer-file <file> [...] [--out <path>]  # draft install_params/wiring_actions for a new backend-plugin, for you to review
+deliveryos pull deliveryos-check-first   # check the catalog before writing new code
+deliveryos pull deliveryos-status        # typecheck, lint, tests, and real PR state
 ```
 
-`push` opens a real GitHub pull request (via `gh auth token` — run
-`gh auth login` once if you haven't) against the artifact's owning remote.
-Requires a GitHub-hosted remote. Without `--new`, `push` edits an
-already-tracked artifact: give it real payload changes (pushes an edit,
-bumping the version — `--bump` only chooses a *bigger* bump than the
-default `patch`, a real payload change always bumps something) or just
-`--description`/`--roles`/`--teams`/`--stacks`/`--component-types` alone
-(a metadata-only edit — no payload touched, no version bump).
+Both need the `claude` CLI authenticated. See [docs/skills.md](docs/skills.md)
+for what each one does and why.
 
-`pull` automatically wires a `backend-plugin`'s declared `wiring_actions`:
-a target file that doesn't exist yet is written verbatim; a target file
-that already exists is left completely untouched and named in the
-summary printed afterward (same safety rule the desktop app's Pull button
-already used -- `pull` just defaults to it too now). Also reruns the
-project's own build afterward to confirm nothing broke, and prints one
-plain-language summary of what happened. `--no-wire` skips all of this
-and goes back to the old plain copy-only behavior, for scripted/CI use
-where nothing else in the project should be touched.
+## How it behaves
 
-`pull --set KEY=VALUE` (repeatable) provides a value for one of the
-artifact's declared `install_params` up front — written to `.env.local` at
-the project root, never into the artifact's own `install_target`. Anything
-still missing after that is reported, not a hard failure; `deliveryos
-config <id> --set KEY=VALUE` fills in the rest later without a re-pull
-(this does *not* re-run `wiring_actions` — only code that reads
-`process.env` at runtime sees the new value).
+**`push`** opens a real pull request against the artifact's owning remote
+(GitHub only, authenticated via `gh auth token`). A real payload change always
+bumps the version; `--bump` only chooses a *larger* bump than the default
+patch. Passing only metadata flags edits metadata alone.
 
-`check-updates --apply` only ever updates an artifact whose current install
-is byte-for-byte identical to its pristine snapshot (no local edits) — one
-with real local edits is reported, never touched, since safely merging a
-local edit against a new upstream version isn't attempted here.
+**`pull`** wires a `backend-plugin`'s declared `wiring_actions` automatically:
+a target file that doesn't exist yet is written; a file that already exists is
+**left completely untouched** and named in the summary. It then reruns your
+project's build to confirm nothing broke. `--no-wire` skips all of it for
+scripted or CI use.
 
-`wire-with-claude` reads the artifact's real, already-resolved lockfile
-paths (never a hand-typed guess), writes them to a context file under
-`.deliveryos/`, and hands off to a real interactive `claude` session (the
-same trust model as running Claude Code by hand — not a restricted,
-tool-limited subprocess) to do the actual wiring. Reruns the project's
-build afterward and prints a plain pass/fail summary. The desktop app's
-Detail view offers the same thing via a "Wire with Claude" button that
-opens a real terminal embedded in the app window itself.
+**`pull --set KEY=VALUE`** (repeatable) supplies an `install_param` up front.
+Values are written to `.env.local` at the project root, never inside the
+artifact. Anything still missing is reported, not fatal — fill it in later
+with `config`, which does *not* re-run wiring, so only code reading
+`process.env` at runtime picks it up.
 
-`scaffold-backend-plugin` is scaffolding, not extraction: `--consumer-file`
-should point at real file(s) in your OWN project that already wire the
-payload in today (e.g. `auth.ts`), since the wiring suggestion generalizes
-from that real example rather than guessing. Writes a draft YAML to review
-and copy from by hand — never touches a real `manifest.yaml`.
+**`check-updates --apply`** only touches an artifact that is byte-for-byte
+identical to its pristine snapshot. Anything with local edits is reported and
+left alone; merging a local edit against a new upstream version is not
+attempted.
 
-`--post-install` (propose-new only) is whatever one-line shell command a
-fresh pull of this artifact should run afterward — `npm install`,
-`pip install -e ".[dev]"`, anything. DeliveryOS doesn't know or care what it
-is, it just runs it in `install_target`. Omit it if the artifact needs no
-setup step. See
-[docs/manual-smoke-test-push.md](docs/manual-smoke-test-push.md) for a
-worked example of both push modes against a real repo.
+## Manifest format
 
-### Manifest format
-
-Each remote is a plain git repo with one manifest per artifact:
+A remote is a plain git repo with one manifest per artifact:
 
 ```
 <remote root>/artifacts/<id>/manifest.yaml
 <remote root>/artifacts/<id>/payload/...    # copied to install_target on pull
 ```
 
-A manifest can instead set `payload_path: <path relative to remote root>` to
-point at a real file or directory living anywhere else in the repo, instead
-of duplicating it under `artifacts/<id>/payload/` — this is how a repo with
-its own pre-existing file layout (like ArcOS's `catalog/`) becomes a remote
-without restructuring itself.
+A manifest can set `payload_path: <path relative to remote root>` to point at
+files living elsewhere in the repo instead of duplicating them under
+`payload/` — that's how a repo with its own existing layout becomes a remote
+without restructuring.
 
-The remote registry/cache lives under `~/.deliveryos` (override with the
-`DELIVERYOS_HOME` env var, e.g. for tests); the per-project lockfile lives at
-`.deliveryos/lock.json` in whatever directory you run `pull` from.
+`install_target` is relative to the project root and may not escape it. It
+*may* be the project root itself — the right shape for a scaffold artifact
+whose whole job is to drop config files at the top level.
+
+A root-target artifact works through the whole lifecycle: pull, status, push,
+update and remove. Every one of those is scoped to the artifact's own
+**footprint** — the top-level entries its payload provided, recorded in the
+pristine snapshot at pull time — so the rest of your project is never reported
+as part of the artifact, and never deleted along with it.
+
+The one case that refuses is a root-target artifact whose pristine snapshot has
+gone missing: without it there is no record of which files belong to the
+artifact, and `push`/`remove` will not guess at the project root. Re-pull to
+rebuild the snapshot.
+
+The remote registry and cache live in `~/.deliveryos` (override with
+`DELIVERYOS_HOME`). The per-project lockfile is `.deliveryos/lock.json`.
 
 ## Desktop app
 
-The same engine, wrapped in a Tauri (Rust + webview) shell. The engine runs
-as a bundled sidecar process the app talks to over stdio — see
-[docs/phase-3-spike-results.md](docs/phase-3-spike-results.md) for why.
+The same engine in a Tauri shell, talking to the engine as a bundled sidecar
+process over stdio.
 
-### Running it in dev mode
+Launch it with the commands under [Running it](#running-it) above.
 
-```
-npm run build && npm run build:sidecar
-cd src-tauri
-npx tauri dev
-```
+`tauri dev` live-reloads on frontend changes. After editing anything under
+`src/` you must re-run `npm run build:sidecar` and restart — the engine is a
+separate compiled binary, not loaded from source. On Windows, put Rust's
+`~/.cargo/bin` on `PATH` first.
 
-(On Windows, make sure Rust's `~/.cargo/bin` is on `PATH` first.) This opens
-the app window and keeps it live-reloading on frontend changes — but **not**
-on sidecar/engine changes; re-run `npm run build:sidecar` from the repo root
-and restart `tauri dev` after editing anything under `src/`.
+### Packaging an installer
 
-### Opening DevTools (for console errors / logs)
-
-Right-click anywhere in the app window and choose **Inspect**, or press
-**F12** — this opens the same Chromium DevTools you'd see in a browser,
-since the app's UI is a webview. Useful panels:
-
-- **Console** — JS errors from the frontend (`src-tauri/spike-ui/*.js`).
-- **Network** — not used; the app never makes HTTP calls, it talks to the
-  sidecar over stdio, so you won't see engine activity here.
-
-**Sidecar/engine-side output** doesn't show up in DevTools at all — it's a
-separate OS process. To see it:
-- In dev mode, the sidecar's stderr is inherited by the terminal you ran
-  `npx tauri dev` from — engine crashes/uncaught errors print there.
-- The engine's actual responses/errors surface in the app as toast
-  notifications (bottom-right) — the message shown is the real underlying
-  error (e.g. a real git error), not a generic "something went wrong."
-- The Detail view's progress log (added in Phase 3) shows live stage-by-stage
-  status during Pull/Push — that's the closest thing to a live log the app
-  exposes today.
-
-### Building a real installer
+All four build steps are required, in order. `tauri.conf.json` silently depends
+on the first three: `bundle.externalBin` needs the sidecar, `bundle.resources`
+needs `esbuild.exe` and `deliveryos.exe`, and both of those build scripts
+assume `npm run build` already produced `dist/`. Skip one and `tauri build`
+either fails outright or — worse — succeeds with a **stale binary baked into
+the installer**.
 
 ```
-cd src-tauri
-npx tauri build --target x86_64-pc-windows-msvc
+npm run build           # tsc -> dist/
+npm run build:sidecar   # -> build/deliveryos-engine-*.exe + build/esbuild.exe
+npm run build:cli       # -> build/deliveryos-cli.exe
+cd src-tauri && npx tauri build
 ```
 
-Produces an `.msi` and an NSIS `.exe` under
-`src-tauri/target/x86_64-pc-windows-msvc/release/bundle/`. Not yet
-code-signed (see [PLAN.md](PLAN.md)'s Phase 3 checklist).
+Output, under `src-tauri/target/release/bundle/`:
+
+| File | What it is |
+|---|---|
+| `nsis/deliveryos_<version>_x64-setup.exe` | **The one to distribute.** Per-user install, no admin rights, and it puts `deliveryos` on the user's PATH. |
+| `msi/deliveryos_<version>_x64_en-US.msi` | Also produced — **don't ship it** |
+| `<each of the above>.sig` | Detached signature the auto-updater checks. Only produced when the signing env vars are set — see [docs/release-process.md](docs/release-process.md). An unsigned local build has no `.sig` files at all. |
+
+**Check the version in the filename before you ship it.** Only a plain
+`npx tauri build` writes to `target/release/bundle/`; passing
+`--target x86_64-pc-windows-msvc` writes to
+`target/x86_64-pc-windows-msvc/release/bundle/` instead. Both paths can
+exist side by side, and the one you didn't just build holds a stale
+installer that looks exactly as legitimate as the fresh one.
+
+**Ship the NSIS `.exe`, not the MSI.** The CLI-onto-PATH step runs from
+`src-tauri/nsis/path-hook.nsh` via `bundle.windows.nsis.installerHooks`, and
+that mechanism is NSIS-only. Someone who installs the MSI gets the app but no
+`deliveryos` command, with nothing telling them so. WiX has an equivalent
+(`fragmentPaths` + an `<Environment>` element); it isn't built yet.
+
+The PATH hook compiles and the installer builds, but the *runtime* behaviour —
+that `deliveryos` really lands on PATH on install and is cleanly removed on
+uninstall — has not been verified end to end on a clean machine. Walk
+[docs/manual-smoke-test-cli-install.md](docs/manual-smoke-test-cli-install.md)
+once before relying on it in front of anyone.
+
+Signing and the `latest.json` the updater expects are covered in
+[docs/release-process.md](docs/release-process.md). Neither installer is
+code-signed today.
+
+**Debugging:** F12 opens Chromium DevTools. The Network panel stays empty by
+design — the frontend talks to the sidecar over stdio, and fonts are vendored
+locally. Engine output goes to the terminal running `tauri dev`; engine errors
+surface in-app as toasts showing the real underlying message.
 
 ## Development
 
 ```
-npm run typecheck
-npm run lint
-npm test
+npm run typecheck     # tsc, strict
+npm run lint          # eslint
+npm test              # vitest
+npm run lint:css      # design-token bypasses in the desktop UI
+npm run ui:contrast   # WCAG contrast report for every text rule, both themes
+npm run ui:themes     # theme resolution across all 6 OS/preference combinations
+npm run ui:fonts      # prove the UI renders with the network blocked
 ```
 
-The frontend (`src-tauri/spike-ui/*.js`) has no automated test coverage
-(ESLint only scans `.ts` files) — verify UI changes by hand; see
-[docs/manual-ui-clickthrough.md](docs/manual-ui-clickthrough.md).
+The desktop frontend has no automated GUI test suite — see
+[docs/manual-ui-clickthrough.md](docs/manual-ui-clickthrough.md) to verify
+changes by hand.
 
-## Docs index
+## Docs
 
 | Doc | What's in it |
 |---|---|
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Full design: five-layer model, artifact kinds, manifest schema, decisions, open risks |
-| [PLAN.md](PLAN.md) | Phase-by-phase checklist — what's done, what's next |
-| [CHANGELOG.md](CHANGELOG.md) | What's actually shipped, phase by phase |
-| [REQUIREMENTS.md](REQUIREMENTS.md) | What to install on a machine to build/run this (Node, `gh`, Rust/MSVC for the app) |
-| [docs/demo-guide.md](docs/demo-guide.md) | Non-technical walkthrough for showing DeliveryOS to anyone |
-| [docs/demo-script.md](docs/demo-script.md) | Step-by-step live demo script (what to click, what to say, anticipated Q&A) |
-| [docs/growtharc-brand-guidelines.md](docs/growtharc-brand-guidelines.md) | Color palette, typography, and component patterns already applied to the desktop app UI |
-| [docs/manual-smoke-test-push.md](docs/manual-smoke-test-push.md) | How to verify `push` against a real GitHub repo by hand |
-| [docs/backend-plugin-walkthrough.md](docs/backend-plugin-walkthrough.md) | Real screenshots of the full `backend-plugin` flow in the desktop app, start to finish |
-| [docs/backend-plugin-lifecycle.md](docs/backend-plugin-lifecycle.md) | Every `backend-plugin` stage explained: install, wire in, build breaks, merge, audit, uninstall, secrets, rotate, reconfigure, update, timeouts |
-| [docs/manual-ui-clickthrough.md](docs/manual-ui-clickthrough.md) | How to verify the desktop app by hand (no automated GUI test suite exists) |
-| [docs/phase-2-retro.md](docs/phase-2-retro.md) | What broke proving the engine against real ArcOS catalog content |
-| [docs/artifact-arcos-cli-retro.md](docs/artifact-arcos-cli-retro.md) | Adding a whole-repo, Pull-only artifact (`arcos-cli`) |
-| [docs/artifact-launchpad-template-retro.md](docs/artifact-launchpad-template-retro.md) | Adding an artifact from a non-ArcOS project (`launchpad-template`) |
-| [docs/ui-components-feature-design.md](docs/ui-components-feature-design.md) | Design for the "UI Components" preview pipeline and sidebar page (see `PLAN.md` Phase 6) |
-| [docs/phase-A-preview-packaging-spike.md](docs/phase-A-preview-packaging-spike.md) | Phase A spike write-up: proving the sandboxed-iframe + esbuild preview pipeline survives the sidecar's Node SEA packaging |
-| [docs/phase-3-spike-results.md](docs/phase-3-spike-results.md) | Sidecar-packaging feasibility spike: size/latency numbers |
-| [docs/phase-3-ui-scope.md](docs/phase-3-ui-scope.md) | What the desktop app UI does and deliberately doesn't do yet, and why |
-| [docs/release-process.md](docs/release-process.md) | Manual runbook for cutting a signed release with working auto-update (no CI exists yet) |
-| [docs/product-roadmap-vision.md](docs/product-roadmap-vision.md) | Long-term roadmap brainstorm: backend/data-engineering artifact kinds, org/team/access maturity, voice AI, a VSCode-based IDE surface |
-| [docs/scalable-architecture-research.md](docs/scalable-architecture-research.md) | Target architecture research: catalog indexing, provenance/signing, policy-as-code, org/team modeling — grounded in Backstage, Sigstore/SLSA, OCI/Helm, and multi-tenant RBAC prior art |
+| [PRODUCT_BRIEF.md](PRODUCT_BRIEF.md) | **Start here if you are not building it.** What it is, who it is for, and one small journey — plain language, no code |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | The design: layer model, artifact kinds, manifest schema, decisions, open risks |
+| [PLAN.md](PLAN.md) | What's shipped and what's next |
+| [CHANGELOG.md](CHANGELOG.md) | Detailed release notes, phase by phase |
+| [REQUIREMENTS.md](REQUIREMENTS.md) | What to install to build and run this |
+| [docs/backend-plugin-lifecycle.md](docs/backend-plugin-lifecycle.md) | Every backend-plugin stage: install, wire, merge, uninstall, secrets, updates |
+| [docs/skills.md](docs/skills.md) | The six Claude Code skills: what each does, and how to get them |
+| [docs/release-process.md](docs/release-process.md) | Runbook for cutting a signed release with working auto-update |
+
+`docs/` also holds working notes — demo scripts, spike write-ups, phase
+retros and roadmap research. They're kept for reference, not as documentation
+of the current system.
+
+---
+
+**Relationship to ArcOS:** standalone project, not an ArcOS extension. It
+lives inside the `arc_os` folder for convenience only — separate git repo, no
+code or dependency relationship.

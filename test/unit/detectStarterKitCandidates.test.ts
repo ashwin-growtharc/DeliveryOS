@@ -46,7 +46,7 @@ describe('detectStarterKitCandidates', () => {
     expect(detectStarterKitCandidates(cwd, alwaysNew)).toEqual([]);
   });
 
-  it('detects a real project at cwd root with a routes.tsx file', () => {
+  it('detects a real project at cwd root with a routes.tsx file, and never proposes "." as its install target', () => {
     const cwd = project();
     writePackageJson(cwd);
     writeFile(cwd, 'src/routes.tsx', 'export const router = createBrowserRouter([]);');
@@ -55,8 +55,17 @@ describe('detectStarterKitCandidates', () => {
     expect(candidates).toHaveLength(1);
     expect(candidates[0].kind).toBe('template');
     expect(candidates[0].payloadPath).toBe(cwd);
-    expect(candidates[0].installTarget).toBe('.');
     expect(candidates[0].description).toContain('src/routes.tsx');
+
+    // Regression: this used to emit '.', which scan printed as a
+    // ready-to-paste `--install-target "."`. That value resolves to the
+    // CONSUMING project's own root, so pull would copy the payload over the
+    // whole project and remove would recursively delete it. It is now
+    // rejected everywhere (ManifestSchema + resolveContainedPath's
+    // allowRoot: false), so emitting it would only hand the user a command
+    // guaranteed to fail. A root-level candidate names itself instead.
+    expect(candidates[0].installTarget).not.toBe('.');
+    expect(candidates[0].installTarget).toBe(candidates[0].id);
   });
 
   it('detects a real project via a real pages/ directory with 2+ files', () => {

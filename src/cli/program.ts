@@ -19,7 +19,14 @@ export function buildProgram(): Command {
   program
     .name('deliveryos')
     .description('DeliveryOS CLI: register git remotes, list/pull/push artifacts')
-    .version('0.1.0');
+    // Kept in step with package.json by test/unit/cliVersion.test.ts, which
+    // fails the build if they drift. It cannot simply import package.json:
+    // tsconfig sets rootDir to src/, so a `../../package.json` import is
+    // outside the compilation root. The literal was previously left at 0.1.0
+    // while the installer moved on, so the CLI shipped INSIDE a 0.1.2
+    // installer reported 0.1.0 -- exactly the kind of drift a hardcoded
+    // version guarantees and nothing was checking.
+    .version('0.1.2');
 
   registerRemoteCommand(program);
   registerListCommand(program);

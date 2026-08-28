@@ -86,7 +86,16 @@ function walkForCandidates(
   if (evaluated) {
     const id = slugify(path.basename(dir));
     if (isNew(id)) {
-      const installTarget = dir === cwd ? '.' : path.relative(cwd, dir).split(path.sep).join('/');
+      // A candidate that IS the project root used to emit `'.'` here, which
+      // scan then printed as a ready-to-paste `--install-target "."`. That is
+      // never a valid install_target: it resolves to the consuming project's
+      // own root, so `pull` would copy the payload over the whole project and
+      // `remove` would recursively delete it. `resolveContainedPath({ allowRoot:
+      // false })` now rejects it everywhere, so emitting it would only hand the
+      // user a command guaranteed to fail. Use the artifact's own id instead --
+      // a named subdirectory, exactly what the starter-kit authoring skill
+      // already tells authors to write by hand.
+      const installTarget = dir === cwd ? id : path.relative(cwd, dir).split(path.sep).join('/');
       candidates.push({
         id,
         kind: 'template',

@@ -3,7 +3,12 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { pullArtifact } from '../../src/engine/pull/pull';
-import { ArtifactResolutionError, ManifestValidationError, PostInstallError } from '../../src/engine/errors';
+import {
+  ArtifactResolutionError,
+  ManifestValidationError,
+  PostInstallError,
+  SignatureBundleInvalidError,
+} from '../../src/engine/errors';
 import { remotesRegistryPath, remoteCachePath } from '../../src/engine/paths';
 import { readLockfile, upsertEntry } from '../../src/engine/lockfile/lockfile';
 import { rmDirWithRetry } from '../../src/engine/execHelpers';
@@ -78,6 +83,73 @@ function writeArtifact(id: string, postInstall: string): void {
     'utf-8',
   );
 }
+
+describe('pullArtifact input validation', () => {
+  // Regression: signature.bundle comes from the REMOTE and is read on the
+  // default pull path. It used to be JSON.parse'd unguarded, so a corrupt or
+  // truncated bundle crashed `pull` with a raw SyntaxError stack trace rather
+  // than being reported as what it is -- a signature that cannot be verified.
+  it('reports a corrupt signature.bundle as an unverifiable signature, not a raw SyntaxError', async () => {
+    writeRegistry(['test-remote']);
+    writeArtifact('corrupt-sig', 'node -e "process.exit(0)"');
+    const bundlePath = path.join(
+      remoteCachePath('test-remote'), 'artifacts', 'corrupt-sig', 'signature.bundle',
+    );
+    fs.writeFileSync(bundlePath, '{"mediaType":"application/vnd.dev.sig', 'utf-8');
+
+    await expect(pullArtifact('corrupt-sig', undefined, cwd)).rejects.toThrow(SignatureBundleInvalidError);
+
+    // Nothing was installed -- verification happens before any file write.
+    expect(fs.existsSync(path.join(cwd, 'installed'))).toBe(false);
+  }, 30_000);
+
+  // A ROOT install_target is legitimate: a lint/tooling scaffold's whole job
+  // is to write eslint.config.js, .prettierrc and friends at the project root.
+  // It previously died with ERR_FS_CP_EINVAL -- AFTER copying the payload and
+  // running post_install -- because the pristine snapshot is written to
+  // <cwd>/.deliveryos/pristine/<id>, inside the directory being copied.
+  it('installs an artifact whose install_target is the project root', async () => {
+    writeRegistry(['test-remote']);
+    const remoteCacheDir = remoteCachePath('test-remote');
+    const payloadDir = path.join(remoteCacheDir, 'artifacts', 'lint-scaffold', 'payload');
+    fs.mkdirSync(payloadDir, { recursive: true });
+    fs.writeFileSync(path.join(payloadDir, 'eslint.config.js'), 'export default [];\n', 'utf-8');
+    fs.writeFileSync(path.join(payloadDir, '.prettierrc'), '{}\n', 'utf-8');
+    fs.writeFileSync(
+      path.join(remoteCacheDir, 'artifacts', 'lint-scaffold', 'manifest.yaml'),
+      [
+        'id: lint-scaffold',
+        'kind: template',
+        'description: ESLint + Prettier config for the project root',
+        'owner: team-x',
+        'version: 1.0.0',
+        'source_repo: https://example.invalid/repo',
+        'install_target: "."',
+        'review_required: false',
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    // Real pre-existing project content, which must survive.
+    fs.writeFileSync(path.join(cwd, 'existing.ts'), 'export const keep = true;', 'utf-8');
+
+    await pullArtifact('lint-scaffold', undefined, cwd);
+
+    // The scaffold's files landed at the project root.
+    expect(fs.existsSync(path.join(cwd, 'eslint.config.js'))).toBe(true);
+    expect(fs.existsSync(path.join(cwd, '.prettierrc'))).toBe(true);
+    // Nothing pre-existing was destroyed.
+    expect(fs.readFileSync(path.join(cwd, 'existing.ts'), 'utf-8')).toContain('keep');
+    // The pristine snapshot exists and, crucially, does not contain a copy of
+    // itself -- the filter is what makes a root install possible at all.
+    const pristine = path.join(cwd, '.deliveryos', 'pristine', 'lint-scaffold');
+    expect(fs.existsSync(path.join(pristine, 'eslint.config.js'))).toBe(true);
+    expect(fs.existsSync(path.join(pristine, '.deliveryos'))).toBe(false);
+
+    expect(readLockfile(cwd).entries.find((e) => e.id === 'lint-scaffold')).toBeDefined();
+  }, 30_000);
+});
 
 describe('pullArtifact post_install error reporting', () => {
   it('runs a real, genuinely failing post_install and reports it via the pre-existing generic message', async () => {
@@ -185,7 +257,15 @@ describe('pullArtifact containment checks (install_target / payload_path)', () =
       'utf-8',
     );
 
-    await expect(pullArtifact('evil-target', undefined, cwd)).rejects.toBeInstanceOf(ManifestValidationError);
+    // Rejected EARLIER than it used to be. The schema now refuses an escaping
+    // install_target at parse time, so discoverManifests skips the artifact
+    // entirely and it never reaches the catalog -- pull cannot resolve it at
+    // all. That is a strictly better outcome than reaching pull and being
+    // refused there: a manifest that can never be safely installed should not
+    // be offerable in the first place.
+    await expect(pullArtifact('evil-target', undefined, cwd)).rejects.toBeInstanceOf(
+      ArtifactResolutionError,
+    );
     // Nothing was created outside cwd -- the escape target's parent (four
     // levels up from cwd) never gains an "escaped" child directory.
     expect(fs.existsSync(path.join(cwd, '..', '..', '..', '..', 'escaped'))).toBe(false);

@@ -28,6 +28,12 @@
   --icon-fg-warm: #8A5A2B;
   /* Same pairing problem, for --sky-100 (command/typescript/go entries). */
   --icon-fg-cool: #2E5E82;
+  /* Third member of the same adaptive-icon-foreground family. The `agent`
+     swatch paired --sage-700 (a FIXED brand accent) with --sage-100 (which
+     adapts), giving 2.83:1 in light mode -- under the 3:1 WCAG floor for a
+     non-text graphic. No single fixed value clears both themes on those two
+     backgrounds, which is precisely why warm/cool are adaptive. */
+  --icon-fg-sage: #5F7A3E;
   /* primary -- navy teal. Fixed brand-identity color, deliberately NOT
      redefined for dark mode: it's only ever used as a solid fill (button/
      chip backgrounds) with white text on top, which stays legible on a
@@ -38,14 +44,88 @@
      introduces no visual change here), but a distinct token so dark mode
      can turn text light without also turning brand-fill buttons light. */
   --ink: var(--primary-700);
-  --text-secondary: #6E6455;
+
+  /* ---- text colour ramp ----
+   * Three real colours, replacing the `opacity` on --ink that used to express
+   * "quieter text". That approach had two costs: it composited --ink down
+   * below the WCAG AA floor (46 of 200 theme-x-surface checks failed, worst
+   * being the primary nav tabs at 2.75:1), and because every rule picked its
+   * own number, one semantic role got several different values -- field
+   * labels at .55 in four places and .65 in three, counts at .5/.55/.65, body
+   * text at .7/.8/.85/.9. Nothing coordinated them, so nothing lined up.
+   *
+   * Values are chosen, not guessed: `node scripts/ui/audit-contrast.mjs`
+   * reports the real ratio of each against both surfaces the app actually
+   * paints text on (--surface and --card), and every one clears 4.5:1 against
+   * the WORSE of the two. --text-tertiary keeps the exact value
+   * --text-secondary used to hold, so the warm brand tone is preserved rather
+   * than replaced; --text-secondary is that same hue darkened. */
+  --text-primary: var(--ink);          /* 11.2:1 -- body copy, values, names */
+  --text-secondary: #5C5344;           /*  7.4:1 -- labels, hints, summaries */
+  --text-tertiary: #6E6455;            /*  5.7:1 -- counts, meta, captions   */
+
+  /* ---- type scale ----
+   * Was 13 distinct hardcoded values including four half-pixel steps
+   * (10, 10.5, 11, 11.5, 12, 12.5, 13, 13.5, 14, 18, 20, 22, 23) -- an
+   * eight-step ramp inside a 3.5px range, which reads as noise rather than
+   * hierarchy. Collapsed to seven, aligned with the design kit this product
+   * ships (13-14px body, 18-24px headings). --text-2xs exists because badges
+   * and micro-labels genuinely sit below body size; everything that was 10 or
+   * 10.5 rounds UP into it rather than staying sub-11px. */
+  --text-2xs: 11px; --text-xs: 12px; --text-sm: 13px; --text-base: 14px;
+  --text-lg: 18px; --text-xl: 20px; --text-2xl: 22px;
+
+  /* ---- spacing scale ----
+   * The design kit specifies multiples of 4. The stylesheet had 44 distinct
+   * padding combinations and 12 distinct gaps, including off-grid 5px, 7px
+   * and 18px one-offs.
+   *
+   * --space-05 (2px) is a deliberate half-step, not a hole in the grid. This
+   * is a dense tool UI: badge and pill padding genuinely needs a sub-4px
+   * value, and forcing those to 4px would visibly inflate every status chip
+   * in the app. Everything else snaps to the 4px grid the design kit
+   * specifies. */
+  --space-05: 2px;
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px;
+  --space-5: 20px; --space-6: 24px; --space-7: 28px; --space-8: 32px;
+
+  /* ---- motion ----
+   * Exactly what the design kit specifies: .15s for ordinary state changes,
+   * .2s ease-out for a larger reveal. Replaces ad-hoc .1s/.15s/.2s.
+   * Everything using these is still disabled wholesale under
+   * prefers-reduced-motion at the end of this file. */
+  --motion-fast: .15s ease;
+  --motion-reveal: .2s ease-out;
+
+  /* ---- stacking ----
+   * Was ad-hoc, with the terminal overlay picking a bare 2000. */
+  --z-sticky: 10; --z-overlay: 1000; --z-toast: 2000;
   /* Same stack `code, .mono` already sets directly below -- defined as a
      token too since 5 other rules reference `var(--font-mono, monospace)`
      and, with no --font-mono ever defined, were silently falling back to
      the bare generic monospace fallback instead of the real font. */
   --font-mono: 'JetBrains Mono', ui-monospace, Consolas, monospace;
+  /* The other two stacks existed only as literals repeated through the file --
+     the serif one written out 9 times, the sans one 3 -- so there was no single
+     place to change a face. Worse, the mono stack was written THREE ways: this
+     full one, a lossy `'JetBrains Mono', monospace` (14 uses) that silently
+     dropped the ui-monospace/Consolas fallbacks, and var(--font-mono). */
+  --font-sans: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-serif: 'EB Garamond', Georgia, serif;
   /* AI accent colors -- AI-specific elements only, see rule comments below */
   --accent-500: #7A00DF; --accent-600: #6600B8; --cyan-500: #0693E3; --cyan-600: #0577B8; --mint-500: #00D084;
+  /* The AI accent as LINK TEXT, which -- unlike a fill -- has to stay
+     readable against the page itself. --accent-600 is deliberately fixed in
+     both themes (it reads fine as a solid fill with white on top), but as
+     text on the dark surface it measures 1.68:1: unusable. This token is the
+     adaptive counterpart, and only link-like text uses it. */
+  --link-accent: var(--accent-600);
+  /* Text sitting ON a brand fill (.btn-primary, .btn-accent, .chip.active).
+     Deliberately fixed in both themes, because the fill it sits on is fixed
+     too -- --primary-700 and --accent-600 stay navy/purple in dark mode, so
+     their label must stay white. A token rather than three loose `#fff`s so
+     the pairing is stated once and the lint rule has nothing to flag. */
+  --on-brand: #FFFFFF;
   /* status */
   --success-100: #DCF8E6; --success-600: #236D40; --warning-100: #FFF4E0; --warning-600: #9C5D00;
   --danger-100: #FFE5E0; --danger-500: #E94E2D; --danger-600: #A2341F;
@@ -54,7 +134,15 @@
   --gradient-ai: linear-gradient(135deg, #0693E3, #7A00DF);
   --gradient-mint: linear-gradient(135deg, #00D084, #0693E3);
   --shadow-1: 0 1px 3px rgb(0 0 0/0.04); --shadow-2: 0 4px 12px rgb(0 0 0/0.08);
-  --radius-md: .5rem; --radius-lg: 1rem; --radius-xl: 1.25rem; --radius-pill: 31.25rem;
+  --radius-sm: .25rem; --radius-md: .5rem; --radius-lg: 1rem; --radius-xl: 1.25rem; --radius-pill: 31.25rem;
+
+  /* Tells the browser which palette to paint NATIVE UI with -- <select>
+     dropdowns and their arrows, scrollbars, text-field carets, focus rings on
+     form controls, the autofill background. None of those are reachable from
+     CSS, so without this they stayed light-mode while everything around them
+     went dark: light scrollbars down the side of a dark page, and a light
+     dropdown arrow on the Browse toolbar's two selects. */
+  color-scheme: light;
 }
 
 /* ---------- dark mode ----------
@@ -76,58 +164,97 @@
  * already vivid enough to read on a dark surface, and changing them would
  * dilute the brand identity they exist to carry. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  /* `:not([data-theme="light"])` is load-bearing, not decoration. It is the
+   * ONLY reason the old `:root[data-theme="light"]` block could be deleted:
+   * without this guard, a user on a dark-preference OS who explicitly picks
+   * light gets the media query's dark values anyway, because nothing outranks
+   * them. With it, an explicit light choice simply falls through to the base
+   * `:root` light palette above. */
+  :root:not([data-theme="light"]) {
     --surface: #15181B; --surface-secondary: #15181B; --surface-tertiary: #0F1214; --surface-inset: #0A0C0D;
     --card: #1F2427;
     --border: #343B3F; --border-strong: #454D51; --border-subtle: #0A0C0D;
     --ink: #ECE9E2;
-    --text-secondary: #918F89;
+    /* Same three-step ramp as light, measured the same way: each clears 4.5:1
+     * against the worse of --surface/--card. --text-tertiary keeps the value
+     * --text-secondary used to hold here too. */
+    --text-primary: var(--ink);   /* 12.9:1 */
+    --text-secondary: #A8A6A1;    /*  6.4:1 */
+    --text-tertiary: #918F89;     /*  4.9:1 */
+    --link-accent: #BE93F0;       /*  6.4:1 -- see --link-accent above */
+    /* --sage-50 was the one pale tint never given a dark value at all. It is the
+     * `rule` kind swatch's background, so that single tile rendered near-white on
+     * an otherwise dark page -- exactly the bug app.js's own comment describes
+     * fixing for doc/skill/command; this one was missed. */
+    --sage-50: #142013;
     --sage-100: #17261A;
     --sand-100: #2C2013; --sand-200: #382A18;
     --sky-100: #10202C;
-    --icon-fg-warm: #E3BD87; --icon-fg-cool: #9AC7EA;
+    --icon-fg-warm: #E3BD87; --icon-fg-cool: #9AC7EA; --icon-fg-sage: #ACC384;
     --success-100: #163B22; --success-600: #6EE0A0;
     --warning-100: #3D2907; --warning-600: #F2B24E;
     --danger-100: #45170F; --danger-600: #FF8A66;
     --shadow-1: 0 1px 3px rgb(0 0 0/0.4); --shadow-2: 0 4px 16px rgb(0 0 0/0.55);
+    color-scheme: dark;  /* see the light declaration in :root */
   }
 }
 
+/* The explicit dark choice, for a user whose OS prefers light. Same values as
+ * the media query above -- CSS has no way to share one declaration block
+ * between a media-query context and a plain selector, so this pair is the
+ * irreducible minimum. It replaces what used to be FOUR copies of the same
+ * 24 tokens (base :root, this media block, [data-theme="dark"], and a
+ * [data-theme="light"] block that restated the base values verbatim), which
+ * meant every palette change needed four correct edits and any missed one
+ * produced a colour that was right in one theme and wrong in the other. */
 :root[data-theme="dark"] {
   --surface: #15181B; --surface-secondary: #15181B; --surface-tertiary: #0F1214; --surface-inset: #0A0C0D;
   --card: #1F2427;
   --border: #343B3F; --border-strong: #454D51; --border-subtle: #0A0C0D;
   --ink: #ECE9E2;
-  --text-secondary: #918F89;
+  /* Same three-step ramp as light, measured the same way: each clears 4.5:1
+   * against the worse of --surface/--card. --text-tertiary keeps the value
+   * --text-secondary used to hold here too. */
+  --text-primary: var(--ink);   /* 12.9:1 */
+  --text-secondary: #A8A6A1;    /*  6.4:1 */
+  --text-tertiary: #918F89;     /*  4.9:1 */
+  --link-accent: #BE93F0;       /*  6.4:1 -- see --link-accent above */
+  /* --sage-50 was the one pale tint never given a dark value at all. It is the
+   * `rule` kind swatch's background, so that single tile rendered near-white on
+   * an otherwise dark page -- exactly the bug app.js's own comment describes
+   * fixing for doc/skill/command; this one was missed. */
+  --sage-50: #142013;
   --sage-100: #17261A;
   --sand-100: #2C2013; --sand-200: #382A18;
   --sky-100: #10202C;
-  --icon-fg-warm: #E3BD87; --icon-fg-cool: #9AC7EA;
+  --icon-fg-warm: #E3BD87; --icon-fg-cool: #9AC7EA; --icon-fg-sage: #ACC384;
   --success-100: #163B22; --success-600: #6EE0A0;
   --warning-100: #3D2907; --warning-600: #F2B24E;
   --danger-100: #45170F; --danger-600: #FF8A66;
   --shadow-1: 0 1px 3px rgb(0 0 0/0.4); --shadow-2: 0 4px 16px rgb(0 0 0/0.55);
-}
-
-/* Forces light mode even when the OS prefers dark -- an explicit
-   opposite choice has to win over the media query, not just add to it. */
-:root[data-theme="light"] {
-  --surface: #FFFCF2; --surface-secondary: #FFFCF2; --surface-tertiary: #F6F1E9; --surface-inset: #EDE6DA;
-  --card: #FFFFFF;
-  --border: #E0D9CE; --border-strong: #C9BFAF; --border-subtle: #EDE6DA;
-  --ink: #1E3C53;
-  --text-secondary: #6E6455;
-  --sage-100: #EAF4DB;
-  --sand-100: #F6E8CC; --sand-200: #EDD9B3;
-  --sky-100: #DBE8F4;
-  --icon-fg-warm: #8A5A2B; --icon-fg-cool: #2E5E82;
-  --success-100: #DCF8E6; --success-600: #236D40;
-  --warning-100: #FFF4E0; --warning-600: #9C5D00;
-  --danger-100: #FFE5E0; --danger-600: #A2341F;
-  --shadow-1: 0 1px 3px rgb(0 0 0/0.04); --shadow-2: 0 4px 12px rgb(0 0 0/0.08);
+  color-scheme: dark;  /* see the light declaration in :root */
 }
 
 *, *::before, *::after { box-sizing: border-box; }
+
+/* ---------- theme switching ----------
+ * Suppresses every transition for the instant the theme flips.
+ *
+ * Without this, switching theme is visibly broken for ~150ms: `color` is not
+ * a transitioned property so it changes immediately, while `background` IS
+ * (see .btn), so every secondary button spends the transition as white text
+ * on a white background -- its label simply disappears. Confirmed by reading
+ * the computed styles right after the toggle: background rgb(255,255,255)
+ * with color rgb(236,233,226).
+ *
+ * The class is added by toggleTheme (app.js) and removed on the next frame,
+ * so it only ever covers the switch itself and never a real interaction. */
+html.theme-switching,
+html.theme-switching *,
+html.theme-switching *::before,
+html.theme-switching *::after {
+  transition: none !important;
+}
 
 /* The HTML `hidden` attribute only wins by default when nothing else sets
  * `display` on the same element -- any class that does (`.grid`, `.chips`,
@@ -148,11 +275,11 @@ html, body {
 
 body {
   margin: 0;
-  font-family: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-family: var(--font-sans);
   background: var(--surface);
   color: var(--ink);
   line-height: 1.5;
-  font-size: 14px;
+  font-size: var(--text-base);
   /* A global safety net: fixing each individual long-unbreakable-string
      case one at a time (progress log paths, tag folder titles, ...) is
      whack-a-mole -- anything, anywhere, that refuses to shrink below its
@@ -170,14 +297,14 @@ body {
  * font-normal (400), not bold/medium -- the editorial feel comes from the
  * serif face and size, not weight. */
 h1, h2, h3, h4 {
-  font-family: 'EB Garamond', Georgia, serif;
+  font-family: var(--font-serif);
   font-weight: 400;
   line-height: 1.2;
   margin: 0;
 }
 
 code, .mono {
-  font-family: 'JetBrains Mono', ui-monospace, Consolas, monospace;
+  font-family: var(--font-mono);
 }
 
 button {
@@ -201,7 +328,16 @@ input, textarea, select {
 #app {
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  /* A fixed viewport height, not min-height.
+   *
+   * With min-height the shell grew to fit its content, the sidebar stretched
+   * to match (2102px on the Add New view), and the WHOLE PAGE scrolled -- so
+   * scrolling down carried the navigation off the top of the screen and left
+   * you with no way back except scrolling up again. Reported directly as
+   * "sidebar scrolling". A desktop app's nav should stay put; only the
+   * content area should move. */
+  height: 100vh;
+  overflow: hidden;
 }
 
 /* ---------- shell chrome: sidebar + content ----------
@@ -223,38 +359,40 @@ input, textarea, select {
 .sidebar {
   width: 236px;
   flex-shrink: 0;
+  /* Scrolls INTERNALLY when the window is too short for the nav, instead of
+     making the whole page taller. Paired with #app's fixed height above. */
+  min-height: 0;
   background: var(--card);
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  padding: 22px 16px;
+  padding: var(--space-5) var(--space-4);
   overflow-y: auto;
 }
 
 .sidebar-brand {
-  font-family: 'EB Garamond', Georgia, serif;
-  font-size: 23px;
+  font-family: var(--font-serif);
+  font-size: var(--text-2xl);
   color: var(--ink);
-  padding: 0 8px 22px;
+  padding: 0 var(--space-2) var(--space-5);
   letter-spacing: .2px;
 }
 
 .sidebar-nav {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--space-05);
 }
 
 .sidebar-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 9px 12px;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-md);
-  color: var(--ink);
-  opacity: .7;
+  color: var(--text-secondary);
   font-weight: 500;
-  font-size: 13.5px;
+  font-size: var(--text-sm);
   cursor: pointer;
   border: none;
   background: transparent;
@@ -263,18 +401,21 @@ input, textarea, select {
 }
 
 .sidebar-item:hover {
-  opacity: 1;
   background: var(--surface-tertiary);
+  color: var(--ink);
 }
 
 /* Active nav state: sage-100 background + navy text, exactly the pairing
  * DESIGN_SYSTEM.md's Navigation section specifies for the active sidebar
  * item. */
 .sidebar-item.active {
-  opacity: 1;
   background: var(--sage-100);
   color: var(--ink);
-  font-weight: 600;
+  /* Deliberately NOT a heavier weight. .sidebar-item is 500 and this used to
+     be 600, so the label physically changed width every time you navigated --
+     a small, constant wobble in the one element that is always on screen. The
+     sage background and the ink text already say "active" without moving
+     anything. */
 }
 
 .sidebar-item .glyph {
@@ -287,7 +428,7 @@ input, textarea, select {
 .sidebar-divider {
   height: 1px;
   background: var(--border);
-  margin: 14px 8px;
+  margin: var(--space-3) var(--space-2);
 }
 
 .content-shell {
@@ -295,16 +436,66 @@ input, textarea, select {
   min-width: 0;
   display: flex;
   flex-direction: column;
+  /* min-height: 0 so this flex child may actually shrink below its content's
+     height -- without it the default `auto` keeps it as tall as its content
+     and the overflow below never engages. */
+  min-height: 0;
+}
+
+/* The one scrolling region. The context strip stays pinned above it, the
+   sidebar stays pinned beside it, and only this moves. */
+.content-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .context-strip {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 13px 28px;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-7);
   border-bottom: 1px solid var(--border);
   background: var(--surface);
-  font-size: 12px;
+  font-size: var(--text-xs);
+}
+
+/* The app-wide "still working" affordance. Deliberately quiet -- it reports a
+   background fact, it is not a call to action -- but always visible, because
+   its whole reason for existing is that an operation you navigated away from
+   was previously invisible. */
+.running-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface-tertiary);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  padding: var(--space-1) var(--space-3);
+  cursor: pointer;
+}
+
+.running-indicator::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--sage-700);
+  animation: running-pulse 1.4s ease-in-out infinite;
+}
+
+.running-indicator:hover {
+  color: var(--ink);
+  border-color: var(--border-strong);
+}
+
+@keyframes running-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .35; }
 }
 
 .context-strip-spacer {
@@ -314,18 +505,18 @@ input, textarea, select {
 .folder-label {
   text-transform: uppercase;
   letter-spacing: .8px;
-  font-size: 10.5px;
+  font-size: var(--text-2xs);
   font-weight: 600;
-  opacity: .5;
+color: var(--text-tertiary);
 }
 
 .folder-path {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   color: var(--ink);
   background: var(--surface-tertiary);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 5px 10px;
+  padding: var(--space-1) var(--space-2);
   max-width: 320px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -342,15 +533,15 @@ input, textarea, select {
  * counterpart in DeliveryOS's UI, so it isn't defined here.) */
 
 .btn {
-  font-size: 13px;
+  font-size: var(--text-sm);
   font-weight: 500;
   background: var(--card);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
-  padding: 7px 14px;
+  padding: var(--space-2) var(--space-3);
   cursor: pointer;
   color: var(--ink);
-  transition: background .1s ease, opacity .1s ease, box-shadow .15s ease;
+  transition: background var(--motion-fast), opacity var(--motion-fast), box-shadow var(--motion-fast);
 }
 
 .btn:hover:not(:disabled) {
@@ -365,7 +556,7 @@ input, textarea, select {
 .btn-primary {
   background: var(--primary-700);
   border-color: var(--primary-700);
-  color: #fff;
+  color: var(--on-brand);
 }
 
 .btn-primary:hover:not(:disabled) {
@@ -378,7 +569,7 @@ input, textarea, select {
 .btn-accent {
   background: var(--accent-500);
   border-color: var(--accent-500);
-  color: #fff;
+  color: var(--on-brand);
 }
 
 .btn-accent:hover:not(:disabled) {
@@ -396,8 +587,8 @@ input, textarea, select {
 }
 
 .btn-sm {
-  font-size: 12px;
-  padding: 5px 11px;
+  font-size: var(--text-xs);
+  padding: var(--space-1) var(--space-3);
 }
 
 /* A button whose only content is one .glyph icon (currently: the theme
@@ -407,7 +598,7 @@ input, textarea, select {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 6px;
+  padding: var(--space-1);
 }
 
 .btn-icon-only .glyph {
@@ -426,7 +617,7 @@ input, textarea, select {
 }
 
 .back-btn {
-  margin-bottom: 14px;
+  margin-bottom: var(--space-3);
 }
 
 /* ---------- layout ---------- */
@@ -443,7 +634,7 @@ input, textarea, select {
   max-width: 1080px;
   width: 100%;
   margin: 0 auto;
-  padding: 24px 24px 60px;
+  padding: var(--space-6) var(--space-6) 60px;
   box-sizing: border-box;
 }
 
@@ -455,21 +646,116 @@ input, textarea, select {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: 20px 22px;
+  padding: var(--space-5) var(--space-5);
   box-shadow: var(--shadow-1);
-  margin-bottom: 16px;
+  margin-bottom: var(--space-4);
 }
 
 .section-title {
-  font-size: 18px;
-  margin-bottom: 12px;
+  font-size: var(--text-lg);
+  margin-bottom: var(--space-3);
 }
 
 .empty-state {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  padding: var(--space-6) var(--space-1);
+}
+
+/* ---------- error state ----------
+ * The counterpart to .empty-state, and the thing the app was missing
+ * entirely. Every failed load used to fire a toast and then set its list to
+ * [], so the screen rendered "No artifacts match." -- a failure was visually
+ * IDENTICAL to a genuinely empty catalog, and the toast that carried the real
+ * reason auto-dismissed after five seconds. The design kit this product ships
+ * is explicit about it: "EmptyState is for 'nothing here yet', never for a
+ * failure -- a failed fetch is ErrorState."
+ *
+ * Deliberately not styled as a full-bleed alarm. It states what failed, shows
+ * the real underlying message (never a paraphrase), and offers the one action
+ * that can help. */
+.error-state {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  margin: var(--space-2) 0;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--danger-500);
+  border-radius: var(--radius-md);
+  background: var(--card);
   color: var(--ink);
-  opacity: .6;
-  font-size: 13.5px;
-  padding: 24px 4px;
+  font-size: var(--text-sm);
+}
+
+.error-state .glyph {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--danger-600);
+}
+
+.error-state-body { flex: 1; min-width: 0; }
+
+.error-state-title {
+  font-weight: 600;
+  margin-bottom: var(--space-1);
+}
+
+/* The real error text from the engine, shown verbatim. It can be a git error
+   or a filesystem path, so it must be able to wrap anywhere. */
+.error-state-detail {
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+.error-state-actions { margin-top: var(--space-3); }
+
+/* ---------- skeletons ----------
+ * Replaces the three separate "spinner + Loading..." blocks the Detail view
+ * used to show at once.
+ *
+ * Opening a backend-plugin kicks off three independent RPCs -- connection
+ * status, install params, wiring actions -- and each section announced its
+ * own loading. The markup was identical, but they landed in three
+ * differently-styled containers at three positions, so one action produced
+ * three unrelated spinners and no sense of what was actually loading.
+ *
+ * A spinner says "something is happening" and demands attention; three of
+ * them compete for it. A skeleton says "this specific area is coming" and
+ * recedes -- and because it is shaped like the content it stands in for,
+ * nothing jumps when the real thing arrives. That is exactly what the design
+ * kit this product ships asks for: "match its width/height to the real
+ * content it's standing in for... so the layout doesn't visibly shift". */
+.skeleton {
+  background: var(--surface-inset);
+  border-radius: var(--radius-sm);
+  animation: skeleton-pulse 1.4s ease-in-out infinite;
+}
+
+.skeleton-line {
+  height: 12px;
+  margin-bottom: var(--space-2);
+}
+
+.skeleton-line:last-child { margin-bottom: 0; }
+
+.skeleton-block {
+  height: 64px;
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-3);
+}
+
+.skeleton-group { padding: var(--space-2) 0; }
+
+@keyframes skeleton-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .55; }
 }
 
 /* Informational banner (not a warning) -- warm sky-100 card tone with a
@@ -480,9 +766,9 @@ input, textarea, select {
   background: var(--sky-100);
   border-left: 3px solid var(--gold-500);
   border-radius: var(--radius-md);
-  padding: 12px 16px;
-  font-size: 13.5px;
-  margin-bottom: 16px;
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-sm);
+  margin-bottom: var(--space-4);
 }
 
 /* Same shape as .hint-banner, but for a genuinely AI-generated finding
@@ -497,9 +783,9 @@ input, textarea, select {
   background: var(--sky-100);
   border-left: 3px solid var(--accent-500);
   border-radius: var(--radius-md);
-  padding: 12px 16px;
-  font-size: 13.5px;
-  margin-bottom: 16px;
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-sm);
+  margin-bottom: var(--space-4);
 }
 
 /* ---------- browse ---------- */
@@ -511,14 +797,14 @@ input, textarea, select {
 .browse-toolbar {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  margin-bottom: 14px;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
 }
 
 .toolbar-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-2);
   flex-wrap: wrap;
 }
 
@@ -529,7 +815,7 @@ input, textarea, select {
 .toolbar-group {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   flex-wrap: wrap;
 }
 
@@ -538,7 +824,7 @@ input, textarea, select {
   min-width: 200px;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
-  padding: 8px 12px;
+  padding: var(--space-2) var(--space-3);
   background: var(--card);
 }
 
@@ -548,10 +834,10 @@ input, textarea, select {
 .toolbar-select {
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
-  padding: 8px 12px;
+  padding: var(--space-2) var(--space-3);
   background: var(--card);
   color: var(--ink);
-  font-size: 13px;
+  font-size: var(--text-sm);
   flex-shrink: 0;
 }
 
@@ -563,22 +849,22 @@ input, textarea, select {
 .mini-search {
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
-  padding: 7px 11px;
+  padding: var(--space-2) var(--space-3);
   background: var(--card);
-  font-size: 12.5px;
+  font-size: var(--text-xs);
   min-width: 160px;
 }
 
 .tag-value-search {
-  margin: 4px 0 10px;
+  margin: var(--space-1) 0 var(--space-2);
   width: 100%;
   max-width: 320px;
 }
 
 .chip {
-  font-size: 12.5px;
+  font-size: var(--text-xs);
   font-weight: 500;
-  padding: 5px 12px;
+  padding: var(--space-1) var(--space-3);
   border-radius: var(--radius-md);
   border: 1px solid var(--border);
   color: var(--ink);
@@ -589,7 +875,7 @@ input, textarea, select {
 
 .chip.active {
   background: var(--primary-700);
-  color: #fff;
+  color: var(--on-brand);
   border-color: var(--primary-700);
   opacity: 1;
 }
@@ -602,10 +888,10 @@ input, textarea, select {
  * Browse-by-tag's category tabs are single-select. */
 .tab-row {
   display: flex;
-  gap: 4px;
+  gap: var(--space-1);
   border-bottom: 1px solid var(--border);
   flex-wrap: wrap;
-  margin-bottom: 16px;
+  margin-bottom: var(--space-4);
 }
 
 .tab-row .tab {
@@ -613,43 +899,41 @@ input, textarea, select {
   border: none;
   border-bottom: 2px solid transparent;
   margin-bottom: -1px;
-  padding: 9px 15px 11px;
-  font-size: 13.5px;
+  padding: var(--space-2) var(--space-4) var(--space-3);
+  font-size: var(--text-sm);
   font-weight: 500;
-  color: var(--ink);
-  opacity: .5;
+  color: var(--text-tertiary);
   cursor: pointer;
   white-space: nowrap;
 }
 
 .tab-row .tab:hover {
-  opacity: .8;
 }
 
 .tab-row .tab.active {
-  opacity: 1;
   font-weight: 600;
   border-bottom-color: var(--ink);
+  color: var(--ink);
 }
 
 .page-head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 16px;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
   flex-wrap: wrap;
 }
 
 .page-head .count {
-  font-size: 13px;
-  opacity: .5;
+  font-size: var(--text-sm);
+color: var(--text-tertiary);
 }
 
 .page-head-actions {
   display: flex;
   align-items: baseline;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 /* ---------- kind swatch (icon + warm accent tint) ----------
@@ -663,7 +947,7 @@ input, textarea, select {
 .kind-swatch {
   width: 34px;
   height: 34px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -678,7 +962,7 @@ input, textarea, select {
 .kind-swatch.sm {
   width: 28px;
   height: 28px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
 }
 
 .kind-swatch.sm svg {
@@ -704,20 +988,20 @@ input, textarea, select {
 .tag-list-panel {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
-  gap: 14px;
+  gap: var(--space-3);
 }
 
 .tag-item-row {
   display: flex;
   align-items: center;
-  gap: 18px;
+  gap: var(--space-4);
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: 20px 24px;
+  padding: var(--space-5) var(--space-6);
   box-shadow: var(--shadow-1);
   cursor: pointer;
-  transition: box-shadow .15s ease, transform .15s ease, border-color .15s ease;
+  transition: box-shadow var(--motion-fast), transform var(--motion-fast), border-color var(--motion-fast);
 }
 
 .tag-item-row:hover {
@@ -729,7 +1013,7 @@ input, textarea, select {
 .tag-item-icon {
   width: 44px;
   height: 44px;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -745,9 +1029,9 @@ input, textarea, select {
  * mark as literal letters rather than a hand-drawn path -- simpler AND
  * more accurate, since that IS their real logo. */
 .tag-item-icon-text {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-weight: 700;
-  font-size: 13px;
+  font-size: var(--text-sm);
   letter-spacing: -.02em;
 }
 
@@ -757,21 +1041,21 @@ input, textarea, select {
 }
 
 .tag-item-name {
-  font-family: 'EB Garamond', Georgia, serif;
-  font-size: 20px;
+  font-family: var(--font-serif);
+  font-size: var(--text-xl);
   line-height: 1.2;
 }
 
 .tag-item-count {
-  font-size: 11.5px;
-  opacity: .55;
-  font-family: 'JetBrains Mono', monospace;
-  margin-top: 4px;
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+  margin-top: var(--space-1);
+color: var(--text-tertiary);
 }
 
 .tag-item-chev {
-  opacity: .3;
-  font-size: 22px;
+  color: var(--text-tertiary);
+  font-size: var(--text-2xl);
   line-height: 1;
   flex-shrink: 0;
 }
@@ -795,7 +1079,7 @@ input, textarea, select {
 }
 
 .ui-component-row {
-  padding: 24px 0;
+  padding: var(--space-6) 0;
   border-bottom: 1px solid var(--border);
 }
 
@@ -810,34 +1094,34 @@ input, textarea, select {
 .ui-component-row-header {
   display: block;
   cursor: pointer;
-  margin-bottom: 16px;
+  margin-bottom: var(--space-4);
   max-width: 720px;
 }
 
 .ui-component-row-header .index {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 12px;
-  opacity: .45;
-  margin-right: 8px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  margin-right: var(--space-2);
+color: var(--text-tertiary);
 }
 
 .ui-component-row-header .name {
-  font-family: 'EB Garamond', Georgia, serif;
-  font-size: 20px;
+  font-family: var(--font-serif);
+  font-size: var(--text-xl);
   line-height: 1.2;
 }
 
 .ui-component-row-header .meta {
-  font-size: 11px;
-  opacity: .55;
-  font-family: 'JetBrains Mono', monospace;
-  margin-left: 10px;
+  font-size: var(--text-2xs);
+  font-family: var(--font-mono);
+  margin-left: var(--space-2);
+color: var(--text-tertiary);
 }
 
 .ui-component-row-header .description {
-  margin: 6px 0 0;
-  font-size: 13px;
-  opacity: .7;
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
 }
 
 /* The live-preview slot -- an iframe fills this once IntersectionObserver
@@ -924,12 +1208,12 @@ input, textarea, select {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0 16px;
+  padding: 0 var(--space-4);
   text-align: center;
   overflow-wrap: break-word;
-  font-size: 11px;
-  opacity: .4;
-  font-family: 'JetBrains Mono', monospace;
+  font-size: var(--text-2xs);
+  font-family: var(--font-mono);
+color: var(--text-tertiary);
 }
 
 /* ---------- Detail view: live preview + variant tabs + controls (Phase C) ---------- */
@@ -945,29 +1229,29 @@ input, textarea, select {
    * here. */
   height: 260px;
   max-width: none;
-  margin-bottom: 12px;
+  margin-bottom: var(--space-3);
 }
 
 .controls-panel {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  margin-bottom: 16px;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
 }
 
 .control-row label {
   display: block;
-  font-size: 12px;
+  font-size: var(--text-xs);
   font-weight: 500;
-  opacity: .65;
-  margin-bottom: 5px;
+  margin-bottom: var(--space-1);
+  color: var(--text-secondary);
 }
 
 .control-checkbox {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 13px;
+  gap: var(--space-1);
+  font-size: var(--text-sm);
   cursor: pointer;
 }
 
@@ -979,8 +1263,8 @@ input, textarea, select {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 16px;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
 }
 
 .tag-folder-header .section-title {
@@ -996,82 +1280,82 @@ input, textarea, select {
 .scan-controls {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-2);
   flex-shrink: 0;
 }
 
 .scan-controls select {
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
-  padding: 8px 12px;
+  padding: var(--space-2) var(--space-3);
   background: var(--card);
 }
 
 .grouped-results {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: var(--space-5);
 }
 
 .kind-group-header {
-  font-size: 13px;
+  font-size: var(--text-sm);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: .04em;
   color: var(--ink);
-  margin-bottom: 8px;
+  margin-bottom: var(--space-2);
 }
 
 .kind-group-header .count {
   font-weight: 400;
-  opacity: .65;
   text-transform: none;
   letter-spacing: normal;
+color: var(--text-tertiary);
 }
 
 .kind-group-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .kind-group-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-3);
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 10px 14px;
+  padding: var(--space-2) var(--space-3);
   cursor: pointer;
 }
 
 .kind-group-row .row-main {
   display: flex;
   align-items: baseline;
-  gap: 10px;
+  gap: var(--space-2);
   min-width: 0;
   flex: 1;
 }
 
 .kind-group-row .row-main .name {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-weight: 600;
-  font-size: 14px;
+  font-size: var(--text-base);
   white-space: nowrap;
 }
 
 .kind-group-row .row-main .summary {
-  font-size: 13px;
-  opacity: .8;
+  font-size: var(--text-sm);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-1);
   min-width: 0;
+  color: var(--text-secondary);
 }
 
 .kind-group-row .row-main .summary .summary-text {
@@ -1084,7 +1368,7 @@ input, textarea, select {
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
-  gap: 14px;
+  gap: var(--space-3);
 }
 
 /* Icon-led: a kind swatch + serif name/kind-label pair up top (row1), the
@@ -1094,13 +1378,13 @@ input, textarea, select {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: 18px 19px;
+  padding: var(--space-4) var(--space-5);
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--space-3);
   box-shadow: var(--shadow-1);
   cursor: pointer;
-  transition: box-shadow .15s ease, transform .15s ease, border-color .15s ease;
+  transition: box-shadow var(--motion-fast), transform var(--motion-fast), border-color var(--motion-fast);
 }
 
 .res-card:hover {
@@ -1112,50 +1396,50 @@ input, textarea, select {
 .res-card .row1 {
   display: flex;
   align-items: flex-start;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .res-card .name {
-  font-family: 'EB Garamond', Georgia, serif;
-  font-size: 20px;
+  font-family: var(--font-serif);
+  font-size: var(--text-xl);
   line-height: 1.2;
 }
 
 .res-card .kind-label {
-  font-size: 10.5px;
+  font-size: var(--text-2xs);
   text-transform: uppercase;
   letter-spacing: .06em;
-  opacity: .5;
   font-weight: 600;
-  margin-top: 2px;
+  margin-top: var(--space-05);
+color: var(--text-tertiary);
 }
 
 .res-card .summary {
-  font-size: 13px;
-  opacity: .8;
+  font-size: var(--text-sm);
   flex: 1;
+  color: var(--text-secondary);
 }
 
 .res-card .row2 {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-top: 2px;
+  margin-top: var(--space-05);
 }
 
 .res-card .meta {
-  font-size: 11px;
-  opacity: .55;
-  font-family: 'JetBrains Mono', monospace;
+  font-size: var(--text-2xs);
+  font-family: var(--font-mono);
+color: var(--text-tertiary);
 }
 
 /* status badges -- 3 distinct colors from the warm/status palette */
 
 .badge {
-  font-size: 10.5px;
+  font-size: var(--text-2xs);
   font-weight: 600;
   letter-spacing: .3px;
-  padding: 3px 9px;
+  padding: var(--space-05) var(--space-2);
   border-radius: var(--radius-md);
   white-space: nowrap;
   text-transform: uppercase;
@@ -1170,13 +1454,11 @@ input, textarea, select {
 .badge.pulled {
   background: var(--success-100);
   color: var(--success-600);
-  opacity: 1;
 }
 
 .badge.edited_locally {
   background: var(--warning-100);
   color: var(--warning-600);
-  opacity: 1;
 }
 
 /* "Update available" is a plain data-freshness signal, not an AI feature --
@@ -1186,13 +1468,11 @@ input, textarea, select {
 .badge.update_available {
   background: var(--sand-200);
   color: var(--ink);
-  opacity: 1;
 }
 
 .badge.both_changed {
   background: var(--danger-100);
   color: var(--danger-600);
-  opacity: 1;
 }
 
 /* ---------- detail ---------- */
@@ -1201,22 +1481,22 @@ input, textarea, select {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 14px;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
   flex-wrap: wrap;
 }
 
 .detail-title-group {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: var(--space-3);
   min-width: 0;
 }
 
 .kind-swatch.lg {
   width: 52px;
   height: 52px;
-  border-radius: 14px;
+  border-radius: var(--radius-lg);
 }
 
 .kind-swatch.lg svg {
@@ -1227,83 +1507,105 @@ input, textarea, select {
 .detail-title {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-2);
   flex-wrap: wrap;
 }
 
 .detail-title .kind-label {
-  font-size: 11.5px;
+  font-size: var(--text-xs);
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: .5px;
-  opacity: .6;
+color: var(--text-tertiary);
 }
 
 .detail-title .name {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 18px;
+  font-family: var(--font-mono);
+  font-size: var(--text-lg);
   font-weight: 600;
 }
 
 .detail-description {
-  font-size: 13.5px;
-  opacity: .85;
-  margin: 0 0 4px;
+  font-size: var(--text-sm);
+  margin: 0 0 var(--space-1);
+  color: var(--text-secondary);
 }
 
-.meta-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px 20px;
-  font-size: 13px;
-  margin: 14px 0;
+/* The artifact identity strip, directly under the description.
+ *
+ * Replaces a two-column .meta-grid that sat at the BOTTOM of the Detail view,
+ * below every action and every content section -- so "what kind is this, what
+ * version, where does it install" was answered only after scrolling past
+ * everything. Now it reads as a compact header line, wrapping naturally
+ * instead of forcing a rigid 1fr 1fr grid at narrow widths. */
+.detail-meta-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3) var(--space-6);
+  margin: var(--space-3) 0;
+  padding: var(--space-3) 0;
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
-  padding: 14px 0;
+  font-size: var(--text-sm);
 }
 
-.meta-grid .k {
-  color: var(--ink);
-  opacity: .55;
-  font-size: 11.5px;
+.detail-meta-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-05);
+  min-width: 0;
+}
+
+/* Full-width rows for the two items whose values are long and must not be
+   squeezed into a column: an absolute install path and a tag list. */
+.detail-meta-item--wide {
+  flex-basis: 100%;
+}
+
+.detail-meta-strip dt {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: .3px;
 }
 
-.meta-grid .v {
+.detail-meta-strip dd {
+  margin: 0;
   font-weight: 500;
+  min-width: 0;
+  word-break: break-word;
 }
 
 .tag-pill {
   display: inline-block;
-  font-size: 11px;
+  font-size: var(--text-2xs);
   font-weight: 500;
   background: var(--surface-tertiary);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 2px 9px;
-  margin: 3px 5px 0 0;
+  padding: var(--space-05) var(--space-2);
+  margin: var(--space-05) var(--space-1) 0 0;
   color: var(--ink);
   opacity: .85;
 }
 
 .install-path-label {
-  font-size: 11.5px;
+  font-size: var(--text-xs);
   font-weight: 500;
-  opacity: .55;
   text-transform: uppercase;
   letter-spacing: .3px;
-  margin-bottom: 6px;
+  margin-bottom: var(--space-1);
+  color: var(--text-secondary);
 }
 
 .install-path {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
   background: var(--surface-tertiary);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 9px 11px;
+  padding: var(--space-2) var(--space-3);
   color: var(--ink);
   opacity: .85;
   word-break: break-all;
@@ -1311,16 +1613,16 @@ input, textarea, select {
 
 .detail-secondary-actions {
   display: flex;
-  gap: 10px;
-  margin-top: 10px;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
 }
 
 .edit-form {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  margin-top: 14px;
-  padding: 14px 16px;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+  padding: var(--space-3) var(--space-4);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--surface-tertiary);
@@ -1328,7 +1630,7 @@ input, textarea, select {
 
 .edit-form-actions {
   display: flex;
-  gap: 10px;
+  gap: var(--space-2);
 }
 
 /* ---------- drift warning (both locally edited AND updated upstream) ----------
@@ -1337,17 +1639,17 @@ input, textarea, select {
  * as a warning, not just another badge. */
 
 .drift-warning {
-  margin-top: 14px;
+  margin-top: var(--space-3);
   background: var(--danger-100);
   border: 1px solid var(--danger-500);
   border-radius: var(--radius-md);
-  padding: 12px 14px;
+  padding: var(--space-3) var(--space-3);
 }
 
 .drift-warning-text {
-  font-size: 13px;
+  font-size: var(--text-sm);
   color: var(--danger-600);
-  margin: 0 0 10px;
+  margin: 0 0 var(--space-2);
 }
 
 /* An informational (not alarming) counterpart to .drift-warning -- a push
@@ -1355,17 +1657,17 @@ input, textarea, select {
  * sand/gold tones (not the AI-reserved sky/cyan pair this used to sit on),
  * matching .badge.update_available's fix above for the same reason. */
 .push-status {
-  margin-top: 14px;
+  margin-top: var(--space-3);
   background: var(--sand-100);
   border: 1px solid var(--gold-500);
   border-radius: var(--radius-md);
-  padding: 12px 14px;
+  padding: var(--space-3) var(--space-3);
 }
 
 .push-status-text {
-  font-size: 13px;
+  font-size: var(--text-sm);
   color: var(--ink);
-  margin: 0 0 10px;
+  margin: 0 0 var(--space-2);
 }
 
 /* ---------- backend-plugin Detail section (Phase 7) ----------
@@ -1376,12 +1678,12 @@ input, textarea, select {
 
 .provenance-badge {
   display: inline-block;
-  font-size: 11px;
+  font-size: var(--text-2xs);
   font-weight: 600;
   letter-spacing: .2px;
-  padding: 4px 10px;
+  padding: var(--space-1) var(--space-2);
   border-radius: var(--radius-md);
-  margin: 14px 0;
+  margin: var(--space-3) 0;
 }
 
 .provenance-badge.signed {
@@ -1404,19 +1706,19 @@ input, textarea, select {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--surface-tertiary);
-  padding: 10px 14px;
-  margin: 0 0 14px;
+  padding: var(--space-2) var(--space-3);
+  margin: 0 0 var(--space-3);
 }
 
 .lifecycle-explainer summary {
   cursor: pointer;
   font-weight: 600;
-  font-size: 13px;
-  padding: 2px 0;
+  font-size: var(--text-sm);
+  padding: var(--space-05) 0;
 }
 
 .lifecycle-explainer[open] summary {
-  margin-bottom: 8px;
+  margin-bottom: var(--space-2);
 }
 
 .lifecycle-steps {
@@ -1425,11 +1727,11 @@ input, textarea, select {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--space-2);
 }
 
 .lifecycle-step {
-  padding-top: 8px;
+  padding-top: var(--space-2);
   border-top: 1px solid var(--border);
 }
 
@@ -1442,15 +1744,15 @@ input, textarea, select {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--space-2);
   font-weight: 600;
-  font-size: 12.5px;
+  font-size: var(--text-xs);
 }
 
 .lifecycle-step-description {
-  font-size: 12.5px;
+  font-size: var(--text-xs);
   color: var(--text-secondary);
-  margin-top: 2px;
+  margin-top: var(--space-05);
   line-height: 1.45;
 }
 
@@ -1458,8 +1760,8 @@ input, textarea, select {
   flex-shrink: 0;
   border: none;
   background: none;
-  color: var(--accent-600);
-  font-size: 11.5px;
+  color: var(--link-accent);
+  font-size: var(--text-xs);
   font-weight: 600;
   cursor: pointer;
   padding: 0;
@@ -1482,21 +1784,21 @@ input, textarea, select {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   background: var(--surface-tertiary);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 10px 14px;
-  margin: 0 0 14px;
+  padding: var(--space-2) var(--space-3);
+  margin: 0 0 var(--space-3);
 }
 
 .status-chip {
   display: inline-flex;
   align-items: center;
-  font-size: 11px;
+  font-size: var(--text-2xs);
   font-weight: 600;
   letter-spacing: .2px;
-  padding: 4px 10px;
+  padding: var(--space-1) var(--space-2);
   border-radius: var(--radius-md);
 }
 
@@ -1531,20 +1833,20 @@ input, textarea, select {
 
 /* Holds one real, sandboxed markdown iframe (see
  * renderMarkdownToSandboxedIframe in app.js) -- no text styling of its
- * own; the rendered document's own <style> (inside the iframe) owns
+ * own; the rendered document's own \3c style> (inside the iframe) owns
  * all of that. Replaces the old .detail-readme, which used to hold raw
  * pre-wrap monospace text before a real markdown renderer existed. */
 .markdown-container {
-  margin-bottom: 14px;
+  margin-bottom: var(--space-3);
 }
 
 .detail-tabs-loading {
   display: flex;
   align-items: center;
-  gap: 7px;
-  font-size: 12.5px;
-  opacity: .6;
-  margin: -6px 0 14px;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  margin: -6px 0 var(--space-3);
+  color: var(--text-secondary);
 }
 
 .markdown-frame {
@@ -1560,26 +1862,40 @@ input, textarea, select {
  * genuinely broken markdown file still shows SOMETHING readable. */
 .markdown-fallback {
   white-space: pre-wrap;
-  font-family: var(--font-mono, monospace);
-  font-size: 12.5px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
   line-height: 1.6;
   background: var(--surface-tertiary);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 14px 16px;
+  padding: var(--space-3) var(--space-4);
   margin: 0;
 }
 
 .install-params-form {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: var(--space-3);
+  align-items: stretch;
+}
+
+/* Sizes to its own label instead of spanning the card.
+   A flex column stretches its children across the cross axis, so this submit
+   button rendered as a full-width navy slab -- visually the heaviest thing on
+   the whole Detail view, louder than Pull, for a step that only applies to
+   artifacts with configurable params. */
+.install-params-form button[type="submit"] {
+  align-self: flex-start;
 }
 
 .install-param-help {
-  font-size: 11px;
-  opacity: .6;
-  margin-bottom: 5px;
+  /* Was --text-2xs (11px). This is real explanatory prose -- often two full
+     lines about what a secret is and where to get one -- not a micro-label,
+     and the design kit puts helper text well above 11px. */
+  font-size: var(--text-xs);
+  margin-bottom: var(--space-1);
+  color: var(--text-secondary);
+  line-height: 1.45;
 }
 
 .install-params-form input[type="text"],
@@ -1587,7 +1903,7 @@ input, textarea, select {
   width: 100%;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
-  padding: 8px 12px;
+  padding: var(--space-2) var(--space-3);
   background: var(--card);
 }
 
@@ -1597,36 +1913,36 @@ input, textarea, select {
  * row) and the shared mono text convention. */
 
 .route-tree {
-  font-size: 12.5px;
+  font-size: var(--text-xs);
 }
 
 .route-node {
-  padding: 3px 0;
+  padding: var(--space-05) 0;
 }
 
 .route-node-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   flex-wrap: wrap;
 }
 
 .route-node-path {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
   color: var(--ink);
 }
 
 .route-node-error-note {
-  font-size: 11px;
-  opacity: .6;
+  font-size: var(--text-2xs);
   font-style: italic;
+  color: var(--text-secondary);
 }
 
 .route-node-children {
-  margin-left: 18px;
+  margin-left: var(--space-4);
   border-left: 1px solid var(--border);
-  padding-left: 12px;
+  padding-left: var(--space-3);
 }
 
 /* ---------- Source-drift check (Detail section) ----------
@@ -1637,31 +1953,31 @@ input, textarea, select {
  * severity read, just at list-item scale rather than a full banner. */
 
 .source-drift-caption {
-  font-size: 13px;
+  font-size: var(--text-sm);
   color: var(--text-secondary);
-  margin: 4px 0 10px;
+  margin: var(--space-1) 0 var(--space-2);
 }
 
 .source-drift-results {
-  margin-top: 12px;
+  margin-top: var(--space-3);
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-1);
 }
 
 .source-drift-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 12.5px;
-  padding: 6px 10px;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  padding: var(--space-1) var(--space-2);
   border-radius: var(--radius-md);
   border: 1px solid var(--border);
 }
 
 .source-drift-item .source-drift-path {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
 }
 
 .source-drift-item.drifted {
@@ -1680,50 +1996,69 @@ input, textarea, select {
 }
 
 .source-drift-summary {
-  font-size: 12.5px;
+  font-size: var(--text-xs);
   font-weight: 600;
 }
 
 /* ---------- Tier 2 wiring suggestions (Phase 7 item 6) ---------- */
 
 .wiring-section-label {
-  font-size: 12px;
+  font-size: var(--text-xs);
   font-weight: 600;
   letter-spacing: .3px;
   text-transform: uppercase;
-  opacity: .65;
-  margin: 18px 0 10px;
+  margin: var(--space-4) 0 var(--space-2);
+  color: var(--text-secondary);
 }
 
 .wiring-action-card {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 12px 14px;
-  margin-bottom: 10px;
+  padding: var(--space-3) var(--space-3);
+  margin-bottom: var(--space-2);
   background: var(--surface-tertiary);
+}
+
+/* Snippets collapse by default -- see the comment at their render site. A
+   plugin with three or four wiring actions otherwise renders as a wall of
+   code, burying the file paths and statuses that are the scannable part. */
+.wiring-action-code {
+  margin-top: var(--space-2);
+}
+
+.wiring-action-code summary {
+  cursor: pointer;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  font-weight: 500;
+  padding: var(--space-1) 0;
+}
+
+.wiring-action-code summary:hover {
+  color: var(--ink);
 }
 
 .wiring-action-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 6px;
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
 }
 
 .wiring-action-header code {
-  font-size: 12.5px;
+  font-size: var(--text-xs);
   background: var(--card);
   border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  padding: 1px var(--space-1);
 }
 
 .wiring-action-status {
-  font-size: 10px;
+  font-size: var(--text-2xs);
   font-weight: 600;
   letter-spacing: .2px;
   text-transform: uppercase;
-  padding: 2px 7px;
+  padding: var(--space-05) var(--space-2);
   border-radius: var(--radius-md);
 }
 
@@ -1731,7 +2066,7 @@ input, textarea, select {
    build-fix) this entry came from -- a category, never a status, so it
    stays visually quieter than .wiring-action-status's colored pills. */
 .wiring-action-kind {
-  font-size: 10px;
+  font-size: var(--text-2xs);
   font-weight: 600;
   letter-spacing: .2px;
   text-transform: uppercase;
@@ -1740,7 +2075,7 @@ input, textarea, select {
 
 .wiring-action-status.absent {
   background: var(--surface-inset);
-  opacity: .7;
+  color: var(--text-secondary);
 }
 
 .wiring-action-status.exists {
@@ -1759,26 +2094,26 @@ input, textarea, select {
 }
 
 .wiring-action-description {
-  font-size: 13px;
+  font-size: var(--text-sm);
   font-weight: 500;
-  margin-bottom: 4px;
+  margin-bottom: var(--space-1);
 }
 
 .wiring-action-instructions {
-  font-size: 12.5px;
-  opacity: .75;
-  margin-bottom: 8px;
+  font-size: var(--text-xs);
+  margin-bottom: var(--space-2);
+  color: var(--text-secondary);
 }
 
 .wiring-action-snippet {
   white-space: pre-wrap;
-  font-family: var(--font-mono, monospace);
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
   line-height: 1.5;
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 10px 12px;
+  padding: var(--space-2) var(--space-3);
   overflow-x: auto;
 }
 
@@ -1789,29 +2124,29 @@ input, textarea, select {
 .token-swatch-grid {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
-  margin-bottom: 4px;
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
 }
 
 .token-swatch {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-1);
   width: 76px;
 }
 
 .token-swatch-color {
   width: 40px;
   height: 40px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   border: 1px solid var(--border);
   flex-shrink: 0;
 }
 
 .token-swatch-label {
-  font-size: 10.5px;
-  font-family: var(--font-mono, monospace);
+  font-size: var(--text-2xs);
+  font-family: var(--font-mono);
   text-align: center;
   line-height: 1.3;
   word-break: break-word;
@@ -1823,14 +2158,14 @@ input, textarea, select {
 .type-sample-list {
   display: flex;
   flex-direction: column;
-  margin-bottom: 4px;
+  margin-bottom: var(--space-1);
 }
 
 .type-sample-row {
   display: flex;
   align-items: baseline;
-  gap: 14px;
-  padding: 8px 0;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
   border-bottom: 1px dashed var(--border);
 }
 
@@ -1839,11 +2174,11 @@ input, textarea, select {
 }
 
 .type-sample-label {
-  font-family: var(--font-mono, monospace);
-  font-size: 10.5px;
-  opacity: .65;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
   width: 130px;
   flex-shrink: 0;
+  color: var(--text-secondary);
 }
 
 .type-sample-text {
@@ -1853,23 +2188,23 @@ input, textarea, select {
 .template-theme-toggle-row {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 10px;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
 }
 
 .template-theme-toggle-caption {
-  font-size: 12px;
-  opacity: .65;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
 }
 
 .template-component-grid {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--space-2);
 }
 
 .template-component-card .ui-component-preview-frame {
-  margin-top: 8px;
+  margin-top: var(--space-2);
 }
 
 .template-component-card .wiring-action-header {
@@ -1877,10 +2212,10 @@ input, textarea, select {
 }
 
 .template-component-caption {
-  font-size: 12px;
-  opacity: .75;
-  margin: 6px 0 0;
+  font-size: var(--text-xs);
+  margin: var(--space-1) 0 0;
   line-height: 1.5;
+color: var(--text-tertiary);
 }
 
 /* Layout-rules summary strip: real radius tokens as chips, plus
@@ -1888,48 +2223,48 @@ input, textarea, select {
    fictional "Max width/Section rhythm" labels, since those were invented
    for its own made-up demo kit, not something this real doc states. */
 .layout-rules-strip {
-  margin-top: 4px;
+  margin-top: var(--space-1);
 }
 
 .radius-token-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 10px;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
 }
 
 .radius-token-chip {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--space-05);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 6px 10px;
+  padding: var(--space-1) var(--space-2);
   background: var(--surface-tertiary);
-  font-size: 11px;
+  font-size: var(--text-2xs);
 }
 
 .radius-token-chip code {
-  font-size: 11.5px;
+  font-size: var(--text-xs);
 }
 
 .radius-token-chip span {
-  opacity: .65;
+color: var(--text-tertiary);
 }
 
 .layout-rules-note {
-  font-size: 12.5px;
-  opacity: .75;
+  font-size: var(--text-xs);
   line-height: 1.5;
-  margin: 0 0 8px;
+  margin: 0 0 var(--space-2);
+color: var(--text-tertiary);
 }
 
 .component-detail-usage-rule {
-  font-size: 13.5px;
-  opacity: .8;
+  font-size: var(--text-sm);
   line-height: 1.6;
-  margin: 4px 0 20px;
+  margin: var(--space-1) 0 var(--space-5);
   max-width: 640px;
+  color: var(--text-secondary);
 }
 
 /* ---------- progress panel (live Pull/Push stage feed) ----------
@@ -1939,11 +2274,11 @@ input, textarea, select {
  * of real stage names is the honest design here. */
 
 .progress-panel {
-  margin-top: 14px;
+  margin-top: var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--surface-tertiary);
-  padding: 12px 14px;
+  padding: var(--space-3) var(--space-3);
   box-sizing: border-box;
   overflow-x: hidden;
 }
@@ -1951,11 +2286,11 @@ input, textarea, select {
 .progress-header {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-2);
 }
 
 .progress-status {
-  font-size: 13px;
+  font-size: var(--text-sm);
   font-weight: 500;
 }
 
@@ -1969,6 +2304,26 @@ input, textarea, select {
  * blockified for free) shows correctly. Setting it here fixes every
  * call site at once rather than requiring each new one to remember to
  * wrap it in a flex container. */
+/* The in-button spinner. Sized against the button's own text rather than the
+   standalone .spinner's 14px, and inheriting currentColor so it works on a
+   brand-filled primary button as well as an outline one. */
+.btn-spinner {
+  width: 12px;
+  height: 12px;
+  border-width: 2px;
+  border-color: currentColor;
+  border-top-color: transparent;
+  margin-right: var(--space-2);
+  opacity: .8;
+}
+
+.btn[aria-busy='true'] {
+  /* Override .btn:disabled's fade: a busy button is not an unavailable one,
+     and dimming it made the spinner harder to see than the thing it replaced. */
+  opacity: 1;
+  cursor: progress;
+}
+
 .spinner {
   display: inline-flex;
   width: 14px;
@@ -2007,18 +2362,18 @@ input, textarea, select {
 }
 
 .progress-log {
-  margin-top: 10px;
+  margin-top: var(--space-2);
   max-height: 160px;
   overflow-y: auto;
   overflow-x: hidden;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 11.5px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
 }
 
 .progress-line {
   display: flex;
-  gap: 8px;
-  padding: 3px 0;
+  gap: var(--space-2);
+  padding: var(--space-05) 0;
   border-bottom: 1px solid var(--border-subtle);
   /* A flex item's default min-width is `auto`, meaning it won't shrink
      below its own content's intrinsic width -- a long, backslash-separated
@@ -2036,34 +2391,34 @@ input, textarea, select {
   flex-shrink: 0;
   text-transform: uppercase;
   letter-spacing: .3px;
-  opacity: .6;
   min-width: 80px;
+color: var(--text-tertiary);
 }
 
 /* ---------- build-fix offers (Phase 10 item 2) ---------- */
 
 .build-fix-offers {
-  margin-top: 10px;
+  margin-top: var(--space-2);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .build-fix-row {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 8px 10px;
+  padding: var(--space-2) var(--space-2);
   background: var(--card);
 }
 
 .build-fix-result {
-  margin-top: 8px;
+  margin-top: var(--space-2);
 }
 
 .build-fix-actions {
   display: flex;
-  gap: 8px;
-  margin-top: 8px;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
 }
 
 /* Phase 11 item 4: structurally identical to .build-fix-row/-result/
@@ -2074,26 +2429,26 @@ input, textarea, select {
 .design-fix-row {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 8px 10px;
+  padding: var(--space-2) var(--space-2);
   background: var(--card);
-  margin-bottom: 8px;
+  margin-bottom: var(--space-2);
 }
 
 .design-fix-result {
-  margin-top: 8px;
+  margin-top: var(--space-2);
 }
 
 .design-fix-actions {
   display: flex;
-  gap: 8px;
-  margin-top: 8px;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
 }
 
 .progress-line .msg {
-  opacity: .9;
   overflow-wrap: anywhere;
   min-width: 0;
   flex: 1;
+color: var(--text-primary);
 }
 
 /* ---------- forms (add-new / remote) ---------- */
@@ -2101,21 +2456,23 @@ input, textarea, select {
 .form-grid {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: var(--space-3);
 }
 
 .field label {
   display: block;
-  font-size: 12px;
+  font-size: var(--text-xs);
   font-weight: 500;
-  opacity: .65;
-  margin-bottom: 5px;
+  margin-bottom: var(--space-1);
+  color: var(--text-secondary);
 }
 
 .field-hint {
-  font-size: 11px;
-  opacity: .55;
-  margin: 5px 0 0;
+  /* Was --text-2xs (11px), below anything the design kit sanctions for helper
+     text. --text-xs is the smallest step the scale actually offers for prose. */
+  font-size: var(--text-xs);
+  margin: var(--space-1) 0 0;
+  color: var(--text-secondary);
 }
 
 .field input[type="text"],
@@ -2124,7 +2481,7 @@ input, textarea, select {
   width: 100%;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
-  padding: 8px 12px;
+  padding: var(--space-2) var(--space-3);
   background: var(--card);
 }
 
@@ -2134,7 +2491,7 @@ input, textarea, select {
 
 .field select + input[type="text"],
 .field .chip-picker + input[type="text"] {
-  margin-top: 8px;
+  margin-top: var(--space-2);
 }
 
 /* ---------- tag picker (roles/stacks/teams) ----------
@@ -2149,17 +2506,17 @@ input, textarea, select {
 .tag-picker-wrap {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .tag-picker {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-1);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
-  padding: 6px 8px;
+  padding: var(--space-1) var(--space-2);
   background: var(--card);
 }
 
@@ -2170,7 +2527,7 @@ input, textarea, select {
 .tag-picker-suggestions {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--space-1);
 }
 
 .tag-picker-suggestions:empty {
@@ -2197,29 +2554,27 @@ input, textarea, select {
 .tag-chip {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  font-size: 12px;
+  gap: var(--space-1);
+  font-size: var(--text-xs);
   font-weight: 500;
   background: var(--surface-tertiary);
   border: 1px solid var(--border);
   border-radius: var(--radius-pill);
-  padding: 3px 6px 3px 10px;
+  padding: var(--space-05) var(--space-1) var(--space-05) var(--space-2);
   color: var(--ink);
 }
 
 .tag-chip-remove {
   border: none;
   background: transparent;
-  color: var(--ink);
-  opacity: .55;
+  color: var(--text-tertiary);
   cursor: pointer;
-  font-size: 14px;
+  font-size: var(--text-base);
   line-height: 1;
-  padding: 2px;
+  padding: var(--space-05);
 }
 
 .tag-chip-remove:hover {
-  opacity: 1;
 }
 
 .tag-picker-input {
@@ -2227,16 +2582,16 @@ input, textarea, select {
   min-width: 120px;
   border: none;
   outline: none;
-  padding: 4px 2px;
+  padding: var(--space-1) var(--space-05);
   background: transparent;
-  font-size: 13px;
+  font-size: var(--text-sm);
   color: var(--ink);
 }
 
 .payload-picker {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-2);
   flex-wrap: wrap;
 }
 
@@ -2247,7 +2602,7 @@ input, textarea, select {
 
 .remote-form {
   display: flex;
-  gap: 10px;
+  gap: var(--space-2);
   align-items: center;
   flex-wrap: wrap;
 }
@@ -2255,7 +2610,7 @@ input, textarea, select {
 .remote-form input {
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
-  padding: 8px 12px;
+  padding: var(--space-2) var(--space-3);
   background: var(--card);
 }
 
@@ -2279,14 +2634,14 @@ input, textarea, select {
 .wizard-card {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-1);
 }
 
 .wizard-progress {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin: 4px 0 18px;
+  gap: var(--space-3);
+  margin: var(--space-1) 0 var(--space-4);
 }
 
 .wizard-progress-track {
@@ -2301,15 +2656,15 @@ input, textarea, select {
   height: 100%;
   background: var(--gradient-brand);
   border-radius: var(--radius-pill);
-  transition: width .2s ease;
+  transition: width var(--motion-fast);
 }
 
 .wizard-progress-label {
-  font-size: 12px;
+  font-size: var(--text-xs);
   font-weight: 500;
-  opacity: .6;
   white-space: nowrap;
   flex-shrink: 0;
+  color: var(--text-secondary);
 }
 
 .wizard-step {
@@ -2321,21 +2676,45 @@ input, textarea, select {
  * multi-field form -- styled like one: EB Garamond serif, larger, normal
  * weight, per DESIGN_SYSTEM.md's typography table (page/card titles use
  * EB Garamond at font-normal, larger sizes than body text). */
-.wizard-step .field label {
-  font-family: 'EB Garamond', Georgia, serif;
-  font-size: 22px;
+/* Only a STEP TITLE when it is actually a step title.
+ *
+ * Add New is two UIs behind one view: a one-step-at-a-time wizard (entered
+ * from Scan) and a flat form with all 13 blocks visible at once (entered from
+ * the sidebar). These labels were styled as page titles for the wizard, where
+ * that is defensible -- but in flat mode it made every field label a 22px
+ * serif heading, LARGER than the 18px card title above them. A field label
+ * outranking the heading of the card it lives in is an inverted hierarchy,
+ * and stacking thirteen of them is what "text sizes are all different" looks
+ * like in practice.
+ *
+ * Scoped to .addnew-wizard-mode (set on the form by renderWizardStep) so the
+ * wizard keeps its title treatment and the flat form gets real labels. */
+#addnew-form.addnew-wizard-mode .wizard-step .field label {
+  font-family: var(--font-serif);
+  /* --text-lg, matching .section-title rather than exceeding it. In wizard
+     mode the step title is the focus of the screen, but it is still a peer of
+     the card heading above it, not senior to it. */
+  font-size: var(--text-lg);
   font-weight: 400;
   color: var(--ink);
-  opacity: 1;
-  margin-bottom: 12px;
+  margin-bottom: var(--space-3);
+}
+
+/* Flat mode: a label, per the design kit's own typography table -- labels are
+   IBM Plex Sans at body size, never the serif heading face. */
+.wizard-step .field label {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: var(--space-1);
 }
 
 .wizard-nav {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-top: 10px;
-  padding-top: 16px;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  padding-top: var(--space-4);
   border-top: 1px solid var(--border);
 }
 
@@ -2350,7 +2729,7 @@ input, textarea, select {
 .chip-picker {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .chip-picker .chip {
@@ -2361,7 +2740,7 @@ input, textarea, select {
 .wizard-review {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--space-05);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   overflow: hidden;
@@ -2370,8 +2749,8 @@ input, textarea, select {
 .wizard-review-row {
   display: flex;
   align-items: baseline;
-  gap: 12px;
-  padding: 10px 14px;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
   border-bottom: 1px solid var(--border);
   background: var(--card);
 }
@@ -2383,16 +2762,16 @@ input, textarea, select {
 .wizard-review-label {
   flex-shrink: 0;
   width: 120px;
-  font-size: 11.5px;
+  font-size: var(--text-xs);
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: .3px;
-  opacity: .55;
+  color: var(--text-secondary);
 }
 
 .wizard-review-value {
   flex: 1;
-  font-size: 13px;
+  font-size: var(--text-sm);
   overflow-wrap: anywhere;
 }
 
@@ -2405,17 +2784,17 @@ input, textarea, select {
 .install-param-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--card);
-  margin-bottom: 6px;
+  margin-bottom: var(--space-1);
 }
 
 .install-param-row .install-param-key {
   flex: 0 0 160px;
-  font-family: var(--font-mono, monospace);
+  font-family: var(--font-mono);
 }
 
 .install-param-row .install-param-description {
@@ -2426,9 +2805,9 @@ input, textarea, select {
 .install-param-checkbox {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-1);
   flex-shrink: 0;
-  font-size: 12px;
+  font-size: var(--text-xs);
   white-space: nowrap;
 }
 
@@ -2442,7 +2821,7 @@ input, textarea, select {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 6px;
+  gap: var(--space-1);
 }
 
 .field-with-suggest textarea {
@@ -2464,9 +2843,9 @@ input, textarea, select {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 0;
+  padding: var(--space-3) 0;
   border-bottom: 1px solid var(--border);
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .settings-row:last-child {
@@ -2474,15 +2853,15 @@ input, textarea, select {
 }
 
 .settings-row .n {
-  font-size: 14px;
+  font-size: var(--text-base);
   font-weight: 600;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
 }
 
 .settings-row .s {
-  font-size: 12px;
-  opacity: .55;
+  font-size: var(--text-xs);
   word-break: break-all;
+  color: var(--text-secondary);
 }
 
 /* ---------- toasts ---------- */
@@ -2493,20 +2872,20 @@ input, textarea, select {
   right: 20px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  z-index: 1000;
+  gap: var(--space-2);
+  z-index: var(--z-overlay);
   max-width: 380px;
 }
 
 .toast {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
+  gap: var(--space-2);
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 11px 14px;
-  font-size: 13px;
+  padding: var(--space-3) var(--space-3);
+  font-size: var(--text-sm);
   box-shadow: var(--shadow-2);
   animation: toast-in .15s ease-out;
 }
@@ -2516,7 +2895,7 @@ input, textarea, select {
   height: 8px;
   border-radius: 50%;
   flex-shrink: 0;
-  margin-top: 5px;
+  margin-top: var(--space-1);
 }
 
 .toast.success .dot { background: var(--mint-500); }
@@ -2526,7 +2905,7 @@ input, textarea, select {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 6px;
+  gap: var(--space-1);
   min-width: 0;
 }
 
@@ -2538,8 +2917,8 @@ input, textarea, select {
   background: none;
   border: none;
   padding: 0;
-  color: var(--accent-600);
-  font-size: 13px;
+  color: var(--link-accent);
+  font-size: var(--text-sm);
   font-weight: 600;
   cursor: pointer;
   text-decoration: underline;
@@ -2559,6 +2938,12 @@ input, textarea, select {
  * Accessibility section -- state changes (done/error/toast shown) are
  * still communicated via color + text, never motion alone. */
 @media (prefers-reduced-motion: reduce) {
+  /* The design kit calls this out by name: Skeleton's pulse is disabled
+     ENTIRELY under reduced motion, never just slowed. Same rule applies to
+     the running indicator's dot. */
+  .skeleton { animation: none; }
+  .running-indicator::before { animation: none; }
+
   .spinner {
     animation: none;
   }
@@ -2582,12 +2967,12 @@ input, textarea, select {
 .wire-terminal-overlay {
   position: fixed;
   inset: 0;
-  z-index: 2000;
+  z-index: var(--z-toast);
   display: flex;
   align-items: flex-end;
   justify-content: center;
   background: rgba(10, 12, 13, 0.55);
-  padding: 32px;
+  padding: var(--space-8);
 }
 
 .wire-terminal-panel {
@@ -2604,20 +2989,20 @@ input, textarea, select {
 .wire-terminal-header {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
   background: #10121600;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .wire-terminal-title {
-  font-size: 13px;
+  font-size: var(--text-sm);
   font-weight: 600;
   color: #e6e6e6;
 }
 
 .wire-terminal-status {
-  font-size: 12px;
+  font-size: var(--text-xs);
   color: #8a8f98;
   margin-right: auto;
 }
@@ -2629,7 +3014,7 @@ input, textarea, select {
 .wire-terminal-container {
   flex: 1;
   min-height: 0;
-  padding: 8px 10px;
+  padding: var(--space-2) var(--space-2);
 }
 
 .wire-terminal-container .xterm {

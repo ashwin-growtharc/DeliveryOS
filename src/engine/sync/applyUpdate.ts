@@ -3,12 +3,11 @@ import * as path from 'path';
 import { execSync } from 'child_process';
 import { readLockfile, upsertEntry } from '../lockfile/lockfile';
 import { findRemote } from '../remote/remoteRegistry';
-import { cachePath } from '../remote/remoteCache';
-import { fetchAndReset } from '../git/git';
+import { cachePath, refreshRemoteCache } from '../remote/remoteCache';
 import { buildCatalog } from '../catalog/catalog';
 import { computeChangedFiles, listFilesRecursive } from '../push/diff';
-import { pristinePath, resolveContainedPath } from '../paths';
-import { ProgressCallback, POST_INSTALL_TIMEOUT_MS } from '../pull/pull';
+import { pristinePath, resolveContainedPath, isRootInstall, readPayloadFootprint } from '../paths';
+import { ProgressCallback, POST_INSTALL_TIMEOUT_MS, POST_INSTALL_MAX_BUFFER_BYTES, writePristineSnapshot } from '../pull/pull';
 import { isExecError, isToolNotFoundError } from '../execHelpers';
 import { compareVersions } from './sync';
 
@@ -74,7 +73,7 @@ export async function applyAvailableUpdates(
       continue;
     }
     onProgress?.('fetch', `Fetching latest from ${name}...`);
-    await fetchAndReset(cachePath(name));
+    await refreshRemoteCache(name);
   }
 
   const catalog = buildCatalog();
@@ -108,9 +107,20 @@ export async function applyAvailableUpdates(
       continue;
     }
 
+    // A root install_target means entry.installTarget IS the whole project, so
+    // the clean-check has to be narrowed to the entries this artifact owns --
+    // otherwise every unrelated file in the project reads as a local edit and
+    // the update is refused forever. See isRootInstall.
+    const entryPristine = pristinePath(cwd, entry.id);
+    const entryIsRootInstall = isRootInstall(cwd, entry.installTarget);
+    const entryTopLevelScope = entryIsRootInstall ? readPayloadFootprint(entryPristine) : undefined;
+    if (entryIsRootInstall && !entryTopLevelScope) {
+      report(false, 'This artifact installs at the project root and its pristine snapshot is missing, so there is no record of which files belong to it -- re-pull it once, then updates can be applied.');
+      continue;
+    }
     let changedFiles;
     try {
-      changedFiles = computeChangedFiles(entry.installTarget, pristinePath(cwd, entry.id));
+      changedFiles = computeChangedFiles(entry.installTarget, entryPristine, { topLevelScope: entryTopLevelScope });
     } catch (err) {
       report(false, `Could not verify this artifact's local state: ${err instanceof Error ? err.message : String(err)}`);
       continue;
@@ -145,6 +155,11 @@ export async function applyAvailableUpdates(
       continue;
     }
 
+    // allowRoot stays TRUE, matching pullArtifact: a root install_target is a
+    // legitimate scaffold shape, and refusing it here meant such an artifact
+    // could never be updated. The two genuinely dangerous operations at the
+    // project root -- the stale-file sweep and the snapshot below -- are both
+    // already footprint-scoped rather than whole-directory.
     const installTarget = resolveContainedPath(cwd, manifest.install_target);
     if (!installTarget) {
       report(false, `The new version's install_target resolves outside the project -- refusing to update.`);
@@ -190,6 +205,22 @@ export async function applyAvailableUpdates(
           cwd: installTarget,
           stdio: 'pipe',
           timeout: POST_INSTALL_TIMEOUT_MS,
+          // Same env and buffer as pull.ts's own post_install call -- this
+          // is the SAME manifest command, just run on the update path
+          // instead of the first install, so it needs the same contract.
+          //
+          // DELIVERYOS_PROJECT_ROOT was missing here, which broke
+          // `check-updates --apply` for every backend plugin: the authoring
+          // skill mandates `cd "$DELIVERYOS_PROJECT_ROOT" && npm install`,
+          // and with the variable unset that expands to `cd "" && npm
+          // install`. Reported as "post_install failed", with the update
+          // already half-applied on disk. See pull.ts's own call site for
+          // the full history of why this variable exists.
+          env: { ...process.env, DELIVERYOS_PROJECT_ROOT: cwd },
+          // Node's default is 1 MB, which a real `npm install` routinely
+          // exceeds -- and blowing it surfaces as a generic post_install
+          // failure rather than anything that names the real cause.
+          maxBuffer: POST_INSTALL_MAX_BUFFER_BYTES,
         }).toString('utf-8');
       } catch (err) {
         const stdout = isExecError(err) ? err.stdout?.toString('utf-8') ?? '' : '';
@@ -217,10 +248,12 @@ export async function applyAvailableUpdates(
       }
     }
 
-    if (fs.existsSync(pristineTarget)) {
-      fs.rmSync(pristineTarget, { recursive: true, force: true });
-    }
-    fs.cpSync(installTarget, pristineTarget, { recursive: true });
+    // Same helper pullArtifact uses. This used to be a bare
+    // fs.cpSync(installTarget, pristineTarget), which for a root install both
+    // throws ERR_FS_CP_EINVAL (the snapshot lives inside the directory being
+    // copied) and would snapshot the user's entire project -- pull had handled
+    // that case since adb677c, and this path had not.
+    writePristineSnapshot(cwd, installTarget, payloadSrc, pristineTarget);
     await upsertEntry(cwd, { ...entry, version: availableVersion });
 
     const note = manifest.wiring_actions.length > 0

@@ -206,6 +206,45 @@ describe('sidecar e2e', () => {
     return fs.mkdtempSync(path.join(scratchRoot, `${label}-`));
   }
 
+  // Regression: the command map was a plain object literal, and dispatch was
+  // a bracket lookup on the unvalidated `command` string off the wire -- so
+  // every Object.prototype member was reachable as a "command" that ran and
+  // reported success. `{"command":"toString"}` returned
+  // {"ok":true,"result":"[object Undefined]"}. The map now has a null
+  // prototype and dispatch checks own-property + callability.
+  it(
+    'refuses Object.prototype members as commands instead of dispatching them',
+    async () => {
+      const cwd = newScratchCwd('proto-dispatch');
+      const session = new SidecarSession(cwd, deliveryOsHome);
+      try {
+        for (const command of [
+          'toString',
+          'valueOf',
+          'constructor',
+          'hasOwnProperty',
+          'isPrototypeOf',
+          '__proto__',
+        ]) {
+          const resp = await session.request(command, {});
+          expect(resp.ok, `expected "${command}" to be refused, not dispatched`).toBe(false);
+          expect(JSON.stringify(resp.error)).toContain('Unknown command');
+        }
+
+        // A genuinely unknown name still behaves the same way, and the
+        // session is still healthy afterwards.
+        const bogus = await session.request('definitely.not.a.command', {});
+        expect(bogus.ok).toBe(false);
+
+        const listResp = await session.request('remote.list', {});
+        expect(listResp.ok).toBe(true);
+      } finally {
+        expect(await session.close()).toBe(0);
+      }
+    },
+    30_000,
+  );
+
   it(
     'remote.add registers a real local git remote, and a subsequent remote.list on the same session shows it',
     async () => {
@@ -508,8 +547,8 @@ describe('sidecar e2e', () => {
   );
 
   it(
-    'artifact.push (edit mode): the sidecar has no octokit-injection point, so it runs real ' +
-      'git ops and then hits the real GitHub auth/API boundary -- a clean error, not a crash',
+    'artifact.push (edit mode): the sidecar has no octokit-injection point, so it reaches ' +
+      'the real GitHub auth/API boundary and fails cleanly there, writing nothing',
     async () => {
       // src/sidecar.ts's `artifact.push` handler calls
       // `pushArtifact(id, options, cwd)` with no 4th (octokit) argument --
@@ -553,6 +592,8 @@ describe('sidecar e2e', () => {
           'utf-8',
         );
 
+        const branchesBefore = (await simpleGit(fixtureRemoteDir).branch(['-a'])).all;
+
         const pushResp = await session.request('artifact.push', {
           id: artifact.id,
           cwd,
@@ -568,14 +609,30 @@ describe('sidecar e2e', () => {
         expect(['GithubAuthError', 'GithubApiError']).toContain(pushResp.error?.type);
         expect(pushResp.error?.message.length ?? 0).toBeGreaterThan(0);
 
-        // The branch/commit/push sequence happens BEFORE the GitHub API
-        // call inside pushArtifact -- confirm it really ran for real
-        // against the fixture "remote", proving the sidecar's wiring
-        // reached all the way to the GitHub boundary.
-        const branchSummary = await simpleGit(fixtureRemoteDir).branch(['-a']);
-        expect(branchSummary.all.some((b) => b.startsWith(`deliveryos/${artifact.id}/`))).toBe(
-          true,
-        );
+        // This test used to assert the OPPOSITE of what the code does: that
+        // "the branch/commit/push sequence happens BEFORE the GitHub API
+        // call", and therefore that a `deliveryos/<id>/...` branch existed in
+        // the fixture remote afterwards. In edit mode pushArtifact calls
+        // createOctokit and then fetchRepoInfo well before createBranch, so
+        // this push dies at the GitHub boundary with no git write at all and
+        // that branch is never created.
+        //
+        // The assertion nonetheless "passed" in a full-suite run, because
+        // OTHER tests in this file push real branches into the same shared
+        // fixture remote -- so it was reading another test's leftover state.
+        // In isolation it failed every time. That is what made this one of
+        // the suite's two long-standing "flaky" failures: it was never
+        // flaky, it was order-dependent and wrong.
+        //
+        // What is actually worth asserting is that the failure happened at
+        // the GitHub boundary and left nothing behind: no new branch pushed
+        // by THIS attempt (snapshot-compared, since the fixture is shared),
+        // and a local cache not parked on a half-built push branch.
+        const branchesAfter = (await simpleGit(fixtureRemoteDir).branch(['-a'])).all;
+        expect(branchesAfter).toEqual(branchesBefore);
+
+        const cacheStatus = await simpleGit(cachePath(remoteName)).status();
+        expect(cacheStatus.current?.startsWith('deliveryos/')).toBe(false);
       } finally {
         await session.close();
       }
@@ -585,8 +642,7 @@ describe('sidecar e2e', () => {
 
   it(
     'artifact.pull emits progress stages in order (resolve, copy, post_install, snapshot, '
-      + 'install-params, lockfile) before the final response, and the final response shape '
-      + 'is untouched',
+      + 'lockfile) before the final response, and the final response shape is untouched',
     async () => {
       const cwd = newScratchCwd('pull-progress');
       const session = new SidecarSession(cwd, deliveryOsHome);
@@ -599,8 +655,13 @@ describe('sidecar e2e', () => {
         session.takeProgressLines(); // discard remote.add's own progress lines (it emits none, but be defensive)
 
         // handbook-doc is TEST_ARTIFACTS's one artifact with a post_install
-        // command -- pulling it exercises all 5 progress stages, including
-        // the 'post_install' one that's conditionally emitted.
+        // command -- pulling it exercises every stage this artifact's shape
+        // actually earns, including the conditionally-emitted 'post_install'.
+        // It declares no signature and no install_params, so 'verify' and
+        // 'install-params' are correctly absent: both are conditional on the
+        // same real-work basis 'post_install' always has been (see the
+        // signed-artifact and install_params tests below for their positive
+        // halves).
         const artifact = TEST_ARTIFACTS.find((a) => a.hasPostInstall)!;
         const pullResp = await session.request('artifact.pull', {
           id: artifact.id,
@@ -612,11 +673,9 @@ describe('sidecar e2e', () => {
         const progressLines = session.takeProgressLines();
         expect(progressLines.map((p) => p.stage)).toEqual([
           'resolve',
-          'verify',
           'copy',
           'post_install',
           'snapshot',
-          'install-params',
           'lockfile',
         ]);
         for (const line of progressLines) {
@@ -637,8 +696,9 @@ describe('sidecar e2e', () => {
   );
 
   it(
-    "artifact.pull on an artifact WITHOUT post_install emits progress stages with the "
-      + "'post_install' stage absent",
+    "artifact.pull on an artifact with no post_install, no signature and no install_params "
+      + "emits only the stages that did real work -- 'post_install', 'verify' and "
+      + "'install-params' are all absent",
     async () => {
       const cwd = newScratchCwd('pull-progress-no-postinstall');
       const session = new SidecarSession(cwd, deliveryOsHome);
@@ -659,7 +719,7 @@ describe('sidecar e2e', () => {
         expect(pullResp.ok).toBe(true);
 
         const stages = session.takeProgressLines().map((p) => p.stage);
-        expect(stages).toEqual(['resolve', 'verify', 'copy', 'snapshot', 'install-params', 'lockfile']);
+        expect(stages).toEqual(['resolve', 'copy', 'snapshot', 'lockfile']);
       } finally {
         await session.close();
       }
@@ -856,6 +916,12 @@ describe('sidecar e2e', () => {
         expect(pullResp.ok).toBe(true);
         expect((pullResp.result as { missingRequiredParams: string[] }).missingRequiredParams)
           .toEqual(['DATABASE_URL']);
+
+        // The positive half of the conditional-stage rule the two
+        // pull-progress tests above assert the negative half of: this
+        // artifact really does declare install_params, so the stage that
+        // announces applying them must actually be emitted here.
+        expect(session.takeProgressLines().map((line) => line.stage)).toContain('install-params');
 
         let envContent = fs.readFileSync(path.join(cwd, '.env.local'), 'utf-8');
         expect(envContent).toContain('AUTH_SECRET=from-pull');
@@ -1154,6 +1220,12 @@ describe('sidecar e2e', () => {
         expect(pullResp.error?.type).toBe('SignatureVerificationError');
         expect(pullResp.error?.message).toContain('no signature bundle was found');
         expect(fs.existsSync(path.join(cwd, SIGNED_ARTIFACT.installTarget))).toBe(false);
+
+        // The positive half of the 'verify' stage's own conditional: this
+        // artifact DOES declare a signature, so the stage is emitted (and the
+        // pull then fails on it) -- where an unsigned artifact never claims to
+        // have verified anything at all.
+        expect(session.takeProgressLines().map((line) => line.stage)).toContain('verify');
       } finally {
         await session.close();
         await teardownTestRemote(signedRemoteDir);

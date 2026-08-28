@@ -35,6 +35,47 @@ describe('ManifestSchema', () => {
     }
   });
 
+  describe('install_target', () => {
+    // The schema deliberately ALLOWS a root install_target. An earlier version
+    // rejected it and broke a real artifact: `react-vite-lint-scaffold` is a
+    // lint/tooling scaffold whose whole job is to drop eslint.config.js,
+    // .prettierrc and friends at the project root, so a root target is the
+    // correct shape for it. And because discoverManifests treated an invalid
+    // manifest as fatal, that one rejection blanked the entire 227-artifact
+    // catalog.
+    //
+    // The hazard was never `pull` -- copying files into the project root is
+    // just what a scaffold does. It is `remove`, which recursively deletes the
+    // path. That guard lives in removeArtifact (`allowRoot: false`), where the
+    // deletion actually happens, and is covered by removeArtifact.test.ts.
+    it('allows a root install_target, which a scaffold legitimately needs', () => {
+      for (const install_target of ['.', './']) {
+        const result = ManifestSchema.safeParse({ ...baseManifest, install_target });
+        expect(result.success, `expected ${JSON.stringify(install_target)} to be accepted`).toBe(true);
+      }
+    });
+
+    it('rejects a path that escapes the project root', () => {
+      for (const install_target of ['..', '../elsewhere', 'a/../../elsewhere']) {
+        const result = ManifestSchema.safeParse({ ...baseManifest, install_target });
+        expect(result.success, `expected ${JSON.stringify(install_target)} to be rejected`).toBe(false);
+      }
+    });
+
+    it('still accepts ordinary subdirectory targets', () => {
+      for (const install_target of [
+        'design-kit',
+        'some/target',
+        './src/lib/auth',
+        'src/app/api/auth',
+        '.claude/agents/my-agent.md',
+      ]) {
+        const result = ManifestSchema.safeParse({ ...baseManifest, install_target });
+        expect(result.success, `expected ${JSON.stringify(install_target)} to be accepted`).toBe(true);
+      }
+    });
+  });
+
   it('rejects a malformed (non-semver) version', () => {
     const result = ManifestSchema.safeParse({ ...baseManifest, version: 'v1' });
     expect(result.success).toBe(false);

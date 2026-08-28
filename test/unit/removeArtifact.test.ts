@@ -148,7 +148,53 @@ describe('removeArtifact', () => {
     await expect(removeArtifact(cwd, 'never-pulled')).rejects.toThrow(ArtifactNotPulledError);
   });
 
-  it('falls back to resolving installTarget via the manifest when the lockfile entry has no installTarget recorded (old-shape entry)', async () => {
+  // THE data-loss regression. `resolveContainedPath` used to treat
+  // `resolved === root` as contained, and removeArtifact fed that straight
+  // into rmDirWithRetry -- so a recorded install location of the project
+  // root itself deleted the user's entire project. DeliveryOS's own
+  // starter-kit scanner emitted exactly that value ('.') and printed it as
+  // a ready-to-paste `--install-target "."`.
+  it('refuses to delete the project root, even when the lockfile records it as the install target', async () => {
+    writeRegistry(['test-remote']);
+    writeManifest('test-remote', { id: 'root-target-plugin', install_target: 'irrelevant' });
+
+    // Real, user-owned project content that must survive.
+    fs.writeFileSync(path.join(cwd, 'important-source.ts'), 'export const keep = true;', 'utf-8');
+    fs.mkdirSync(path.join(cwd, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(cwd, 'src', 'app.ts'), 'console.log("keep me");', 'utf-8');
+
+    await upsertEntry(cwd, {
+      id: 'root-target-plugin',
+      version: '1.0.0',
+      remote: 'test-remote',
+      installTarget: cwd,
+    });
+
+    await expect(removeArtifact(cwd, 'root-target-plugin')).rejects.toThrow(ArtifactNotPulledError);
+
+    // The project is still there.
+    expect(fs.existsSync(path.join(cwd, 'important-source.ts'))).toBe(true);
+    expect(fs.existsSync(path.join(cwd, 'src', 'app.ts'))).toBe(true);
+    expect(fs.existsSync(cwd)).toBe(true);
+  });
+
+  it('refuses a recorded install target of "." for the same reason', async () => {
+    writeRegistry(['test-remote']);
+    writeManifest('test-remote', { id: 'dot-target-plugin', install_target: 'irrelevant' });
+    fs.writeFileSync(path.join(cwd, 'important-source.ts'), 'export const keep = true;', 'utf-8');
+
+    await upsertEntry(cwd, {
+      id: 'dot-target-plugin',
+      version: '1.0.0',
+      remote: 'test-remote',
+      installTarget: '.',
+    });
+
+    await expect(removeArtifact(cwd, 'dot-target-plugin')).rejects.toThrow(ArtifactNotPulledError);
+    expect(fs.existsSync(path.join(cwd, 'important-source.ts'))).toBe(true);
+  });
+
+  it('refuses to remove an old-shape entry with no recorded installTarget, rather than trusting the remote manifest', async () => {
     writeRegistry(['test-remote']);
     writeManifest('test-remote', { id: 'old-shape-plugin', install_target: 'installed' });
 
@@ -160,12 +206,19 @@ describe('removeArtifact', () => {
     // lockfile entry written before these fields existed looks like.
     await upsertEntry(cwd, { id: 'old-shape-plugin', version: '1.0.0', remote: 'test-remote' });
 
-    const result = await removeArtifact(cwd, 'old-shape-plugin');
+    // Regression: this used to fall back to re-reading `install_target` from
+    // the manifest at REMOVAL time and recursively delete whatever it
+    // resolved to. `install_target` is a remote-controlled, mutable field,
+    // so that let whoever controls the remote choose the delete target --
+    // and could be changed after the artifact was already installed.
+    // Refusing costs the user one `pull` and removes the whole class of bug.
+    await expect(removeArtifact(cwd, 'old-shape-plugin')).rejects.toThrow(ArtifactNotPulledError);
 
-    expect(result.removedInstallTarget).toBe(true);
-    expect(fs.existsSync(installTarget)).toBe(false);
+    // Nothing was touched, and the lockfile entry is left intact so the
+    // user can re-pull and retry.
+    expect(fs.existsSync(path.join(installTarget, 'payload.txt'))).toBe(true);
     const lockfile = readLockfile(cwd);
-    expect(lockfile.entries.find((e) => e.id === 'old-shape-plugin')).toBeUndefined();
+    expect(lockfile.entries.find((e) => e.id === 'old-shape-plugin')).toBeDefined();
   });
 
   it('never deletes anything outside cwd even when a wiredFiles entry is crafted to escape it', async () => {

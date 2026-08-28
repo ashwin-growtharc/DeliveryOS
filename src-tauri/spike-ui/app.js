@@ -33,6 +33,20 @@
     both_changed: 'Both changed',
   };
 
+  /** The human label for a localStatus, never `undefined`.
+   *
+   * Every call site used to index STATUS_LABELS directly, so any status the
+   * engine reports outside these five keys rendered the literal string
+   * "undefined" into a badge -- and injected an unknown class alongside it,
+   * so the badge lost its styling too. localStatus is computed engine-side
+   * and can gain values without this map being updated in the same change,
+   * which is exactly the kind of drift a fallback exists for. Showing the raw
+   * status is more useful than showing nothing: it is at least the truth, and
+   * it names the missing key for whoever has to add it. */
+  function statusLabel(status) {
+    return STATUS_LABELS[status] ?? String(status ?? 'Unknown');
+  }
+
   // ---------- kind icon (Browse's cards, Detail, Tag Folder/Scan rows) ----------
   //
   // A small, distinct mark per kind, plus a warm accent tint -- never the
@@ -53,10 +67,15 @@
   // saturated accent left unchanged across themes on purpose -- the fixed
   // dark text pairs with it fine regardless of theme.
   const KIND_ICON = {
-    agent: { icon: 'i-kind-agent', bg: 'var(--sage-100)', fg: 'var(--sage-700)' },
+    agent: { icon: 'i-kind-agent', bg: 'var(--sage-100)', fg: 'var(--icon-fg-sage)' },
     skill: { icon: 'i-kind-skill', bg: 'var(--sand-100)', fg: 'var(--icon-fg-warm)' },
     command: { icon: 'i-kind-command', bg: 'var(--sky-100)', fg: 'var(--icon-fg-cool)' },
-    rule: { icon: 'i-kind-rule', bg: 'var(--sage-50)', fg: 'var(--primary-700)' },
+    // Uses --ink for the same reason `doc` below does: --primary-700 is
+    // deliberately FIXED (brand-fill only), so pairing it with a background
+    // that adapts leaves this one swatch unreadable in the other theme.
+    // --sage-50 had additionally never been given a dark value at all, so
+    // this tile rendered near-white with navy text on a dark page.
+    rule: { icon: 'i-kind-rule', bg: 'var(--sage-50)', fg: 'var(--ink)' },
     template: { icon: 'i-kind-template', bg: 'var(--gold-500)', fg: '#6B4A00' },
     // A shade deeper than skill's own sand-100 -- stays in the same warm
     // family (backend-plugin reads as "a utility kind," same spirit as
@@ -209,6 +228,22 @@
     return document.getElementById(id);
   }
 
+  /** Scrolls the content region back to its top.
+   *
+   * Both view-switching paths used to call window.scrollTo(0, 0). That worked
+   * while the whole PAGE scrolled -- but the page no longer scrolls: the shell
+   * is pinned to the viewport and `.content-scroll` is the one scrolling
+   * region, so scrolling the window is now a silent no-op. Without this,
+   * switching views would land you wherever the previous view was scrolled to,
+   * which is exactly the bug showView's own comment records having fixed
+   * once already. */
+  function scrollContentToTop() {
+    const region = document.querySelector('.content-scroll');
+    if (region) region.scrollTop = 0;
+    // Belt and braces for any context where the page itself can still scroll.
+    window.scrollTo(0, 0);
+  }
+
   function entryKey(entry) {
     return `${entry.manifest.id}::${entry.remoteName}`;
   }
@@ -282,6 +317,129 @@
     }, linkUrl ? 12000 : 5000);
   }
 
+  /** Renders a real error state into `container`, replacing its contents.
+   *
+   * The app had no error state at all. Every failed load fired a toast and
+   * then set its list to [], so the screen showed "No artifacts match." --
+   * a failure was indistinguishable from an empty catalog, and the toast
+   * carrying the actual reason vanished after five seconds. The design kit
+   * this product ships says exactly this is wrong: "EmptyState is for
+   * 'nothing here yet', never for a failure -- a failed fetch is ErrorState."
+   *
+   * `detail` is the engine's own message, shown verbatim rather than
+   * paraphrased -- the whole point of the sidecar's error contract is that a
+   * real git or filesystem error reaches the user intact. `onRetry`, when
+   * given, renders the one action that can actually help; the kit's guidance
+   * is to omit it when retrying cannot (a 404), so callers decide. */
+  function renderErrorState(container, title, detail, onRetry) {
+    container.innerHTML = '';
+    const wrap = document.createElement('div');
+    wrap.className = 'error-state';
+    wrap.setAttribute('role', 'alert');
+
+    const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    icon.setAttribute('class', 'glyph');
+    icon.setAttribute('aria-hidden', 'true');
+    const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+    use.setAttribute('href', '#i-alert');
+    icon.appendChild(use);
+    wrap.appendChild(icon);
+
+    const body = document.createElement('div');
+    body.className = 'error-state-body';
+    const titleEl = document.createElement('div');
+    titleEl.className = 'error-state-title';
+    titleEl.textContent = title;
+    body.appendChild(titleEl);
+
+    if (detail) {
+      const detailEl = document.createElement('div');
+      detailEl.className = 'error-state-detail';
+      // textContent, not innerHTML: this string comes from the engine and can
+      // contain anything a git or filesystem error contains.
+      detailEl.textContent = detail;
+      body.appendChild(detailEl);
+    }
+
+    if (onRetry) {
+      const actions = document.createElement('div');
+      actions.className = 'error-state-actions';
+      const retry = document.createElement('button');
+      retry.type = 'button';
+      retry.className = 'btn btn-sm';
+      retry.textContent = 'Try again';
+      retry.addEventListener('click', () => void onRetry());
+      actions.appendChild(retry);
+      body.appendChild(actions);
+    }
+
+    wrap.appendChild(body);
+    container.appendChild(wrap);
+  }
+
+  /** Fills `container` with a shape-matched loading skeleton.
+   *
+   * `shape` names what is coming, so the placeholder resembles it:
+   *   'chips'  a row of short status pills   (connection status)
+   *   'fields' stacked label + input pairs   (install params / configuration)
+   *   'cards'  a few tall blocks             (wiring actions)
+   *
+   * This replaces three separate "spinner + Loading..." blocks that used to
+   * appear simultaneously when opening one artifact. Their markup was
+   * identical -- the code comments even say "same pattern" -- but they
+   * rendered into three differently-styled containers, so a single action
+   * produced three competing spinners in three places and no sense of what
+   * was actually loading. Skeletons recede instead of competing, and because
+   * they are shaped like the real content nothing jumps when it arrives. */
+  function renderSkeleton(container, shape, count = 3) {
+    container.innerHTML = '';
+    const group = document.createElement('div');
+    group.className = 'skeleton-group';
+    // Announced as busy rather than as content: a screen reader should hear
+    // "loading", not read out a pile of empty placeholder boxes.
+    group.setAttribute('aria-busy', 'true');
+    group.setAttribute('aria-live', 'polite');
+    group.setAttribute('aria-label', 'Loading');
+
+    if (shape === 'chips') {
+      const row = document.createElement('div');
+      row.style.display = 'flex';
+      row.style.gap = 'var(--space-2)';
+      for (let i = 0; i < count; i += 1) {
+        const chip = document.createElement('span');
+        chip.className = 'skeleton skeleton-line';
+        chip.style.width = `${70 + i * 24}px`;
+        chip.style.height = '20px';
+        chip.style.marginBottom = '0';
+        row.appendChild(chip);
+      }
+      group.appendChild(row);
+    } else if (shape === 'fields') {
+      for (let i = 0; i < count; i += 1) {
+        const label = document.createElement('div');
+        label.className = 'skeleton skeleton-line';
+        label.style.width = '120px';
+        group.appendChild(label);
+        const input = document.createElement('div');
+        input.className = 'skeleton skeleton-block';
+        input.style.height = '36px';
+        group.appendChild(input);
+      }
+    } else {
+      for (let i = 0; i < count; i += 1) {
+        const block = document.createElement('div');
+        block.className = 'skeleton skeleton-block';
+        group.appendChild(block);
+      }
+    }
+    container.appendChild(group);
+  }
+
+  /** The message text out of any thrown value, for display. */
+  function errorText(err) {
+    return err instanceof Error ? err.message : String(err);
+  }
+
   function toastSuccess(message, linkUrl, linkLabel) {
     showToast('success', message, linkUrl, linkLabel);
   }
@@ -305,12 +463,42 @@
    * call would capture "Working..." as its own "original" label and leave
    * the button stuck on it forever once both calls finish. */
   async function withBusy(button, busyLabel, fn) {
+    // The button KEEPS its own label and gains a spinner. It used to have its
+    // label replaced with a generic word, which is why several buttons in
+    // flight at once all read "Working..." and you could not tell which action
+    // was actually running -- reported directly as "3 different loading
+    // buttons in a single screen which I don't know what is loading".
+    //
+    // There were 28 call sites using 11 different busy labels, five of them
+    // the contentless "Working...", and the same word spelled two ways
+    // ('Checking...' four times, 'Checking…' once). Keeping the real
+    // label makes all of that moot: "Pull" stays "Pull" and simply shows it is
+    // working, so the running action names itself.
+    //
+    // `busyLabel` is still accepted -- every call site passes one -- but it is
+    // now used only for assistive tech, via aria-label, rather than being
+    // shown. That keeps a screen reader's announcement specific without
+    // making the visible UI ambiguous.
     if (button.dataset.idleLabel === undefined) {
       button.dataset.idleLabel = button.textContent;
     }
     button._busyCount = (button._busyCount || 0) + 1;
-    button.disabled = true;
-    button.textContent = busyLabel;
+
+    if (button._busyCount === 1) {
+      button.disabled = true;
+      // aria-busy is the standard signal that this control's content is being
+      // updated; the label stays readable rather than being swapped out.
+      button.setAttribute('aria-busy', 'true');
+      if (busyLabel) {
+        button.dataset.idleAriaLabel = button.getAttribute('aria-label') ?? '';
+        button.setAttribute('aria-label', `${button.dataset.idleLabel.trim()} — ${busyLabel}`);
+      }
+      const spinner = document.createElement('span');
+      spinner.className = 'spinner btn-spinner';
+      spinner.setAttribute('aria-hidden', 'true');
+      button.prepend(spinner);
+    }
+
     try {
       return await fn();
     } finally {
@@ -318,7 +506,14 @@
       if (button._busyCount <= 0) {
         button._busyCount = 0;
         button.disabled = false;
-        button.textContent = button.dataset.idleLabel;
+        button.removeAttribute('aria-busy');
+        const restored = button.dataset.idleAriaLabel;
+        if (restored !== undefined) {
+          if (restored) button.setAttribute('aria-label', restored);
+          else button.removeAttribute('aria-label');
+          delete button.dataset.idleAriaLabel;
+        }
+        button.querySelector('.btn-spinner')?.remove();
       }
     }
   }
@@ -372,7 +567,7 @@
     // Tag Folder both navigate in via showViewRaw (below), which already
     // calls this same reset right before rendering, so this doesn't clear
     // anything they're about to show.
-    resetProgressPanel();
+    hideProgressPanel();
     for (const section of document.querySelectorAll('.view')) {
       section.hidden = section.id !== `view-${view}`;
     }
@@ -386,7 +581,7 @@
     // content is now much shorter per-tab than the old one-long-scroll
     // layout, so landing mid-page reads as genuinely broken rather than
     // just "a bit off").
-    window.scrollTo(0, 0);
+    scrollContentToTop();
     if (view === 'browse') {
       void loadCatalog();
     } else if (view === 'tags') {
@@ -426,8 +621,14 @@
     await withBusy(refreshBtn, 'Working...', async () => {
       try {
         state.catalog = await call('catalog.list', { cwd: state.projectDir });
+        // Cleared on success, so a recovered load stops showing the old error.
+        state.catalogError = null;
       } catch (err) {
         toastError(err);
+        // Recorded, not just toasted. Setting the catalog to [] and relying on
+        // a 5-second toast to explain why is how a failed load ended up
+        // looking exactly like an empty catalog.
+        state.catalogError = errorText(err);
         state.catalog = [];
       }
       renderChips();
@@ -454,8 +655,10 @@
     await withBusy(refreshBtn, 'Refreshing...', async () => {
       try {
         state.catalog = await call('catalog.refresh', { cwd: state.projectDir });
+        state.catalogError = null;
       } catch (err) {
         toastError(err);
+        state.catalogError = errorText(err);
       }
       renderChips();
       renderCards();
@@ -592,8 +795,8 @@
         );
       }
       if (state.sortBy === 'status') {
-        const labelA = STATUS_LABELS[displayStatus(a)];
-        const labelB = STATUS_LABELS[displayStatus(b)];
+        const labelA = statusLabel(displayStatus(a));
+        const labelB = statusLabel(displayStatus(b));
         return labelA.localeCompare(labelB) || a.manifest.id.localeCompare(b.manifest.id);
       }
       if (state.sortBy === 'edited') {
@@ -1164,7 +1367,18 @@
   // before the next render" discipline as clearDetailTemplateListeners.
   let markdownIframeMessageHandlers = [];
 
+  /** Every markdown iframe currently on screen, as { container, markdownText }.
+   *
+   * buildMarkdownDocument bakes the theme into the iframe's srcdoc at RENDER
+   * time -- it has to, because a sandboxed document cannot read the parent
+   * page's custom properties (see that function's own comment). So toggling
+   * the app theme did nothing to an already-open README: it stayed in the old
+   * theme until you navigated away and came back. Keeping the source markdown
+   * here lets toggleTheme re-render them in place. */
+  let mountedMarkdownIframes = [];
+
   function clearMarkdownIframeListeners() {
+    mountedMarkdownIframes = [];
     for (const handler of markdownIframeMessageHandlers) {
       window.removeEventListener('message', handler);
     }
@@ -1211,6 +1425,12 @@
   // loadTemplateComponentPreview), so a card that finishes loading AFTER
   // the toggle was already flipped still self-syncs correctly with no
   // queuing logic needed.
+  // Initialised from the app's REAL current theme, not a hardcoded 'light'.
+  // Hardcoding it meant that running the app in dark mode and opening a
+  // template's Components tab rendered every preview light -- sitting right
+  // next to its own second Light/Dark switch, which is how the mismatch was
+  // visible without being obviously a bug. Assigned in initTheme() rather
+  // than here, since getEffectiveTheme reads the DOM.
   let currentTemplateTheme = 'light';
 
   // Note: renderBuildFixRow/renderWiringMergeRow each keep their OWN
@@ -1569,7 +1789,7 @@
     // both awaits resolved, a real inconsistency next to every other
     // async wait in Detail that DOES show this. Cleared the moment real
     // chips are ready to render (panel.innerHTML = '' below).
-    panel.innerHTML = '<span class="spinner" aria-hidden="true"></span> Loading…';
+    renderSkeleton(panel, 'chips', 3);
     panel.hidden = false;
 
     // Signed/unsigned is deliberately NOT repeated here -- detail-provenance-badge
@@ -1652,6 +1872,36 @@
       panel.appendChild(el);
     }
 
+    // "Verify build" runs the CONSUMING PROJECT's build (artifact.verifyBuild
+    // -> the same runProjectBuild every other build-verify step already uses),
+    // so it only means anything for an artifact that can actually break that
+    // build: one that edits the project's own source/config (wiring_actions),
+    // needs configuration wired into it (install_params), or runs a command on
+    // install (post_install). An artifact whose entire payload is copied into a
+    // folder of its own -- a skill's SKILL.md under .claude/skills/, a doc, a
+    // template -- cannot affect the build at all.
+    //
+    // Found by direct user feedback: a pulled skill showed a status panel
+    // containing nothing but "Build -- not checked yet" and a "Verify build"
+    // button, and clicking it turned that into a green "Build passing" that
+    // read as if the SKILL.md had itself been built and validated. It had not
+    // -- that was the host project's unrelated build, which would have said
+    // exactly the same thing with the artifact deleted. Same hasLifecycle gate,
+    // and the same "data, not kind" convention, that renderLifecycleExplainer
+    // already uses.
+    const hasLifecycle = (manifest.install_params && manifest.install_params.length > 0)
+      || (manifest.wiring_actions && manifest.wiring_actions.length > 0)
+      || !!manifest.post_install;
+
+    if (!hasLifecycle) {
+      // chips is necessarily empty here -- its only two sources are
+      // install_params and wiring_actions, both of which hasLifecycle covers --
+      // so with the build row gone too there is nothing left to render. Hide
+      // the panel rather than leave an unexplained empty strip above the tabs.
+      panel.hidden = true;
+      return;
+    }
+
     const buildChip = document.createElement('span');
     buildChip.className = 'status-chip neutral';
     buildChip.textContent = 'Build -- not checked yet';
@@ -1724,7 +1974,7 @@
       // nothing at all while the RPC below was in flight (or, worse, a
       // PREVIOUS artifact's still-rendered fields), the one gap left when
       // that pattern was applied to its two siblings.
-      fieldsContainer.innerHTML = '<span class="spinner" aria-hidden="true"></span> Loading…';
+      renderSkeleton(fieldsContainer, 'fields', 2);
       try {
         const result = await call('artifact.readInstallParamValues', {
           id: manifest.id,
@@ -1875,6 +2125,20 @@
     };
     window.addEventListener('message', handler);
     markdownIframeMessageHandlers.push(handler);
+    mountedMarkdownIframes.push({ container, markdownText });
+  }
+
+  /** Re-renders every open markdown iframe in the current theme. Called from
+   * toggleTheme, because the theme is baked into each iframe's srcdoc rather
+   * than inherited. Rebuilding is cheap (the markdown is already in memory)
+   * and is the only way to re-theme a sandboxed document. */
+  function refreshMarkdownIframeThemes() {
+    if (mountedMarkdownIframes.length === 0) return;
+    const open = mountedMarkdownIframes.slice();
+    clearMarkdownIframeListeners();
+    for (const { container, markdownText } of open) {
+      if (container.isConnected) renderMarkdownToSandboxedIframe(container, markdownText);
+    }
   }
 
   /** Wraps already-rendered (HTML-escaped-raw-HTML) markdown output into
@@ -2424,7 +2688,7 @@ ${bodyHtml}
     // showing a PREVIOUS artifact's stale cards) until resolveWiringActions
     // resolved, with no indication anything was happening.
     section.hidden = false;
-    container.innerHTML = '<span class="spinner" aria-hidden="true"></span> Loading…';
+    renderSkeleton(container, 'cards', 2);
 
     let resolved;
     try {
@@ -2479,10 +2743,24 @@ ${bodyHtml}
       card.appendChild(instructionsEl);
 
       if (action.snippet) {
+        // Collapsed by default. A backend-plugin routinely declares three or
+        // four wiring actions, and rendering every snippet expanded turned
+        // this section into an undifferentiated wall of code you had to scroll
+        // past to reach the actions -- the file path and status, which are the
+        // things you actually scan, were lost in it. The summary line carries
+        // the useful facts (which file, how many lines) so the code is one
+        // click away rather than always in the way.
+        const lineCount = action.snippet.split('\n').length;
+        const disclosure = document.createElement('details');
+        disclosure.className = 'wiring-action-code';
+        const summary = document.createElement('summary');
+        summary.textContent = `Show the ${lineCount}-line snippet`;
+        disclosure.appendChild(summary);
         const snippetEl = document.createElement('pre');
         snippetEl.className = 'wiring-action-snippet';
         snippetEl.textContent = action.snippet;
-        card.appendChild(snippetEl);
+        disclosure.appendChild(snippetEl);
+        card.appendChild(disclosure);
       }
 
       // Backend plug-and-play: the target file already existing used to
@@ -3012,6 +3290,10 @@ ${bodyHtml}
     const statusEl = $('wire-terminal-status');
     const container = $('wire-terminal-container');
     container.innerHTML = '';
+    // Remember where focus came from so closing can put it back, and start
+    // listening for Escape/Tab only while the overlay is actually open.
+    wireTerminalReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    document.addEventListener('keydown', handleWireTerminalKeydown, true);
     overlay.hidden = false;
     statusEl.textContent = 'Starting…';
 
@@ -3079,6 +3361,54 @@ ${bodyHtml}
    * one). `silent` skips both the confirm and the fade-out, used when
    * `openWireTerminal` replaces an already-finished/already-confirmed
    * previous session rather than the user explicitly closing one. */
+  /** The element focus should return to when the terminal overlay closes.
+   * Captured at open time, because focus is inside the overlay by then and
+   * the browser will drop it to <body> otherwise -- which silently loses a
+   * keyboard user's place in the page. */
+  let wireTerminalReturnFocus = null;
+
+  /** Keeps Tab inside the open overlay.
+   *
+   * The overlay covers the viewport at z-index 2000, but nothing stopped Tab
+   * walking out of it into the page behind -- which is still fully
+   * interactive, just visually dimmed. A keyboard user could tab to controls
+   * they cannot see and act on the app underneath a modal shell running a
+   * live terminal. */
+  function trapWireTerminalFocus(ev) {
+    if (ev.key !== 'Tab') return;
+    const overlay = $('wire-terminal-overlay');
+    if (overlay.hidden) return;
+    const focusable = overlay.querySelectorAll(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]),'
+      + ' textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    );
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    // The xterm canvas takes focus itself and is not in the list above, so
+    // only wrap when focus is genuinely on an edge control.
+    if (!ev.shiftKey && document.activeElement === last) {
+      ev.preventDefault();
+      first.focus();
+    } else if (ev.shiftKey && document.activeElement === first) {
+      ev.preventDefault();
+      last.focus();
+    }
+  }
+
+  /** Escape closes the overlay, the way every modal is expected to.
+   * Deliberately routed through closeWireTerminal so it still asks for
+   * confirmation when a claude session is genuinely still running -- Escape
+   * should be an exit, not a way to skip a warning. */
+  function handleWireTerminalKeydown(ev) {
+    if (ev.key === 'Escape' && !$('wire-terminal-overlay').hidden) {
+      ev.preventDefault();
+      void closeWireTerminal();
+      return;
+    }
+    trapWireTerminalFocus(ev);
+  }
+
   async function closeWireTerminal(opts = {}) {
     if (!wireTerminalState) return;
     if (wireTerminalState.sessionActive && !opts.silent) {
@@ -3102,6 +3432,12 @@ ${bodyHtml}
 
     $('wire-terminal-overlay').hidden = true;
     $('wire-terminal-container').innerHTML = '';
+    document.removeEventListener('keydown', handleWireTerminalKeydown, true);
+    // Put focus back where it was, rather than letting it fall to <body>.
+    if (wireTerminalReturnFocus && wireTerminalReturnFocus.isConnected) {
+      wireTerminalReturnFocus.focus();
+    }
+    wireTerminalReturnFocus = null;
   }
 
   /** Phase 11 Detail-view task: renders design-kit's color tokens/type
@@ -3915,7 +4251,7 @@ ${bodyHtml}
       return;
     }
     await withBusy(btn, 'Pulling...', async () => {
-      await beginProgress();
+      const opKey = await beginProgress();
       let succeeded = 0;
       const failures = [];
       // Every artifact pulled here shares the same `cwd`/`.gitignore`, so a
@@ -3955,7 +4291,7 @@ ${bodyHtml}
           failures.push(`${entry.manifest.id}: ${err instanceof Error ? err.message : String(err)}`);
         }
       }
-      endProgress(failures.length === 0);
+      endProgress(failures.length === 0, opKey);
 
       if (succeeded > 0) {
         // "Pulled" (not "processed"/"handled") stays the right word even
@@ -4030,7 +4366,7 @@ ${bodyHtml}
     state.activeTagValue = value;
     state.tagFolderSearch = '';
     $('tag-folder-search').value = '';
-    resetProgressPanel();
+    hideProgressPanel();
     renderTagFolder();
     showViewRaw('tag-folder');
   }
@@ -4084,7 +4420,7 @@ ${bodyHtml}
           ${kindSwatchHtml(entry.manifest.kind, 'sm')}
           <div class="row-main">
             <span class="name">${escapeHtml(entry.manifest.id)}</span>
-            <span class="badge ${status}">${STATUS_LABELS[status]}</span>
+            <span class="badge ${status}">${statusLabel(status)}</span>
             <span class="summary">${escapeHtml(entry.manifest.description)}</span>
           </div>
         `;
@@ -4140,7 +4476,7 @@ ${bodyHtml}
     card.querySelector('.kind-label').textContent = entry.manifest.kind;
     card.querySelector('.summary').textContent = entry.manifest.description;
     card.querySelector('.meta').textContent = `v${entry.manifest.version} · ${entry.manifest.owner}`;
-    card.querySelector('.badge').textContent = STATUS_LABELS[status];
+    card.querySelector('.badge').textContent = statusLabel(status);
     card.addEventListener('click', () => openDetail(entry));
     return card;
   }
@@ -4151,6 +4487,25 @@ ${bodyHtml}
 
     const entries = filteredEntries();
     grid.innerHTML = '';
+
+    // A failed load is NOT an empty catalog. Showing "No artifacts match."
+    // after `catalog.list` threw is actively misleading -- it reads as "your
+    // remote has nothing in it" when the truth is "we could not reach it".
+    const errorHost = $('browse-error');
+    if (state.catalogError) {
+      errorHost.hidden = false;
+      renderErrorState(
+        errorHost,
+        'Could not load the catalog',
+        state.catalogError,
+        () => refreshCatalogFromRemotes(),
+      );
+      $('browse-empty').hidden = true;
+      return;
+    }
+    errorHost.hidden = true;
+    errorHost.innerHTML = '';
+
     $('browse-empty').hidden = entries.length !== 0;
     $('browse-empty').textContent =
       state.search.trim() || state.activeKinds.size > 0
@@ -4169,7 +4524,7 @@ ${bodyHtml}
    * own inline button inside a Tag Folder view. */
   async function runArtifactAction(entry, action, button) {
     await withBusy(button, 'Working...', async () => {
-      await beginProgress();
+      await beginProgress(entry);
       try {
         if (action === 'applyUpdate') {
           const [result] = await call('artifact.applyUpdate', {
@@ -4222,7 +4577,7 @@ ${bodyHtml}
               // Surface the real build output where it's actually visible
               // -- reuses the existing progress log rather than inventing
               // a new UI surface for this.
-              appendProgressLine('build', build.output || 'Build failed.');
+              recordProgress(entry, 'build', build.output || 'Build failed.');
               // Phase 10 item 2: offer to try fixing one of the files this
               // same pull just auto-wired -- never any other file. Never
               // offered for a timeout or a missing build tool (Phase 13's
@@ -4254,10 +4609,10 @@ ${bodyHtml}
           });
           toastSuccess(`Pushed ${entry.manifest.id}: opened PR #${result.number}`, result.url);
         }
-        endProgress(true);
+        endProgress(true, entry);
         await loadCatalog();
       } catch (err) {
-        endProgress(false);
+        endProgress(false, entry);
         toastError(err);
       }
     });
@@ -4286,10 +4641,10 @@ ${bodyHtml}
    * failure (after marking the progress panel failed) so each caller can
    * apply its own error handling. */
   async function checkForArtifactUpdatesCore() {
-    await beginProgress();
+    const opKey = await beginProgress();
     try {
       const updates = await call('sync.checkForUpdates', { cwd: state.projectDir });
-      endProgress(true);
+      endProgress(true, opKey);
 
       for (const update of updates) {
         const entry = state.catalog.find(
@@ -4310,7 +4665,7 @@ ${bodyHtml}
 
       return updates;
     } catch (err) {
-      endProgress(false);
+      endProgress(false, opKey);
       throw err;
     }
   }
@@ -4381,10 +4736,10 @@ ${bodyHtml}
   async function handleCheckPushStatus(entry) {
     const btn = $('detail-check-push-status-btn');
     await withBusy(btn, 'Checking...', async () => {
-      await beginProgress();
+      await beginProgress(entry);
       try {
         const results = await resolvePendingPushesCore();
-        endProgress(true);
+        endProgress(true, entry);
 
         const mine = results.find(
           (r) => r.id === entry.manifest.id && r.remote === entry.remoteName,
@@ -4402,7 +4757,7 @@ ${bodyHtml}
         }
         refreshDetailIfShown(entry);
       } catch (err) {
-        endProgress(false);
+        endProgress(false, entry);
         toastError(err);
       }
     });
@@ -4432,13 +4787,13 @@ ${bodyHtml}
 
     const btn = $('detail-remove-btn');
     await withBusy(btn, 'Removing...', async () => {
-      await beginProgress();
+      await beginProgress(entry);
       try {
         const result = await call('artifact.remove', {
           id: entry.manifest.id,
           cwd: state.projectDir,
         });
-        endProgress(true);
+        endProgress(true, entry);
         toastSuccess(`Removed ${entry.manifest.id}.`);
 
         const followUps = [];
@@ -4455,7 +4810,7 @@ ${bodyHtml}
         await loadCatalog();
         refreshDetailIfShown(entry);
       } catch (err) {
-        endProgress(false);
+        endProgress(false, entry);
         toastError(err);
       }
     });
@@ -4471,20 +4826,20 @@ ${bodyHtml}
   async function handleSaveMetadataEdit(entry, metadataEdit) {
     const saveBtn = $('edit-save-btn');
     await withBusy(saveBtn, 'Saving...', async () => {
-      await beginProgress();
+      await beginProgress(entry);
       try {
         const result = await call('artifact.push', {
           id: entry.manifest.id,
           cwd: state.projectDir,
           options: { metadataEdit },
         });
-        endProgress(true);
+        endProgress(true, entry);
         toastSuccess(`Updated ${entry.manifest.id} metadata: opened PR #${result.number} (${result.url})`);
         $('detail-edit-form').hidden = true;
         await loadCatalog();
         refreshDetailIfShown(entry);
       } catch (err) {
-        endProgress(false);
+        endProgress(false, entry);
         toastError(err);
       }
     });
@@ -4532,68 +4887,212 @@ ${bodyHtml}
    * where an early progress line could otherwise arrive before anyone is
    * listening for it. Tears down any previous subscription first (there's
    * only ever one action in flight at a time, but this is defensive). */
-  async function beginProgress() {
+  /** ---- in-flight operation store ----
+   *
+   * Pull/push/update run in the sidecar and keep running whether or not you
+   * stay on the screen that started them. Progress used to be written STRAIGHT
+   * TO THE DOM by a listener that `resetProgressPanel()` tore down -- and
+   * `resetProgressPanel()` ran on every view switch. So navigating away
+   * mid-pull broke things in four separate ways, all of which show up as
+   * "if I go back while pulling, things are broken":
+   *
+   *   1. The listener was unsubscribed, so every remaining progress event for
+   *      a still-running pull was silently dropped.
+   *   2. Nothing anywhere indicated an operation was still running.
+   *   3. Coming back to the artifact showed an EMPTY panel, because the log
+   *      lived only in the DOM that had just been cleared.
+   *   4. Worst: `endProgress()` wrote "Done"/"Failed" into whatever panel
+   *      happened to be on screen. Start a pull, go back, open a different
+   *      artifact -- and the first pull's completion stamped the second
+   *      artifact's panel.
+   *
+   * The fix is to stop treating the DOM as the source of truth. An operation's
+   * stages accumulate here, keyed by artifact; the panel becomes a pure render
+   * of whichever record belongs to the artifact you are currently looking at.
+   * Navigating away now costs nothing, and coming back replays the log.
+   *
+   * Keyed by artifact: the engine's progress events carry no operation id, and
+   * `withBusy` already prevents two actions on one artifact at once, so one
+   * record per artifact is exactly the granularity available.
+   */
+  const operations = new Map();
+
+  /** The artifact whose operation is currently receiving progress events.
+   * Needed because `sidecar-progress` events are global and carry no id. */
+  let activeOperationId = null;
+
+  /** The single, session-long progress subscription. Installed once and never
+   * torn down -- the old code subscribed per action and unsubscribed on view
+   * change, which is precisely what lost events. */
+  let progressUnlistenGlobal = null;
+
+  async function installProgressListener() {
+    if (progressUnlistenGlobal) return;
+    try {
+      progressUnlistenGlobal = await listen('sidecar-progress', (event) => {
+        const { stage, message } = event.payload;
+        const op = activeOperationId ? operations.get(activeOperationId) : null;
+        if (!op) return;
+        op.lines.push({ stage, message });
+        // Only touch the DOM when this operation's artifact is on screen.
+        // Otherwise the record just accumulates, ready to be replayed.
+        if (isOperationDisplayed(op)) appendProgressLine(stage, message);
+      });
+    } catch {
+      // listen() failing is rare and non-fatal: operations still run and still
+      // reach completion, they just will not stream live stages.
+      progressUnlistenGlobal = null;
+    }
+  }
+
+  /** The operation the panel is currently rendering, or null. This is the
+   * single source of truth for "does the panel on screen belong to this
+   * operation".
+   *
+   * An earlier version asked `state.view === 'detail' && detailShownEntryKey
+   * === op.entryKey` instead, which was wrong twice over: `#detail-progress`
+   * is a PAGE-LEVEL panel (index.html:940, outside every `.view` section)
+   * deliberately shared by Browse's card buttons, Tag Folder rows and bulk
+   * pulls -- so every operation not started from Detail rendered a panel that
+   * then refused to accept its own progress lines or its own "Done", and sat
+   * frozen on "Working…" with an empty log. A bulk pull, keyed `__global__`,
+   * could never match a `detailShownEntryKey` at all, so it was dead by
+   * definition. */
+  let displayedOperationKey = null;
+
+  /** Appends a stage to an operation's record, and to the panel only if that
+   * operation is the one on screen.
+   *
+   * The engine's own progress events go through the listener above; this is
+   * for stages the FRONTEND generates -- currently the post-install build
+   * result. That line used to be written straight to `$('progress-log')`,
+   * which meant it appeared under whatever artifact happened to be displayed
+   * (so artifact A's build error showed up in artifact B's log), and it was
+   * never stored, so navigating away and back lost it permanently. */
+  function recordProgress(entry, stage, message) {
+    const key = entry ? entryKey(entry) : activeOperationId;
+    const op = key ? operations.get(key) : null;
+    if (op) op.lines.push({ stage, message });
+    if (!op || isOperationDisplayed(op)) appendProgressLine(stage, message);
+  }
+
+  /** True when the panel currently on screen genuinely belongs to `op`. */
+  function isOperationDisplayed(op) {
+    return displayedOperationKey === op.entryKey;
+  }
+
+  /** Renders an operation record into the panel from scratch. Used when
+   * opening a Detail view for an artifact that has one, so a log built while
+   * you were elsewhere is not lost. */
+  function renderOperationPanel(op) {
+    displayedOperationKey = op.entryKey;
     const panel = $('detail-progress');
     $('progress-log').innerHTML = '';
     $('build-fix-offers').innerHTML = '';
     $('build-fix-offers').hidden = true;
     panel.hidden = false;
     panel.classList.remove('done', 'error');
-    $('progress-status').textContent = 'Working…';
-
-    if (progressUnlisten) {
-      progressUnlisten();
-      progressUnlisten = null;
-    }
-    try {
-      progressUnlisten = await listen('sidecar-progress', (event) => {
-        const { stage, message } = event.payload;
-        appendProgressLine(stage, message);
-      });
-    } catch (err) {
-      // Every call site does `await beginProgress()` BEFORE its own try
-      // block (deliberately -- see this function's own doc comment about
-      // closing the race before the real sidecar call goes out), so a
-      // rejection here would otherwise propagate out of beginProgress
-      // itself, skip every caller's endProgress(false) in its catch
-      // block, and leave the panel stuck showing "Working…" forever.
-      // Caught here instead: progress LINES just won't stream live for
-      // this action (a real but narrow degradation -- listen() itself
-      // failing is rare), but the action itself still runs and still
-      // reaches its own endProgress() normally either way.
-      progressUnlisten = null;
+    for (const line of op.lines) appendProgressLine(line.stage, line.message);
+    if (op.status === 'running') {
+      $('progress-status').textContent = 'Working…';
+    } else {
+      panel.classList.add(op.status === 'done' ? 'done' : 'error');
+      $('progress-status').textContent = op.status === 'done' ? 'Done' : 'Failed';
     }
   }
 
-  /** Marks the progress panel as finished (success or failure) and tears
-   * down the event subscription. Deliberately does NOT hide or clear the
-   * panel/log -- the point is to leave the full stage history visible
-   * through to "Done"/"Failed", not wipe it the moment the action settles. */
-  function endProgress(success) {
-    const panel = $('detail-progress');
-    panel.classList.add(success ? 'done' : 'error');
-    $('progress-status').textContent = success ? 'Done' : 'Failed';
-    if (progressUnlisten) {
-      progressUnlisten();
-      progressUnlisten = null;
-    }
+  /** Shows the panel for whichever artifact Detail is about to display, or
+   * hides it when that artifact has no operation. Replaces the old
+   * "always wipe on navigate" behaviour. */
+  function syncProgressPanelToDetail(entry) {
+    const op = entry ? operations.get(entryKey(entry)) : null;
+    if (op) renderOperationPanel(op);
+    else hideProgressPanel();
   }
 
-  /** Resets the progress panel back to its hidden, empty idle state. Called
-   * only when a NEW Detail view is opened (openDetail(), below) -- never by
-   * renderDetail()/refreshDetailIfShown()'s post-action re-render, which
-   * must leave an in-progress or just-finished log alone. */
-  function resetProgressPanel() {
+  /** Hides and empties the panel WITHOUT touching any operation record or the
+   * global listener -- the two things the old resetProgressPanel destroyed. */
+  function hideProgressPanel() {
+    displayedOperationKey = null;
     const panel = $('detail-progress');
     panel.hidden = true;
     panel.classList.remove('done', 'error');
     $('progress-log').innerHTML = '';
     $('build-fix-offers').innerHTML = '';
     $('build-fix-offers').hidden = true;
-    if (progressUnlisten) {
-      progressUnlisten();
-      progressUnlisten = null;
+  }
+
+  /** Starts (or restarts) the operation record for `entry` and shows it.
+   *
+   * RETURNS the operation key. Callers must hand that key back to
+   * `endProgress` rather than relying on `activeOperationId` still pointing at
+   * them: with two operations overlapping (a bulk pull running while the user
+   * opens an artifact and pulls it individually), whichever finishes first
+   * cleared `activeOperationId`, so the second one's `endProgress` found no
+   * key at all and never marked its record done -- leaving the "Working…"
+   * indicator stuck on screen for the rest of the session with nothing able to
+   * clear it. */
+  async function beginProgress(entry) {
+    await installProgressListener();
+    const key = entry ? entryKey(entry) : `__op-${operationSeq += 1}`;
+    activeOperationId = key;
+    const op = { entryKey: key, status: 'running', lines: [], startedAt: Date.now() };
+    operations.set(key, op);
+    renderOperationPanel(op);
+    renderRunningIndicator();
+    return key;
+  }
+
+  /** Counter behind the synthetic keys used by operations with no single
+   * artifact (a bulk pull, an update check, Scan's propose). A fixed
+   * `'__global__'` string meant two such operations shared one record and
+   * overwrote each other. */
+  let operationSeq = 0;
+
+  /** Marks the operation finished. Only writes to the DOM if its artifact is
+   * still on screen -- otherwise a pull finishing in the background would
+   * stamp "Done" onto whatever unrelated artifact you navigated to. */
+  function endProgress(success, entryOrKey) {
+    const key = typeof entryOrKey === 'string'
+      ? entryOrKey
+      : (entryOrKey ? entryKey(entryOrKey) : activeOperationId);
+    const op = key ? operations.get(key) : null;
+    if (op) {
+      op.status = success ? 'done' : 'failed';
+      if (isOperationDisplayed(op)) {
+        const panel = $('detail-progress');
+        panel.classList.add(success ? 'done' : 'error');
+        $('progress-status').textContent = success ? 'Done' : 'Failed';
+      }
     }
+    if (activeOperationId === key) activeOperationId = null;
+    renderRunningIndicator();
+  }
+
+  /** A persistent, app-wide "work is still running" affordance in the context
+   * strip. Without it, navigating away from a pull left NO indication anywhere
+   * that anything was happening -- the operation simply finished later and a
+   * toast appeared out of nowhere. Clicking it returns to that artifact. */
+  function renderRunningIndicator() {
+    const host = $('running-indicator');
+    if (!host) return;
+    const running = [];
+    for (const op of operations.values()) {
+      if (op.status === 'running') running.push(op);
+    }
+    host.hidden = running.length === 0;
+    if (running.length === 0) return;
+    host.textContent = running.length === 1 ? 'Working…' : `Working… (${running.length})`;
+    // Only offer navigation when there is somewhere to navigate TO. A bulk
+    // pull or update check has no single artifact, and the click used to be
+    // silently swallowed -- worst on exactly the long-running batch operations
+    // you are most likely to have navigated away from.
+    const target = state.catalog.find((e) => entryKey(e) === running[0].entryKey);
+    host.onclick = target ? () => void openDetail(target) : null;
+    host.style.cursor = target ? 'pointer' : 'default';
+    host.title = target
+      ? `Working on ${target.manifest.id} -- click to open`
+      : `${running.length} operation(s) still running`;
   }
 
   /** Detail's Back button label per possible `state.detailReturnView` --
@@ -4626,7 +5125,10 @@ ${bodyHtml}
     }
     $('back-to-browse-btn').textContent =
       DETAIL_RETURN_LABELS[state.detailReturnView] ?? DETAIL_RETURN_LABELS.browse;
-    resetProgressPanel();
+    // Show whatever operation belongs to THIS artifact, replaying a log
+    // built while you were elsewhere. This used to wipe the panel
+    // unconditionally, which is why coming back mid-pull showed nothing.
+    syncProgressPanelToDetail(entry);
     renderDetail(entry);
     showViewRaw('detail');
   }
@@ -4644,7 +5146,7 @@ ${bodyHtml}
     }
     // Same scroll-reset showView already does -- openDetail/
     // openComponentDetail both navigate via THIS function, not showView.
-    window.scrollTo(0, 0);
+    scrollContentToTop();
   }
 
   /** Detail's top-level content tabs -- reuses the exact `.tab-row`/`.tab`/
@@ -4845,13 +5347,17 @@ ${bodyHtml}
     kindIconEl.innerHTML = `<svg><use href="#${kindIcon.icon}"/></svg>`;
     $('detail-kind').textContent = manifest.kind;
     $('detail-name').textContent = manifest.id;
-    $('detail-badge').textContent = STATUS_LABELS[status];
+    $('detail-badge').textContent = statusLabel(status);
     $('detail-badge').className = `badge ${status}`;
     $('detail-description').textContent = manifest.description;
     $('meta-kind').textContent = manifest.kind;
     $('meta-version').textContent = manifest.version;
     $('meta-owner').textContent = manifest.owner;
-    $('meta-refresh').textContent = manifest.refresh || '—';
+    // Hidden entirely when the artifact declares no refresh policy, which is
+    // most of them. It used to render an em-dash -- a row whose only content
+    // was "there is nothing here", taking up the same space as a real fact.
+    $('meta-refresh').textContent = manifest.refresh || '';
+    $('meta-refresh-item').hidden = !manifest.refresh;
 
     const tags = manifest.tags || { roles: [], teams: [], stacks: [], componentTypes: [] };
     const pills = [
@@ -4860,9 +5366,10 @@ ${bodyHtml}
       ...(tags.stacks || []).map((s) => `stack: ${s}`),
       ...(tags.componentTypes || []).map((c) => `component: ${c}`),
     ];
-    $('meta-tags').innerHTML = pills.length
-      ? pills.map((p) => `<span class="tag-pill">${escapeHtml(p)}</span>`).join('')
-      : '<span class="tag-pill">none</span>';
+    // Same reasoning as Refresh above: an artifact with no tags shows no Tags
+    // row, rather than a pill whose text is "none".
+    $('meta-tags').innerHTML = pills.map((p) => `<span class="tag-pill">${escapeHtml(p)}</span>`).join('');
+    $('meta-tags-item').hidden = pills.length === 0;
 
     // Provenance badge: honest about what's actually been verified. No
     // artifact has a real signature yet (Phase 7's item 3, the actual
@@ -4961,7 +5468,8 @@ ${bodyHtml}
     // data, activity data, both, or neither.
     void renderActivitySection(entry);
 
-    $('detail-install-path').textContent = entry.installTarget;
+    $('detail-install-path').textContent = entry.installTarget ?? '';
+    $('meta-install-item').hidden = !entry.installTarget;
 
     const openFolderBtn = $('detail-open-folder-btn');
     if (entry.localStatus !== 'not_pulled') {
@@ -5259,7 +5767,9 @@ ${bodyHtml}
     templateThemePicker = createSingleChipPicker($('detail-template-theme-toggle'));
     templateThemePicker.setOptions(
       [{ value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }],
-      'light',
+      // Seeded from the app's real theme, not a hardcoded 'light' -- otherwise
+      // this control claims "Light" while sitting inside a dark app.
+      getEffectiveTheme(),
     );
     templateThemePicker.onChange((theme) => {
       currentTemplateTheme = theme;
@@ -5267,6 +5777,29 @@ ${bodyHtml}
         iframe.contentWindow.postMessage({ type: 'setTheme', theme }, '*');
       }
     });
+  }
+
+  /** Points the template-preview grid's own Light/Dark control at whatever
+   * the app theme currently is, and pushes that to any preview iframe already
+   * mounted.
+   *
+   * There are two theme systems here: the global one (a data-theme attribute
+   * on <html>) and this one (a postMessage into each sandboxed preview
+   * iframe, which cannot see the parent's CSS). They are genuinely separate
+   * mechanisms, but they should never DISAGREE -- and they did, because this
+   * one was initialised to a hardcoded 'light' and never heard about the
+   * global toggle. */
+  function syncTemplateThemeToggle() {
+    if (!templateThemePicker) return;
+    templateThemePicker.setOptions(
+      [{ value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }],
+      currentTemplateTheme,
+    );
+    for (const iframe of detailTemplateIframes) {
+      if (iframe.contentWindow) {
+        iframe.contentWindow.postMessage({ type: 'setTheme', theme: currentTemplateTheme }, '*');
+      }
+    }
   }
 
   /** Refreshes every tag picker's suggestion list from the current catalog
@@ -5949,6 +6482,12 @@ ${bodyHtml}
     const stepEls = document.querySelectorAll('#addnew-form .wizard-step');
     const currentStep = ADDNEW_STEPS[wizardStepIndex];
 
+    // Let CSS tell the two modes apart. A field label is styled as a step
+    // TITLE only in wizard mode, where it genuinely is one; in flat mode all
+    // 13 are on screen at once and must read as labels, not as thirteen
+    // headings larger than the card title above them.
+    $('addnew-form').classList.toggle('addnew-wizard-mode', addNewWizardMode);
+
     if (!addNewWizardMode) {
       for (const stepEl of stepEls) {
         stepEl.hidden = stepEl.dataset.step === 'review';
@@ -6259,7 +6798,7 @@ ${bodyHtml}
    * network activity). The actual view-section toggle already happened in
    * showView() before this runs. */
   async function openScanView() {
-    resetProgressPanel();
+    hideProgressPanel();
     $('scan-results').innerHTML = '';
     $('scan-empty').hidden = true;
     await loadRemotesForScanSelect();
@@ -6364,17 +6903,17 @@ ${bodyHtml}
 
     const btn = $('scan-run-btn');
     await withBusy(btn, 'Scanning...', async () => {
-      await beginProgress();
+      const opKey = await beginProgress();
       try {
         const candidates = await call('scan.run', { cwd: state.projectDir, remote });
-        endProgress(true);
+        endProgress(true, opKey);
         // Cached so returnToScan can restore this batch later (minus
         // whichever one was just proposed, if any) without a second real
         // network scan -- see that function's own doc comment.
         state.lastScanCandidates = candidates;
         renderScanResults(candidates);
       } catch (err) {
-        endProgress(false);
+        endProgress(false, opKey);
         toastError(err);
       }
     });
@@ -6397,7 +6936,7 @@ ${bodyHtml}
    * nothing needs restoring there. */
   function returnToScan(proposedId) {
     showViewRaw('scan');
-    resetProgressPanel();
+    hideProgressPanel();
     if (proposedId) {
       state.lastScanCandidates = state.lastScanCandidates.filter((c) => c.id !== proposedId);
     }
@@ -6412,7 +6951,7 @@ ${bodyHtml}
    * populating BEFORE setting its value -- showView's own fire-and-forget
    * load would otherwise race, leaving the select on its default option. */
   async function openAddNewFromScanCandidate(candidate, remoteName) {
-    resetProgressPanel();
+    hideProgressPanel();
     showViewRaw('addnew');
     resetAddNewForm();
     populateKindPicker();
@@ -6676,7 +7215,17 @@ ${bodyHtml}
 
   function toggleTheme() {
     const next = getEffectiveTheme() === 'dark' ? 'light' : 'dark';
-    document.documentElement.setAttribute('data-theme', next);
+    // Suppress transitions across the switch itself. `color` is not a
+    // transitioned property and flips instantly, while `background` is -- so
+    // without this, every secondary button spends ~150ms as light text on a
+    // still-light background and its label visibly disappears. Removed on the
+    // next frame so real interactions keep their transitions.
+    const html = document.documentElement;
+    html.classList.add('theme-switching');
+    html.setAttribute('data-theme', next);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => html.classList.remove('theme-switching'));
+    });
     try {
       localStorage.setItem(THEME_KEY, next);
     } catch (err) {
@@ -6684,10 +7233,18 @@ ${bodyHtml}
       // restart; the toggle itself still works for this session.
     }
     updateThemeToggleButton();
+    // A sandboxed markdown iframe cannot read the parent's custom properties,
+    // so its theme is baked in at render time -- re-render to re-theme.
+    refreshMarkdownIframeThemes();
+    // Keep the template-preview grid's own theme following the app's, so the
+    // two theme systems cannot drift apart.
+    currentTemplateTheme = next;
+    syncTemplateThemeToggle();
   }
 
   function initTheme() {
     updateThemeToggleButton();
+    currentTemplateTheme = getEffectiveTheme();
     // Only matters before the user has ever made an explicit choice: keep
     // the button's icon tracking a live OS theme change rather than only
     // whatever `prefers-color-scheme` was at page load.
@@ -6711,6 +7268,12 @@ ${bodyHtml}
     }
 
     $('wire-terminal-close').addEventListener('click', () => void closeWireTerminal());
+    // Clicking the dimmed backdrop closes, the way a modal is expected to.
+    // Guarded on the target being the overlay ITSELF so a click that lands on
+    // the panel (or a drag that ends outside it) does not close the session.
+    $('wire-terminal-overlay').addEventListener('mousedown', (ev) => {
+      if (ev.target === ev.currentTarget) void closeWireTerminal();
+    });
     $('theme-toggle-btn').addEventListener('click', () => toggleTheme());
     $('change-folder-btn').addEventListener('click', () => void changeFolder());
     $('refresh-btn').addEventListener('click', () => void refreshCatalogFromRemotes());
@@ -6860,11 +7423,12 @@ ${bodyHtml}
     initTagPickers();
     wireEvents();
 
-    // One-time subscription for the whole app session -- unlike
-    // `sidecar-progress` (re-subscribed per action via beginProgress/
-    // endProgress), there's exactly one `auto-sync-tick` listener ever
-    // needed, since the Rust timer behind it runs for the lifetime of the
-    // app and never needs tearing down/re-creating.
+    // One-time subscription for the whole app session, like
+    // `sidecar-progress` above: the Rust timer behind it runs for the
+    // lifetime of the app and never needs tearing down or re-creating.
+    // (`sidecar-progress` used to be re-subscribed per action instead, which
+    // is what lost progress events when you navigated away mid-pull -- see
+    // the operation store's own comment.)
     await listen('auto-sync-tick', () => void onAutoSyncTick());
 
     const stored = localStorage.getItem(PROJECT_DIR_KEY);

@@ -148,3 +148,37 @@ export class WiringMergeError extends DeliveryOsError {}
  * valid, expected outcome) -- same posture as `WiringMergeError`/
  * `BuildFixError`. */
 export class WiringPlacementError extends DeliveryOsError {}
+
+/** Thrown by the sidecar when a request names a command that does not
+ * exist. Its own class rather than a raw `Error` so the frontend can tell
+ * "you asked for something that isn't a command" apart from "the command
+ * ran and failed", and so it is reported through the same taxonomy as
+ * every other engine failure.
+ *
+ * The command map used to be a plain object literal looked up by bracket
+ * access on an unvalidated string off the wire, so every `Object.prototype`
+ * member -- `toString`, `constructor`, `valueOf` -- dispatched as a real
+ * command and reported `ok: true`. The map now has a null prototype and
+ * dispatch checks own-property + callability; this error is what an unknown
+ * command produces instead. */
+export class UnknownCommandError extends DeliveryOsError {}
+
+/** Thrown when an artifact's `SOURCES.json` exists but cannot be read as a
+ * valid sources file -- malformed JSON, or JSON of the wrong shape.
+ *
+ * Distinct from `SourcesFileMissingError` ("this artifact was never recorded
+ * with drift tracking", an ordinary, expected state) -- this one means the
+ * file IS there and is broken. It arrives inside a payload from a remote, so
+ * it is untrusted input: an unguarded parse surfaced either a raw
+ * `SyntaxError` stack trace or a `TypeError` from mapping over a missing
+ * `entries` array. */
+export class SourcesFileInvalidError extends DeliveryOsError {}
+
+/** Thrown when an artifact ships a `signature.bundle` that cannot be parsed
+ * as JSON at all.
+ *
+ * The bundle comes from the remote, and is read on the default `pull` path.
+ * An unguarded parse meant a corrupt or truncated bundle crashed `pull` with
+ * a raw `SyntaxError` stack trace, rather than being reported as what it
+ * actually is: a signature that cannot be verified. */
+export class SignatureBundleInvalidError extends DeliveryOsError {}

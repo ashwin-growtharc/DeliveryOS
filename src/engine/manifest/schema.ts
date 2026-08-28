@@ -1,4 +1,18 @@
+import path from 'node:path';
 import { z } from 'zod';
+
+/** Normalizes a manifest-declared relative path to a comparable form:
+ * POSIX separators, no leading `./`, no trailing slash. Returns `''` for
+ * anything that denotes the root itself (".", "./", "a/.."), which is the
+ * case `install_target` must reject. Purely lexical -- it never touches the
+ * filesystem, so it is safe to run inside a zod schema. The real
+ * containment check still happens at each use site against a real root. */
+function normalizeRelative(value: string): string {
+  const normalized = path.posix.normalize(value.replace(/\\/g, '/'));
+  if (normalized === '.' || normalized === './' || normalized === '/') return '';
+  return normalized.replace(/\/+$/, '');
+}
+
 
 /**
  * One install-time value a `backend-plugin` artifact (or any future kind
@@ -109,7 +123,30 @@ export const ManifestSchema = z.object({
     })
     .default({}),
   source_repo: z.string().min(1),
-  install_target: z.string().min(1),
+  // Where the payload is installed inside the CONSUMING project, relative
+  // to that project's root.
+  //
+  // Rejects anything escaping the project. Deliberately does NOT reject the
+  // project root itself.
+  //
+  // An earlier version did, and it was wrong: it broke a real, legitimate
+  // artifact. `react-vite-lint-scaffold` is a lint/tooling scaffold whose
+  // entire purpose is to drop eslint.config.js, .prettierrc and friends at the
+  // project root -- a root `install_target` is the correct shape for it, not a
+  // mistake. Worse, because `discoverManifests` treats any invalid manifest as
+  // fatal, that one rejection blanked the whole 227-artifact catalog.
+  //
+  // The real hazard was never `pull` (copying files into the project root is
+  // just what a scaffold does) -- it is `remove`, which recursively DELETES
+  // this path and would take the user's entire project with it. So the guard
+  // belongs there, and only there: `removeArtifact` passes
+  // `{ allowRoot: false }` and refuses. See that call site.
+  install_target: z
+    .string()
+    .min(1)
+    .refine((value) => !normalizeRelative(value).startsWith('..'), {
+      message: 'install_target may not escape the project root',
+    }),
   // Optional escape hatch from the artifacts/<id>/payload/ convention: when
   // set, points directly at the artifact's real payload location, relative
   // to the remote's root (same relativity convention as install_target) --

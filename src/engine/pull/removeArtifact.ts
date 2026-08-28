@@ -1,10 +1,11 @@
 import * as fs from 'fs';
+import * as path from 'path';
 import { execSync } from 'child_process';
 import { readLockfile, removeEntry } from '../lockfile/lockfile';
-import { resolveArtifact } from './pull';
+import { resolveArtifact, POST_INSTALL_MAX_BUFFER_BYTES } from './pull';
 import { resolveContainedTargetFile, resolveWiringActions } from './wiring';
 import { readExistingEnvValues } from './installParams';
-import { pristinePath, resolveContainedPath } from '../paths';
+import { pristinePath, resolveContainedPath, isRootInstall, readPayloadFootprint } from '../paths';
 import { ArtifactNotPulledError } from '../errors';
 import { isExecError, isToolNotFoundError, rmDirWithRetry } from '../execHelpers';
 
@@ -47,6 +48,10 @@ function runPostRemoveCommand(
       stdio: 'pipe',
       timeout: timeoutMs,
       env: { ...process.env, DELIVERYOS_PROJECT_ROOT: projectRoot },
+      // Same 1 MB-default trap as post_install/verifyBuild: a chatty
+      // teardown command would otherwise be killed with ENOBUFS and
+      // reported as a post_remove failure.
+      maxBuffer: POST_INSTALL_MAX_BUFFER_BYTES,
     }).toString('utf-8');
     return { output };
   } catch (err) {
@@ -140,36 +145,31 @@ export async function removeArtifact(
     );
   }
 
-  // Prefer the real path recorded at pull time; an old-shape entry (pulled
-  // before installTarget was recorded) falls back to resolving it fresh via
-  // the manifest -- same function pull.ts itself uses. If that ALSO fails
-  // (remote unregistered, artifact deleted from the catalog), fail loud and
-  // honest rather than guess a path to delete.
-  let rawInstallTarget: string;
-  // Set only by the fallback branch below, when it had to resolve the
-  // manifest anyway to recover a never-recorded installTarget -- reused
-  // by resolvedManifest further down instead of resolving it a second
-  // time (found via review: the fallback's own already-resolved manifest
-  // was being silently discarded, contradicting this file's own doc
-  // comment that resolution happens "ONCE... and reused for both").
-  let manifestFromInstallTargetFallback: ReturnType<typeof resolveArtifact>['manifest'] | undefined;
-  if (entry.installTarget) {
-    rawInstallTarget = entry.installTarget;
-  } else {
-    let resolved;
-    try {
-      resolved = resolveArtifact(id, entry.remote);
-    } catch (err) {
-      const detail = err instanceof Error ? err.message : String(err);
-      throw new ArtifactNotPulledError(
-        `"${id}"'s install location was never recorded (pulled before this was tracked), and it can no `
-          + `longer be resolved from its manifest either: ${detail}. Nothing was removed -- locate and `
-          + `delete its installed files manually, then remove its lockfile entry by hand.`,
-      );
-    }
-    rawInstallTarget = resolved.manifest.install_target;
-    manifestFromInstallTargetFallback = resolved.manifest;
+  // Only ever the real path recorded at pull time. An old-shape entry
+  // (pulled before installTarget was recorded) REFUSES rather than falling
+  // back to re-reading `install_target` from the manifest.
+  //
+  // That fallback used to exist and was a genuine trust bug: `install_target`
+  // is a remote-controlled, MUTABLE field, and this function feeds whatever
+  // it resolves to straight into a recursive delete. Re-reading it at removal
+  // time meant whoever controls the remote -- not DeliveryOS, and not the
+  // user -- decided what got deleted, and could change that decision after
+  // the artifact was already installed. `resolveContainedPath` was the only
+  // guard, and it permitted the project root itself.
+  //
+  // Re-pulling is cheap and records a real `installTarget`, so refusing costs
+  // the user one command and removes the whole class of problem. This is
+  // exactly the posture ArtifactNotPulledError already documents.
+  if (!entry.installTarget) {
+    throw new ArtifactNotPulledError(
+      `"${id}"'s install location was never recorded in lock.json (it was pulled before DeliveryOS `
+        + `tracked that). Nothing was removed. Re-pull it (\`deliveryos pull ${id}\`) so the real `
+        + `install location is recorded, then remove it -- or delete its files manually and drop its `
+        + `lockfile entry by hand. DeliveryOS will not infer a delete target from the artifact's `
+        + `current manifest, because that value lives on the remote and can change after install.`,
+    );
   }
+  const rawInstallTarget: string = entry.installTarget;
 
   // Defense in depth, same posture as the wiredFiles re-validation just
   // below: `lock.json` is a plain project-local JSON file a person could
@@ -184,8 +184,28 @@ export async function removeArtifact(
   const installTarget = resolveContainedPath(cwd, rawInstallTarget);
   if (!installTarget) {
     throw new ArtifactNotPulledError(
-      `"${id}"'s recorded install location ("${rawInstallTarget}") resolves outside this project -- `
-        + `refusing to delete it. Nothing was removed; check lock.json by hand before retrying.`,
+      `"${id}"'s recorded install location ("${rawInstallTarget}") escapes this project -- refusing to `
+        + `delete it. Nothing was removed; check lock.json by hand before retrying.`,
+    );
+  }
+
+  // A ROOT install_target used to be refused outright here, which left a
+  // scaffold artifact installable but never removable. It is refused no
+  // longer -- but the whole-directory delete below absolutely must not run at
+  // the project root, so removal is narrowed to the exact top-level entries the
+  // payload provided, recorded in the pristine snapshot at pull time.
+  //
+  // Without that snapshot the footprint is unknowable, and the only safe
+  // answer at the project root is to refuse: there is no guess here that isn't
+  // "delete some or all of the user's project".
+  const rootInstall = isRootInstall(cwd, installTarget);
+  const rootFootprint = rootInstall ? readPayloadFootprint(pristinePath(cwd, id)) : undefined;
+  if (rootInstall && !rootFootprint) {
+    throw new ArtifactNotPulledError(
+      `"${id}" installs at the project root, and its pristine snapshot is missing, so there is no `
+        + `record of which files belong to it -- refusing to delete anything rather than guess at your `
+        + `whole project. Nothing was removed. Re-pull it to rebuild the snapshot, then remove it, or `
+        + `delete its files by hand and drop its lockfile entry.`,
     );
   }
 
@@ -203,19 +223,13 @@ export async function removeArtifact(
   // wiredFiles is already the authoritative record of what DeliveryOS
   // itself created, so a real removal still completes even without this.
   //
-  // Genuinely reuses the fallback branch's own resolution above when it
-  // already ran (an old-shape lockfile entry) -- only resolves fresh here
-  // for the normal case, where entry.installTarget already existed and
-  // nothing above needed the manifest yet.
+  // Always resolved fresh here: nothing above needs the manifest any more
+  // now that the install location comes only from the lockfile.
   let resolvedManifest: ReturnType<typeof resolveArtifact>['manifest'] | undefined;
-  if (manifestFromInstallTargetFallback) {
-    resolvedManifest = manifestFromInstallTargetFallback;
-  } else {
-    try {
-      resolvedManifest = resolveArtifact(id, entry.remote).manifest;
-    } catch {
-      resolvedManifest = undefined;
-    }
+  try {
+    resolvedManifest = resolveArtifact(id, entry.remote).manifest;
+  } catch {
+    resolvedManifest = undefined;
   }
 
   let postRemoveOutput: string | undefined;
@@ -239,7 +253,19 @@ export async function removeArtifact(
     // rest of removal (wired files, pristine snapshot, lockfile entry)
     // still needs to complete even when this one step doesn't.
     try {
-      await rmDirWithRetry(installTarget);
+      if (rootInstall) {
+        // Never the root directory itself -- only the entries this artifact
+        // actually put there. rmDirWithRetry handles a plain file as happily
+        // as a directory (fs.rmSync with recursive+force underneath).
+        for (const name of rootFootprint ?? []) {
+          const owned = path.join(installTarget, name);
+          if (fs.existsSync(owned)) {
+            await rmDirWithRetry(owned);
+          }
+        }
+      } else {
+        await rmDirWithRetry(installTarget);
+      }
       removedInstallTarget = true;
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);

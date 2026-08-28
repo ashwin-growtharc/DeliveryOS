@@ -297,6 +297,30 @@ describe('readWiringMergeLog', () => {
     expect(readWiringMergeLog(cwd, 'test-remote', 'test-artifact')).toEqual([]);
   });
 
+  // Regression, same shape as readBuildFixLog's own torn-line test: an
+  // append-only JSONL log written with a bare appendFileSync, from one
+  // process per RPC, so interleaved writes are routine. An unguarded parse
+  // meant one bad line threw and destroyed the whole Activity tab.
+  it('skips a torn/unparseable line instead of losing every other record', async () => {
+    fs.writeFileSync(path.join(cwd, 'auth.ts'), 'export const original = 1;', 'utf-8');
+    fs.writeFileSync(
+      path.join(cwd, 'package.json'),
+      JSON.stringify({ name: 'x', scripts: { build: 'node -e "console.log(1)"' } }),
+      'utf-8',
+    );
+    await applyWiringMerge(cwd, 'auth.ts', 'export const first = 1;', 'first merge', 'test-remote', 'test-artifact');
+
+    const logPath = wiringMergeLogPath(cwd);
+    const good = fs.readFileSync(logPath, 'utf-8').trim();
+    fs.writeFileSync(logPath, `{"timestamp":"2026-01-01T00:00:00.000Z","remoteN
+${good}
+`, 'utf-8');
+
+    const records = readWiringMergeLog(cwd, 'test-remote', 'test-artifact');
+    expect(records).toHaveLength(1);
+    expect(records[0].description).toBe('first merge');
+  }, 30_000);
+
   it('filters out entries belonging to a different artifact, and returns matches newest first', async () => {
     fs.writeFileSync(path.join(cwd, 'auth.ts'), 'export const original = 1;', 'utf-8');
     fs.writeFileSync(path.join(cwd, 'db.ts'), 'export const db = 1;', 'utf-8');

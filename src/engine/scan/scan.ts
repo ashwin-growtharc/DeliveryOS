@@ -1,8 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { findRemote } from '../remote/remoteRegistry';
-import { cachePath } from '../remote/remoteCache';
-import { fetchAndReset } from '../git/git';
+import { refreshRemoteCache } from '../remote/remoteCache';
 import { buildCatalog } from '../catalog/catalog';
 import { readLockfile } from '../lockfile/lockfile';
 import { guessDescriptionFromFrontmatter } from '../manifest/frontmatter';
@@ -68,7 +67,7 @@ export async function scanForNewArtifacts(
   }
 
   onProgress?.('fetch', `Fetching remote "${remoteName}"...`);
-  await fetchAndReset(cachePath(remoteName));
+  await refreshRemoteCache(remoteName);
 
   const remoteCatalogIds = new Set(
     buildCatalog()

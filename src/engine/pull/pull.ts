@@ -4,8 +4,13 @@ import { execSync } from 'child_process';
 import { buildCatalog, CatalogEntry } from '../catalog/catalog';
 import { cachePath } from '../remote/remoteCache';
 import { upsertEntry, readLockfile } from '../lockfile/lockfile';
-import { pristinePath, resolveContainedPath, adaptSrcDirPath } from '../paths';
-import { ArtifactResolutionError, ManifestValidationError, PostInstallError } from '../errors';
+import { pristinePath, resolveContainedPath, adaptSrcDirPath, isRootInstall } from '../paths';
+import {
+  ArtifactResolutionError,
+  ManifestValidationError,
+  PostInstallError,
+  SignatureBundleInvalidError,
+} from '../errors';
 import { Manifest } from '../manifest/schema';
 import {
   resolveInstallParamValues,
@@ -56,6 +61,17 @@ export type ProgressCallback = (stage: string, message: string) => void;
 // slower than a plain rebuild.
 export const POST_INSTALL_TIMEOUT_MS = 10 * 60 * 1000;
 
+/** Capture limit for a shelled-out hook's combined stdout/stderr.
+ *
+ * Node's default is 1 MB, and exceeding it kills the child and throws
+ * ENOBUFS -- which surfaces to the user as a generic "post_install failed"
+ * that names nothing about the real cause. A real `npm install` routinely
+ * prints more than 1 MB, so the default was effectively a size-dependent
+ * random failure. 10 MB matches what `runClaudeSubprocess` already settled
+ * on for the same reason. Shared by pull's post_install, applyUpdate's
+ * post_install, removeArtifact's post_remove, and verifyBuild. */
+export const POST_INSTALL_MAX_BUFFER_BYTES = 10 * 1024 * 1024;
+
 /**
  * Resolves which catalog entry `id` refers to. Throws
  * ArtifactResolutionError if the id doesn't exist anywhere, or if it exists
@@ -105,6 +121,47 @@ export function resolveArtifact(
  * real timeout path with a real hung command in milliseconds instead of
  * actually waiting out the production constant.
  */
+/**
+ * Records the pristine (as-pulled) snapshot an artifact's later status checks,
+ * `push` diffs and updates all compare against.
+ *
+ * Shared by `pullArtifact` and `applyAvailableUpdates` because BOTH have to
+ * handle the root-install case identically, and only pull used to: a plain
+ * `fs.cpSync(installTarget, pristineTarget)` is impossible for a root install
+ * (the snapshot lives at <cwd>/.deliveryos/pristine/<id>, inside the directory
+ * being copied, and Node rejects that with ERR_FS_CP_EINVAL) and wrong even if
+ * it worked (it would snapshot the user's ENTIRE project as if it were the
+ * artifact, so every unrelated file they own would later read as part of it).
+ * A `filter` does not help -- Node checks self-containment before the filter
+ * runs.
+ *
+ * So for a root install it copies only the top-level entries the payload
+ * actually provided, taken FROM `installTarget` so post_install's own generated
+ * output is still captured. That snapshot is what `readPayloadFootprint` later
+ * reads back as the artifact's authoritative footprint at the project root.
+ */
+export function writePristineSnapshot(
+  cwd: string,
+  installTarget: string,
+  payloadSrc: string,
+  pristineTarget: string,
+): void {
+  if (fs.existsSync(pristineTarget)) {
+    fs.rmSync(pristineTarget, { recursive: true, force: true });
+  }
+  if (isRootInstall(cwd, installTarget)) {
+    fs.mkdirSync(pristineTarget, { recursive: true });
+    for (const entry of fs.readdirSync(payloadSrc)) {
+      const installed = path.join(installTarget, entry);
+      if (fs.existsSync(installed)) {
+        fs.cpSync(installed, path.join(pristineTarget, entry), { recursive: true });
+      }
+    }
+    return;
+  }
+  fs.cpSync(installTarget, pristineTarget, { recursive: true });
+}
+
 export async function pullArtifact(
   id: string,
   remoteName: string | undefined,
@@ -159,6 +216,11 @@ export async function pullArtifact(
   // for real is a judgment call for the Wiring section's own AI-assist
   // flow, not something the synchronous pull path guesses at.
   const effectiveInstallTarget = adaptSrcDirPath(cwd, manifest.install_target) ?? manifest.install_target;
+  // allowRoot stays TRUE here. A root install_target is a legitimate shape for
+  // a scaffold artifact whose job is to write config files at the project root
+  // (eslint.config.js, .prettierrc, ...), and rejecting it here broke exactly
+  // such an artifact. The destructive case is `remove`, not `pull` -- see
+  // removeArtifact, which passes allowRoot: false because it deletes.
   const installTarget = resolveContainedPath(cwd, effectiveInstallTarget);
   if (!installTarget) {
     throw new ManifestValidationError(
@@ -173,11 +235,35 @@ export async function pullArtifact(
   // alongside the manifest at artifacts/<id>/signature.bundle, regardless
   // of any `payload_path` override -- it's a property of the manifest
   // record, not the payload location.
-  onProgress?.('verify', 'Verifying artifact signature...');
   const signatureBundlePath = path.join(remoteDir, 'artifacts', manifest.id, 'signature.bundle');
-  const signatureBundle = fs.existsSync(signatureBundlePath)
-    ? JSON.parse(fs.readFileSync(signatureBundlePath, 'utf-8'))
-    : undefined;
+  const hasSignatureBundle = fs.existsSync(signatureBundlePath);
+  // Announced only when there is genuinely something to check: either the
+  // manifest declares a `signature` (the only case verifyArtifactSignature
+  // does any work at all -- it returns immediately otherwise), or a bundle
+  // file is actually present to be parsed and validated. Emitting this stage
+  // unconditionally made the pull log claim "Verifying artifact signature..."
+  // for the overwhelming majority of artifacts that have never been signed,
+  // flatly contradicting the Detail panel's own provenance badge reading
+  // "Unverified -- no provenance signature yet" on that very same artifact.
+  // Same conditional-stage convention `post_install` below already follows.
+  if (manifest.signature || hasSignatureBundle) {
+    onProgress?.('verify', 'Verifying artifact signature...');
+  }
+  // The bundle comes from the remote and is read on the DEFAULT pull path,
+  // so a corrupt or truncated one must report as an unverifiable signature
+  // rather than escaping as a raw SyntaxError stack trace from JSON.parse.
+  let signatureBundle: unknown;
+  if (hasSignatureBundle) {
+    try {
+      signatureBundle = JSON.parse(fs.readFileSync(signatureBundlePath, 'utf-8'));
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      throw new SignatureBundleInvalidError(
+        `Artifact "${manifest.id}" ships a signature.bundle that is not valid JSON, so its signature `
+          + `cannot be verified: ${detail}. Nothing was installed.`,
+      );
+    }
+  }
   await verifyArtifactSignature(manifest, payloadSrc, signatureBundle);
 
   onProgress?.('copy', `Copying payload files to ${installTarget}...`);
@@ -216,6 +302,7 @@ export async function pullArtifact(
         // path a manifest's post_install can `cd` to directly, with no
         // relative-depth guessing at all.
         env: { ...process.env, DELIVERYOS_PROJECT_ROOT: cwd },
+        maxBuffer: POST_INSTALL_MAX_BUFFER_BYTES,
       }).toString('utf-8');
     } catch (err) {
       const stdout = isExecError(err) ? err.stdout?.toString('utf-8') ?? '' : '';
@@ -261,10 +348,7 @@ export async function pullArtifact(
   // though the user hasn't touched anything yet.
   onProgress?.('snapshot', 'Recording installed state...');
   const pristineTarget = pristinePath(cwd, manifest.id);
-  if (fs.existsSync(pristineTarget)) {
-    fs.rmSync(pristineTarget, { recursive: true, force: true });
-  }
-  fs.cpSync(installTarget, pristineTarget, { recursive: true });
+  writePristineSnapshot(cwd, installTarget, payloadSrc, pristineTarget);
 
   // Deliberately after the pristine snapshot above, and writes to `cwd`
   // itself (`.env.local`), never into `installTarget` -- see
@@ -272,7 +356,14 @@ export async function pullArtifact(
   // real point, not just a convenient ordering. A no-op (writes nothing)
   // for the overwhelming majority of artifacts, which declare no
   // install_params at all.
-  onProgress?.('install-params', 'Applying install-time configuration...');
+  // Same conditional-stage reasoning as 'verify' above: applyInstallParams
+  // and applyEnvExamplePlaceholders are both explicit no-ops for an artifact
+  // declaring no install_params, so announcing "Applying install-time
+  // configuration..." there described work that never happened and left no
+  // trace anywhere for the user to go looking for afterward.
+  if (manifest.install_params.length > 0) {
+    onProgress?.('install-params', 'Applying install-time configuration...');
+  }
   const { values, missingRequired } = resolveInstallParamValues(
     manifest.install_params,
     providedValues,

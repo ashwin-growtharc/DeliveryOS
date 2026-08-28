@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { buildCatalog, annotateCatalog } from '../../engine/catalog/catalog';
+import { buildCatalog, annotateCatalog, takeSkippedManifests } from '../../engine/catalog/catalog';
 import { printCatalog } from '../output';
 
 export function registerListCommand(program: Command): void {
@@ -17,5 +17,23 @@ export function registerListCommand(program: Command): void {
       // never had it at all.
       const entries = annotateCatalog(buildCatalog(), process.cwd(), options.remote);
       printCatalog(entries, Boolean(options.json));
+
+      // A manifest that could not be loaded is reported AFTER the catalog,
+      // never instead of it. One bad artifact used to throw and leave the
+      // user with nothing but a validation error -- the whole catalog gone
+      // because of a single file they very likely did not write.
+      const skipped = takeSkippedManifests();
+      if (skipped.length > 0 && !options.json) {
+        process.stderr.write(
+          `
+${skipped.length} artifact(s) could not be loaded and were skipped:
+`,
+        );
+        for (const entry of skipped) {
+          process.stderr.write(`  [${entry.remoteName}] ${entry.path}
+      ${entry.reason}
+`);
+        }
+      }
     });
 }

@@ -74,9 +74,16 @@ this produces not just the installer but a matching detached signature file
 alongside it, under:
 
 ```
-src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi(.sig)
-src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe(.sig)
+src-tauri/target/release/bundle/msi/*.msi(.sig)
+src-tauri/target/release/bundle/nsis/*.exe(.sig)
 ```
+
+That is where a plain `npx tauri build` (the command in step 2) puts them.
+Passing `--target x86_64-pc-windows-msvc` instead writes to
+`src-tauri/target/x86_64-pc-windows-msvc/release/bundle/`. Both directories
+can exist on the same machine from different builds, so confirm the version
+in the filename is the one you just cut before publishing it — a stale
+installer from the other path is indistinguishable at a glance.
 
 **Publish the NSIS `.exe`, not the MSI.** Both used to "just work" equally
 with the updater, but that's no longer true now that the `deliveryos` CLI

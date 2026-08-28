@@ -1,11 +1,10 @@
 import { listRemotes } from '../remote/remoteRegistry';
-import { cachePath } from '../remote/remoteCache';
-import { discoverManifests } from '../manifest/parser';
+import { cachePath, refreshRemoteCache } from '../remote/remoteCache';
+import { discoverManifests, SkippedManifest } from '../manifest/parser';
 import { Manifest } from '../manifest/schema';
-import { fetchAndReset } from '../git/git';
 import { readLockfile } from '../lockfile/lockfile';
 import { computeChangedFiles } from '../push/diff';
-import { pristinePath, resolveContainedPath } from '../paths';
+import { pristinePath, resolveContainedPath, isRootInstall, readPayloadFootprint } from '../paths';
 
 export interface CatalogEntry {
   manifest: Manifest;
@@ -39,13 +38,34 @@ export function buildCatalog(): CatalogEntry[] {
   const entries: CatalogEntry[] = [];
 
   for (const remote of remotes) {
-    const manifests = discoverManifests(cachePath(remote.name));
+    const { manifests, skipped } = discoverManifests(cachePath(remote.name));
     for (const manifest of manifests) {
       entries.push({ manifest, remoteName: remote.name });
+    }
+    // Reported, never fatal. A single unloadable manifest used to throw and
+    // take the whole catalog with it -- 227 artifacts made unreachable by one
+    // bad file. Surfaced here so a broken artifact is still visible as a
+    // problem rather than silently vanishing, without stopping anyone else
+    // from browsing.
+    for (const entry of skipped) {
+      lastSkippedManifests.push({ ...entry, remoteName: remote.name });
     }
   }
 
   return entries;
+}
+
+/** Manifests skipped by the most recent `buildCatalog()` call, if any.
+ *
+ * Deliberately a module-level record rather than a return value: `buildCatalog`
+ * has many callers and returning a tuple from all of them would be a wide,
+ * mechanical change for a signal that is purely advisory. Callers that want to
+ * warn read this immediately after calling. */
+const lastSkippedManifests: Array<SkippedManifest & { remoteName: string }> = [];
+
+/** Returns (and clears) the manifests skipped by the last `buildCatalog()`. */
+export function takeSkippedManifests(): Array<SkippedManifest & { remoteName: string }> {
+  return lastSkippedManifests.splice(0, lastSkippedManifests.length);
 }
 
 /**
@@ -71,7 +91,7 @@ export async function refreshCatalog(
   for (const remote of listRemotes()) {
     onProgress?.('fetch', `Fetching latest from ${remote.name}...`);
     try {
-      await fetchAndReset(cachePath(remote.name));
+      await refreshRemoteCache(remote.name);
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
       onProgress?.('fetch', `Could not refresh "${remote.name}", skipping: ${detail}`);
@@ -119,6 +139,11 @@ export function annotateCatalog(
     // catalog, not just artifacts the user chose to pull. One bad manifest
     // degrades to `not_pulled` for that entry alone; it never breaks
     // listing the rest of the catalog.
+    // allowRoot stays TRUE: a root install_target is a legitimate scaffold
+    // shape that pullArtifact installs correctly, and rejecting it here was
+    // what made such an artifact read `not_pulled` forever no matter how many
+    // times it was successfully pulled. Nothing on this path deletes anything;
+    // the diff below is narrowed instead. See isRootInstall.
     const installTarget = resolveContainedPath(cwd, manifest.install_target);
     const lockEntry = lockfile.entries.find((e) => e.id === manifest.id);
 
@@ -128,11 +153,26 @@ export function annotateCatalog(
     } else if (!lockEntry) {
       localStatus = 'not_pulled';
     } else {
-      try {
-        const changedFiles = computeChangedFiles(installTarget, pristinePath(cwd, manifest.id));
-        localStatus = changedFiles.length === 0 ? 'pulled' : 'edited_locally';
-      } catch {
+      const pristine = pristinePath(cwd, manifest.id);
+      // At the project root `installTarget` is the user's whole project, so the
+      // diff has to be narrowed to the entries this artifact actually owns --
+      // otherwise every unrelated file reads as a local edit and the artifact
+      // is permanently `edited_locally`.
+      const rootInstall = isRootInstall(cwd, installTarget);
+      const topLevelScope = rootInstall ? readPayloadFootprint(pristine) : undefined;
+      if (rootInstall && !topLevelScope) {
+        // Snapshot gone (a stale pull), so the footprint is unknowable. An
+        // unscoped walk of the project root is exactly what must not happen
+        // here -- degrade to `pulled`, the same way the catch below already
+        // does for a missing snapshot on the normal path.
         localStatus = 'pulled';
+      } else {
+        try {
+          const changedFiles = computeChangedFiles(installTarget, pristine, { topLevelScope });
+          localStatus = changedFiles.length === 0 ? 'pulled' : 'edited_locally';
+        } catch {
+          localStatus = 'pulled';
+        }
       }
     }
 

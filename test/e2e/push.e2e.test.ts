@@ -12,6 +12,9 @@ import {
 } from '../fixtures/testRemote';
 import { addRemoteEntry } from '../../src/engine/remote/remoteRegistry';
 import { cloneRemote, cachePath } from '../../src/engine/remote/remoteCache';
+
+/** Literal newline, kept as a constant so the source stays free of escape ambiguity. */
+const NL = String.fromCharCode(10);
 import { fetchAndReset } from '../../src/engine/git/git';
 import { pullArtifact } from '../../src/engine/pull/pull';
 import { pushArtifact } from '../../src/engine/push/push';
@@ -885,6 +888,47 @@ describe('push e2e', () => {
       expect(octokit.rest.pulls.create).not.toHaveBeenCalled();
     },
     30_000,
+  );
+
+  it(
+    'cache hygiene: a successful push leaves the cache on the remote default branch, never parked on its own unmerged push branch',
+    async () => {
+      // Regression for the cache-poisoning bug. A successful push used to
+      // leave the cache checked out on `deliveryos/<id>/<ts>` with the
+      // UNMERGED payload committed, and nothing ever reset it. Every
+      // subsequent read that doesn't fetch first -- `list`, `pull`,
+      // `config`, `wiring`, `catalog.list`, every preview compile -- then
+      // read that unmerged branch as if it were the remote's real state.
+      // Concretely: a `pull` immediately after a `push` installed the
+      // user's own unreviewed PR content.
+      const remoteName = 'test-remote-cache-hygiene';
+      await registerAndClone(remoteName, fixtureRemoteDir);
+      const defaultBranch = (await simpleGit(fixtureRemoteDir).status()).current;
+
+      const artifact = TEST_ARTIFACTS.find((a) => a.id === 'welcome-template')!;
+      const cwd = newScratchCwd('cache-hygiene');
+      await pullArtifact(artifact.id, remoteName, cwd);
+
+      const editedPath = path.join(cwd, artifact.installTarget, 'README.md');
+      fs.writeFileSync(editedPath, '# welcome-template' + NL + NL + 'unreviewed local edit.' + NL, 'utf-8');
+
+      const result = await pushArtifact(artifact.id, {}, cwd, makeFakeOctokit());
+      expect(await branchExistsInFixture(fixtureRemoteDir, result.branch)).toBe(true);
+
+      // The cache is back on the remote's real tip, not the push branch.
+      const cacheStatus = await simpleGit(cachePath(remoteName)).status();
+      expect(cacheStatus.current).toBe(defaultBranch);
+      expect(cacheStatus.current).not.toBe(result.branch);
+
+      // And the content the cache now exposes is the remote's, not the
+      // unreviewed edit -- this is the part users actually felt.
+      const cachedReadme = fs.readFileSync(
+        path.join(cachePath(remoteName), 'artifacts', artifact.id, 'payload', 'README.md'),
+        'utf-8',
+      );
+      expect(cachedReadme).not.toContain('unreviewed local edit');
+    },
+    120_000,
   );
 
   it(

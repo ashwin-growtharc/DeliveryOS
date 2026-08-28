@@ -279,6 +279,32 @@ describe('readBuildFixLog (Activity tab)', () => {
     expect(readBuildFixLog(cwd, 'ai-helpers', 'nextauth-credentials')).toEqual([]);
   });
 
+  // Regression: this is an append-only JSONL log written with a bare
+  // appendFileSync, and the Tauri host spawns ONE PROCESS PER RPC -- so
+  // concurrent appends from different processes are routine and a torn or
+  // interleaved write is a real possibility. The reader used to JSON.parse
+  // each line unguarded, so a single bad line threw and destroyed the entire
+  // Activity tab for that artifact, permanently.
+  it('skips a torn/unparseable line instead of losing every other record', async () => {
+    fs.writeFileSync(path.join(cwd, 'a.ts'), 'export const a = 1;', 'utf-8');
+    await applyBuildFix(cwd, 'a.ts', 'export const a = 2;', 'error A', {
+      remoteName: 'ai-helpers',
+      artifactId: 'nextauth-credentials',
+    });
+
+    // Simulate a torn interleaved write: a truncated JSON line spliced in
+    // ahead of the real, intact record.
+    const logPath = buildFixLogPath(cwd);
+    const good = fs.readFileSync(logPath, 'utf-8').trim();
+    fs.writeFileSync(logPath, `{"timestamp":"2026-01-01T00:00:00.000Z","remoteN
+${good}
+`, 'utf-8');
+
+    const entries = readBuildFixLog(cwd, 'ai-helpers', 'nextauth-credentials');
+    expect(entries).toHaveLength(1);
+    expect(entries[0].filePath).toBe('a.ts');
+  }, 30_000);
+
   it('filters out entries belonging to a different artifact, and returns matches newest first', async () => {
     fs.writeFileSync(path.join(cwd, 'a.ts'), 'export const a = 1;', 'utf-8');
     fs.writeFileSync(path.join(cwd, 'b.ts'), 'export const b = 1;', 'utf-8');

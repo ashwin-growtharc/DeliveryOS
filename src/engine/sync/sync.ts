@@ -1,8 +1,7 @@
 import * as fs from 'fs';
 import { readLockfile, upsertEntry } from '../lockfile/lockfile';
 import { findRemote } from '../remote/remoteRegistry';
-import { cachePath } from '../remote/remoteCache';
-import { fetchAndReset } from '../git/git';
+import { refreshRemoteCache } from '../remote/remoteCache';
 import { buildCatalog } from '../catalog/catalog';
 import { ProgressCallback } from '../pull/pull';
 import { pristinePath, resolveContainedPath } from '../paths';
@@ -73,7 +72,7 @@ export async function checkForUpdates(
       continue;
     }
     onProgress?.('fetch', `Fetching latest from ${name}...`);
-    await fetchAndReset(cachePath(name));
+    await refreshRemoteCache(name);
   }
 
   const catalog = buildCatalog();
@@ -169,7 +168,7 @@ export async function resolvePendingPushes(
 
     if (status.merged) {
       onProgress?.('resync', `"${entry.id}" was merged -- resyncing local status...`);
-      await fetchAndReset(cachePath(entry.remote));
+      await refreshRemoteCache(entry.remote);
       const catalog = buildCatalog();
       const match = catalog.find(
         (candidate) => candidate.manifest.id === entry.id && candidate.remoteName === entry.remote,
@@ -179,7 +178,7 @@ export async function resolvePendingPushes(
         // check pull.ts itself applies before ever resolving it, since a
         // freshly-fetched remote's manifest could have changed this field
         // to something that escapes cwd since it was first pulled.
-        const installTarget = resolveContainedPath(cwd, match.manifest.install_target);
+        const installTarget = resolveContainedPath(cwd, match.manifest.install_target, { allowRoot: false });
         if (!installTarget) {
           throw new ManifestValidationError(
             `Artifact "${entry.id}"'s install_target ("${match.manifest.install_target}") resolves `

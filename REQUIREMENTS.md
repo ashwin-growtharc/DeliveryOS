@@ -1,45 +1,113 @@
 # Requirements
 
-Everything needed on a machine to build and run DeliveryOS, kept current as
-new phases add new prerequisites. See [README.md](README.md) for usage once
-these are installed.
+Two very different lists depending on what you're doing. Find your row:
 
-## Core (Phases 0-2 — CLI engine)
+| You are… | Read |
+|---|---|
+| Given the installer and want to run the app | [Running the desktop app](#running-the-desktop-app) |
+| Using the `deliveryos` CLI | [Running the CLI](#running-the-cli) |
+| Building DeliveryOS from source | [Building from source](#building-from-source) |
+
+**You do not need Rust, MSVC or Node to *run* DeliveryOS.** Those are build
+tools — Rust compiles to a native binary, and both shipped executables embed
+their own Node runtime. They appear only under "Building from source".
+
+---
+
+## Running the desktop app
+
+You were handed an installer. Almost nothing is required.
+
+| Requirement | Notes |
+|---|---|
+| **Windows 10/11** | The NSIS installer runs per-user — **no administrator rights needed**. |
+| **WebView2** | Handled for you. The installer silently downloads it if missing (needs an internet connection during install). Already present on Windows 11 and recent Windows 10. |
+| **git** | **The one thing you must install yourself.** Every remote operation shells out to it — without git there is no catalog, and nothing can be pulled or pushed. |
+
+Optional, only for specific features:
+
+| Requirement | Unlocks | Without it |
+|---|---|---|
+| **`gh`**, authenticated (`gh auth login`, `repo` scope) | Proposing changes back as a PR | Browse, pull, remove and update all still work. Only `push` fails. |
+| **`claude`**, authenticated | Every AI feature: "Suggest with Claude", the build-fix flow, wiring merge suggestions, Wire with Claude — and the two published skills, which *are* Claude skills | The rest of the app is unaffected. |
+
+**Getting the CLI too:** install the **NSIS `.exe`**, not the `.msi`. The `.exe`
+puts `deliveryos` on your PATH automatically; the MSI installs the app but
+silently leaves you without the CLI. (The PATH hook has not yet been verified
+against a real build — see `docs/manual-smoke-test-cli-install.md`.)
+
+**One thing the packaged app can never do:** generate `preview.png` when
+pushing a UI component. Node SEA cannot load `playwright-core` in any form.
+Push still succeeds, just without the image. The CLI run from source can do it.
+
+## Running the CLI
+
+The shipped `deliveryos.exe` is self-contained — **it does not need Node**.
+Requirements are the same as above: `git` always, `gh` for `push`, `claude` for
+AI features.
+
+One extra, worth knowing because it isn't about DeliveryOS at all: an
+artifact's own `post_install` may need whatever tooling *that artifact* uses —
+usually `npm`. A missing tool is reported as a warning, never a hard failure.
+
+| Requirement | Notes |
+|---|---|
+| Microsoft Edge or Chrome | Only for generating `preview.png` when pushing a `ui-component`. Uses an already-installed browser rather than downloading one. Edge ships with Windows. Degrades gracefully: no image, push still succeeds. |
+
+## Building from source
+
+Everything below is build-time only. None of it is needed by anyone you give
+the installer to.
+
+### The engine and CLI
 
 | Requirement | Version | Why |
 |---|---|---|
-| Node.js | >= 22.12.0 | Runtime; also the minimum needed for `@octokit/rest` (ESM-only) to load via native `require(esm)` under this project's CommonJS build — see `package.json`'s `engines` field. |
-| npm | bundled with Node | Installs `package.json` dependencies. |
-| git | any recent version | `remote add`/`pull`/`push` shell out to it via `simple-git`. |
-| GitHub CLI (`gh`) | any recent version, **authenticated** (`gh auth login`) | `push` gets a GitHub token via `gh auth token` to open PRs. Needs `repo` scope at minimum. |
-| Microsoft Edge or Chrome | already installed (Edge ships with Windows) | `push` generates a real `preview.png` for `ui-component` artifacts via `playwright-core`, which launches an already-installed browser rather than downloading its own. Not required to run DeliveryOS itself — only this one push-time step degrades gracefully (no preview image, push still succeeds) if neither is found. |
+| Node.js | >= 22.12.0 | The build toolchain, and the minimum for `@octokit/rest` (ESM-only) to load via native `require(esm)` under this project's CommonJS build — see `package.json`'s `engines`. |
+| npm | bundled with Node | Installs dependencies. |
 
-Install: `npm install` at the repo root. Verify: `npm run typecheck && npm run lint && npm test`.
+```
+npm install
+npm run build
+npm link          # puts `deliveryos` on your PATH
+```
 
-## Claude Code integration (Phases 8-10)
+Verify with `npm run typecheck && npm run lint && npm test`.
 
-| Requirement | Notes |
-|---|---|
-| Claude Code CLI (`claude`), **authenticated** | Required for every AI-assisted feature: "Suggest with Claude" (Add New's description/component-type suggestions), the "want help fixing this?" build-fix flow, and anti-pattern-fix suggestions — all spawn a real `claude -p` subprocess. Also required to install/use the `deliveryos-check-first` and `deliveryos-status` Skills at all, since those ARE Claude Code Skills. Nothing else in DeliveryOS depends on it — the CLI, `pull`/`push`, and the desktop app all work fully without it. |
-
-## Phase 3+ (Tauri desktop app)
+### The desktop app
 
 | Requirement | Notes |
 |---|---|
-| Rust toolchain (`rustup`, `rustc`, `cargo`) | Installed via `winget install Rustlang.Rustup` on Windows, or `rustup.rs`'s installer elsewhere. Tauri's native shell is Rust. |
-| **Windows only:** MSVC C++ Build Tools | Tauri on Windows links against MSVC (`link.exe`), not MinGW. Install via `winget install Microsoft.VisualStudio.2022.BuildTools --override "--add Microsoft.VisualStudio.Workload.VCTools"`, or the Visual Studio Installer's "Desktop development with C++" workload. Large (multi-GB) download. |
-| **Windows only:** WebView2 Runtime | Tauri's webview on Windows. Ships with Windows 11 and recent Windows 10 by default; only needs manual install on older/stripped-down Windows images. |
-| **macOS only:** Xcode Command Line Tools | `xcode-select --install`. Needed for Tauri's macOS build (WKWebView, linking). |
-| Tauri CLI | Added as a dev dependency once Phase 3 scaffolding starts (`@tauri-apps/cli`); not yet added as of Phase 2. |
+| Rust toolchain (`rustup`, `rustc`, `cargo`) | Tauri's native shell is Rust. `winget install Rustlang.Rustup` on Windows, or rustup.rs elsewhere. |
+| **Windows:** MSVC C++ Build Tools | Tauri links against MSVC (`link.exe`), not MinGW. `winget install Microsoft.VisualStudio.2022.BuildTools --override "--add Microsoft.VisualStudio.Workload.VCTools"`, or the "Desktop development with C++" workload. Multi-GB download. |
+| **macOS:** Xcode Command Line Tools | `xcode-select --install`. Needed for WKWebView and linking. |
+| Tauri CLI | Already a devDependency (`@tauri-apps/cli`) — `npm install` gets it. |
 
-**Cross-platform note:** a Mac build cannot be produced from a Windows
-machine (or vice versa) — Tauri needs to compile against the real OS
-toolchain. The same source should build on any platform with zero code
-changes once it's written in a portable way; getting an actual macOS binary
-requires running the build on a real Mac or a macOS CI runner (e.g. GitHub
-Actions' `macos-latest`), not local cross-compilation.
+```
+npm run build && npm run build:sidecar
+cd src-tauri && npx tauri dev
+```
 
-**Code signing** (needed before a real installer can be distributed, not for
-local dev/testing): a Windows code-signing certificate, and an Apple
-Developer ID + notarization credentials for macOS. Neither is set up yet;
-tracked as Phase 3 scope (ARCHITECTURE.md §9 risk #7).
+**A Mac build cannot be produced from Windows, or vice versa** — Tauri compiles
+against the real OS toolchain. The same source builds on any platform; getting
+a macOS binary needs a real Mac or a macOS CI runner.
+
+**Code signing** is not set up. Needed before distributing a real installer: a
+Windows code-signing certificate, and an Apple Developer ID plus notarization
+credentials for macOS. Tracked in ARCHITECTURE.md §9 risk #7.
+
+## When something fails
+
+| What you see | What's missing | Fix |
+|---|---|---|
+| `git` errors on `remote add`, or an empty catalog | git | Install git and reopen your terminal |
+| `Failed to get a GitHub token via "gh auth token"` on `push` | `gh`, or it isn't authenticated | `gh auth login` — needs `repo` scope |
+| "Suggest with Claude" / build-fix / Wire with Claude fail | `claude` not on PATH or not authenticated | Install Claude Code and sign in |
+| `deliveryos: command not found` after installing the app | You installed the `.msi` | Install the NSIS `.exe` instead, or add the install directory to PATH by hand |
+| `deliveryos: command not found` after building from source | `npm link` not run | `npm link`, or use `node dist/index.js <command>` |
+| Push succeeds but the PR has no preview image | No Chrome/Edge, or you used the packaged app | Expected. The packaged app can never render previews; use the CLI from source if you need one |
+| An artifact's `post_install` fails with a missing tool | That artifact's own tooling (usually `npm`) | Install what the artifact needs; DeliveryOS itself is fine |
+| One artifact missing, others fine | That manifest failed validation | `deliveryos list` prints skipped manifests and the reason to stderr |
+
+See [README.md](README.md) for usage and [docs/skills.md](docs/skills.md) for
+the Claude Code skills.
