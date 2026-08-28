@@ -175,8 +175,40 @@ Launch it with the commands under [Running it](#running-it) above.
 separate compiled binary, not loaded from source. On Windows, put Rust's
 `~/.cargo/bin` on `PATH` first.
 
-Build an installer with `npx tauri build` — produces an `.msi` and an NSIS
-`.exe` under `src-tauri/target/*/release/bundle/`.
+### Packaging an installer
+
+All four build steps are required, in order. `tauri.conf.json` silently depends
+on the first three: `bundle.externalBin` needs the sidecar, `bundle.resources`
+needs `esbuild.exe` and `deliveryos.exe`, and both of those build scripts
+assume `npm run build` already produced `dist/`. Skip one and `tauri build`
+either fails outright or — worse — succeeds with a **stale binary baked into
+the installer**.
+
+```
+npm run build           # tsc -> dist/
+npm run build:sidecar   # -> build/deliveryos-engine-*.exe + build/esbuild.exe
+npm run build:cli       # -> build/deliveryos-cli.exe
+cd src-tauri && npx tauri build
+```
+
+Output, under `src-tauri/target/x86_64-pc-windows-msvc/release/bundle/`:
+
+| File | What it is |
+|---|---|
+| `nsis/deliveryos_<version>_x64-setup.exe` | **The one to distribute.** Per-user install, no admin rights, and it puts `deliveryos` on the user's PATH. |
+| `nsis/deliveryos_<version>_x64-setup.exe.sig` | Detached signature the auto-updater checks |
+| `msi/deliveryos_<version>_x64_en-US.msi` | Also produced — **don't ship it** |
+| `msi/deliveryos_<version>_x64_en-US.msi.sig` | Its signature |
+
+**Ship the NSIS `.exe`, not the MSI.** The CLI-onto-PATH step runs from
+`src-tauri/nsis/path-hook.nsh` via `bundle.windows.nsis.installerHooks`, and
+that mechanism is NSIS-only. Someone who installs the MSI gets the app but no
+`deliveryos` command, with nothing telling them so. WiX has an equivalent
+(`fragmentPaths` + an `<Environment>` element); it isn't built yet.
+
+Signing and the `latest.json` the updater expects are covered in
+[docs/release-process.md](docs/release-process.md). Neither installer is
+code-signed today.
 
 **Debugging:** F12 opens Chromium DevTools. The Network panel stays empty by
 design — the frontend talks to the sidecar over stdio, and fonts are vendored
