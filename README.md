@@ -259,7 +259,7 @@ changes by hand.
 
 | Doc | What's in it |
 |---|---|
-| [docs/product-brief.md](docs/product-brief.md) | **Start here if you're not building it.** What we're trying to do, who for, and one day of using it — no implementation detail |
+| [PRODUCT_BRIEF.md](PRODUCT_BRIEF.md) | **Start here if you are not building it.** What it is, who it is for, and one small journey — plain language, no code |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | The design: layer model, artifact kinds, manifest schema, decisions, open risks |
 | [PLAN.md](PLAN.md) | What's shipped and what's next |
 | [CHANGELOG.md](CHANGELOG.md) | Detailed release notes, phase by phase |
