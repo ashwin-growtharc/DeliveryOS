@@ -20,6 +20,8 @@
     "test": "vitest run",
     "ui:contrast": "node scripts/ui/audit-contrast.mjs",
     "ui:themes": "node scripts/ui/check-theme-matrix.mjs",
+    "lint:css": "node scripts/ui/lint-tokens.mjs",
+    "ui:screenshots": "node scripts/ui/screenshot-views.mjs",
     "build:sidecar": "node scripts/build-sidecar.mjs",
     "build:cli": "node scripts/build-cli.mjs",
     "generate:vendored-react": "node scripts/generate-vendored-react-runtime.mjs",

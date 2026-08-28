@@ -72,7 +72,14 @@
   /* ---- spacing scale ----
    * The design kit specifies multiples of 4. The stylesheet had 44 distinct
    * padding combinations and 12 distinct gaps, including off-grid 5px, 7px
-   * and 18px one-offs. */
+   * and 18px one-offs.
+   *
+   * --space-05 (2px) is a deliberate half-step, not a hole in the grid. This
+   * is a dense tool UI: badge and pill padding genuinely needs a sub-4px
+   * value, and forcing those to 4px would visibly inflate every status chip
+   * in the app. Everything else snaps to the 4px grid the design kit
+   * specifies. */
+  --space-05: 2px;
   --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px;
   --space-5: 20px; --space-6: 24px; --space-7: 28px; --space-8: 32px;
 
@@ -107,6 +114,12 @@
      text on the dark surface it measures 1.68:1: unusable. This token is the
      adaptive counterpart, and only link-like text uses it. */
   --link-accent: var(--accent-600);
+  /* Text sitting ON a brand fill (.btn-primary, .btn-accent, .chip.active).
+     Deliberately fixed in both themes, because the fill it sits on is fixed
+     too -- --primary-700 and --accent-600 stay navy/purple in dark mode, so
+     their label must stay white. A token rather than three loose `#fff`s so
+     the pairing is stated once and the lint rule has nothing to flag. */
+  --on-brand: #FFFFFF;
   /* status */
   --success-100: #DCF8E6; --success-600: #236D40; --warning-100: #FFF4E0; --warning-600: #9C5D00;
   --danger-100: #FFE5E0; --danger-500: #E94E2D; --danger-600: #A2341F;
@@ -217,11 +230,11 @@ html, body {
 
 body {
   margin: 0;
-  font-family: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-family: var(--font-sans);
   background: var(--surface);
   color: var(--ink);
   line-height: 1.5;
-  font-size: 14px;
+  font-size: var(--text-base);
   /* A global safety net: fixing each individual long-unbreakable-string
      case one at a time (progress log paths, tag folder titles, ...) is
      whack-a-mole -- anything, anywhere, that refuses to shrink below its
@@ -239,14 +252,14 @@ body {
  * font-normal (400), not bold/medium -- the editorial feel comes from the
  * serif face and size, not weight. */
 h1, h2, h3, h4 {
-  font-family: 'EB Garamond', Georgia, serif;
+  font-family: var(--font-serif);
   font-weight: 400;
   line-height: 1.2;
   margin: 0;
 }
 
 code, .mono {
-  font-family: 'JetBrains Mono', ui-monospace, Consolas, monospace;
+  font-family: var(--font-mono);
 }
 
 button {
@@ -296,33 +309,33 @@ input, textarea, select {
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  padding: 22px 16px;
+  padding: var(--space-5) var(--space-4);
   overflow-y: auto;
 }
 
 .sidebar-brand {
-  font-family: 'EB Garamond', Georgia, serif;
-  font-size: 23px;
+  font-family: var(--font-serif);
+  font-size: var(--text-2xl);
   color: var(--ink);
-  padding: 0 8px 22px;
+  padding: 0 var(--space-2) var(--space-5);
   letter-spacing: .2px;
 }
 
 .sidebar-nav {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--space-05);
 }
 
 .sidebar-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 9px 12px;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-md);
   color: var(--text-secondary);
   font-weight: 500;
-  font-size: 13.5px;
+  font-size: var(--text-sm);
   cursor: pointer;
   border: none;
   background: transparent;
@@ -354,7 +367,7 @@ input, textarea, select {
 .sidebar-divider {
   height: 1px;
   background: var(--border);
-  margin: 14px 8px;
+  margin: var(--space-3) var(--space-2);
 }
 
 .content-shell {
@@ -367,11 +380,11 @@ input, textarea, select {
 .context-strip {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 13px 28px;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-7);
   border-bottom: 1px solid var(--border);
   background: var(--surface);
-  font-size: 12px;
+  font-size: var(--text-xs);
 }
 
 .context-strip-spacer {
@@ -381,18 +394,18 @@ input, textarea, select {
 .folder-label {
   text-transform: uppercase;
   letter-spacing: .8px;
-  font-size: 10.5px;
+  font-size: var(--text-2xs);
   font-weight: 600;
 color: var(--text-tertiary);
 }
 
 .folder-path {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   color: var(--ink);
   background: var(--surface-tertiary);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 5px 10px;
+  padding: var(--space-1) var(--space-2);
   max-width: 320px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -409,15 +422,15 @@ color: var(--text-tertiary);
  * counterpart in DeliveryOS's UI, so it isn't defined here.) */
 
 .btn {
-  font-size: 13px;
+  font-size: var(--text-sm);
   font-weight: 500;
   background: var(--card);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
-  padding: 7px 14px;
+  padding: var(--space-2) var(--space-3);
   cursor: pointer;
   color: var(--ink);
-  transition: background .1s ease, opacity .1s ease, box-shadow .15s ease;
+  transition: background var(--motion-fast), opacity var(--motion-fast), box-shadow var(--motion-fast);
 }
 
 .btn:hover:not(:disabled) {
@@ -432,7 +445,7 @@ color: var(--text-tertiary);
 .btn-primary {
   background: var(--primary-700);
   border-color: var(--primary-700);
-  color: #fff;
+  color: var(--on-brand);
 }
 
 .btn-primary:hover:not(:disabled) {
@@ -445,7 +458,7 @@ color: var(--text-tertiary);
 .btn-accent {
   background: var(--accent-500);
   border-color: var(--accent-500);
-  color: #fff;
+  color: var(--on-brand);
 }
 
 .btn-accent:hover:not(:disabled) {
@@ -463,8 +476,8 @@ color: var(--text-tertiary);
 }
 
 .btn-sm {
-  font-size: 12px;
-  padding: 5px 11px;
+  font-size: var(--text-xs);
+  padding: var(--space-1) var(--space-3);
 }
 
 /* A button whose only content is one .glyph icon (currently: the theme
@@ -474,7 +487,7 @@ color: var(--text-tertiary);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 6px;
+  padding: var(--space-1);
 }
 
 .btn-icon-only .glyph {
@@ -493,7 +506,7 @@ color: var(--text-tertiary);
 }
 
 .back-btn {
-  margin-bottom: 14px;
+  margin-bottom: var(--space-3);
 }
 
 /* ---------- layout ---------- */
@@ -510,7 +523,7 @@ color: var(--text-tertiary);
   max-width: 1080px;
   width: 100%;
   margin: 0 auto;
-  padding: 24px 24px 60px;
+  padding: var(--space-6) var(--space-6) 60px;
   box-sizing: border-box;
 }
 
@@ -522,20 +535,20 @@ color: var(--text-tertiary);
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: 20px 22px;
+  padding: var(--space-5) var(--space-5);
   box-shadow: var(--shadow-1);
-  margin-bottom: 16px;
+  margin-bottom: var(--space-4);
 }
 
 .section-title {
-  font-size: 18px;
-  margin-bottom: 12px;
+  font-size: var(--text-lg);
+  margin-bottom: var(--space-3);
 }
 
 .empty-state {
   color: var(--text-secondary);
-  font-size: 13.5px;
-  padding: 24px 4px;
+  font-size: var(--text-sm);
+  padding: var(--space-6) var(--space-1);
 }
 
 /* Informational banner (not a warning) -- warm sky-100 card tone with a
@@ -546,9 +559,9 @@ color: var(--text-tertiary);
   background: var(--sky-100);
   border-left: 3px solid var(--gold-500);
   border-radius: var(--radius-md);
-  padding: 12px 16px;
-  font-size: 13.5px;
-  margin-bottom: 16px;
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-sm);
+  margin-bottom: var(--space-4);
 }
 
 /* Same shape as .hint-banner, but for a genuinely AI-generated finding
@@ -563,9 +576,9 @@ color: var(--text-tertiary);
   background: var(--sky-100);
   border-left: 3px solid var(--accent-500);
   border-radius: var(--radius-md);
-  padding: 12px 16px;
-  font-size: 13.5px;
-  margin-bottom: 16px;
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-sm);
+  margin-bottom: var(--space-4);
 }
 
 /* ---------- browse ---------- */
@@ -577,14 +590,14 @@ color: var(--text-tertiary);
 .browse-toolbar {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  margin-bottom: 14px;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
 }
 
 .toolbar-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-2);
   flex-wrap: wrap;
 }
 
@@ -595,7 +608,7 @@ color: var(--text-tertiary);
 .toolbar-group {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   flex-wrap: wrap;
 }
 
@@ -604,7 +617,7 @@ color: var(--text-tertiary);
   min-width: 200px;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
-  padding: 8px 12px;
+  padding: var(--space-2) var(--space-3);
   background: var(--card);
 }
 
@@ -614,10 +627,10 @@ color: var(--text-tertiary);
 .toolbar-select {
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
-  padding: 8px 12px;
+  padding: var(--space-2) var(--space-3);
   background: var(--card);
   color: var(--ink);
-  font-size: 13px;
+  font-size: var(--text-sm);
   flex-shrink: 0;
 }
 
@@ -629,22 +642,22 @@ color: var(--text-tertiary);
 .mini-search {
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
-  padding: 7px 11px;
+  padding: var(--space-2) var(--space-3);
   background: var(--card);
-  font-size: 12.5px;
+  font-size: var(--text-xs);
   min-width: 160px;
 }
 
 .tag-value-search {
-  margin: 4px 0 10px;
+  margin: var(--space-1) 0 var(--space-2);
   width: 100%;
   max-width: 320px;
 }
 
 .chip {
-  font-size: 12.5px;
+  font-size: var(--text-xs);
   font-weight: 500;
-  padding: 5px 12px;
+  padding: var(--space-1) var(--space-3);
   border-radius: var(--radius-md);
   border: 1px solid var(--border);
   color: var(--ink);
@@ -655,7 +668,7 @@ color: var(--text-tertiary);
 
 .chip.active {
   background: var(--primary-700);
-  color: #fff;
+  color: var(--on-brand);
   border-color: var(--primary-700);
   opacity: 1;
 }
@@ -668,10 +681,10 @@ color: var(--text-tertiary);
  * Browse-by-tag's category tabs are single-select. */
 .tab-row {
   display: flex;
-  gap: 4px;
+  gap: var(--space-1);
   border-bottom: 1px solid var(--border);
   flex-wrap: wrap;
-  margin-bottom: 16px;
+  margin-bottom: var(--space-4);
 }
 
 .tab-row .tab {
@@ -679,8 +692,8 @@ color: var(--text-tertiary);
   border: none;
   border-bottom: 2px solid transparent;
   margin-bottom: -1px;
-  padding: 9px 15px 11px;
-  font-size: 13.5px;
+  padding: var(--space-2) var(--space-4) var(--space-3);
+  font-size: var(--text-sm);
   font-weight: 500;
   color: var(--text-tertiary);
   cursor: pointer;
@@ -700,20 +713,20 @@ color: var(--text-tertiary);
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 16px;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
   flex-wrap: wrap;
 }
 
 .page-head .count {
-  font-size: 13px;
+  font-size: var(--text-sm);
 color: var(--text-tertiary);
 }
 
 .page-head-actions {
   display: flex;
   align-items: baseline;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 /* ---------- kind swatch (icon + warm accent tint) ----------
@@ -727,7 +740,7 @@ color: var(--text-tertiary);
 .kind-swatch {
   width: 34px;
   height: 34px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -742,7 +755,7 @@ color: var(--text-tertiary);
 .kind-swatch.sm {
   width: 28px;
   height: 28px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
 }
 
 .kind-swatch.sm svg {
@@ -768,20 +781,20 @@ color: var(--text-tertiary);
 .tag-list-panel {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
-  gap: 14px;
+  gap: var(--space-3);
 }
 
 .tag-item-row {
   display: flex;
   align-items: center;
-  gap: 18px;
+  gap: var(--space-4);
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: 20px 24px;
+  padding: var(--space-5) var(--space-6);
   box-shadow: var(--shadow-1);
   cursor: pointer;
-  transition: box-shadow .15s ease, transform .15s ease, border-color .15s ease;
+  transition: box-shadow var(--motion-fast), transform var(--motion-fast), border-color var(--motion-fast);
 }
 
 .tag-item-row:hover {
@@ -793,7 +806,7 @@ color: var(--text-tertiary);
 .tag-item-icon {
   width: 44px;
   height: 44px;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -809,9 +822,9 @@ color: var(--text-tertiary);
  * mark as literal letters rather than a hand-drawn path -- simpler AND
  * more accurate, since that IS their real logo. */
 .tag-item-icon-text {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-weight: 700;
-  font-size: 13px;
+  font-size: var(--text-sm);
   letter-spacing: -.02em;
 }
 
@@ -821,21 +834,21 @@ color: var(--text-tertiary);
 }
 
 .tag-item-name {
-  font-family: 'EB Garamond', Georgia, serif;
-  font-size: 20px;
+  font-family: var(--font-serif);
+  font-size: var(--text-xl);
   line-height: 1.2;
 }
 
 .tag-item-count {
-  font-size: 11.5px;
-  font-family: 'JetBrains Mono', monospace;
-  margin-top: 4px;
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+  margin-top: var(--space-1);
 color: var(--text-tertiary);
 }
 
 .tag-item-chev {
   color: var(--text-tertiary);
-  font-size: 22px;
+  font-size: var(--text-2xl);
   line-height: 1;
   flex-shrink: 0;
 }
@@ -859,7 +872,7 @@ color: var(--text-tertiary);
 }
 
 .ui-component-row {
-  padding: 24px 0;
+  padding: var(--space-6) 0;
   border-bottom: 1px solid var(--border);
 }
 
@@ -874,33 +887,33 @@ color: var(--text-tertiary);
 .ui-component-row-header {
   display: block;
   cursor: pointer;
-  margin-bottom: 16px;
+  margin-bottom: var(--space-4);
   max-width: 720px;
 }
 
 .ui-component-row-header .index {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 12px;
-  margin-right: 8px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  margin-right: var(--space-2);
 color: var(--text-tertiary);
 }
 
 .ui-component-row-header .name {
-  font-family: 'EB Garamond', Georgia, serif;
-  font-size: 20px;
+  font-family: var(--font-serif);
+  font-size: var(--text-xl);
   line-height: 1.2;
 }
 
 .ui-component-row-header .meta {
-  font-size: 11px;
-  font-family: 'JetBrains Mono', monospace;
-  margin-left: 10px;
+  font-size: var(--text-2xs);
+  font-family: var(--font-mono);
+  margin-left: var(--space-2);
 color: var(--text-tertiary);
 }
 
 .ui-component-row-header .description {
-  margin: 6px 0 0;
-  font-size: 13px;
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-sm);
 color: var(--text-secondary);
 }
 
@@ -988,11 +1001,11 @@ color: var(--text-secondary);
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0 16px;
+  padding: 0 var(--space-4);
   text-align: center;
   overflow-wrap: break-word;
-  font-size: 11px;
-  font-family: 'JetBrains Mono', monospace;
+  font-size: var(--text-2xs);
+  font-family: var(--font-mono);
 color: var(--text-tertiary);
 }
 
@@ -1009,29 +1022,29 @@ color: var(--text-tertiary);
    * here. */
   height: 260px;
   max-width: none;
-  margin-bottom: 12px;
+  margin-bottom: var(--space-3);
 }
 
 .controls-panel {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  margin-bottom: 16px;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
 }
 
 .control-row label {
   display: block;
-  font-size: 12px;
+  font-size: var(--text-xs);
   font-weight: 500;
-  margin-bottom: 5px;
+  margin-bottom: var(--space-1);
 color: var(--text-secondary);
 }
 
 .control-checkbox {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 13px;
+  gap: var(--space-1);
+  font-size: var(--text-sm);
   cursor: pointer;
 }
 
@@ -1043,8 +1056,8 @@ color: var(--text-secondary);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 16px;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
 }
 
 .tag-folder-header .section-title {
@@ -1060,30 +1073,30 @@ color: var(--text-secondary);
 .scan-controls {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-2);
   flex-shrink: 0;
 }
 
 .scan-controls select {
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
-  padding: 8px 12px;
+  padding: var(--space-2) var(--space-3);
   background: var(--card);
 }
 
 .grouped-results {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: var(--space-5);
 }
 
 .kind-group-header {
-  font-size: 13px;
+  font-size: var(--text-sm);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: .04em;
   color: var(--ink);
-  margin-bottom: 8px;
+  margin-bottom: var(--space-2);
 }
 
 .kind-group-header .count {
@@ -1096,44 +1109,44 @@ color: var(--text-tertiary);
 .kind-group-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .kind-group-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-3);
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 10px 14px;
+  padding: var(--space-2) var(--space-3);
   cursor: pointer;
 }
 
 .kind-group-row .row-main {
   display: flex;
   align-items: baseline;
-  gap: 10px;
+  gap: var(--space-2);
   min-width: 0;
   flex: 1;
 }
 
 .kind-group-row .row-main .name {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-weight: 600;
-  font-size: 14px;
+  font-size: var(--text-base);
   white-space: nowrap;
 }
 
 .kind-group-row .row-main .summary {
-  font-size: 13px;
+  font-size: var(--text-sm);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-1);
   min-width: 0;
 color: var(--text-secondary);
 }
@@ -1148,7 +1161,7 @@ color: var(--text-secondary);
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
-  gap: 14px;
+  gap: var(--space-3);
 }
 
 /* Icon-led: a kind swatch + serif name/kind-label pair up top (row1), the
@@ -1158,13 +1171,13 @@ color: var(--text-secondary);
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: 18px 19px;
+  padding: var(--space-4) var(--space-5);
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--space-3);
   box-shadow: var(--shadow-1);
   cursor: pointer;
-  transition: box-shadow .15s ease, transform .15s ease, border-color .15s ease;
+  transition: box-shadow var(--motion-fast), transform var(--motion-fast), border-color var(--motion-fast);
 }
 
 .res-card:hover {
@@ -1176,26 +1189,26 @@ color: var(--text-secondary);
 .res-card .row1 {
   display: flex;
   align-items: flex-start;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .res-card .name {
-  font-family: 'EB Garamond', Georgia, serif;
-  font-size: 20px;
+  font-family: var(--font-serif);
+  font-size: var(--text-xl);
   line-height: 1.2;
 }
 
 .res-card .kind-label {
-  font-size: 10.5px;
+  font-size: var(--text-2xs);
   text-transform: uppercase;
   letter-spacing: .06em;
   font-weight: 600;
-  margin-top: 2px;
+  margin-top: var(--space-05);
 color: var(--text-tertiary);
 }
 
 .res-card .summary {
-  font-size: 13px;
+  font-size: var(--text-sm);
   flex: 1;
 color: var(--text-secondary);
 }
@@ -1204,22 +1217,22 @@ color: var(--text-secondary);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-top: 2px;
+  margin-top: var(--space-05);
 }
 
 .res-card .meta {
-  font-size: 11px;
-  font-family: 'JetBrains Mono', monospace;
+  font-size: var(--text-2xs);
+  font-family: var(--font-mono);
 color: var(--text-tertiary);
 }
 
 /* status badges -- 3 distinct colors from the warm/status palette */
 
 .badge {
-  font-size: 10.5px;
+  font-size: var(--text-2xs);
   font-weight: 600;
   letter-spacing: .3px;
-  padding: 3px 9px;
+  padding: var(--space-05) var(--space-2);
   border-radius: var(--radius-md);
   white-space: nowrap;
   text-transform: uppercase;
@@ -1261,22 +1274,22 @@ color: var(--text-tertiary);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 14px;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
   flex-wrap: wrap;
 }
 
 .detail-title-group {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: var(--space-3);
   min-width: 0;
 }
 
 .kind-swatch.lg {
   width: 52px;
   height: 52px;
-  border-radius: 14px;
+  border-radius: var(--radius-lg);
 }
 
 .kind-swatch.lg svg {
@@ -1287,12 +1300,12 @@ color: var(--text-tertiary);
 .detail-title {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-2);
   flex-wrap: wrap;
 }
 
 .detail-title .kind-label {
-  font-size: 11.5px;
+  font-size: var(--text-xs);
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: .5px;
@@ -1300,31 +1313,31 @@ color: var(--text-tertiary);
 }
 
 .detail-title .name {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 18px;
+  font-family: var(--font-mono);
+  font-size: var(--text-lg);
   font-weight: 600;
 }
 
 .detail-description {
-  font-size: 13.5px;
-  margin: 0 0 4px;
+  font-size: var(--text-sm);
+  margin: 0 0 var(--space-1);
 color: var(--text-secondary);
 }
 
 .meta-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 12px 20px;
-  font-size: 13px;
-  margin: 14px 0;
+  gap: var(--space-3) var(--space-5);
+  font-size: var(--text-sm);
+  margin: var(--space-3) 0;
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
-  padding: 14px 0;
+  padding: var(--space-3) 0;
 }
 
 .meta-grid .k {
   color: var(--text-secondary);
-  font-size: 11.5px;
+  font-size: var(--text-xs);
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: .3px;
@@ -1336,33 +1349,33 @@ color: var(--text-secondary);
 
 .tag-pill {
   display: inline-block;
-  font-size: 11px;
+  font-size: var(--text-2xs);
   font-weight: 500;
   background: var(--surface-tertiary);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 2px 9px;
-  margin: 3px 5px 0 0;
+  padding: var(--space-05) var(--space-2);
+  margin: var(--space-05) var(--space-1) 0 0;
   color: var(--ink);
   opacity: .85;
 }
 
 .install-path-label {
-  font-size: 11.5px;
+  font-size: var(--text-xs);
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: .3px;
-  margin-bottom: 6px;
+  margin-bottom: var(--space-1);
 color: var(--text-secondary);
 }
 
 .install-path {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
   background: var(--surface-tertiary);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 9px 11px;
+  padding: var(--space-2) var(--space-3);
   color: var(--ink);
   opacity: .85;
   word-break: break-all;
@@ -1370,16 +1383,16 @@ color: var(--text-secondary);
 
 .detail-secondary-actions {
   display: flex;
-  gap: 10px;
-  margin-top: 10px;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
 }
 
 .edit-form {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  margin-top: 14px;
-  padding: 14px 16px;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+  padding: var(--space-3) var(--space-4);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--surface-tertiary);
@@ -1387,7 +1400,7 @@ color: var(--text-secondary);
 
 .edit-form-actions {
   display: flex;
-  gap: 10px;
+  gap: var(--space-2);
 }
 
 /* ---------- drift warning (both locally edited AND updated upstream) ----------
@@ -1396,17 +1409,17 @@ color: var(--text-secondary);
  * as a warning, not just another badge. */
 
 .drift-warning {
-  margin-top: 14px;
+  margin-top: var(--space-3);
   background: var(--danger-100);
   border: 1px solid var(--danger-500);
   border-radius: var(--radius-md);
-  padding: 12px 14px;
+  padding: var(--space-3) var(--space-3);
 }
 
 .drift-warning-text {
-  font-size: 13px;
+  font-size: var(--text-sm);
   color: var(--danger-600);
-  margin: 0 0 10px;
+  margin: 0 0 var(--space-2);
 }
 
 /* An informational (not alarming) counterpart to .drift-warning -- a push
@@ -1414,17 +1427,17 @@ color: var(--text-secondary);
  * sand/gold tones (not the AI-reserved sky/cyan pair this used to sit on),
  * matching .badge.update_available's fix above for the same reason. */
 .push-status {
-  margin-top: 14px;
+  margin-top: var(--space-3);
   background: var(--sand-100);
   border: 1px solid var(--gold-500);
   border-radius: var(--radius-md);
-  padding: 12px 14px;
+  padding: var(--space-3) var(--space-3);
 }
 
 .push-status-text {
-  font-size: 13px;
+  font-size: var(--text-sm);
   color: var(--ink);
-  margin: 0 0 10px;
+  margin: 0 0 var(--space-2);
 }
 
 /* ---------- backend-plugin Detail section (Phase 7) ----------
@@ -1435,12 +1448,12 @@ color: var(--text-secondary);
 
 .provenance-badge {
   display: inline-block;
-  font-size: 11px;
+  font-size: var(--text-2xs);
   font-weight: 600;
   letter-spacing: .2px;
-  padding: 4px 10px;
+  padding: var(--space-1) var(--space-2);
   border-radius: var(--radius-md);
-  margin: 14px 0;
+  margin: var(--space-3) 0;
 }
 
 .provenance-badge.signed {
@@ -1463,19 +1476,19 @@ color: var(--text-secondary);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--surface-tertiary);
-  padding: 10px 14px;
-  margin: 0 0 14px;
+  padding: var(--space-2) var(--space-3);
+  margin: 0 0 var(--space-3);
 }
 
 .lifecycle-explainer summary {
   cursor: pointer;
   font-weight: 600;
-  font-size: 13px;
-  padding: 2px 0;
+  font-size: var(--text-sm);
+  padding: var(--space-05) 0;
 }
 
 .lifecycle-explainer[open] summary {
-  margin-bottom: 8px;
+  margin-bottom: var(--space-2);
 }
 
 .lifecycle-steps {
@@ -1484,11 +1497,11 @@ color: var(--text-secondary);
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--space-2);
 }
 
 .lifecycle-step {
-  padding-top: 8px;
+  padding-top: var(--space-2);
   border-top: 1px solid var(--border);
 }
 
@@ -1501,15 +1514,15 @@ color: var(--text-secondary);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--space-2);
   font-weight: 600;
-  font-size: 12.5px;
+  font-size: var(--text-xs);
 }
 
 .lifecycle-step-description {
-  font-size: 12.5px;
+  font-size: var(--text-xs);
   color: var(--text-secondary);
-  margin-top: 2px;
+  margin-top: var(--space-05);
   line-height: 1.45;
 }
 
@@ -1518,7 +1531,7 @@ color: var(--text-secondary);
   border: none;
   background: none;
   color: var(--link-accent);
-  font-size: 11.5px;
+  font-size: var(--text-xs);
   font-weight: 600;
   cursor: pointer;
   padding: 0;
@@ -1541,21 +1554,21 @@ color: var(--text-secondary);
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   background: var(--surface-tertiary);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 10px 14px;
-  margin: 0 0 14px;
+  padding: var(--space-2) var(--space-3);
+  margin: 0 0 var(--space-3);
 }
 
 .status-chip {
   display: inline-flex;
   align-items: center;
-  font-size: 11px;
+  font-size: var(--text-2xs);
   font-weight: 600;
   letter-spacing: .2px;
-  padding: 4px 10px;
+  padding: var(--space-1) var(--space-2);
   border-radius: var(--radius-md);
 }
 
@@ -1590,19 +1603,19 @@ color: var(--text-secondary);
 
 /* Holds one real, sandboxed markdown iframe (see
  * renderMarkdownToSandboxedIframe in app.js) -- no text styling of its
- * own; the rendered document's own <style> (inside the iframe) owns
+ * own; the rendered document's own \3c style> (inside the iframe) owns
  * all of that. Replaces the old .detail-readme, which used to hold raw
  * pre-wrap monospace text before a real markdown renderer existed. */
 .markdown-container {
-  margin-bottom: 14px;
+  margin-bottom: var(--space-3);
 }
 
 .detail-tabs-loading {
   display: flex;
   align-items: center;
-  gap: 7px;
-  font-size: 12.5px;
-  margin: -6px 0 14px;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  margin: -6px 0 var(--space-3);
 color: var(--text-secondary);
 }
 
@@ -1619,25 +1632,25 @@ color: var(--text-secondary);
  * genuinely broken markdown file still shows SOMETHING readable. */
 .markdown-fallback {
   white-space: pre-wrap;
-  font-family: var(--font-mono, monospace);
-  font-size: 12.5px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
   line-height: 1.6;
   background: var(--surface-tertiary);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 14px 16px;
+  padding: var(--space-3) var(--space-4);
   margin: 0;
 }
 
 .install-params-form {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: var(--space-3);
 }
 
 .install-param-help {
-  font-size: 11px;
-  margin-bottom: 5px;
+  font-size: var(--text-2xs);
+  margin-bottom: var(--space-1);
 color: var(--text-secondary);
 }
 
@@ -1646,7 +1659,7 @@ color: var(--text-secondary);
   width: 100%;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
-  padding: 8px 12px;
+  padding: var(--space-2) var(--space-3);
   background: var(--card);
 }
 
@@ -1656,36 +1669,36 @@ color: var(--text-secondary);
  * row) and the shared mono text convention. */
 
 .route-tree {
-  font-size: 12.5px;
+  font-size: var(--text-xs);
 }
 
 .route-node {
-  padding: 3px 0;
+  padding: var(--space-05) 0;
 }
 
 .route-node-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   flex-wrap: wrap;
 }
 
 .route-node-path {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
   color: var(--ink);
 }
 
 .route-node-error-note {
-  font-size: 11px;
+  font-size: var(--text-2xs);
   font-style: italic;
 color: var(--text-secondary);
 }
 
 .route-node-children {
-  margin-left: 18px;
+  margin-left: var(--space-4);
   border-left: 1px solid var(--border);
-  padding-left: 12px;
+  padding-left: var(--space-3);
 }
 
 /* ---------- Source-drift check (Detail section) ----------
@@ -1696,31 +1709,31 @@ color: var(--text-secondary);
  * severity read, just at list-item scale rather than a full banner. */
 
 .source-drift-caption {
-  font-size: 13px;
+  font-size: var(--text-sm);
   color: var(--text-secondary);
-  margin: 4px 0 10px;
+  margin: var(--space-1) 0 var(--space-2);
 }
 
 .source-drift-results {
-  margin-top: 12px;
+  margin-top: var(--space-3);
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-1);
 }
 
 .source-drift-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 12.5px;
-  padding: 6px 10px;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  padding: var(--space-1) var(--space-2);
   border-radius: var(--radius-md);
   border: 1px solid var(--border);
 }
 
 .source-drift-item .source-drift-path {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
 }
 
 .source-drift-item.drifted {
@@ -1739,50 +1752,50 @@ color: var(--text-secondary);
 }
 
 .source-drift-summary {
-  font-size: 12.5px;
+  font-size: var(--text-xs);
   font-weight: 600;
 }
 
 /* ---------- Tier 2 wiring suggestions (Phase 7 item 6) ---------- */
 
 .wiring-section-label {
-  font-size: 12px;
+  font-size: var(--text-xs);
   font-weight: 600;
   letter-spacing: .3px;
   text-transform: uppercase;
-  margin: 18px 0 10px;
+  margin: var(--space-4) 0 var(--space-2);
 color: var(--text-secondary);
 }
 
 .wiring-action-card {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 12px 14px;
-  margin-bottom: 10px;
+  padding: var(--space-3) var(--space-3);
+  margin-bottom: var(--space-2);
   background: var(--surface-tertiary);
 }
 
 .wiring-action-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 6px;
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
 }
 
 .wiring-action-header code {
-  font-size: 12.5px;
+  font-size: var(--text-xs);
   background: var(--card);
   border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  padding: 1px var(--space-1);
 }
 
 .wiring-action-status {
-  font-size: 10px;
+  font-size: var(--text-2xs);
   font-weight: 600;
   letter-spacing: .2px;
   text-transform: uppercase;
-  padding: 2px 7px;
+  padding: var(--space-05) var(--space-2);
   border-radius: var(--radius-md);
 }
 
@@ -1790,7 +1803,7 @@ color: var(--text-secondary);
    build-fix) this entry came from -- a category, never a status, so it
    stays visually quieter than .wiring-action-status's colored pills. */
 .wiring-action-kind {
-  font-size: 10px;
+  font-size: var(--text-2xs);
   font-weight: 600;
   letter-spacing: .2px;
   text-transform: uppercase;
@@ -1818,26 +1831,26 @@ color: var(--text-secondary);
 }
 
 .wiring-action-description {
-  font-size: 13px;
+  font-size: var(--text-sm);
   font-weight: 500;
-  margin-bottom: 4px;
+  margin-bottom: var(--space-1);
 }
 
 .wiring-action-instructions {
-  font-size: 12.5px;
-  margin-bottom: 8px;
+  font-size: var(--text-xs);
+  margin-bottom: var(--space-2);
 color: var(--text-secondary);
 }
 
 .wiring-action-snippet {
   white-space: pre-wrap;
-  font-family: var(--font-mono, monospace);
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
   line-height: 1.5;
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 10px 12px;
+  padding: var(--space-2) var(--space-3);
   overflow-x: auto;
 }
 
@@ -1848,29 +1861,29 @@ color: var(--text-secondary);
 .token-swatch-grid {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
-  margin-bottom: 4px;
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
 }
 
 .token-swatch {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-1);
   width: 76px;
 }
 
 .token-swatch-color {
   width: 40px;
   height: 40px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   border: 1px solid var(--border);
   flex-shrink: 0;
 }
 
 .token-swatch-label {
-  font-size: 10.5px;
-  font-family: var(--font-mono, monospace);
+  font-size: var(--text-2xs);
+  font-family: var(--font-mono);
   text-align: center;
   line-height: 1.3;
   word-break: break-word;
@@ -1882,14 +1895,14 @@ color: var(--text-secondary);
 .type-sample-list {
   display: flex;
   flex-direction: column;
-  margin-bottom: 4px;
+  margin-bottom: var(--space-1);
 }
 
 .type-sample-row {
   display: flex;
   align-items: baseline;
-  gap: 14px;
-  padding: 8px 0;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
   border-bottom: 1px dashed var(--border);
 }
 
@@ -1898,8 +1911,8 @@ color: var(--text-secondary);
 }
 
 .type-sample-label {
-  font-family: var(--font-mono, monospace);
-  font-size: 10.5px;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
   width: 130px;
   flex-shrink: 0;
 color: var(--text-secondary);
@@ -1912,23 +1925,23 @@ color: var(--text-secondary);
 .template-theme-toggle-row {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 10px;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
 }
 
 .template-theme-toggle-caption {
-  font-size: 12px;
+  font-size: var(--text-xs);
 color: var(--text-secondary);
 }
 
 .template-component-grid {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--space-2);
 }
 
 .template-component-card .ui-component-preview-frame {
-  margin-top: 8px;
+  margin-top: var(--space-2);
 }
 
 .template-component-card .wiring-action-header {
@@ -1936,8 +1949,8 @@ color: var(--text-secondary);
 }
 
 .template-component-caption {
-  font-size: 12px;
-  margin: 6px 0 0;
+  font-size: var(--text-xs);
+  margin: var(--space-1) 0 0;
   line-height: 1.5;
 color: var(--text-tertiary);
 }
@@ -1947,29 +1960,29 @@ color: var(--text-tertiary);
    fictional "Max width/Section rhythm" labels, since those were invented
    for its own made-up demo kit, not something this real doc states. */
 .layout-rules-strip {
-  margin-top: 4px;
+  margin-top: var(--space-1);
 }
 
 .radius-token-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 10px;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
 }
 
 .radius-token-chip {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--space-05);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 6px 10px;
+  padding: var(--space-1) var(--space-2);
   background: var(--surface-tertiary);
-  font-size: 11px;
+  font-size: var(--text-2xs);
 }
 
 .radius-token-chip code {
-  font-size: 11.5px;
+  font-size: var(--text-xs);
 }
 
 .radius-token-chip span {
@@ -1977,16 +1990,16 @@ color: var(--text-tertiary);
 }
 
 .layout-rules-note {
-  font-size: 12.5px;
+  font-size: var(--text-xs);
   line-height: 1.5;
-  margin: 0 0 8px;
+  margin: 0 0 var(--space-2);
 color: var(--text-tertiary);
 }
 
 .component-detail-usage-rule {
-  font-size: 13.5px;
+  font-size: var(--text-sm);
   line-height: 1.6;
-  margin: 4px 0 20px;
+  margin: var(--space-1) 0 var(--space-5);
   max-width: 640px;
 color: var(--text-secondary);
 }
@@ -1998,11 +2011,11 @@ color: var(--text-secondary);
  * of real stage names is the honest design here. */
 
 .progress-panel {
-  margin-top: 14px;
+  margin-top: var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--surface-tertiary);
-  padding: 12px 14px;
+  padding: var(--space-3) var(--space-3);
   box-sizing: border-box;
   overflow-x: hidden;
 }
@@ -2010,11 +2023,11 @@ color: var(--text-secondary);
 .progress-header {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-2);
 }
 
 .progress-status {
-  font-size: 13px;
+  font-size: var(--text-sm);
   font-weight: 500;
 }
 
@@ -2066,18 +2079,18 @@ color: var(--text-secondary);
 }
 
 .progress-log {
-  margin-top: 10px;
+  margin-top: var(--space-2);
   max-height: 160px;
   overflow-y: auto;
   overflow-x: hidden;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 11.5px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
 }
 
 .progress-line {
   display: flex;
-  gap: 8px;
-  padding: 3px 0;
+  gap: var(--space-2);
+  padding: var(--space-05) 0;
   border-bottom: 1px solid var(--border-subtle);
   /* A flex item's default min-width is `auto`, meaning it won't shrink
      below its own content's intrinsic width -- a long, backslash-separated
@@ -2102,27 +2115,27 @@ color: var(--text-tertiary);
 /* ---------- build-fix offers (Phase 10 item 2) ---------- */
 
 .build-fix-offers {
-  margin-top: 10px;
+  margin-top: var(--space-2);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .build-fix-row {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 8px 10px;
+  padding: var(--space-2) var(--space-2);
   background: var(--card);
 }
 
 .build-fix-result {
-  margin-top: 8px;
+  margin-top: var(--space-2);
 }
 
 .build-fix-actions {
   display: flex;
-  gap: 8px;
-  margin-top: 8px;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
 }
 
 /* Phase 11 item 4: structurally identical to .build-fix-row/-result/
@@ -2133,19 +2146,19 @@ color: var(--text-tertiary);
 .design-fix-row {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 8px 10px;
+  padding: var(--space-2) var(--space-2);
   background: var(--card);
-  margin-bottom: 8px;
+  margin-bottom: var(--space-2);
 }
 
 .design-fix-result {
-  margin-top: 8px;
+  margin-top: var(--space-2);
 }
 
 .design-fix-actions {
   display: flex;
-  gap: 8px;
-  margin-top: 8px;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
 }
 
 .progress-line .msg {
@@ -2160,20 +2173,20 @@ color: var(--text-primary);
 .form-grid {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: var(--space-3);
 }
 
 .field label {
   display: block;
-  font-size: 12px;
+  font-size: var(--text-xs);
   font-weight: 500;
-  margin-bottom: 5px;
+  margin-bottom: var(--space-1);
 color: var(--text-secondary);
 }
 
 .field-hint {
-  font-size: 11px;
-  margin: 5px 0 0;
+  font-size: var(--text-2xs);
+  margin: var(--space-1) 0 0;
 color: var(--text-secondary);
 }
 
@@ -2183,7 +2196,7 @@ color: var(--text-secondary);
   width: 100%;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
-  padding: 8px 12px;
+  padding: var(--space-2) var(--space-3);
   background: var(--card);
 }
 
@@ -2193,7 +2206,7 @@ color: var(--text-secondary);
 
 .field select + input[type="text"],
 .field .chip-picker + input[type="text"] {
-  margin-top: 8px;
+  margin-top: var(--space-2);
 }
 
 /* ---------- tag picker (roles/stacks/teams) ----------
@@ -2208,17 +2221,17 @@ color: var(--text-secondary);
 .tag-picker-wrap {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .tag-picker {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-1);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
-  padding: 6px 8px;
+  padding: var(--space-1) var(--space-2);
   background: var(--card);
 }
 
@@ -2229,7 +2242,7 @@ color: var(--text-secondary);
 .tag-picker-suggestions {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--space-1);
 }
 
 .tag-picker-suggestions:empty {
@@ -2256,13 +2269,13 @@ color: var(--text-secondary);
 .tag-chip {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  font-size: 12px;
+  gap: var(--space-1);
+  font-size: var(--text-xs);
   font-weight: 500;
   background: var(--surface-tertiary);
   border: 1px solid var(--border);
   border-radius: var(--radius-pill);
-  padding: 3px 6px 3px 10px;
+  padding: var(--space-05) var(--space-1) var(--space-05) var(--space-2);
   color: var(--ink);
 }
 
@@ -2271,9 +2284,9 @@ color: var(--text-secondary);
   background: transparent;
   color: var(--text-tertiary);
   cursor: pointer;
-  font-size: 14px;
+  font-size: var(--text-base);
   line-height: 1;
-  padding: 2px;
+  padding: var(--space-05);
 }
 
 .tag-chip-remove:hover {
@@ -2284,16 +2297,16 @@ color: var(--text-secondary);
   min-width: 120px;
   border: none;
   outline: none;
-  padding: 4px 2px;
+  padding: var(--space-1) var(--space-05);
   background: transparent;
-  font-size: 13px;
+  font-size: var(--text-sm);
   color: var(--ink);
 }
 
 .payload-picker {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-2);
   flex-wrap: wrap;
 }
 
@@ -2304,7 +2317,7 @@ color: var(--text-secondary);
 
 .remote-form {
   display: flex;
-  gap: 10px;
+  gap: var(--space-2);
   align-items: center;
   flex-wrap: wrap;
 }
@@ -2312,7 +2325,7 @@ color: var(--text-secondary);
 .remote-form input {
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
-  padding: 8px 12px;
+  padding: var(--space-2) var(--space-3);
   background: var(--card);
 }
 
@@ -2336,14 +2349,14 @@ color: var(--text-secondary);
 .wizard-card {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-1);
 }
 
 .wizard-progress {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin: 4px 0 18px;
+  gap: var(--space-3);
+  margin: var(--space-1) 0 var(--space-4);
 }
 
 .wizard-progress-track {
@@ -2358,11 +2371,11 @@ color: var(--text-secondary);
   height: 100%;
   background: var(--gradient-brand);
   border-radius: var(--radius-pill);
-  transition: width .2s ease;
+  transition: width var(--motion-fast);
 }
 
 .wizard-progress-label {
-  font-size: 12px;
+  font-size: var(--text-xs);
   font-weight: 500;
   white-space: nowrap;
   flex-shrink: 0;
@@ -2379,20 +2392,20 @@ color: var(--text-secondary);
  * weight, per DESIGN_SYSTEM.md's typography table (page/card titles use
  * EB Garamond at font-normal, larger sizes than body text). */
 .wizard-step .field label {
-  font-family: 'EB Garamond', Georgia, serif;
-  font-size: 22px;
+  font-family: var(--font-serif);
+  font-size: var(--text-2xl);
   font-weight: 400;
   color: var(--ink);
   opacity: 1;
-  margin-bottom: 12px;
+  margin-bottom: var(--space-3);
 }
 
 .wizard-nav {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-top: 10px;
-  padding-top: 16px;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  padding-top: var(--space-4);
   border-top: 1px solid var(--border);
 }
 
@@ -2407,7 +2420,7 @@ color: var(--text-secondary);
 .chip-picker {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .chip-picker .chip {
@@ -2418,7 +2431,7 @@ color: var(--text-secondary);
 .wizard-review {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--space-05);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   overflow: hidden;
@@ -2427,8 +2440,8 @@ color: var(--text-secondary);
 .wizard-review-row {
   display: flex;
   align-items: baseline;
-  gap: 12px;
-  padding: 10px 14px;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
   border-bottom: 1px solid var(--border);
   background: var(--card);
 }
@@ -2440,7 +2453,7 @@ color: var(--text-secondary);
 .wizard-review-label {
   flex-shrink: 0;
   width: 120px;
-  font-size: 11.5px;
+  font-size: var(--text-xs);
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: .3px;
@@ -2449,7 +2462,7 @@ color: var(--text-secondary);
 
 .wizard-review-value {
   flex: 1;
-  font-size: 13px;
+  font-size: var(--text-sm);
   overflow-wrap: anywhere;
 }
 
@@ -2462,17 +2475,17 @@ color: var(--text-secondary);
 .install-param-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--card);
-  margin-bottom: 6px;
+  margin-bottom: var(--space-1);
 }
 
 .install-param-row .install-param-key {
   flex: 0 0 160px;
-  font-family: var(--font-mono, monospace);
+  font-family: var(--font-mono);
 }
 
 .install-param-row .install-param-description {
@@ -2483,9 +2496,9 @@ color: var(--text-secondary);
 .install-param-checkbox {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-1);
   flex-shrink: 0;
-  font-size: 12px;
+  font-size: var(--text-xs);
   white-space: nowrap;
 }
 
@@ -2499,7 +2512,7 @@ color: var(--text-secondary);
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 6px;
+  gap: var(--space-1);
 }
 
 .field-with-suggest textarea {
@@ -2521,9 +2534,9 @@ color: var(--text-secondary);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 0;
+  padding: var(--space-3) 0;
   border-bottom: 1px solid var(--border);
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .settings-row:last-child {
@@ -2531,13 +2544,13 @@ color: var(--text-secondary);
 }
 
 .settings-row .n {
-  font-size: 14px;
+  font-size: var(--text-base);
   font-weight: 600;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
 }
 
 .settings-row .s {
-  font-size: 12px;
+  font-size: var(--text-xs);
   word-break: break-all;
 color: var(--text-secondary);
 }
@@ -2550,20 +2563,20 @@ color: var(--text-secondary);
   right: 20px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  z-index: 1000;
+  gap: var(--space-2);
+  z-index: var(--z-overlay);
   max-width: 380px;
 }
 
 .toast {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
+  gap: var(--space-2);
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 11px 14px;
-  font-size: 13px;
+  padding: var(--space-3) var(--space-3);
+  font-size: var(--text-sm);
   box-shadow: var(--shadow-2);
   animation: toast-in .15s ease-out;
 }
@@ -2573,7 +2586,7 @@ color: var(--text-secondary);
   height: 8px;
   border-radius: 50%;
   flex-shrink: 0;
-  margin-top: 5px;
+  margin-top: var(--space-1);
 }
 
 .toast.success .dot { background: var(--mint-500); }
@@ -2583,7 +2596,7 @@ color: var(--text-secondary);
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 6px;
+  gap: var(--space-1);
   min-width: 0;
 }
 
@@ -2596,7 +2609,7 @@ color: var(--text-secondary);
   border: none;
   padding: 0;
   color: var(--link-accent);
-  font-size: 13px;
+  font-size: var(--text-sm);
   font-weight: 600;
   cursor: pointer;
   text-decoration: underline;
@@ -2639,12 +2652,12 @@ color: var(--text-secondary);
 .wire-terminal-overlay {
   position: fixed;
   inset: 0;
-  z-index: 2000;
+  z-index: var(--z-toast);
   display: flex;
   align-items: flex-end;
   justify-content: center;
   background: rgba(10, 12, 13, 0.55);
-  padding: 32px;
+  padding: var(--space-8);
 }
 
 .wire-terminal-panel {
@@ -2661,20 +2674,20 @@ color: var(--text-secondary);
 .wire-terminal-header {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
   background: #10121600;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .wire-terminal-title {
-  font-size: 13px;
+  font-size: var(--text-sm);
   font-weight: 600;
   color: #e6e6e6;
 }
 
 .wire-terminal-status {
-  font-size: 12px;
+  font-size: var(--text-xs);
   color: #8a8f98;
   margin-right: auto;
 }
@@ -2686,7 +2699,7 @@ color: var(--text-secondary);
 .wire-terminal-container {
   flex: 1;
   min-height: 0;
-  padding: 8px 10px;
+  padding: var(--space-2) var(--space-2);
 }
 
 .wire-terminal-container .xterm {
