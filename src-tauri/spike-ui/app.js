@@ -301,6 +301,71 @@
     }, linkUrl ? 12000 : 5000);
   }
 
+  /** Renders a real error state into `container`, replacing its contents.
+   *
+   * The app had no error state at all. Every failed load fired a toast and
+   * then set its list to [], so the screen showed "No artifacts match." --
+   * a failure was indistinguishable from an empty catalog, and the toast
+   * carrying the actual reason vanished after five seconds. The design kit
+   * this product ships says exactly this is wrong: "EmptyState is for
+   * 'nothing here yet', never for a failure -- a failed fetch is ErrorState."
+   *
+   * `detail` is the engine's own message, shown verbatim rather than
+   * paraphrased -- the whole point of the sidecar's error contract is that a
+   * real git or filesystem error reaches the user intact. `onRetry`, when
+   * given, renders the one action that can actually help; the kit's guidance
+   * is to omit it when retrying cannot (a 404), so callers decide. */
+  function renderErrorState(container, title, detail, onRetry) {
+    container.innerHTML = '';
+    const wrap = document.createElement('div');
+    wrap.className = 'error-state';
+    wrap.setAttribute('role', 'alert');
+
+    const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    icon.setAttribute('class', 'glyph');
+    icon.setAttribute('aria-hidden', 'true');
+    const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+    use.setAttribute('href', '#i-alert');
+    icon.appendChild(use);
+    wrap.appendChild(icon);
+
+    const body = document.createElement('div');
+    body.className = 'error-state-body';
+    const titleEl = document.createElement('div');
+    titleEl.className = 'error-state-title';
+    titleEl.textContent = title;
+    body.appendChild(titleEl);
+
+    if (detail) {
+      const detailEl = document.createElement('div');
+      detailEl.className = 'error-state-detail';
+      // textContent, not innerHTML: this string comes from the engine and can
+      // contain anything a git or filesystem error contains.
+      detailEl.textContent = detail;
+      body.appendChild(detailEl);
+    }
+
+    if (onRetry) {
+      const actions = document.createElement('div');
+      actions.className = 'error-state-actions';
+      const retry = document.createElement('button');
+      retry.type = 'button';
+      retry.className = 'btn btn-sm';
+      retry.textContent = 'Try again';
+      retry.addEventListener('click', () => void onRetry());
+      actions.appendChild(retry);
+      body.appendChild(actions);
+    }
+
+    wrap.appendChild(body);
+    container.appendChild(wrap);
+  }
+
+  /** The message text out of any thrown value, for display. */
+  function errorText(err) {
+    return err instanceof Error ? err.message : String(err);
+  }
+
   function toastSuccess(message, linkUrl, linkLabel) {
     showToast('success', message, linkUrl, linkLabel);
   }
@@ -445,8 +510,14 @@
     await withBusy(refreshBtn, 'Working...', async () => {
       try {
         state.catalog = await call('catalog.list', { cwd: state.projectDir });
+        // Cleared on success, so a recovered load stops showing the old error.
+        state.catalogError = null;
       } catch (err) {
         toastError(err);
+        // Recorded, not just toasted. Setting the catalog to [] and relying on
+        // a 5-second toast to explain why is how a failed load ended up
+        // looking exactly like an empty catalog.
+        state.catalogError = errorText(err);
         state.catalog = [];
       }
       renderChips();
@@ -473,8 +544,10 @@
     await withBusy(refreshBtn, 'Refreshing...', async () => {
       try {
         state.catalog = await call('catalog.refresh', { cwd: state.projectDir });
+        state.catalogError = null;
       } catch (err) {
         toastError(err);
+        state.catalogError = errorText(err);
       }
       renderChips();
       renderCards();
@@ -4201,6 +4274,25 @@ ${bodyHtml}
 
     const entries = filteredEntries();
     grid.innerHTML = '';
+
+    // A failed load is NOT an empty catalog. Showing "No artifacts match."
+    // after `catalog.list` threw is actively misleading -- it reads as "your
+    // remote has nothing in it" when the truth is "we could not reach it".
+    const errorHost = $('browse-error');
+    if (state.catalogError) {
+      errorHost.hidden = false;
+      renderErrorState(
+        errorHost,
+        'Could not load the catalog',
+        state.catalogError,
+        () => refreshCatalogFromRemotes(),
+      );
+      $('browse-empty').hidden = true;
+      return;
+    }
+    errorHost.hidden = true;
+    errorHost.innerHTML = '';
+
     $('browse-empty').hidden = entries.length !== 0;
     $('browse-empty').textContent =
       state.search.trim() || state.activeKinds.size > 0
@@ -6751,7 +6843,17 @@ ${bodyHtml}
 
   function toggleTheme() {
     const next = getEffectiveTheme() === 'dark' ? 'light' : 'dark';
-    document.documentElement.setAttribute('data-theme', next);
+    // Suppress transitions across the switch itself. `color` is not a
+    // transitioned property and flips instantly, while `background` is -- so
+    // without this, every secondary button spends ~150ms as light text on a
+    // still-light background and its label visibly disappears. Removed on the
+    // next frame so real interactions keep their transitions.
+    const html = document.documentElement;
+    html.classList.add('theme-switching');
+    html.setAttribute('data-theme', next);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => html.classList.remove('theme-switching'));
+    });
     try {
       localStorage.setItem(THEME_KEY, next);
     } catch (err) {

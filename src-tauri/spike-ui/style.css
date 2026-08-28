@@ -135,6 +135,14 @@
   --gradient-mint: linear-gradient(135deg, #00D084, #0693E3);
   --shadow-1: 0 1px 3px rgb(0 0 0/0.04); --shadow-2: 0 4px 12px rgb(0 0 0/0.08);
   --radius-sm: .25rem; --radius-md: .5rem; --radius-lg: 1rem; --radius-xl: 1.25rem; --radius-pill: 31.25rem;
+
+  /* Tells the browser which palette to paint NATIVE UI with -- <select>
+     dropdowns and their arrows, scrollbars, text-field carets, focus rings on
+     form controls, the autofill background. None of those are reachable from
+     CSS, so without this they stayed light-mode while everything around them
+     went dark: light scrollbars down the side of a dark page, and a light
+     dropdown arrow on the Browse toolbar's two selects. */
+  color-scheme: light;
 }
 
 /* ---------- dark mode ----------
@@ -187,6 +195,7 @@
     --warning-100: #3D2907; --warning-600: #F2B24E;
     --danger-100: #45170F; --danger-600: #FF8A66;
     --shadow-1: 0 1px 3px rgb(0 0 0/0.4); --shadow-2: 0 4px 16px rgb(0 0 0/0.55);
+    color-scheme: dark;  /* see the light declaration in :root */
   }
 }
 
@@ -223,9 +232,29 @@
   --warning-100: #3D2907; --warning-600: #F2B24E;
   --danger-100: #45170F; --danger-600: #FF8A66;
   --shadow-1: 0 1px 3px rgb(0 0 0/0.4); --shadow-2: 0 4px 16px rgb(0 0 0/0.55);
+  color-scheme: dark;  /* see the light declaration in :root */
 }
 
 *, *::before, *::after { box-sizing: border-box; }
+
+/* ---------- theme switching ----------
+ * Suppresses every transition for the instant the theme flips.
+ *
+ * Without this, switching theme is visibly broken for ~150ms: `color` is not
+ * a transitioned property so it changes immediately, while `background` IS
+ * (see .btn), so every secondary button spends the transition as white text
+ * on a white background -- its label simply disappears. Confirmed by reading
+ * the computed styles right after the toggle: background rgb(255,255,255)
+ * with color rgb(236,233,226).
+ *
+ * The class is added by toggleTheme (app.js) and removed on the next frame,
+ * so it only ever covers the switch itself and never a real interaction. */
+html.theme-switching,
+html.theme-switching *,
+html.theme-switching *::before,
+html.theme-switching *::after {
+  transition: none !important;
+}
 
 /* The HTML `hidden` attribute only wins by default when nothing else sets
  * `display` on the same element -- any class that does (`.grid`, `.chips`,
@@ -570,6 +599,60 @@ color: var(--text-tertiary);
   font-size: var(--text-sm);
   padding: var(--space-6) var(--space-1);
 }
+
+/* ---------- error state ----------
+ * The counterpart to .empty-state, and the thing the app was missing
+ * entirely. Every failed load used to fire a toast and then set its list to
+ * [], so the screen rendered "No artifacts match." -- a failure was visually
+ * IDENTICAL to a genuinely empty catalog, and the toast that carried the real
+ * reason auto-dismissed after five seconds. The design kit this product ships
+ * is explicit about it: "EmptyState is for 'nothing here yet', never for a
+ * failure -- a failed fetch is ErrorState."
+ *
+ * Deliberately not styled as a full-bleed alarm. It states what failed, shows
+ * the real underlying message (never a paraphrase), and offers the one action
+ * that can help. */
+.error-state {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  margin: var(--space-2) 0;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--danger-500);
+  border-radius: var(--radius-md);
+  background: var(--card);
+  color: var(--ink);
+  font-size: var(--text-sm);
+}
+
+.error-state .glyph {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--danger-600);
+}
+
+.error-state-body { flex: 1; min-width: 0; }
+
+.error-state-title {
+  font-weight: 600;
+  margin-bottom: var(--space-1);
+}
+
+/* The real error text from the engine, shown verbatim. It can be a git error
+   or a filesystem path, so it must be able to wrap anywhere. */
+.error-state-detail {
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+.error-state-actions { margin-top: var(--space-3); }
 
 /* Informational banner (not a warning) -- warm sky-100 card tone with a
  * gold-500 accent border. Previously used cyan-500 for the border, which

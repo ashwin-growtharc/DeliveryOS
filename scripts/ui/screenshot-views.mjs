@@ -49,6 +49,13 @@ for (const theme of THEMES) {
     await page.goto(PAGE_URL, { waitUntil: 'load' });
     // The app's own theme mechanism, driven the way a user drives it.
     await page.evaluate((t) => document.documentElement.setAttribute('data-theme', t), theme);
+    // Let transitions settle before capturing. Without this the shots are
+    // taken mid-transition and lie: background is a transitioned property but
+    // color is not, so buttons photograph as blank light blocks. That is how
+    // a real bug (the theme switch briefly hiding every button label) was
+    // found, but it also means an unsettled capture cannot be trusted.
+    await page.waitForTimeout(350);
+    await page.evaluate(() => document.fonts.ready);
 
     for (const view of VIEWS) {
       // Show exactly one view, the same way showView() does.
