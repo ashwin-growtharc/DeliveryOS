@@ -117,7 +117,9 @@ Check it worked:
 
 ```
 deliveryos --version
-npm run typecheck && npm run lint && npm test
+npm run typecheck
+npm run lint
+npm test
 ```
 
 No `npm link`? Run it as `node dist/index.js <command>` instead, or
@@ -135,8 +137,10 @@ Also needs a native toolchain, because Tauri's shell is Rust.
 | Tauri CLI | Nothing — already a devDependency, `npm install` gets it |
 
 ```
-npm run build && npm run build:sidecar
-cd src-tauri && npx tauri dev
+npm run build
+npm run build:sidecar
+cd src-tauri
+npx tauri dev
 ```
 
 On Windows, make sure Rust's `~/.cargo/bin` is on your PATH first.
@@ -159,6 +163,8 @@ for macOS. Tracked in ARCHITECTURE.md §9 risk #7.
 | Suggest with Claude / build-fix / Wire with Claude fail | Install `claude` and sign in, then reopen your terminal |
 | `deliveryos: command not found` after installing the app | You installed the `.msi`. Install the NSIS `.exe` instead |
 | `deliveryos: command not found` after building from source | Run `npm link`, or use `node dist/index.js <command>` |
+| `tauri build` says **cargo metadata ... program not found** | Rust is installed but not on this terminal's PATH. **Open a new terminal** — an already-open one keeps the PATH it started with |
+| `The token '&&' is not a valid statement separator` | You are in Windows PowerShell 5.1, which has no `&&`. Run each command on its own line (every block in these docs is written that way) |
 | Push worked but the PR has no preview image | Expected — the packaged app can never render previews. Use the CLI from source if you need one |
 | An artifact's setup step fails with a missing tool | Install what *that artifact* needs (usually `npm`). DeliveryOS itself is fine |
 | One artifact missing, the rest fine | That manifest failed validation. `deliveryos list` prints which and why to stderr |

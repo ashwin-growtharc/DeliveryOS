@@ -43,8 +43,10 @@ deliveryos pull email-code-auth
 **The desktop app** is a native window:
 
 ```
-npm run build && npm run build:sidecar
-cd src-tauri && npx tauri dev
+npm run build
+npm run build:sidecar
+cd src-tauri
+npx tauri dev
 ```
 
 It needs Rust and, on Windows, MSVC Build Tools — see
@@ -200,7 +202,8 @@ the installer**.
 npm run build           # tsc -> dist/
 npm run build:sidecar   # -> build/deliveryos-engine-*.exe + build/esbuild.exe
 npm run build:cli       # -> build/deliveryos-cli.exe
-cd src-tauri && npx tauri build
+cd src-tauri
+npx tauri build
 ```
 
 Output, under `src-tauri/target/release/bundle/`:
