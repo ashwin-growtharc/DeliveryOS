@@ -163,6 +163,47 @@ Goal: make the hardest kind authorable, and the catalog navigable.
   pulling one into a fresh project
 - Starter Kits and Backend Plugins as their own sidebar destinations
 
+## Phase 15 — Delivery tooling — **v1 proposed, awaiting PR review**
+
+Goal: carry a delivery methodology — a scoping calculator, a risk register, a
+friction log — the same way the catalog already carries code, without client
+data ever reaching a shared remote.
+
+Scoped in [docs/delivery-tools-requirements.md](docs/delivery-tools-requirements.md).
+Approved 2026-09-01: the template/instance split, files over a live in-app
+tool, and the v1 scope below. **Ashwin B owns** the risk library and
+friction-log conventions. No first-test engagement identified yet — v1 was
+built anyway, on the understanding that "done" still means a real engagement
+used one, not that these three PRs merged.
+
+- Three artifacts, each a real, working payload plus a required `README.md`
+  stating the rule (fill in your own copy, never push it back) and the
+  named owner: `scoping-calculator` (`dataset` — a real `.xlsx` with working
+  formulas: day rate × complexity multiplier × days per phase, phases
+  matching the delivery playbook order), `risk-register` (`doc` — a
+  pre-listed risk library by engagement type: data platform / web app /
+  AI-agent build, plus a blank live-register table), `friction-log` (`doc` —
+  a weekly capture format, with the scrub-step rule written into its own
+  README as a required step, not a judgment call)
+- All three tagged `stacks: delivery-tooling`, so they're findable as a group
+  even with no dedicated Browse category yet
+- Proposed as real PRs against `growtharc-ai-helpers`: [#70](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/70)
+  (risk-register), [#71](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/71)
+  (friction-log), [#72](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/72)
+  (scoping-calculator) — none merged yet, pending the same human review every
+  other artifact goes through
+- The shared blank and the filled-in copy are **never the same file** — blank
+  inside `install_target`, filled copy outside it, so `push` structurally
+  cannot see client data. Same split `.env.example`/`.env.local` already uses
+- **Deferred, neither blocks v1**: a "Suggest" button filing a GitHub issue
+  (small — octokit, `gh` auth and the `repo` token scope are already in place),
+  and an "Improve the template" flow that edits the upstream copy (modelled on
+  `metadataEdit`, which already opens a PR without reading local files)
+- **Not doing**: a live tool inside DeliveryOS's own preview — the iframe has
+  no `allow-same-origin`, so it can compute but can never save
+- **Definition of done, still open**: one real engagement used one of these
+  and we know whether it helped — not "three PRs merged"
+
 ## Tier 0 hardening — **In progress**
 
 A cross-cutting track: fix what's broken and prove someone outside the build
@@ -192,6 +233,10 @@ Ordered by what blocks value, not by phase number.
 4. **A shared command surface** — the CLI exposes 15 commands and the sidecar
    40, with nothing shared between them, so they drift. `remote add`/`remove`
    exist twice and only the sidecar copy has tests.
+
+Deliberately unranked: **Phase 15 (delivery tooling)**'s v1 is proposed
+(3 PRs, awaiting review), but "done" is a real engagement using one of them —
+not something that belongs on a list ordered by engineering effort.
 
 ---
 
