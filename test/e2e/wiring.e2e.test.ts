@@ -8,6 +8,7 @@ import {
   teardownTestRemote,
   INSTALL_PARAMS_ARTIFACT,
 } from '../fixtures/testRemote';
+import { rmDirWithRetry } from '../../src/engine/execHelpers';
 
 // Phase 8 item 2: `deliveryos wiring <id>` -- the one concrete gap that was
 // blocking a Claude Code Skill from doing anything with Tier 2 wiring at
@@ -64,8 +65,8 @@ describe('wiring e2e (Phase 8 item 2)', () => {
 
   afterAll(async () => {
     await teardownTestRemote(remoteDir);
-    fs.rmSync(deliveryOsHome, { recursive: true, force: true });
-    fs.rmSync(cwd, { recursive: true, force: true });
+    await rmDirWithRetry(deliveryOsHome);
+    await rmDirWithRetry(cwd);
   });
 
   it('resolves both actions as whenAbsent against a fresh project with neither file present, in JSON', () => {

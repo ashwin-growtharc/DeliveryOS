@@ -12,6 +12,7 @@ import {
   INSTALL_PARAMS_ARTIFACT,
   SIGNED_ARTIFACT,
 } from '../fixtures/testRemote';
+import { rmDirWithRetry } from '../../src/engine/execHelpers';
 
 // This e2e test drives the CLI as a real subprocess (via `tsx src/index.ts`)
 // rather than in-process, since that's closer to how a real user invokes
@@ -68,8 +69,8 @@ describe('pull e2e', () => {
 
   afterAll(async () => {
     await teardownTestRemote(fixtureRemoteDir);
-    fs.rmSync(deliveryOsHome, { recursive: true, force: true });
-    fs.rmSync(scratchCwd, { recursive: true, force: true });
+    await rmDirWithRetry(deliveryOsHome);
+    await rmDirWithRetry(scratchCwd);
   });
 
   it('registers the test remote', () => {
@@ -303,8 +304,8 @@ describe('pull e2e', () => {
         ]);
       } finally {
         await teardownTestRemote(remoteDir);
-        fs.rmSync(isolatedHome, { recursive: true, force: true });
-        fs.rmSync(cwd, { recursive: true, force: true });
+        await rmDirWithRetry(isolatedHome);
+        await rmDirWithRetry(cwd);
       }
     }, 30_000);
 
@@ -324,7 +325,7 @@ describe('pull e2e', () => {
 
     afterAll(async () => {
       await teardownTestRemote(paramsRemoteDir);
-      fs.rmSync(paramsCwd, { recursive: true, force: true });
+      await rmDirWithRetry(paramsCwd);
     });
 
     it('--set (repeated) writes real values to .env.local, and reports nothing missing once every required param is covered', () => {
@@ -383,7 +384,7 @@ describe('pull e2e', () => {
       expect(fs.existsSync(path.join(installTargetDir, '.env.example'))).toBe(false);
     });
 
-    it('pulling with a required param genuinely unfilled (no --set, no default) still succeeds, and reports it as missing rather than failing the whole pull', () => {
+    it('pulling with a required param genuinely unfilled (no --set, no default) still succeeds, and reports it as missing rather than failing the whole pull', async () => {
       const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'deliveryos-e2e-install-params-missing-'));
       try {
         const addResult = runCli(
@@ -416,11 +417,11 @@ describe('pull e2e', () => {
         const envContent = fs.readFileSync(path.join(cwd, '.env.local'), 'utf-8');
         expect(envContent).toBe('AUTH_URL=http://localhost:3000\n');
       } finally {
-        fs.rmSync(cwd, { recursive: true, force: true });
+        await rmDirWithRetry(cwd);
       }
     });
 
-    it('--no-wire skips auto-wiring entirely, matching every DeliveryOS version before Phase 19 -- for scripted/CI use', () => {
+    it('--no-wire skips auto-wiring entirely, matching every DeliveryOS version before Phase 19 -- for scripted/CI use', async () => {
       const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'deliveryos-e2e-install-params-nowire-'));
       try {
         const addResult = runCli(
@@ -450,11 +451,11 @@ describe('pull e2e', () => {
         expect(fs.existsSync(path.join(cwd, 'auth.ts'))).toBe(false);
         expect(fs.existsSync(path.join(cwd, 'middleware.ts'))).toBe(false);
       } finally {
-        fs.rmSync(cwd, { recursive: true, force: true });
+        await rmDirWithRetry(cwd);
       }
     });
 
-    it('rejects a malformed --set value (no "=") with a clean error, not a crash', () => {
+    it('rejects a malformed --set value (no "=") with a clean error, not a crash', async () => {
       const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'deliveryos-e2e-install-params-badset-'));
       try {
         const addResult = runCli(
@@ -477,7 +478,7 @@ describe('pull e2e', () => {
         expect(result.status).not.toBe(0);
         expect(result.stderr).toContain('KEY=VALUE');
       } finally {
-        fs.rmSync(cwd, { recursive: true, force: true });
+        await rmDirWithRetry(cwd);
       }
     });
   });
@@ -507,8 +508,8 @@ describe('pull e2e', () => {
         expect(entry.signed).toBe(true);
       } finally {
         await teardownTestRemote(remoteDir);
-        fs.rmSync(isolatedHome, { recursive: true, force: true });
-        fs.rmSync(cwd, { recursive: true, force: true });
+        await rmDirWithRetry(isolatedHome);
+        await rmDirWithRetry(cwd);
       }
     }, 30_000);
 
@@ -537,7 +538,7 @@ describe('pull e2e', () => {
         expect(fs.existsSync(path.join(cwd, SIGNED_ARTIFACT.installTarget))).toBe(false);
       } finally {
         await teardownTestRemote(remoteDir);
-        fs.rmSync(cwd, { recursive: true, force: true });
+        await rmDirWithRetry(cwd);
       }
     }, 30_000);
 
@@ -566,7 +567,7 @@ describe('pull e2e', () => {
         expect(fs.existsSync(path.join(cwd, SIGNED_ARTIFACT.installTarget))).toBe(false);
       } finally {
         await teardownTestRemote(remoteDir);
-        fs.rmSync(cwd, { recursive: true, force: true });
+        await rmDirWithRetry(cwd);
       }
     }, 30_000);
   });

@@ -1,0 +1,144 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# One in-flight run per ref. This job is 20-30 minutes on a Windows runner, so
+# without this a busy branch queues behind its own superseded runs.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: verify
+    runs-on: windows-latest
+    # windows-latest, not ubuntu, for two reasons. Edge ships preinstalled, so
+    # `chromium.launch({ channel: 'msedge' })` resolves -- and the browser tests
+    # here HARD-FAIL rather than skip when no channel is available
+    # (test/e2e/uiOperationStore.e2e.test.ts, test/unit/renderPreviewImage.test.ts).
+    # And this project's real bug history is overwhelmingly Windows-specific:
+    # EPERM cleanup races, argv splitting, shell quoting, path separators.
+    #
+    # NOT the 6h default timeout. Every individual test has its own cap (30s
+    # default, up to 180s), but ~45 e2e tests drive spawnSync or execSync, and
+    # vitest cannot interrupt a synchronous child -- it blocks its worker thread
+    # and no per-test timeout ever fires. A hung git or tsx child is therefore an
+    # unbounded job, and cancel-in-progress above would block every later push
+    # behind it.
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pinned to package.json's own engines.node floor rather than "22.x", so
+      # that declaration stays honest instead of rotting silently.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.12.0'
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      # This ALSO runs the six scripts/generate-vendored-*.mjs codegen steps,
+      # because they are package.json's `prepare` script and npm runs `prepare`
+      # on `npm ci`. Codegen is therefore complete before any gate below needs
+      # it, and no explicit generate step belongs here. None of the six touch the
+      # network -- they read node_modules and write into src/engine/preview/ and
+      # src-tauri/spike-ui/vendor/.
+      - name: Install
+        id: install
+        run: npm ci
+
+      # Two codegen outputs are tracked files (vendoredLibraries.generated.ts,
+      # vendoredTailwindPreflight.generated.ts), as are all 15 files under
+      # src-tauri/spike-ui/vendor/. The generators claim byte-identical output
+      # from a pinned package-lock; this is what makes that claim checkable, and
+      # it is the only thing standing between "regenerated" and "someone
+      # hand-edited a generated file". Costs about a second.
+      #
+      # Reliable on a Windows runner only because .gitattributes sets
+      # `* text=auto eol=lf`: the checkout is LF, the scripts write \n, so there
+      # is no CRLF phantom diff. That file's own comment records solving exactly
+      # this trap locally.
+      - name: Generated files match their generators
+        if: ${{ !cancelled() && steps.install.conclusion == 'success' }}
+        run: git diff --exit-code -- src/engine/preview src-tauri/spike-ui/vendor
+
+      # Every gate below uses `!cancelled()`, never `continue-on-error`.
+      # continue-on-error reports the job GREEN with a failing gate, which is the
+      # exact opposite of what a gate is for. `!cancelled()` runs every remaining
+      # step so one push produces the whole list of what is wrong, while the job
+      # still fails. That matters most in the first weeks of having CI at all,
+      # when failures are environmental and arrive in batches. The
+      # `steps.install.conclusion` guard stops a failed npm ci from cascading
+      # into eight identical "cannot find module" errors.
+
+      # No pre-hook on `lint`, so unlike typecheck/test this does not re-run
+      # codegen. Cheapest gate, therefore first.
+      - name: Lint
+        if: ${{ !cancelled() && steps.install.conclusion == 'success' }}
+        run: npm run lint
+
+      - name: Typecheck
+        if: ${{ !cancelled() && steps.install.conclusion == 'success' }}
+        run: npm run typecheck
+
+      # Pure postcss, no browser, exits 1 on any violation, ~3s.
+      - name: Design tokens (CSS)
+        if: ${{ !cancelled() && steps.install.conclusion == 'success' }}
+        run: npm run lint:css
+
+      # Deliberately BEFORE `npm test`. Both of these launch a real browser
+      # through the same chromium.launch({ channel }) chrome->msedge loop the
+      # browser TESTS use. Running the two ~25-second audits first turns "Edge is
+      # not resolvable on this runner" into a one-minute failure instead of a
+      # twenty-minute one.
+      - name: Theme matrix (real browser)
+        if: ${{ !cancelled() && steps.install.conclusion == 'success' }}
+        run: npm run ui:themes
+
+      # Blocks every non-file:// request in the browser context and asserts that
+      # 11 vendored @font-face rules really registered. The only check anywhere
+      # that would catch a broken generate-vendored-fonts.mjs output, or someone
+      # reintroducing a fonts.googleapis.com link.
+      - name: Fonts resolve offline (network blocked)
+        if: ${{ !cancelled() && steps.install.conclusion == 'success' }}
+        run: npm run ui:fonts
+
+      # The long pole: 58 unit + ~11 e2e files, capped by vitest.config.ts at
+      # max(2, cores/2) = 2 workers on a 4-core runner. Its own step timeout so
+      # the log names WHICH step hung rather than making you infer it from a
+      # job-level kill.
+      - name: Test
+        if: ${{ !cancelled() && steps.install.conclusion == 'success' }}
+        timeout-minutes: 30
+        run: npm test
+
+  # NOT a gate. scripts/ui/screenshot-views.mjs asserts nothing -- it only
+  # captures 11 views x 2 themes x 2 widths for a human to look at. Kept out of
+  # the PR path entirely and run on demand, which is how the design-system work
+  # actually uses it.
+  screenshots:
+    name: screenshots (on demand)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.12.0'
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - run: npm run ui:screenshots -- --out screenshots
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ui-screenshots
+          path: screenshots/

@@ -5,6 +5,7 @@ import * as path from 'path';
 import { spawnSync } from 'child_process';
 import simpleGit from 'simple-git';
 import { createTestRemote, teardownTestRemote, TEST_ARTIFACTS } from '../fixtures/testRemote';
+import { rmDirWithRetry } from '../../src/engine/execHelpers';
 
 // Thin CLI-wiring smoke test for `check-updates --apply` -- the underlying
 // engine function (applyAvailableUpdates) already has thorough direct
@@ -38,8 +39,8 @@ describe('check-updates --apply e2e (CLI)', () => {
 
   afterAll(async () => {
     await teardownTestRemote(fixtureRemoteDir);
-    fs.rmSync(deliveryOsHome, { recursive: true, force: true });
-    fs.rmSync(scratchCwd, { recursive: true, force: true });
+    await rmDirWithRetry(deliveryOsHome);
+    await rmDirWithRetry(scratchCwd);
   });
 
   it('pulls an artifact, bumps it upstream, then `check-updates --apply` actually updates it via the real CLI', async () => {
