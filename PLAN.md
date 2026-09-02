@@ -470,12 +470,21 @@ team benefits, rather than build more on an unproven foundation.
   `files: ['**/*.ts']`, so `--print-config` reports `rules: 0` for all 7,464
   lines. ~15 browser globals would leave a 2-warning backlog. Blocks "Split
   `app.js`" under What's next.
-- **Open — `.deliveryos/` is still not gitignored**, and the audit logs still
-  hold full file bodies. Redaction reduces credential exposure; it does not make
-  the directory safe to commit. Only `.env.local` gets a gitignore check today,
-  and that is a warning.
-- **Open — `redactEmbeddedSecrets` is a heuristic, not a parser.**
-  `export const authSecret = "hunter2"` (camelCase) still passes through.
+- Done: `.deliveryos/` now carries its own `.gitignore` in every project it
+  lands in — written by `ensureProjectDeliveryOsDir`, which is the single way
+  that directory gets created. Inside the directory rather than appended to the
+  project's own `.gitignore`, which belongs to whoever owns the repo. This is
+  also what makes the stale-absolute-path bug unreachable: a committed
+  `lock.json` was the delivery mechanism.
+- **Open — the audit logs still hold full file bodies.** Redaction reduces
+  credential exposure and the directory is no longer committed by accident, but
+  a private project's source is still copied verbatim into a local file. Worth
+  deciding whether `before`/`after` need to be full bodies at all, or whether a
+  bounded diff would serve the Activity panel just as well.
+- **Open — `redactEmbeddedSecrets` is a heuristic, not a parser.** camelCase
+  (`authSecret`) and SCREAMING_SNAKE are both covered now, but a secret reaching
+  a log in any other shape — assigned through an intermediate variable, say —
+  still passes.
 
 ---
 
