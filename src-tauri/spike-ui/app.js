@@ -1695,6 +1695,22 @@
         goTo: hasInstallParams ? jump('configuration', 'detail-install-params-fields') : null,
       },
       {
+        // The one side effect that was shown nowhere before a pull, in either
+        // UI -- while the wiring snippets beside it have always been fully
+        // visible. Deliberately quotes the command verbatim rather than
+        // describing it: "runs a setup command" tells you nothing you can
+        // actually judge.
+        show: !!manifest.post_install,
+        title: 'It runs a command on your machine',
+        description:
+          'After the files are copied in, this artifact runs the following command inside its own '
+          + 'install folder:\n\n'
+          + (manifest.post_install || '')
+          + '\n\nMost of these just install packages the artifact needs. It has your project root '
+          + 'available to it, so read it before pulling something you do not recognise.',
+        goTo: null,
+      },
+      {
         show: hasWiringActions,
         title: 'New files get added for you',
         description: 'Any new file this needs gets created automatically. If it changes how your project builds, that gets checked right away.',
@@ -4581,7 +4597,11 @@ ${bodyHtml}
    * the call. The single call site for all three actions everywhere they
    * can be triggered one-at-a-time: Detail's action button, and a row's
    * own inline button inside a Tag Folder view. */
-  async function runArtifactAction(entry, action, button) {
+  /** `force` is passed ONLY by Detail's "discard local edit and re-sync"
+   * button, which has already shown its own confirm dialog. Every other caller
+   * leaves it false, so an ordinary Pull now refuses rather than silently
+   * overwriting someone's edits -- see PullOptions.force in the engine. */
+  async function runArtifactAction(entry, action, button, force = false) {
     await withBusy(button, 'Working...', async () => {
       await beginProgress(entry);
       try {
@@ -4616,6 +4636,7 @@ ${bodyHtml}
               id: entry.manifest.id,
               remote: entry.remoteName,
               cwd: state.projectDir,
+              force,
             });
             // Phase 12: one coherent plain-language read of everything
             // that happened (wiring applied/needsReview, build outcome,
@@ -4657,6 +4678,7 @@ ${bodyHtml}
               id: entry.manifest.id,
               remote: entry.remoteName,
               cwd: state.projectDir,
+              force,
             });
             toastSuccess(`Pulled ${result.manifest.id}`);
             if (result.installParamWarning) {
@@ -5494,7 +5516,7 @@ ${bodyHtml}
     // each independently no-op on their own empty list).
     const hasInstallParams = manifest.install_params && manifest.install_params.length > 0;
     const hasWiringActions = manifest.wiring_actions && manifest.wiring_actions.length > 0;
-    detailTabState.configuration = hasInstallParams || hasWiringActions;
+    detailTabState.configuration = hasInstallParams || hasWiringActions || !!manifest.post_install;
     if (detailTabState.configuration) {
       renderPostInstallHealthBanner(entry);
       void renderInstallParamsSection(entry);
@@ -5642,7 +5664,9 @@ ${bodyHtml}
               ' and replace them with the current upstream version. Continue?',
           )
         ) {
-          void runArtifactAction(entry, 'pull', overwriteBtn).then(() => refreshDetailIfShown(entry));
+          // force: the confirm above IS the gate -- without it the engine now
+          // refuses, and this button would silently stop working.
+          void runArtifactAction(entry, 'pull', overwriteBtn, true).then(() => refreshDetailIfShown(entry));
         }
       };
     } else {

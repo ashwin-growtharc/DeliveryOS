@@ -35,6 +35,18 @@ export function registerCheckUpdatesCommand(program: Command): void {
       for (const result of results) {
         if (result.applied) {
           console.log(`${result.id} (${result.remote}): updated ${result.previousVersion} -> ${result.availableVersion}`);
+          // What actually changed, not just that a number moved. The refusal
+          // path has always named the user's own changed files; this names the
+          // ones that just overwrote their copy.
+          if (result.changedFiles && result.changedFiles.length > 0) {
+            const shown = result.changedFiles.slice(0, 10);
+            for (const change of shown) {
+              console.log(`  ${change.status}: ${change.relPath}`);
+            }
+            if (result.changedFiles.length > shown.length) {
+              console.log(`  ...and ${result.changedFiles.length - shown.length} more`);
+            }
+          }
           if (result.postInstallOutput && result.postInstallOutput.trim().length > 0) {
             console.log(result.postInstallOutput.trimEnd());
           }

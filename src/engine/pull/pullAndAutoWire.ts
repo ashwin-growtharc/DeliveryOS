@@ -34,8 +34,12 @@ export async function pullAndAutoWire(
   cwd: string,
   onProgress?: ProgressCallback,
   providedValues: Record<string, string> = {},
+  /** Passed straight through to `pullArtifact` -- see `PullOptions.force`.
+   * This is the auto-wiring path, so it inherits the same refusal on local
+   * edits rather than quietly having a different rule from a plain pull. */
+  force = false,
 ): Promise<AutoWireResult> {
-  const pullResult = await pullArtifact(id, remoteName, cwd, onProgress, providedValues);
+  const pullResult = await pullArtifact(id, remoteName, cwd, onProgress, providedValues, { force });
 
   if (pullResult.manifest.wiring_actions.length === 0) {
     return {

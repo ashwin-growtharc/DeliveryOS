@@ -180,7 +180,7 @@ describe('pullArtifact post_install error reporting', () => {
     writeArtifact('hangs-install', 'node -e "setTimeout(() => {}, 600)"');
 
     try {
-      await pullArtifact('hangs-install', undefined, cwd, undefined, {}, 200);
+      await pullArtifact('hangs-install', undefined, cwd, undefined, {}, { postInstallTimeoutMs: 200 });
       throw new Error('expected pullArtifact to reject');
     } catch (err) {
       expect(err).toBeInstanceOf(PostInstallError);

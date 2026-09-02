@@ -129,6 +129,20 @@ export async function createBranch(repoDir: string, branchName: string): Promise
  * this works deterministically even in environments with no ambient git
  * identity configured at all.
  */
+/** Removes any `user.name`/`user.email` a previous version of `commitPaths`
+ * baked into this clone's local config. Absent config is the normal case, and
+ * `git config --unset` exits 5 for a key that is not set -- tolerated, since
+ * "already clean" is the outcome we want either way. */
+async function clearPersistedIdentity(git: SimpleGit): Promise<void> {
+  for (const key of ['user.name', 'user.email']) {
+    try {
+      await git.raw(['config', '--local', '--unset', key]);
+    } catch {
+      // Not set locally. Nothing to clear.
+    }
+  }
+}
+
 export async function commitPaths(
   repoDir: string,
   paths: string[],
@@ -137,10 +151,26 @@ export async function commitPaths(
 ): Promise<void> {
   const git = simpleGit(repoDir);
   try {
-    await git.addConfig('user.name', identity.name, false, 'local');
-    await git.addConfig('user.email', identity.email, false, 'local');
+    // Passed per-invocation with `-c`, NOT written as local config.
+    //
+    // `addConfig(..., 'local')` persisted the identity into the shared cache
+    // clone's own .git/config, and nothing ever cleared it -- fetchAndReset
+    // touches refs, not config, and cloneRemote only runs when the directory
+    // is absent. On a personal machine that is a harmless no-op (it rewrites
+    // the same value), which is why one pusher would never notice. On any
+    // shared box, jump host or CI runner, the FIRST pusher's identity then won
+    // over every later pusher's global config -- so their commits, and the
+    // "Pushed by" line in every PR body, were attributed to someone else.
+    //
+    // Cleared here as well as avoided, so a machine already in that state
+    // recovers on its next push rather than staying wrong forever.
+    await clearPersistedIdentity(git);
     await git.add(paths);
-    await git.commit(message);
+    await git.raw([
+      '-c', `user.name=${identity.name}`,
+      '-c', `user.email=${identity.email}`,
+      'commit', '-m', message,
+    ]);
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     throw new GitOperationError(detail);

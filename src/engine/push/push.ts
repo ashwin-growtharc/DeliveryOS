@@ -8,6 +8,7 @@ import { resolveArtifact, ProgressCallback } from '../pull/pull';
 import { buildCatalog } from '../catalog/catalog';
 import { ManifestSchema, Manifest, InstallParam } from '../manifest/schema';
 import { bumpVersion, VersionBumpKind } from '../manifest/version';
+import { compareVersions } from '../sync/sync';
 import { renderPreviewImage } from '../preview/renderPreviewImage';
 import { findPreviewEntryFile } from '../preview/resolveArtifactPreview';
 import {
@@ -43,6 +44,7 @@ import { getGithubToken } from '../github/githubAuth';
 import {
   PushModeConflictError,
   NoLocalChangesError,
+  StalePushError,
   IdCollisionError,
   RemoteRegistryError,
   ManifestValidationError,
@@ -93,6 +95,11 @@ export interface PushOptions {
   // for -- this field only lets someone choose a bigger bump than the
   // default, never opt out of bumping entirely.
   bump?: VersionBumpKind;
+  /** Push even though the artifact was edited against a version that is no
+   * longer the remote's current one. Off by default: see `StalePushError` for
+   * what it silently used to do. When set, the PR body says it was forced and
+   * names the overlapping files, so the escape hatch leaves a trace. */
+  force?: boolean;
 }
 
 export interface PushResult {
@@ -256,6 +263,9 @@ export async function pushArtifact(
     let filesToCommit: string[];
     let prTitle: string;
     let defaultBranch: string;
+    // Set only when --force pushed over a stale version, so the PR body can
+    // say so. Undefined on every ordinary push.
+    let stalePushWarning: { editedAgainst: string; upstreamVersion: string; overlap: string[] } | undefined;
     let prBody: string;
 
     if (options.isNew) {
@@ -499,10 +509,12 @@ export async function pushArtifact(
       // loop then rmSync'd every payload file in the cache and opened a PR
       // DELETING the artifact's whole payload upstream, on a shared remote.
       // `lockEntry.installTarget` is an ABSOLUTE path, so it is only meaningful
-      // for the machine and the directory it was written on -- and `.deliveryos/`
-      // is not gitignored, so a lockfile really does travel to other clones. It
-      // is re-validated against THIS cwd before use, exactly as removeArtifact
-      // already re-validates the same field, rather than trusted blindly.
+      // for the machine and the directory it was written on. `.deliveryos/` now
+      // carries its own .gitignore (ensureProjectDeliveryOsDir), so a lockfile
+      // should no longer travel to other clones -- but it is still re-validated
+      // against THIS cwd before use, exactly as removeArtifact re-validates the
+      // same field. A project that was committed before that landed, or whose
+      // .gitignore someone removed, still exists.
       const recorded = lockEntry?.installTarget;
       const recordedIsUsable = recorded !== undefined && resolveContainedPath(cwd, recorded) === recorded;
       const installTarget = recordedIsUsable
@@ -550,12 +562,6 @@ export async function pushArtifact(
         );
       }
 
-      // Only fetched now, after the no-local-changes check -- see this
-      // function's own comment above `client`'s construction for why.
-      const repoInfo = await fetchRepoInfo(client, ghOwner, ghRepo);
-      defaultBranch = repoInfo.defaultBranch;
-      const isPrivateRepo = repoInfo.isPrivate;
-
       // If the manifest this was pulled from set `payload_path`, the real
       // file/directory lives there in the remote's repo, not under
       // artifacts/<id>/payload/ -- write the diff back to that same real
@@ -582,6 +588,59 @@ export async function pushArtifact(
         payloadDestDir = path.join(cacheDir, 'artifacts', id, 'payload');
       }
       const payloadDestGitRoot = manifest.payload_path ?? `artifacts/${id}/payload`;
+
+      // Did someone else merge a change to this artifact since you pulled it?
+      //
+      // `manifest` here is the remote's CURRENT default-branch state (the
+      // fetchAndReset above refreshed the cache), and `lockEntry.version` is
+      // what this project actually pulled and edited against. Nothing used to
+      // compare them, and the consequence was silent: the staging loop below
+      // does a whole-file copy of YOUR files -- which are the version you
+      // pulled, plus your edits -- over whatever is upstream now. The commit is
+      // made off the current tip, so for any file you both touched, your push
+      // REVERTS theirs as an ordinary forward diff. Git flags nothing, and the
+      // PR body just says "modified: foo.ts".
+      //
+      // The overlap is the part worth naming: files changed both upstream and
+      // locally are the ones that actually lose work. Computed against the same
+      // pristine snapshot both comparisons already use.
+      if (lockEntry && compareVersions(manifest.version, lockEntry.version) > 0) {
+        const upstreamChanged = computeChangedFiles(payloadDestDir, pristine, { topLevelScope });
+        const localPaths = new Set(changedFiles.map((c) => c.relPath));
+        const overlap = upstreamChanged.map((c) => c.relPath).filter((p) => localPaths.has(p));
+
+        if (!options.force) {
+          const overlapDetail = overlap.length > 0
+            ? `\n\n${overlap.length} file(s) you changed also changed upstream -- pushing would revert `
+              + `those changes:\n${overlap.slice(0, 10).map((p) => `  ${p}`).join('\n')}`
+              + (overlap.length > 10 ? `\n  ...and ${overlap.length - 10} more` : '')
+            : '\n\nNone of the files you changed were touched upstream, so a merge would likely be clean '
+              + '-- but the version you edited against is no longer current.';
+          throw new StalePushError(
+            `You edited "${id}" against v${lockEntry.version}, but remote "${remoteName}" is now at `
+              + `v${manifest.version} -- someone else's change merged in between.`
+              + overlapDetail
+              + `\n\nCommit your work to your own git first, then \`deliveryos pull ${id} --force\` to take `
+              + `the current version (that now refreshes from the remote), and re-apply your edit. `
+              + `Or re-run with --force to push anyway; the pull request will say it was forced.`,
+          );
+        }
+        // Forced: proceed, but make it visible to whoever reviews the PR.
+        // Unblocking someone is a fair reason for the flag; hiding what the
+        // push did is not.
+        stalePushWarning = {
+          editedAgainst: lockEntry.version,
+          upstreamVersion: manifest.version,
+          overlap,
+        };
+      }
+
+      // Only fetched now, after the no-local-changes check -- see this
+      // function's own comment above `client`'s construction for why.
+      const repoInfo = await fetchRepoInfo(client, ghOwner, ghRepo);
+      defaultBranch = repoInfo.defaultBranch;
+      const isPrivateRepo = repoInfo.isPrivate;
+
       onProgress?.('stage', `Staging ${changedFiles.length} changed file(s) for "${id}"...`);
       for (const change of changedFiles) {
         if (change.status === 'deleted') {
@@ -630,6 +689,9 @@ export async function pushArtifact(
         gitUserEmail: identity.email,
         changedFiles,
         payloadRoot: manifest.payload_path,
+        // Undefined on every ordinary push; set only when --force pushed over a
+        // version that had already moved upstream.
+        stalePush: stalePushWarning,
         previewImageGitPath,
         previewImageUrl:
           previewImageGitPath && !isPrivateRepo

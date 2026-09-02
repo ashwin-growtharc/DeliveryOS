@@ -11,6 +11,7 @@ import { applyAvailableUpdates } from '../../src/engine/sync/applyUpdate';
 import { readLockfile } from '../../src/engine/lockfile/lockfile';
 import { computeChangedFiles } from '../../src/engine/push/diff';
 import { pristinePath } from '../../src/engine/paths';
+import { LocalEditsWouldBeLostError } from '../../src/engine/errors';
 
 // Verifies the real gap `checkForUpdates` always left open: it only ever
 // reported "installed -> available," never actually applied anything.
@@ -451,6 +452,84 @@ describe('applyAvailableUpdates e2e', () => {
       expect(results).toEqual([]);
     },
     30_000,
+  );
+
+
+  it(
+    'refuses to pull over local edits, and --force takes CURRENT upstream rather than a stale cache',
+    async () => {
+      // Two separate defects in one flow.
+      //
+      // First: pullArtifact copies the payload over installTarget wholesale, so
+      // on an artifact someone has edited that is silent data loss. The desktop
+      // app has always confirm-gated this; the CLI had no guard at all, and
+      // "re-pull to get the latest" is exactly the instinct people reach for
+      // once artifacts are shared.
+      //
+      // Second, and the reason --force fetches: pullArtifact is the one major
+      // operation that never fetched. Discarding real edits in favour of an
+      // arbitrarily stale cache is strictly worse than refusing, so forcing has
+      // to actually go and get what it claims to be giving you.
+      const remoteName = 'test-remote-pull-force';
+      addRemoteEntry({ name: remoteName, url: fixtureRemoteDir, addedAt: new Date().toISOString() });
+      await cloneRemote(remoteName, fixtureRemoteDir);
+
+      const artifact = TEST_ARTIFACTS.find((a) => a.id === 'welcome-template')!;
+      const cwd = newScratchCwd('pull-force');
+      await pullArtifact(artifact.id, remoteName, cwd);
+
+      const readmePath = path.join(cwd, artifact.installTarget, 'README.md');
+      fs.writeFileSync(readmePath, '# welcome-template\n\nmy unpushed local edit.\n', 'utf-8');
+
+      // Someone publishes a new version upstream. The local cache has NOT seen
+      // it -- nothing has fetched since the clone.
+      const upstreamReadme = path.join(fixtureRemoteDir, 'artifacts', artifact.id, 'payload', 'README.md');
+      fs.writeFileSync(upstreamReadme, '# welcome-template\n\nbrand new upstream content.\n', 'utf-8');
+      const remoteGit = simpleGit(fixtureRemoteDir);
+      await remoteGit.add([`artifacts/${artifact.id}/payload/README.md`]);
+      await remoteGit.commit('upstream edits welcome-template');
+
+      // Refused, and the edit is still there afterwards.
+      await expect(pullArtifact(artifact.id, remoteName, cwd)).rejects.toThrow(
+        LocalEditsWouldBeLostError,
+      );
+      expect(fs.readFileSync(readmePath, 'utf-8')).toContain('my unpushed local edit');
+
+      // Forced: the edit is discarded, AND what replaced it is what is really
+      // upstream right now -- not the stale cached copy. Without the fetch this
+      // assertion fails with the ORIGINAL fixture content, which is exactly the
+      // "lost the edit for nothing" case.
+      await pullArtifact(artifact.id, remoteName, cwd, undefined, {}, { force: true });
+
+      const after = fs.readFileSync(readmePath, 'utf-8');
+      expect(after).toContain('brand new upstream content');
+      expect(after).not.toContain('my unpushed local edit');
+    },
+    120_000,
+  );
+
+  it(
+    'still pulls normally when the artifact has no local edits, and when it was never pulled at all',
+    async () => {
+      // The guard must not turn an ordinary pull into a refusal -- that would
+      // be a far worse regression than the bug it fixes.
+      const remoteName = 'test-remote-pull-clean';
+      addRemoteEntry({ name: remoteName, url: fixtureRemoteDir, addedAt: new Date().toISOString() });
+      await cloneRemote(remoteName, fixtureRemoteDir);
+
+      const artifact = TEST_ARTIFACTS.find((a) => a.id === 'lint-config')!;
+      const cwd = newScratchCwd('pull-clean');
+
+      // First pull: nothing installed yet, so there is nothing to protect.
+      const first = await pullArtifact(artifact.id, remoteName, cwd);
+      expect(first.manifest.id).toBe(artifact.id);
+
+      // Second pull with the files untouched: byte-identical to the pristine
+      // snapshot, so it proceeds silently.
+      const second = await pullArtifact(artifact.id, remoteName, cwd);
+      expect(second.manifest.id).toBe(artifact.id);
+    },
+    120_000,
   );
 
 });

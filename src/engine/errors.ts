@@ -42,6 +42,20 @@ export class GithubApiError extends DeliveryOsError {}
  * nothing to open a PR for. */
 export class NoLocalChangesError extends DeliveryOsError {}
 
+/** Thrown when `pull` would overwrite local edits to an already-pulled
+ * artifact. Refused rather than copied over, because the copy is wholesale and
+ * the loss is silent -- the desktop app has always confirm-gated this, the CLI
+ * had no guard. `--force` bypasses it, and also fetches first so the trade is
+ * against real upstream rather than a stale cache. */
+export class LocalEditsWouldBeLostError extends DeliveryOsError {}
+
+/** Thrown when an edit-mode push is based on a version that is no longer the
+ * remote's current one -- i.e. someone else's change merged in between the pull
+ * and the push. Refused rather than merged, because the staging loop's
+ * whole-file copy would silently revert their work as an ordinary forward diff
+ * that git has no reason to flag. `--force` bypasses it and stamps the PR. */
+export class StalePushError extends DeliveryOsError {}
+
 /** Thrown when `push --new` targets an id that already exists in the
  * target remote's (freshly-refreshed) catalog. */
 export class IdCollisionError extends DeliveryOsError {}

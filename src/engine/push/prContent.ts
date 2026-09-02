@@ -70,6 +70,41 @@ export interface EditPrContentParams extends PreviewImageParams {
   // PR body names the real file/directory instead of a shadow path that
   // was never actually written to.
   payloadRoot?: string;
+  /** Set only when this push was FORCED past `StalePushError` -- authored
+   * against a version the remote had already moved on from. A forced stale
+   * push can revert an already-merged change as an ordinary forward diff that
+   * git has no reason to flag, so the PR reviewer is the only remaining
+   * safeguard and has to be told explicitly. */
+  stalePush?: { editedAgainst: string; upstreamVersion: string; overlap: string[] };
+}
+
+/** Renders the forced-stale-push warning, or `''` for an ordinary push.
+ *
+ * Deliberately the first thing in the body, above even the metadata line: this
+ * is the one case where the diff a reviewer is about to read can silently undo
+ * something already merged, and the diff itself shows no sign of it. */
+function buildStalePushSection(stale: EditPrContentParams['stalePush']): string {
+  if (!stale) {
+    return '';
+  }
+
+  const overlapBlock = stale.overlap.length > 0
+    ? '\n>\n> **These files changed both upstream and in this push** -- merging it will revert the '
+      + 'upstream version of them:\n'
+      + stale.overlap.slice(0, 20).map((p) => `> - \`${p}\``).join('\n')
+      + (stale.overlap.length > 20 ? `\n> - ...and ${stale.overlap.length - 20} more` : '')
+    : '\n>\n> No files overlap, so this should merge cleanly -- but it was still authored against an '
+      + 'older version.';
+
+  return [
+    '',
+    '> [!WARNING]',
+    `> **Forced push over a stale version.** This was edited against v${stale.editedAgainst}, but the`,
+    `> remote had already moved to v${stale.upstreamVersion}.${overlapBlock}`,
+    '>',
+    `> Review this against the current default branch, not against v${stale.editedAgainst}.`,
+    '',
+  ].join('\n');
 }
 
 /** Builds the PR title/body for an edit-mode push (a diff against an
@@ -87,9 +122,10 @@ export function buildEditPrContent(params: EditPrContentParams): PrContent {
     .join('\n');
 
   const previewSection = buildPreviewSection(params);
+  const staleSection = buildStalePushSection(params.stalePush);
 
   const body = `## DeliveryOS push: update \`${id}\`
-
+${staleSection}
 **Kind:** ${kind}   **Owner:** ${owner}   **Version:** ${versionDisplay}
 **Pushed by:** ${gitUserName} <${gitUserEmail}>
 ${previewSection}

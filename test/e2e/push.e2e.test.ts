@@ -18,7 +18,8 @@ const NL = String.fromCharCode(10);
 import { fetchAndReset } from '../../src/engine/git/git';
 import { pullArtifact } from '../../src/engine/pull/pull';
 import { pushArtifact } from '../../src/engine/push/push';
-import { NoLocalChangesError, IdCollisionError } from '../../src/engine/errors';
+import { NoLocalChangesError, IdCollisionError, StalePushError } from '../../src/engine/errors';
+import { readLockfile } from '../../src/engine/lockfile/lockfile';
 import type { GithubClient } from '../../src/engine/github/github';
 
 // This e2e test never touches the network or a real GitHub account: the
@@ -929,6 +930,114 @@ describe('push e2e', () => {
       expect(cachedReadme).not.toContain('unreviewed local edit');
       // The happy path stays silent -- no warning on an ordinary push.
       expect(result.cacheResetWarning).toBeUndefined();
+    },
+    120_000,
+  );
+
+  it(
+    'refuses a push authored against a version someone else has already superseded, instead of silently reverting their merged change',
+    async () => {
+      // The multi-user failure this whole guard exists for, and it has never
+      // been possible to hit with one person: B's files are "the version B
+      // pulled, plus B's edits", and the staging loop copies them WHOLESALE
+      // over current upstream. The commit is made off the current tip, so A's
+      // merged change is reverted as an ordinary forward diff -- git has no
+      // reason to flag it and the PR body just says "modified: README.md".
+      const remoteName = 'test-remote-stale-push';
+      await registerAndClone(remoteName, fixtureRemoteDir);
+      const defaultBranch = (await simpleGit(fixtureRemoteDir).status()).current;
+
+      const artifact = TEST_ARTIFACTS.find((a) => a.id === 'welcome-template')!;
+
+      // B pulls FIRST, at v1.0.0. This ordering is the whole test: B's
+      // lockfile has to record the pre-merge version.
+      const cwdB = newScratchCwd('stale-b');
+      await pullArtifact(artifact.id, remoteName, cwdB);
+      expect(readLockfile(cwdB).entries.find((e) => e.id === artifact.id)?.version).toBe('1.0.0');
+
+      // A pulls, edits the same file, pushes, and A's change is merged.
+      const cwdA = newScratchCwd('stale-a');
+      await pullArtifact(artifact.id, remoteName, cwdA);
+      fs.writeFileSync(
+        path.join(cwdA, artifact.installTarget, 'README.md'),
+        '# welcome-template' + NL + NL + "A's merged change." + NL,
+        'utf-8',
+      );
+      const resultA = await pushArtifact(artifact.id, {}, cwdA, makeFakeOctokit());
+      const remoteGit = simpleGit(fixtureRemoteDir);
+      await remoteGit.checkout(defaultBranch);
+      await remoteGit.merge([resultA.branch]);
+
+      // B now edits the SAME file, still on v1.0.0, and pushes.
+      fs.writeFileSync(
+        path.join(cwdB, artifact.installTarget, 'README.md'),
+        '# welcome-template' + NL + NL + "B's edit, made before A merged." + NL,
+        'utf-8',
+      );
+
+      await expect(pushArtifact(artifact.id, {}, cwdB, makeFakeOctokit())).rejects.toThrow(
+        StalePushError,
+      );
+
+      // The refusal names the overlap -- that is what tells someone they are
+      // about to destroy work rather than just that a number moved.
+      await expect(pushArtifact(artifact.id, {}, cwdB, makeFakeOctokit())).rejects.toThrow(
+        /README\.md/,
+      );
+
+      // And A's merged content is still what the remote holds.
+      const upstreamReadme = fs.readFileSync(
+        path.join(fixtureRemoteDir, 'artifacts', artifact.id, 'payload', 'README.md'),
+        'utf-8',
+      );
+      expect(upstreamReadme).toContain("A's merged change");
+      expect(upstreamReadme).not.toContain("B's edit");
+    },
+    120_000,
+  );
+
+  it(
+    '--force pushes over a stale version anyway, but says so in the pull request body',
+    async () => {
+      // The escape hatch has to exist -- two people editing one artifact must
+      // not deadlock -- but a forced stale push can still revert a merged
+      // change, so the PR reviewer is the last safeguard and has to be told.
+      const remoteName = 'test-remote-stale-push-forced';
+      await registerAndClone(remoteName, fixtureRemoteDir);
+      const defaultBranch = (await simpleGit(fixtureRemoteDir).status()).current;
+
+      const artifact = TEST_ARTIFACTS.find((a) => a.id === 'lint-config')!;
+
+      const cwdB = newScratchCwd('forced-b');
+      await pullArtifact(artifact.id, remoteName, cwdB);
+
+      const cwdA = newScratchCwd('forced-a');
+      await pullArtifact(artifact.id, remoteName, cwdA);
+      fs.writeFileSync(
+        path.join(cwdA, artifact.installTarget, 'README.md'),
+        '# lint-config' + NL + NL + "A's change." + NL,
+        'utf-8',
+      );
+      const resultA = await pushArtifact(artifact.id, {}, cwdA, makeFakeOctokit());
+      const remoteGit = simpleGit(fixtureRemoteDir);
+      await remoteGit.checkout(defaultBranch);
+      await remoteGit.merge([resultA.branch]);
+
+      fs.writeFileSync(
+        path.join(cwdB, artifact.installTarget, 'README.md'),
+        '# lint-config' + NL + NL + "B's forced edit." + NL,
+        'utf-8',
+      );
+
+      const octokit = makeFakeOctokit();
+      const resultB = await pushArtifact(artifact.id, { force: true }, cwdB, octokit);
+
+      expect(resultB.number).toBeGreaterThan(0);
+      const prBody = octokit.rest.pulls.create.mock.calls.at(-1)![0].body as string;
+      expect(prBody).toContain('Forced push over a stale version');
+      expect(prBody).toContain('README.md');
+      // Names both versions, so a reviewer knows what to diff against.
+      expect(prBody).toMatch(/v1\.0\.0/);
     },
     120_000,
   );

@@ -29,6 +29,12 @@ export interface ApplyUpdateResult {
    * silent no-op. Never set when `applied` is true. */
   reason?: string;
   postInstallOutput?: string;
+  /** What the new version changed, relative to the copy this project had.
+   * Populated only when `applied` is true -- on a refusal nothing was touched,
+   * so there is nothing to report. Empty when the diff could not be computed
+   * (a missing pristine snapshot), which is deliberately not the same as "no
+   * changes". */
+  changedFiles?: Array<{ relPath: string; status: string }>;
   /** Set only when applied is true AND the new version declares
    * wiring_actions -- a version bump can add a NEW integration step this
    * function deliberately does not attempt to auto-apply (that's a
@@ -91,8 +97,14 @@ export async function applyAvailableUpdates(
     // so the !match branch below can report through the SAME single reporting
     // path as every other degradation in this loop.
     let availableVersion: string | undefined;
+    // `changedFiles` is assigned only on the success path below, so a refusal
+    // never claims to know what upstream changed.
+    let upstreamChangesForReport: Array<{ relPath: string; status: string }> | undefined;
     const report = (applied: boolean, reason?: string, postInstallOutput?: string, note?: string): void => {
-      results.push({ id: entry.id, remote: entry.remote, previousVersion, availableVersion, applied, reason, postInstallOutput, note });
+      results.push({
+        id: entry.id, remote: entry.remote, previousVersion, availableVersion, applied, reason,
+        postInstallOutput, note, changedFiles: upstreamChangesForReport,
+      });
     };
 
     const match = catalog.find(
@@ -237,6 +249,23 @@ export async function applyAvailableUpdates(
     // payload (not the current install against the new payload -- they're
     // identical at this point, since changedFiles was already confirmed
     // empty above) finds exactly those removed files.
+    // What the new version actually changes, computed against the same two
+    // trees the stale-file sweep below already walks.
+    //
+    // This comparison existed and was thrown away: files were DELETED based on
+    // it and the person was never told which. Meanwhile the refusal path a
+    // hundred lines up will name five of *their* changed files -- so the one
+    // thing reported in detail was your own edit, and the thing that actually
+    // overwrote your files was reported as a version number.
+    let upstreamChanges: ReturnType<typeof computeChangedFiles> = [];
+    try {
+      upstreamChanges = computeChangedFiles(payloadSrc, pristineTarget, { topLevelScope: entryTopLevelScope });
+    } catch {
+      // A missing pristine snapshot is already handled above for the paths that
+      // need it; here an unknowable diff must not block a legitimate update.
+      upstreamChanges = [];
+    }
+
     const oldFiles = new Set(listFilesRecursive(pristineTarget));
     const newFiles = new Set(listFilesRecursive(payloadSrc));
     for (const relPath of oldFiles) {
@@ -310,6 +339,7 @@ export async function applyAvailableUpdates(
     const note = manifest.wiring_actions.length > 0
       ? 'This version declares wiring suggestions -- worth checking the Wiring section again in case this update added a new one.'
       : undefined;
+    upstreamChangesForReport = upstreamChanges.map((c) => ({ relPath: c.relPath, status: c.status }));
     report(true, undefined, postInstallOutput, note);
   }
 

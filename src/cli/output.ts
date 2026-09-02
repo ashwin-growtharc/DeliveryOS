@@ -33,6 +33,14 @@ export function printCatalog(entries: CatalogListEntry[], json: boolean): void {
         hasDefault: param.default !== undefined,
       })),
       signed: entry.manifest.signature !== undefined,
+      // The shell command this artifact runs after installing, verbatim, or
+      // absent when it declares none. This payload exists so a caller can
+      // judge fit and trust WITHOUT pulling first (see this function's own
+      // doc comment) -- and the one thing that actually executes arbitrary
+      // code on their machine was the one thing it did not report. The
+      // declarative, reviewable parts (install_params, wiring snippets) were
+      // already here.
+      postInstall: entry.manifest.post_install,
       localStatus: entry.localStatus,
     }));
     console.log(JSON.stringify(plain));

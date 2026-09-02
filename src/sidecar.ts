@@ -226,7 +226,11 @@ const commandTable: Record<string, CommandHandler> = {
     const cwd = requireString(args, 'cwd');
     const remote = optionalString(args, 'remote');
     const values = optionalStringRecord(args, 'values');
-    return pullArtifact(id, remote, cwd, onProgress, values);
+    // The app confirm-gates an overwrite of local edits itself (its own
+    // "This will discard your local edits" dialog), so it passes force AFTER
+    // the person has said yes -- otherwise that button would now refuse.
+    const force = args.force === true;
+    return pullArtifact(id, remote, cwd, onProgress, values, { force });
   },
 
   // Phase 10 item 1: "deterministic apply-and-test on Pull, no agent
@@ -242,7 +246,7 @@ const commandTable: Record<string, CommandHandler> = {
     const cwd = requireString(args, 'cwd');
     const remote = optionalString(args, 'remote');
     const values = optionalStringRecord(args, 'values');
-    const result = await pullAndAutoWire(id, remote, cwd, onProgress, values);
+    const result = await pullAndAutoWire(id, remote, cwd, onProgress, values, args.force === true);
     // Phase 12: the app's own persistent Detail banner and the Pull
     // toast both need this plain-language read, not just the raw
     // applied/needsReview/build/missingRequiredParams fields -- computed

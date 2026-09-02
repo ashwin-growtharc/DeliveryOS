@@ -192,9 +192,10 @@ export function annotateCatalog(
     // missing root, so every pristine file read as `deleted` and the artifact
     // was permanently `edited_locally` no matter how cleanly it was pulled.
     // Re-validated against THIS cwd, never trusted blindly: the recorded value
-    // is an ABSOLUTE path, and `.deliveryos/` is not gitignored, so a lockfile
-    // written on another machine (or before this project was renamed) really
-    // does turn up here. A stale one that still happened to be contained would
+    // is an ABSOLUTE path. `.deliveryos/` now carries its own .gitignore
+    // (ensureProjectDeliveryOsDir), so a foreign lockfile should be rarer than
+    // it was -- but a project committed before that landed, or one whose folder
+    // was simply renamed, still lands here. A stale one that still happened to be contained would
     // make computeChangedFiles below diff a directory that does not exist and
     // report the artifact `edited_locally` forever -- which is what enables the
     // Push button, and push is where that becomes destructive.

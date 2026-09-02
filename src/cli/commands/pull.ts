@@ -47,7 +47,14 @@ export function registerPullCommand(program: Command): void {
         + 'are still written to .env.local, and the artifact\'s own post_install command is '
         + 'still run -- this flag opts out of the wiring/build step only.',
     )
-    .action(async (id: string, options: { remote?: string; set: Record<string, string>; wire: boolean }) => {
+    .option(
+      '--force',
+      'Discard local edits to this artifact and take the current upstream version. Refused by '
+        + 'default: pulling copies the payload over your files wholesale, so on an artifact you '
+        + 'have edited that is silent data loss. Forcing also re-fetches the remote first, so you '
+        + 'are trading your edits for what is actually upstream, not for a stale local cache.',
+    )
+    .action(async (id: string, options: { remote?: string; set: Record<string, string>; wire: boolean; force?: boolean }) => {
       // Resolved once up front (cheap -- reads the already-cloned remote,
       // no network) purely to decide WHICH path to take: pullAndAutoWire
       // is worth its extra build-verify step only when there's actually
@@ -63,8 +70,19 @@ export function registerPullCommand(program: Command): void {
       const { manifest } = resolveArtifact(id, options.remote);
       const hasWiring = manifest.wiring_actions.length > 0;
 
+      // Named before it runs, not after. `post_install` is an arbitrary shell
+      // command with the project root in its environment, and it was the one
+      // side effect shown nowhere -- the wiring snippets and install_params it
+      // sits beside have always been fully visible in both the CLI and the app.
+      // Printed rather than gated: this matches how `deliveryos wiring` shows
+      // snippets, and adding a prompt would change what every existing script
+      // does.
+      if (manifest.post_install) {
+        console.log(`This artifact runs a command after installing: ${manifest.post_install}`);
+      }
+
       if (!options.wire || !hasWiring) {
-        const result = await pullArtifact(id, options.remote, process.cwd(), undefined, options.set);
+        const result = await pullArtifact(id, options.remote, process.cwd(), undefined, options.set, { force: options.force });
         if (result.postInstallOutput && result.postInstallOutput.trim().length > 0) {
           console.log(result.postInstallOutput.trimEnd());
         }
@@ -85,7 +103,7 @@ export function registerPullCommand(program: Command): void {
         return;
       }
 
-      const result = await pullAndAutoWire(id, options.remote, process.cwd(), undefined, options.set);
+      const result = await pullAndAutoWire(id, options.remote, process.cwd(), undefined, options.set, options.force);
       const { pullResult } = result;
       if (pullResult.postInstallOutput && pullResult.postInstallOutput.trim().length > 0) {
         console.log(pullResult.postInstallOutput.trimEnd());

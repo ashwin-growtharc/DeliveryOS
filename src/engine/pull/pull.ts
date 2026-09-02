@@ -2,14 +2,15 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { execSync } from 'child_process';
 import { buildCatalog, CatalogEntry } from '../catalog/catalog';
-import { cachePath } from '../remote/remoteCache';
+import { cachePath, refreshRemoteCache } from '../remote/remoteCache';
 import { upsertEntry, readLockfile } from '../lockfile/lockfile';
-import { pristinePath, resolveContainedPath, adaptSrcDirPath, isRootInstall, ensureProjectDeliveryOsDir } from '../paths';
+import { pristinePath, resolveContainedPath, adaptSrcDirPath, isRootInstall, ensureProjectDeliveryOsDir, readPayloadFootprint } from '../paths';
 import { isSensitiveTargetPath } from './wiring';
 import {
   ArtifactResolutionError,
   ManifestValidationError,
   PostInstallError,
+  LocalEditsWouldBeLostError,
   SignatureBundleInvalidError,
 } from '../errors';
 import { Manifest } from '../manifest/schema';
@@ -20,6 +21,7 @@ import {
   readExistingEnvValues,
   applyEnvExamplePlaceholders,
 } from './installParams';
+import { computeChangedFiles } from '../push/diff';
 import { verifyArtifactSignature } from '../provenance/verify';
 import { isExecError, isToolNotFoundError } from '../execHelpers';
 
@@ -122,10 +124,8 @@ export function resolveArtifact(
  * checklist), then upserts the cwd-scoped lockfile. The lockfile is only
  * updated once the copy and post_install both succeed.
  *
- * `postInstallTimeoutMs` defaults to `POST_INSTALL_TIMEOUT_MS` for every
- * real caller (none pass it) -- it exists purely so tests can exercise the
- * real timeout path with a real hung command in milliseconds instead of
- * actually waiting out the production constant.
+ * Refuses when the install target has local edits, unless `options.force` --
+ * see `PullOptions` for why forcing also fetches.
  */
 /**
  * Records the pristine (as-pulled) snapshot an artifact's later status checks,
@@ -172,16 +172,54 @@ export function writePristineSnapshot(
   fs.cpSync(installTarget, pristineTarget, { recursive: true });
 }
 
+export interface PullOptions {
+  /** Discard local edits to this artifact's install target instead of refusing.
+   *
+   * Off by default. `pullArtifact` copies the payload over `installTarget`
+   * wholesale, so on an artifact someone has edited that is silent data loss --
+   * and "re-pull to get the latest" is a common instinct once artifacts are
+   * shared between people. The desktop app has always confirm-gated this; the
+   * CLI had no guard at all.
+   *
+   * Setting this ALSO fetches the remote first. That is not a convenience:
+   * `pullArtifact` otherwise never fetches, so discarding real edits in favour
+   * of an arbitrarily stale cache would destroy work for nothing. */
+  force?: boolean;
+  /** Test-only seam: lets a test exercise the real timeout path with a real
+   * hung command in milliseconds instead of waiting out the production
+   * constant. No production caller passes it. */
+  postInstallTimeoutMs?: number;
+}
+
 export async function pullArtifact(
   id: string,
   remoteName: string | undefined,
   cwd: string,
   onProgress?: ProgressCallback,
   providedValues: Record<string, string> = {},
-  postInstallTimeoutMs: number = POST_INSTALL_TIMEOUT_MS,
+  options: PullOptions = {},
 ): Promise<PullResult> {
+  const { force = false, postInstallTimeoutMs = POST_INSTALL_TIMEOUT_MS } = options;
   onProgress?.('resolve', `Resolving artifact "${id}"...`);
-  const entry = resolveArtifact(id, remoteName);
+  let entry = resolveArtifact(id, remoteName);
+
+  // `--force` means "discard my edits and take the current upstream version",
+  // so it has to actually GO AND GET the current upstream version. Every other
+  // path through this function reads whatever is already sitting in the local
+  // cache -- pullArtifact is the one major operation that never fetches (push,
+  // applyUpdate, checkForUpdates, refreshCatalog and scan all do). Without
+  // this, forcing would trade someone's real edits for arbitrarily stale
+  // content, which is strictly worse than refusing.
+  //
+  // Resolved first, then re-resolved: the remote name may only be known after
+  // resolution (`remoteName` is optional and often omitted), and re-resolving
+  // is what makes `manifest` and the payload reflect what was just fetched.
+  if (force) {
+    onProgress?.('fetch', `Fetching latest from ${entry.remoteName} before discarding local changes...`);
+    await refreshRemoteCache(entry.remoteName);
+    entry = resolveArtifact(id, remoteName);
+  }
+
   const { manifest, remoteName: resolvedRemoteName } = entry;
 
   const remoteDir = cachePath(resolvedRemoteName);
@@ -298,6 +336,49 @@ export async function pullArtifact(
     }
   }
   await verifyArtifactSignature(manifest, payloadSrc, signatureBundle);
+
+  // Refuse to copy over someone's local edits.
+  //
+  // `fs.cpSync` below overwrites the install target wholesale, so on an edited
+  // artifact this was silent data loss -- and it is the CLI that was exposed:
+  // the desktop app has always confirm-gated this action, so it passes
+  // `force: true` after the person has already said yes.
+  //
+  // Same comparison `applyAvailableUpdates` already makes for the same reason,
+  // and the same posture: report what would be lost, never guess.
+  if (!force) {
+    const existingEntry = readLockfile(cwd).entries.find((e) => e.id === manifest.id);
+    if (existingEntry?.installTarget && fs.existsSync(existingEntry.installTarget)) {
+      const pristineForCheck = pristinePath(cwd, manifest.id);
+      let localChanges: ReturnType<typeof computeChangedFiles> = [];
+      try {
+        const rootInstall = isRootInstall(cwd, existingEntry.installTarget);
+        const topLevelScope = rootInstall ? readPayloadFootprint(pristineForCheck) : undefined;
+        // A root install with no snapshot has no knowable footprint, so there
+        // is nothing to compare -- fall through rather than walk the whole
+        // project, exactly as annotateCatalog does.
+        if (!rootInstall || topLevelScope) {
+          localChanges = computeChangedFiles(existingEntry.installTarget, pristineForCheck, { topLevelScope });
+        }
+      } catch {
+        // No pristine snapshot (a pull from before snapshots existed, or a
+        // hand-deleted one) means the comparison is unknowable, not clean.
+        // Falling through is deliberate: refusing every such pull would make
+        // an old artifact permanently unpullable.
+        localChanges = [];
+      }
+      if (localChanges.length > 0) {
+        const names = localChanges.slice(0, 5).map((c) => c.relPath).join(', ');
+        const more = localChanges.length > 5 ? `, and ${localChanges.length - 5} more` : '';
+        throw new LocalEditsWouldBeLostError(
+          `"${manifest.id}" has ${localChanges.length} local change${localChanges.length === 1 ? '' : 's'} `
+            + `(${names}${more}) that pulling would overwrite.\n\n`
+            + `Push them first (\`deliveryos push ${manifest.id}\`), or commit them to your own git and `
+            + `re-run with --force to discard them and take the current upstream version.`,
+        );
+      }
+    }
+  }
 
   onProgress?.('copy', `Copying payload files to ${installTarget}...`);
   fs.cpSync(payloadSrc, installTarget, { recursive: true });
