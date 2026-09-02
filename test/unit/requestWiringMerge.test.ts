@@ -11,6 +11,7 @@ import {
 } from '../../src/engine/pull/requestWiringMerge';
 import { wiringMergeLogPath } from '../../src/engine/paths';
 import { WiringMergeError } from '../../src/engine/errors';
+import { rmDirWithRetry } from '../../src/engine/execHelpers';
 
 describe('buildWiringMergePrompt', () => {
   it('embeds the existing file, description, and instructions, and asks for strict JSON', () => {
@@ -162,8 +163,11 @@ describe('applyWiringMerge', () => {
     cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'deliveryos-apply-merge-test-'));
   });
 
-  afterEach(() => {
-    fs.rmSync(cwd, { recursive: true, force: true });
+  // These spawn a real `node` build subprocess; on Windows a killed
+  // process's grandchild can still hold a lock on cwd right as this
+  // deletes it, so use the shared retrying delete rather than a bare rmSync.
+  afterEach(async () => {
+    await rmDirWithRetry(cwd);
   });
 
   it('writes the merge, confirms via a real passing build, and logs applied: true', async () => {
@@ -280,6 +284,66 @@ describe('applyWiringMerge', () => {
       applyWiringMerge(cwd, 'does-not-exist.ts', 'merged content', 'wire it in', 'test-remote', 'test-artifact'),
     ).rejects.toThrow(WiringMergeError);
   });
+
+  it('never writes a real secret from the target file into the audit log, and still rolls the real file back to its exact original content', async () => {
+    // Regression test. `.deliveryos/wiring-merge-log.jsonl` stored `before`
+    // and `after` verbatim with no redaction anywhere, and nothing
+    // gitignores `.deliveryos/` -- so a wiring merge against auth.ts (the
+    // file this flow touches most often, by a wide margin) copied that
+    // project's live credentials into a plaintext log, one `git add -A`
+    // away from being committed forever.
+    const original = [
+      'export const authOptions = {',
+      '  secret: "hunter2-live-credential",',
+      '  providers: [],',
+      '};',
+    ].join('\n');
+    fs.writeFileSync(path.join(cwd, 'auth.ts'), original, 'utf-8');
+    fs.writeFileSync(
+      path.join(cwd, 'package.json'),
+      JSON.stringify({ name: 'x', scripts: { build: 'node -e "process.exit(1)"' } }),
+      'utf-8',
+    );
+
+    const merged = [
+      'export const authOptions = {',
+      '  secret: "hunter2-live-credential",',
+      '  providers: [SomeProvider],',
+      '};',
+    ].join('\n');
+
+    const result = await applyWiringMerge(
+      cwd,
+      'auth.ts',
+      merged,
+      'wire in the auth guard',
+      'test-remote',
+      'test-artifact',
+    );
+    expect(result.rolledBack).toBe(true);
+
+    const raw = fs.readFileSync(wiringMergeLogPath(cwd), 'utf-8');
+    const entry = JSON.parse(raw.trim().split('\n')[0]);
+    expect(entry.before).not.toContain('hunter2-live-credential');
+    expect(entry.after).not.toContain('hunter2-live-credential');
+    expect(entry.before).toContain('[redacted]');
+    expect(entry.after).toContain('[redacted]');
+    // Nothing leaked anywhere else in the line either, not just those fields.
+    expect(raw).not.toContain('hunter2-live-credential');
+    // Redacted, not dropped: the rest of the diff still reads normally, and
+    // both fields are still plain strings for renderActivityDiffDisclosure.
+    expect(typeof entry.before).toBe('string');
+    expect(typeof entry.after).toBe('string');
+    expect(entry.before).toContain('export const authOptions = {');
+    expect(entry.after).toContain('providers: [SomeProvider]');
+
+    // THE LOAD-BEARING ASSERTION. Rollback restores from an in-memory
+    // `before` read before the append, never from the log -- so redacting
+    // the log must not be able to reach the restore path. The real file on
+    // disk has to come back byte-identical, secret and all.
+    expect(fs.readFileSync(path.join(cwd, 'auth.ts'), 'utf-8')).toBe(original);
+    expect(fs.readFileSync(path.join(cwd, 'auth.ts'), 'utf-8')).toContain('hunter2-live-credential');
+  }, 30_000);
 });
 
 describe('readWiringMergeLog', () => {

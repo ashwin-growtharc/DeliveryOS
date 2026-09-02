@@ -11,6 +11,7 @@ import {
 } from '../../src/engine/pull/fixBuildFailure';
 import { buildFixLogPath } from '../../src/engine/paths';
 import { BuildFixError } from '../../src/engine/errors';
+import { rmDirWithRetry } from '../../src/engine/execHelpers';
 
 describe('buildFixPrompt (Phase 10 item 2)', () => {
   it('embeds both the file content and the build error, and asks for strict JSON', () => {
@@ -152,8 +153,11 @@ describe('applyBuildFix (Phase 10 item 2)', () => {
     cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'deliveryos-apply-fix-test-'));
   });
 
-  afterEach(() => {
-    fs.rmSync(cwd, { recursive: true, force: true });
+  // These spawn a real `node` build subprocess; on Windows a killed
+  // process's grandchild can still hold a lock on cwd right as this
+  // deletes it, so use the shared retrying delete rather than a bare rmSync.
+  afterEach(async () => {
+    await rmDirWithRetry(cwd);
   });
 
   it('writes the fix, confirms via a real passing build, and logs applied: true', async () => {
@@ -262,6 +266,62 @@ describe('applyBuildFix (Phase 10 item 2)', () => {
     expect(entry.remoteName).toBe('ai-helpers');
     expect(entry.artifactId).toBe('nextauth-credentials');
   });
+
+  it('never writes a real secret from the target file into the audit log, and still rolls the real file back to its exact original content', async () => {
+    // Regression test. `.deliveryos/build-fix-log.jsonl` stored `before`,
+    // `after` and `buildError` verbatim with no redaction anywhere, and
+    // nothing gitignores `.deliveryos/`. A failing build is also exactly
+    // the thing that dumps the environment into its own stderr, so the
+    // error text needed guarding just as much as the file body did.
+    const original = [
+      'export const authOptions = {',
+      '  secret: "hunter2-live-credential",',
+      '  providers: [],',
+      '};',
+    ].join('\n');
+    fs.writeFileSync(path.join(cwd, 'auth.ts'), original, 'utf-8');
+    fs.writeFileSync(
+      path.join(cwd, 'package.json'),
+      JSON.stringify({ name: 'x', scripts: { build: 'node -e "process.exit(1)"' } }),
+      'utf-8',
+    );
+
+    const proposed = [
+      'export const authOptions = {',
+      '  secret: "hunter2-live-credential",',
+      '  providers: [SomeProvider],',
+      '};',
+    ].join('\n');
+    const buildError = 'Build failed\nDATABASE_PASSWORD=hunter2-env-dump\n  at build.js:1:1';
+
+    const result = await applyBuildFix(cwd, 'auth.ts', proposed, buildError);
+    expect(result.rolledBack).toBe(true);
+
+    const raw = fs.readFileSync(buildFixLogPath(cwd), 'utf-8');
+    const logged = JSON.parse(raw.trim().split('\n')[0]);
+    expect(logged.before).not.toContain('hunter2-live-credential');
+    expect(logged.after).not.toContain('hunter2-live-credential');
+    expect(logged.buildError).not.toContain('hunter2-env-dump');
+    expect(logged.before).toContain('[redacted]');
+    expect(logged.after).toContain('[redacted]');
+    expect(raw).not.toContain('hunter2-live-credential');
+    expect(raw).not.toContain('hunter2-env-dump');
+    // Redacted, not dropped or clipped -- the Activity panel still reads
+    // normally, and every field is still a plain string.
+    expect(typeof logged.before).toBe('string');
+    expect(typeof logged.after).toBe('string');
+    expect(logged.before).toContain('export const authOptions = {');
+    expect(logged.after).toContain('providers: [SomeProvider]');
+    expect(logged.buildError).toContain('Build failed');
+    expect(logged.buildError).toContain('at build.js:1:1');
+
+    // THE LOAD-BEARING ASSERTION. Rollback restores from an in-memory
+    // `before` read before the append, never from the log -- so redacting
+    // the log must not be able to reach the restore path. The real file on
+    // disk has to come back byte-identical, secret and all.
+    expect(fs.readFileSync(path.join(cwd, 'auth.ts'), 'utf-8')).toBe(original);
+    expect(fs.readFileSync(path.join(cwd, 'auth.ts'), 'utf-8')).toContain('hunter2-live-credential');
+  }, 30_000);
 });
 
 describe('readBuildFixLog (Activity tab)', () => {
