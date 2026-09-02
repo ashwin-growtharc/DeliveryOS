@@ -46,6 +46,51 @@ export function projectDeliveryOsDir(cwd: string): string {
   return path.join(cwd, '.deliveryos');
 }
 
+/** Contents of the `.gitignore` DeliveryOS drops inside its own project-local
+ * directory. `*` ignores the whole directory including this file; git reads a
+ * `.gitignore` regardless of whether that file is itself ignored. */
+const PROJECT_DIR_GITIGNORE = `# Created automatically by DeliveryOS. Everything in this directory is local
+# to THIS machine and this checkout, and none of it is meant to be committed:
+#
+#   lock.json              records installTarget/wiredFiles as ABSOLUTE paths,
+#                          so it is meaningless in another clone -- and acting
+#                          on a stale one made \`push\` diff a directory that
+#                          does not exist, which proposed deleting an
+#                          artifact's whole payload upstream.
+#   pristine/              a full second copy of every pulled artifact's payload
+#   *.jsonl                audit logs holding the FULL text of real project
+#                          files, before and after an AI-assisted edit
+#   wire-context-*.md      generated prompts
+#   scan-staging/          scratch output of \`deliveryos scan\`
+#
+# Delete this file if you genuinely want to track the directory.
+*
+`;
+
+/** Creates the project-local `.deliveryos/` directory if needed, and makes sure
+ * it carries its own `.gitignore`.
+ *
+ * A `.gitignore` INSIDE the directory rather than a line appended to the
+ * project's own: DeliveryOS created this directory and owns all of it, but the
+ * project's `.gitignore` belongs to the person whose repo this is, and a tool
+ * silently editing it is a different and worse thing to do. This also works
+ * whatever their ignore setup looks like -- including no `.gitignore` at all --
+ * and self-heals, since every write comes back through here.
+ *
+ * Not merely a warning, unlike `.env.local` (installParams.ts): that file is
+ * the user's, so all DeliveryOS can do is point at it. This one is ours. */
+export function ensureProjectDeliveryOsDir(cwd: string): string {
+  const dir = projectDeliveryOsDir(cwd);
+  fs.mkdirSync(dir, { recursive: true });
+  const ignorePath = path.join(dir, '.gitignore');
+  // Never overwritten: someone who deliberately edited or removed it has made a
+  // choice, and re-imposing it on every write would be the tool arguing back.
+  if (!fs.existsSync(ignorePath)) {
+    fs.writeFileSync(ignorePath, PROJECT_DIR_GITIGNORE, 'utf-8');
+  }
+  return dir;
+}
+
 /** Project-local (cwd-scoped) lockfile path. */
 export function lockfilePath(cwd: string): string {
   return path.join(projectDeliveryOsDir(cwd), 'lock.json');

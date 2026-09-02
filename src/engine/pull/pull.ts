@@ -4,7 +4,7 @@ import { execSync } from 'child_process';
 import { buildCatalog, CatalogEntry } from '../catalog/catalog';
 import { cachePath } from '../remote/remoteCache';
 import { upsertEntry, readLockfile } from '../lockfile/lockfile';
-import { pristinePath, resolveContainedPath, adaptSrcDirPath, isRootInstall } from '../paths';
+import { pristinePath, resolveContainedPath, adaptSrcDirPath, isRootInstall, ensureProjectDeliveryOsDir } from '../paths';
 import { isSensitiveTargetPath } from './wiring';
 import {
   ArtifactResolutionError,
@@ -152,6 +152,10 @@ export function writePristineSnapshot(
   payloadSrc: string,
   pristineTarget: string,
 ): void {
+  // The snapshot lives under `.deliveryos/`, and on a project's very first pull
+  // this runs BEFORE the lockfile write -- so without this the directory could
+  // be created by a plain recursive mkdir and miss its own .gitignore.
+  ensureProjectDeliveryOsDir(cwd);
   if (fs.existsSync(pristineTarget)) {
     fs.rmSync(pristineTarget, { recursive: true, force: true });
   }

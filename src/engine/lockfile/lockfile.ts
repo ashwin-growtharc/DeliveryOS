@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as properLockfile from 'proper-lockfile';
-import { lockfilePath, projectDeliveryOsDir } from '../paths';
+import { lockfilePath, ensureProjectDeliveryOsDir } from '../paths';
 import { LockFile, LockEntry } from './types';
 import { LockfileCorruptError } from '../errors';
 
@@ -67,10 +67,7 @@ export function readLockfile(cwd: string): LockFile {
  * half-written lock.json if the process is interrupted mid-write.
  */
 export function writeLockfile(cwd: string, lockfile: LockFile): void {
-  const dir = projectDeliveryOsDir(cwd);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
+  const dir = ensureProjectDeliveryOsDir(cwd);
   const filePath = lockfilePath(cwd);
   const tmpPath = path.join(dir, `.lock.json.${process.pid}.${Date.now()}.tmp`);
   fs.writeFileSync(tmpPath, JSON.stringify(lockfile, null, 2) + '\n', 'utf-8');
@@ -100,10 +97,7 @@ export function writeLockfile(cwd: string, lockfile: LockFile): void {
  * existing before the very first lock in a fresh project.
  */
 export async function upsertEntry(cwd: string, entry: LockEntry): Promise<void> {
-  const dir = projectDeliveryOsDir(cwd);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
+  ensureProjectDeliveryOsDir(cwd);
   const filePath = lockfilePath(cwd);
 
   const release = await properLockfile.lock(filePath, {
@@ -136,10 +130,7 @@ export async function upsertEntry(cwd: string, entry: LockEntry): Promise<void> 
  * doesn't need to handle a surprise failure here too.
  */
 export async function removeEntry(cwd: string, id: string): Promise<void> {
-  const dir = projectDeliveryOsDir(cwd);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
+  ensureProjectDeliveryOsDir(cwd);
   const filePath = lockfilePath(cwd);
 
   const release = await properLockfile.lock(filePath, {

@@ -3,7 +3,7 @@ import * as path from 'path';
 import { runClaudeSubprocess, DISALLOWED_TOOLS } from '../claude/runClaudeSubprocess';
 import { resolveContainedTargetFile } from '../pull/wiring';
 import { runProjectBuild, BuildVerificationResult } from '../pull/verifyBuild';
-import { wiringPlacementLogPath } from '../paths';
+import { wiringPlacementLogPath, ensureProjectDeliveryOsDir } from '../paths';
 import { redactEmbeddedSecrets } from '../audit/redact';
 import { WiringPlacementError } from '../errors';
 
@@ -238,7 +238,7 @@ interface WiringPlacementLogEntry {
  * before for every ordinary build. */
 function appendWiringPlacementLog(cwd: string, entry: WiringPlacementLogEntry): void {
   const logPath = wiringPlacementLogPath(cwd);
-  fs.mkdirSync(path.dirname(logPath), { recursive: true });
+  ensureProjectDeliveryOsDir(cwd);
   const redacted: WiringPlacementLogEntry = {
     ...entry,
     rebuildOutput: entry.rebuildOutput === undefined

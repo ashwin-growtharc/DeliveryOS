@@ -1,9 +1,8 @@
 import * as fs from 'fs';
-import * as path from 'path';
 import { runClaudeSubprocess, DISALLOWED_TOOLS } from '../claude/runClaudeSubprocess';
 import { resolveContainedTargetFile } from './wiring';
 import { runProjectBuild, BuildVerificationResult } from './verifyBuild';
-import { wiringMergeLogPath } from '../paths';
+import { wiringMergeLogPath, ensureProjectDeliveryOsDir } from '../paths';
 import { WiringMergeError } from '../errors';
 import { redactEmbeddedSecrets, redactTextToSummary, MAX_LOG_FIELD_CHARS } from '../audit/redact';
 
@@ -269,7 +268,7 @@ function appendWiringMergeLog(cwd: string, entry: WiringMergeLogEntry): void {
       ? undefined
       : redactEmbeddedSecrets(entry.rebuildOutput),
   };
-  fs.mkdirSync(path.dirname(logPath), { recursive: true });
+  ensureProjectDeliveryOsDir(cwd);
   fs.appendFileSync(logPath, `${JSON.stringify(redacted)}\n`, 'utf-8');
 }
 

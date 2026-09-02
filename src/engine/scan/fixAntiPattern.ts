@@ -4,7 +4,7 @@ import { runClaudeSubprocess, DISALLOWED_TOOLS } from '../claude/runClaudeSubpro
 import { resolveContainedTargetFile } from '../pull/wiring';
 import { compileLocalPreview } from '../preview/resolveArtifactPreview';
 import { readPayloadSource } from './suggestMetadata';
-import { designFixLogPath } from '../paths';
+import { designFixLogPath, ensureProjectDeliveryOsDir } from '../paths';
 import { DesignFixError } from '../errors';
 import { redactTextToSummary, MAX_LOG_FIELD_CHARS } from '../audit/redact';
 
@@ -215,7 +215,7 @@ function appendDesignFixLog(cwd: string, entry: DesignFixLogEntry): void {
     before: redactTextToSummary(entry.before, MAX_LOG_FIELD_CHARS) ?? '',
     after: redactTextToSummary(entry.after, MAX_LOG_FIELD_CHARS) ?? '',
   };
-  fs.mkdirSync(path.dirname(logPath), { recursive: true });
+  ensureProjectDeliveryOsDir(cwd);
   fs.appendFileSync(logPath, `${JSON.stringify(redacted)}\n`, 'utf-8');
 }
 

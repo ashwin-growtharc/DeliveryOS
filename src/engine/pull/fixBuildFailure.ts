@@ -1,9 +1,8 @@
 import * as fs from 'fs';
-import * as path from 'path';
 import { runClaudeSubprocess, DISALLOWED_TOOLS } from '../claude/runClaudeSubprocess';
 import { resolveContainedTargetFile } from './wiring';
 import { runProjectBuild, BuildVerificationResult } from './verifyBuild';
-import { buildFixLogPath } from '../paths';
+import { buildFixLogPath, ensureProjectDeliveryOsDir } from '../paths';
 import { BuildFixError } from '../errors';
 import { redactEmbeddedSecrets, redactTextToSummary, MAX_LOG_FIELD_CHARS } from '../audit/redact';
 
@@ -251,7 +250,7 @@ function appendBuildFixLog(cwd: string, entry: BuildFixLogEntry): void {
       ? undefined
       : redactEmbeddedSecrets(entry.rebuildOutput),
   };
-  fs.mkdirSync(path.dirname(logPath), { recursive: true });
+  ensureProjectDeliveryOsDir(cwd);
   fs.appendFileSync(logPath, `${JSON.stringify(redacted)}\n`, 'utf-8');
 }
 

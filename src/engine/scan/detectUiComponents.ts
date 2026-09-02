@@ -3,7 +3,7 @@ import * as path from 'path';
 import { ComponentDoc, PropItem } from 'react-docgen-typescript';
 import { parseComponentFile, parseEnumValues } from '../preview/docgen';
 import { detectSelfNestingWarnings } from './detectSelfNesting';
-import { scanStagingDir } from '../paths';
+import { scanStagingDir, ensureProjectDeliveryOsDir } from '../paths';
 import { ScanCandidate } from './types';
 
 const COMPONENT_FILE_PATTERN = /\.(tsx|jsx)$/i;
@@ -323,6 +323,7 @@ function materializeFlatCandidate(
   source: string,
 ): MaterializedPayload {
   const stagingDir = path.join(scanStagingDir(cwd), id);
+  ensureProjectDeliveryOsDir(cwd);
   fs.mkdirSync(stagingDir, { recursive: true });
 
   const basename = path.basename(filePath);
