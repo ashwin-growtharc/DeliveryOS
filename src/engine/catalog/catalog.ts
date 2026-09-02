@@ -153,26 +153,32 @@ export function annotateCatalog(
     } else if (!lockEntry) {
       localStatus = 'not_pulled';
     } else {
-      const pristine = pristinePath(cwd, manifest.id);
-      // At the project root `installTarget` is the user's whole project, so the
-      // diff has to be narrowed to the entries this artifact actually owns --
-      // otherwise every unrelated file reads as a local edit and the artifact
-      // is permanently `edited_locally`.
-      const rootInstall = isRootInstall(cwd, installTarget);
-      const topLevelScope = rootInstall ? readPayloadFootprint(pristine) : undefined;
-      if (rootInstall && !topLevelScope) {
-        // Snapshot gone (a stale pull), so the footprint is unknowable. An
-        // unscoped walk of the project root is exactly what must not happen
-        // here -- degrade to `pulled`, the same way the catch below already
-        // does for a missing snapshot on the normal path.
-        localStatus = 'pulled';
-      } else {
-        try {
+      // ONE try around all three of pristinePath, readPayloadFootprint and
+      // computeChangedFiles. `pristinePath` asserts a usable id (paths.ts) and
+      // therefore throws, and this function annotates the WHOLE catalog -- so a
+      // single unusable entry must degrade to `pulled` for itself alone rather
+      // than take the listing for every other artifact down with it. This repo
+      // has blanked a catalog that way twice; see parser.ts's own comment.
+      try {
+        const pristine = pristinePath(cwd, manifest.id);
+        // At the project root `installTarget` is the user's whole project, so the
+        // diff has to be narrowed to the entries this artifact actually owns --
+        // otherwise every unrelated file reads as a local edit and the artifact
+        // is permanently `edited_locally`.
+        const rootInstall = isRootInstall(cwd, installTarget);
+        const topLevelScope = rootInstall ? readPayloadFootprint(pristine) : undefined;
+        if (rootInstall && !topLevelScope) {
+          // Snapshot gone (a stale pull), so the footprint is unknowable. An
+          // unscoped walk of the project root is exactly what must not happen
+          // here -- degrade to `pulled`, the same way the catch already does
+          // for a missing snapshot on the normal path.
+          localStatus = 'pulled';
+        } else {
           const changedFiles = computeChangedFiles(installTarget, pristine, { topLevelScope });
           localStatus = changedFiles.length === 0 ? 'pulled' : 'edited_locally';
-        } catch {
-          localStatus = 'pulled';
         }
+      } catch {
+        localStatus = 'pulled';
       }
     }
 

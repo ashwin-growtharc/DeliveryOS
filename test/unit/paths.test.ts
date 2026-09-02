@@ -7,6 +7,8 @@ import {
   remoteCachePath,
   remotesCacheRoot,
   adaptSrcDirPath,
+  pristinePath,
+  pristineDir,
 } from '../../src/engine/paths';
 
 describe('resolveContainedPath', () => {
@@ -89,6 +91,32 @@ describe('remoteCachePath', () => {
     expect(() => remoteCachePath('.')).toThrow(/Invalid remote name/);
     expect(() => remoteCachePath('..')).toThrow(/Invalid remote name/);
     expect(() => remoteCachePath('')).toThrow(/Invalid remote name/);
+  });
+});
+
+describe('pristinePath', () => {
+  it('joins an ordinary id under pristineDir as before', () => {
+    const cwd = path.join(os.tmpdir(), 'deliveryos-pristine-path-test');
+    expect(pristinePath(cwd, 'my-artifact')).toBe(path.join(pristineDir(cwd), 'my-artifact'));
+  });
+
+  // `id` here originates from a lockfile entry -- a plain project-local JSON
+  // file anyone can hand-edit -- and removeArtifact feeds the result straight
+  // into fs.rmSync(recursive, force). Sanitized the same way remoteCachePath,
+  // wireContextPath and previewCachePath already sanitize their own segments;
+  // this function was the one sibling that did not.
+  it('rejects a traversing or separator-bearing id, refusing to resolve outside pristineDir', () => {
+    const cwd = path.join(os.tmpdir(), 'deliveryos-pristine-path-test');
+    expect(() => pristinePath(cwd, '../../../SomeFolder')).toThrow(/Invalid artifact id/);
+    expect(() => pristinePath(cwd, 'a/b')).toThrow(/Invalid artifact id/);
+    expect(() => pristinePath(cwd, 'a\\b')).toThrow(/Invalid artifact id/);
+  });
+
+  it('rejects "." and ".." outright, and an empty id', () => {
+    const cwd = path.join(os.tmpdir(), 'deliveryos-pristine-path-test');
+    expect(() => pristinePath(cwd, '.')).toThrow(/Invalid artifact id/);
+    expect(() => pristinePath(cwd, '..')).toThrow(/Invalid artifact id/);
+    expect(() => pristinePath(cwd, '')).toThrow(/Invalid artifact id/);
   });
 });
 

@@ -5,7 +5,7 @@ import * as path from 'path';
 import { stringify } from 'yaml';
 import { removeArtifact } from '../../src/engine/pull/removeArtifact';
 import { readLockfile, upsertEntry } from '../../src/engine/lockfile/lockfile';
-import { pristinePath, remotesRegistryPath, remoteCachePath } from '../../src/engine/paths';
+import { pristinePath, remotesRegistryPath, remoteCachePath, lockfilePath } from '../../src/engine/paths';
 import { ArtifactNotPulledError } from '../../src/engine/errors';
 import { Manifest } from '../../src/engine/manifest/schema';
 import { rmDirWithRetry } from '../../src/engine/execHelpers';
@@ -219,6 +219,41 @@ describe('removeArtifact', () => {
     expect(fs.existsSync(path.join(installTarget, 'payload.txt'))).toBe(true);
     const lockfile = readLockfile(cwd);
     expect(lockfile.entries.find((e) => e.id === 'old-shape-plugin')).toBeDefined();
+  });
+
+  it('refuses a hand-edited lockfile entry whose id escapes the project, deleting nothing outside cwd', async () => {
+    // The real vector for pristinePath's missing segment check. Unlike every
+    // other pristinePath caller, removeArtifact looks its entry up ONLY in the
+    // lockfile -- resolveArtifact's failure is tolerated -- so a catalog match
+    // never gates this. lock.json is a plain project-local JSON file anyone can
+    // hand-edit, and `id` reaches fs.rmSync(recursive, force) at the end of
+    // this function.
+    const victim = path.join(cwd, 'victim-sibling');
+    fs.mkdirSync(victim, { recursive: true });
+    fs.writeFileSync(path.join(victim, 'keep.txt'), 'must survive', 'utf-8');
+
+    const installTarget = path.join(cwd, 'installed');
+    fs.mkdirSync(installTarget, { recursive: true });
+
+    // Hand-written, NOT via upsertEntry -- upsertEntry would never produce
+    // this, which is the point: the file is user-editable.
+    fs.mkdirSync(path.dirname(lockfilePath(cwd)), { recursive: true });
+    fs.writeFileSync(
+      lockfilePath(cwd),
+      JSON.stringify({
+        version: 1,
+        entries: [
+          { id: '../../victim-sibling', version: '1.0.0', remote: 'test-remote', installTarget },
+        ],
+      }),
+      'utf-8',
+    );
+
+    // readLockfile drops the unusable entry, so removeArtifact simply cannot
+    // find it -- an honest refusal rather than a traversing delete.
+    await expect(removeArtifact(cwd, '../../victim-sibling')).rejects.toThrow(ArtifactNotPulledError);
+
+    expect(fs.existsSync(path.join(victim, 'keep.txt'))).toBe(true);
   });
 
   it('never deletes anything outside cwd even when a wiredFiles entry is crafted to escape it', async () => {

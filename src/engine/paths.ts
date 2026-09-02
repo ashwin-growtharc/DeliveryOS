@@ -115,8 +115,21 @@ export function pristineDir(cwd: string): string {
   return path.join(projectDeliveryOsDir(cwd), 'pristine');
 }
 
-/** Path to the pristine snapshot for a specific pulled artifact id. */
+/** Path to the pristine snapshot for a specific pulled artifact id.
+ *
+ * `id` is sanitized the same way `remoteCachePath`, `wireContextPath` and
+ * `previewCachePath` already sanitize their own segments -- this function
+ * was the one sibling that did not, and it is the one whose result is fed
+ * straight into `fs.rmSync(..., { recursive: true, force: true })` by
+ * `removeArtifact`. Every other caller reaches it through a catalog match
+ * (and `parser.ts` refuses any manifest whose `id` differs from its own
+ * folder name, so a traversing id cannot reach the catalog), but
+ * `removeArtifact` looks its entry up ONLY in the lockfile -- a plain
+ * project-local JSON file anyone can hand-edit. `readLockfile` now drops
+ * such an entry before it ever gets here; this is the backstop for any
+ * caller that builds an id some other way. */
 export function pristinePath(cwd: string, id: string): string {
+  assertSafePathSegment(id, 'artifact id');
   return path.join(pristineDir(cwd), id);
 }
 
