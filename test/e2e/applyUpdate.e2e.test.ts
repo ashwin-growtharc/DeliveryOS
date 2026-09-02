@@ -250,4 +250,129 @@ describe('applyAvailableUpdates e2e', () => {
     },
     30_000,
   );
+  it(
+    'applies an update for a src/-prefixed artifact in a project that does not use src/ -- the relocation guard used to refuse every such update, forever',
+    async () => {
+      // pullArtifact records the adaptSrcDirPath-SHORTENED target in the
+      // lockfile (`lib/thing`), but applyUpdate re-derived it RAW from the
+      // manifest (`src/lib/thing`). The two never matched, so the relocation
+      // guard fired on every update with a message blaming the artifact for a
+      // move that never happened.
+      //
+      // The root `app/` directory below is what makes this reproduce at all:
+      // adaptSrcDirPath only shortens when it can see an app/ or pages/ dir.
+      // In an empty project it returns undefined, both sides fall back to the
+      // manifest's literal value, they agree, and the bug is invisible. That
+      // is why no existing fixture caught this -- none uses a src/ prefix.
+      const remoteName = 'apply-update-srcdir';
+      const artifactId = 'src-target-artifact';
+
+      const artifactDir = path.join(fixtureRemoteDir, 'artifacts', artifactId);
+      fs.mkdirSync(path.join(artifactDir, 'payload'), { recursive: true });
+      fs.writeFileSync(path.join(artifactDir, 'payload', 'README.md'), 'v1\n', 'utf-8');
+      fs.writeFileSync(
+        path.join(artifactDir, 'manifest.yaml'),
+        [
+          `id: ${artifactId}`,
+          'kind: doc',
+          'description: Declares a src/-prefixed install_target',
+          'owner: team-x',
+          'version: 1.0.0',
+          'source_repo: https://example.invalid/repo',
+          'install_target: src/lib/thing',
+          'review_required: false',
+          '',
+        ].join('\n'),
+        'utf-8',
+      );
+      const git = simpleGit(fixtureRemoteDir);
+      await git.add([`artifacts/${artifactId}`]);
+      await git.commit(`add ${artifactId}`);
+
+      addRemoteEntry({ name: remoteName, url: fixtureRemoteDir, addedAt: new Date().toISOString() });
+      await cloneRemote(remoteName, fixtureRemoteDir);
+
+      const cwd = newScratchCwd('srcdir-update');
+      // An app-router-shaped project: has app/, has no src/.
+      fs.mkdirSync(path.join(cwd, 'app'), { recursive: true });
+
+      const pulled = await pullArtifact(artifactId, remoteName, cwd);
+      // Precondition, not the assertion under test: if this landed in
+      // src/lib/thing then adaptSrcDirPath did not shorten and the rest of
+      // this test proves nothing.
+      expect(pulled.installTarget).toBe(path.join(cwd, 'lib', 'thing'));
+      expect(fs.existsSync(path.join(cwd, 'src'))).toBe(false);
+
+      fs.writeFileSync(path.join(artifactDir, 'payload', 'README.md'), 'v2 updated\n', 'utf-8');
+      await git.add([`artifacts/${artifactId}`]);
+      await git.commit(`edit ${artifactId} payload`);
+      await bumpUpstreamVersion(artifactId, '1.1.0');
+      // No re-clone: applyAvailableUpdates calls refreshRemoteCache itself.
+
+      const results = await applyAvailableUpdates(cwd);
+      const result = results.find((r) => r.id === artifactId);
+
+      expect(result).toBeDefined();
+      expect(result!.reason).toBeUndefined();
+      expect(result!.applied).toBe(true);
+
+      // The update is real, and it did NOT quietly create a second copy under
+      // src/ -- that would be a different bug, not this fix.
+      expect(fs.readFileSync(path.join(cwd, 'lib', 'thing', 'README.md'), 'utf-8')).toBe('v2 updated\n');
+      expect(fs.existsSync(path.join(cwd, 'src'))).toBe(false);
+      const entry = readLockfile(cwd).entries.find((e) => e.id === artifactId);
+      expect(entry?.version).toBe('1.1.0');
+      expect(entry?.installTarget).toBe(path.join(cwd, 'lib', 'thing'));
+    },
+    30_000,
+  );
+
+  it(
+    'still refuses an update that GENUINELY relocates install_target, so the fix above did not just delete the guard',
+    async () => {
+      const remoteName = 'apply-update-real-move';
+      const artifactId = 'relocating-artifact';
+
+      const artifactDir = path.join(fixtureRemoteDir, 'artifacts', artifactId);
+      fs.mkdirSync(path.join(artifactDir, 'payload'), { recursive: true });
+      fs.writeFileSync(path.join(artifactDir, 'payload', 'README.md'), 'v1\n', 'utf-8');
+      const manifest = (version: string, target: string): string =>
+        [
+          `id: ${artifactId}`,
+          'kind: doc',
+          'description: Moves its install_target between versions',
+          'owner: team-x',
+          `version: ${version}`,
+          'source_repo: https://example.invalid/repo',
+          `install_target: ${target}`,
+          'review_required: false',
+          '',
+        ].join('\n');
+      fs.writeFileSync(path.join(artifactDir, 'manifest.yaml'), manifest('1.0.0', 'src/lib/moving'), 'utf-8');
+      const git = simpleGit(fixtureRemoteDir);
+      await git.add([`artifacts/${artifactId}`]);
+      await git.commit(`add ${artifactId}`);
+
+      addRemoteEntry({ name: remoteName, url: fixtureRemoteDir, addedAt: new Date().toISOString() });
+      await cloneRemote(remoteName, fixtureRemoteDir);
+
+      const cwd = newScratchCwd('real-move');
+      fs.mkdirSync(path.join(cwd, 'app'), { recursive: true });
+      await pullArtifact(artifactId, remoteName, cwd);
+
+      // A DIFFERENT manifest string, not the same one spelled two ways.
+      fs.writeFileSync(path.join(artifactDir, 'manifest.yaml'), manifest('1.1.0', 'vendor/moving'), 'utf-8');
+      await git.add([`artifacts/${artifactId}`]);
+      await git.commit(`relocate ${artifactId}`);
+
+      const results = await applyAvailableUpdates(cwd);
+      const result = results.find((r) => r.id === artifactId);
+
+      expect(result?.applied).toBe(false);
+      expect(result?.reason).toContain('moved install_target');
+      expect(fs.existsSync(path.join(cwd, 'vendor'))).toBe(false);
+    },
+    30_000,
+  );
+
 });

@@ -10,7 +10,13 @@ import { ManifestSchema, Manifest, InstallParam } from '../manifest/schema';
 import { bumpVersion, VersionBumpKind } from '../manifest/version';
 import { renderPreviewImage } from '../preview/renderPreviewImage';
 import { findPreviewEntryFile } from '../preview/resolveArtifactPreview';
-import { pristinePath, resolveContainedPath, isRootInstall, readPayloadFootprint } from '../paths';
+import {
+  pristinePath,
+  resolveContainedPath,
+  isRootInstall,
+  readPayloadFootprint,
+  adaptSrcDirPath,
+} from '../paths';
 import { computeChangedFiles, listPayloadFiles } from './diff';
 import { buildBranchName } from './branchName';
 import {
@@ -472,7 +478,19 @@ export async function pushArtifact(
       // shape, and refusing it here meant such an artifact could be pulled but
       // never contributed back. Nothing here deletes -- this path only diffs --
       // so the fix is to narrow the diff, not to refuse. See isRootInstall.
-      const installTarget = resolveContainedPath(cwd, manifest.install_target);
+      // The lockfile's recorded target wins whenever there is one, because it
+      // is where the payload ACTUALLY landed. Re-deriving it from the manifest
+      // here was destructive, not merely wrong: in a project without a `src/`
+      // directory -- where pullArtifact's adaptSrcDirPath shortened
+      // `src/lib/x` to `lib/x` -- this pointed at a directory that does not
+      // exist. listFilesRecursive returns [] for a missing root, so
+      // computeChangedFiles below reported EVERY pristine file as `deleted`,
+      // the only guard (`changedFiles.length === 0`) passed, and the staging
+      // loop then rmSync'd every payload file in the cache and opened a PR
+      // DELETING the artifact's whole payload upstream, on a shared remote.
+      const installTarget =
+        lockEntry?.installTarget
+        ?? resolveContainedPath(cwd, adaptSrcDirPath(cwd, manifest.install_target) ?? manifest.install_target);
       if (!installTarget) {
         throw new ManifestValidationError(
           `Artifact "${id}"'s install_target ("${manifest.install_target}") resolves outside the project -- `

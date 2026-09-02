@@ -6,7 +6,7 @@ import { findRemote } from '../remote/remoteRegistry';
 import { cachePath, refreshRemoteCache } from '../remote/remoteCache';
 import { buildCatalog } from '../catalog/catalog';
 import { computeChangedFiles, listFilesRecursive } from '../push/diff';
-import { pristinePath, resolveContainedPath, isRootInstall, readPayloadFootprint } from '../paths';
+import { pristinePath, resolveContainedPath, isRootInstall, readPayloadFootprint, adaptSrcDirPath } from '../paths';
 import { ProgressCallback, POST_INSTALL_TIMEOUT_MS, POST_INSTALL_MAX_BUFFER_BYTES, writePristineSnapshot } from '../pull/pull';
 import { isExecError, isToolNotFoundError } from '../execHelpers';
 import { compareVersions } from './sync';
@@ -160,12 +160,29 @@ export async function applyAvailableUpdates(
     // could never be updated. The two genuinely dangerous operations at the
     // project root -- the stale-file sweep and the snapshot below -- are both
     // already footprint-scoped rather than whole-directory.
-    const installTarget = resolveContainedPath(cwd, manifest.install_target);
+    //
+    // Adapted the SAME way pullArtifact adapts it (pull.ts) before recording
+    // entry.installTarget. Resolving the manifest's RAW value here meant that
+    // in any project without a `src/` directory -- where adaptSrcDirPath
+    // shortens `src/lib/x` to `lib/x` at pull time -- the lockfile's shortened
+    // path never equalled this one, so the relocation guard below refused
+    // EVERY update for EVERY artifact whose install_target starts with `src/`.
+    // Permanently, and with a message blaming the new version for a move that
+    // never happened.
+    const effectiveInstallTarget = adaptSrcDirPath(cwd, manifest.install_target) ?? manifest.install_target;
+    const installTarget = resolveContainedPath(cwd, effectiveInstallTarget);
     if (!installTarget) {
       report(false, `The new version's install_target resolves outside the project -- refusing to update.`);
       continue;
     }
-    if (installTarget !== entry.installTarget) {
+    // Accept EITHER spelling of the same manifest string. adaptSrcDirPath is
+    // filesystem-dependent, so a project that gained a root `app/` after the
+    // pull would otherwise produce a fresh false "this version moved
+    // install_target". Both candidates derive from the same manifest value, so
+    // a genuine relocation (a different string) still fails both and is still
+    // refused -- see this file's own e2e control case.
+    const rawInstallTarget = resolveContainedPath(cwd, manifest.install_target);
+    if (installTarget !== entry.installTarget && rawInstallTarget !== entry.installTarget) {
       // A version that relocates install_target is a real but rare edge
       // case -- refusing rather than guessing which of the two locations
       // is "right" keeps this safe; remove + re-pull handles it manually.

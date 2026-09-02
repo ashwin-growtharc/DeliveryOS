@@ -4,7 +4,13 @@ import { discoverManifests, SkippedManifest } from '../manifest/parser';
 import { Manifest } from '../manifest/schema';
 import { readLockfile } from '../lockfile/lockfile';
 import { computeChangedFiles } from '../push/diff';
-import { pristinePath, resolveContainedPath, isRootInstall, readPayloadFootprint } from '../paths';
+import {
+  pristinePath,
+  resolveContainedPath,
+  isRootInstall,
+  readPayloadFootprint,
+  adaptSrcDirPath,
+} from '../paths';
 
 export interface CatalogEntry {
   manifest: Manifest;
@@ -176,8 +182,16 @@ export function annotateCatalog(
     // what made such an artifact read `not_pulled` forever no matter how many
     // times it was successfully pulled. Nothing on this path deletes anything;
     // the diff below is narrowed instead. See isRootInstall.
-    const installTarget = resolveContainedPath(cwd, manifest.install_target);
     const lockEntry = lockfile.entries.find((e) => e.id === manifest.id);
+    // The lockfile's recorded target wins whenever there is one, because it is
+    // where the payload ACTUALLY landed. Re-deriving it from the manifest here
+    // meant that in a project without a `src/` directory -- where pullArtifact's
+    // adaptSrcDirPath shortened `src/lib/x` to `lib/x` -- this diffed a
+    // directory that does not exist. listFilesRecursive returns [] for a
+    // missing root, so every pristine file read as `deleted` and the artifact
+    // was permanently `edited_locally` no matter how cleanly it was pulled.
+    const installTarget = lockEntry?.installTarget
+      ?? resolveContainedPath(cwd, adaptSrcDirPath(cwd, manifest.install_target) ?? manifest.install_target);
 
     let localStatus: LocalStatus;
     if (!installTarget) {
