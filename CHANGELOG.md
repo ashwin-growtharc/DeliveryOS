@@ -288,6 +288,53 @@ clean.
 
 ---
 
+### What the review of this branch caught
+
+An independent review of these changes found five defects, two of them
+introduced by the fixes above. Recorded rather than quietly folded in, because
+the suite was green for all five.
+
+- **Trusting the lockfile's `install_target` re-armed the payload deletion it
+  was meant to close.** That field is an *absolute* path, and `.deliveryos/` is
+  not gitignored — so a lockfile genuinely arrives in another clone, or survives
+  the project folder being renamed. A stale absolute target does not exist,
+  `listFilesRecursive` returns `[]` for a missing directory, every pristine file
+  reports `deleted`, and the `changedFiles.length === 0` guard does not fire.
+  `removeArtifact` already re-validates the same field and says in a comment
+  that lock.json is "never trusted blindly"; `push` and `annotateCatalog` did
+  exactly that. Both now re-validate against the current cwd, and `push` refuses
+  outright when the resolved target is not on disk — the check that closes the
+  class rather than one trigger. Before the fix `pushArtifact` *resolved*: it
+  opened the PR. `test/e2e/push.e2e.test.ts`.
+- **Deviation 3's regex was quadratic.** `[a-z0-9+.-]*` was unanchored and had
+  to be followed by `://`, so every position in a long run of those characters
+  consumed the whole run and backtracked one character at a time — 7.1 s at
+  128 KB, 82 s at 256 KB, 11.5 minutes at 1 MB, in one synchronous `replace`.
+  Reachable rather than theoretical: `redactEmbeddedSecrets` is deliberately the
+  non-truncating entry point, and `buildError`/`rebuildOutput` reach it at up to
+  10 MB. Now anchored on `://` with a bounded lookbehind; 128 KB went from
+  7165 ms to 0 ms with identical behaviour.
+- **camelCase credential fields still leaked.** Deviation 2 fixed
+  SCREAMING_SNAKE and did nothing for a case transition, so
+  `const jwtSecret = "hunter2"` passed through — in the very convention the
+  TypeScript files this protects actually use. Added as a fourth, deliberately
+  case-*sensitive* pass: the main pattern's `i` flag makes a `(?<=[a-z0-9])`
+  lookbehind match after uppercase too, which would redact `notasecret`. Bare
+  `Key` is excluded, since `cacheKey`/`rowKey`/`sortKey` are ordinary
+  identifiers — all pinned by tests.
+- **The bulk "Pull all" loop dropped `installParamWarning` entirely**, in the
+  one path that pulls the most artifacts at once. Now reported per-artifact, and
+  deliberately not through `failures`, which would have made `endProgress` call
+  the whole batch failed over a refused param.
+- **`applyInstallParams` contradicted itself twice.** It returned the gitignore
+  warning ("we just wrote a secret") even when every key had been refused and
+  nothing was written, and `missingRequiredParams` counted a required param as
+  satisfied when its key turned out to be unwritable — so the health summary
+  read "fully configured" beside a warning saying the opposite.
+- The skipped-manifest notice also never named *which* artifact (`reason` alone
+  never does — the CLI prints `path` for exactly this reason) and rendered as a
+  single 230px cell in an auto-fit grid instead of a banner.
+
 ## Design system and hygiene overhaul (branch `overhaul/design-system-and-hygiene`)
 
 Numbered phases stop here. [PLAN.md](PLAN.md) merged the original 32 into 15
