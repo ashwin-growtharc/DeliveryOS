@@ -204,6 +204,198 @@ used one, not that these three PRs merged.
 - **Definition of done, still open**: one real engagement used one of these
   and we know whether it helped — not "three PRs merged"
 
+## Phase 16 — One core, many surfaces — **Not started**
+
+Goal: make the engine reachable from a third consumer (an MCP server, so any AI
+harness can drive DeliveryOS) without tripling the CLI-vs-sidecar drift this
+file already tracks under "What's next".
+
+Full research and design in
+[docs/agent-surface-plan.md](docs/agent-surface-plan.md) — grounded in an audit
+of both existing surfaces, hexagonal-architecture research, and a systematic read
+of BuilderIO's `agent-native` framework as real prior art (its MCP subsystem,
+approval path across all six of its surfaces, guards, audit, secrets, and stated
+design intent).
+
+**The one design rule everything else follows from.** `agent-native` documents
+its own bug in a source comment: `authorize` is honoured on all six of its
+surfaces because it's baked *inside* `run`, while `needsApproval` is *"honoured
+only inside the agent loop"* because it took the flag route — verified absent
+from its CLI and its normal HTTP route. So: **every gate here — exposure,
+approval, effect — must be enforced by wrapping the handler, never by a flag an
+adapter is trusted to read.**
+
+**The finding that reframes it:** MCP is not a new feature. It's the third
+consumer that makes an already-known problem worth fixing. The engine is
+*already* a clean core — no `console.*` in hand-written engine code, no
+`process.cwd()`, no `commander` imports, `GithubClient` already a real port with
+two implementations. What's missing is one shared layer above it.
+
+**In-process, not shelling out, and not HTTP.** MCP calls the same engine
+functions the CLI and sidecar already call, over stdio. The sidecar is proof the
+shape works — it is an MCP server in all but protocol. Shelling out to the
+`deliveryos` binary with agent-supplied arguments would reintroduce the exact
+Windows shell-injection class this project already hit twice (Phase 7's
+command-injection finding, Phase 11's argv-splitting bug). An HTTP API is also
+wrong here: DeliveryOS operates on the local project, the local lockfile and
+local git — the agent runs on the same machine as the files.
+
+### Stage 0 — CI first, then the real bugs (do this regardless of MCP) — **Mostly landed**
+
+**CI was the precondition for everything else in this phase, and it now
+exists.** `.github/workflows/ci.yml` runs lint, typecheck, a generated-file
+drift check, two browser audits and the full suite on `windows-latest`; the
+runner choice and step ordering are in [CHANGELOG.md](CHANGELOG.md). Until it
+landed, nothing ran any of the gates but a human who remembered to — and a
+static guard without CI is a script someone remembers to run, which is the exact
+failure the guard was meant to replace (the reference implementation even gates
+its strictness on `Boolean(process.env.CI)`, so ported as-is it would silently
+no-op here).
+
+The confirmed defects triaged in
+[docs/hardening-ledger.html](docs/hardening-ledger.html) landed with it, on
+branch `tier0/hardening-and-ci`; they are listed in the Tier 0 track below.
+Against this list specifically:
+
+- Done: `audit/redact.ts` ported and applied — at **four** audit-log append
+  sites, not the two this list assumed, and with three documented deviations
+  from the source. Closes the plaintext half of the Tier 0 item below
+- Done: the sidecar no longer drops skipped manifests, together with
+  `buildCatalog`'s unbounded `lastSkippedManifests` array — `catalog.list` and
+  `catalog.refresh` now return `{ entries, skipped }`
+- **Wrong when written**: the two "missing" CLI tests are not missing. `remote
+  add`'s success path and `remote remove`'s cache-directory deletion both
+  already exist, in `test/e2e/pull.e2e.test.ts`
+- **Open**: extract `addRemote`/`removeRemote` into `src/engine/remote/`. The
+  orchestration exists twice today (`src/cli/commands/remoteAdd.ts:13-27` vs
+  `src/sidecar.ts:169-187`, whose own comment admits it "mirrors `runRemoteAdd`'s
+  order exactly")
+- **Open**: collapse the `hasWiring` dispatch gate from three copies to one
+  (`src/cli/commands/pull.ts:54-57`, `src-tauri/spike-ui/app.js:4554`, and split
+  across two sidecar keys)
+
+### Stage 1 — the command registry
+
+One typed definition per operation (name, input schema, `mutates`,
+`emitsProgress`, `costsRealMoney`, an explicit `surfaces` allowlist, approval
+posture, handler). Both existing surfaces migrate onto it. Schema-derived
+validation replaces `requireString`/`optionalString`/`optionalStringRecord`
+(`src/sidecar.ts:118-135`) and commander's ad-hoc reducers — which is what makes
+today's **invisible drift** visible: `--remote` optional in CLI `wiring` but
+required in sidecar `checkSourceDrift`; 91 lines of `toPushOptions` that exist
+only on the CLI; no CLI equivalent of `catalog.refresh` at all. The
+skipped-manifest example this list used to lead with is now fixed under Tier 0
+— which is the point: it took a person noticing, because nothing made the two
+surfaces disagree visibly.
+
+Deliberately stays per-surface: progress sinks, stdout formatting, flag
+ergonomics, and confirmation gating.
+
+Paired with a **static guard** (`agent-native`'s `guards/` + `doctor` pattern, ten
+source scanners in one place): fail the build if a registry entry reaches the MCP
+allowlist without a declared `effect`, or if an `effect: 'writes-shared'` entry
+reaches it at all. That is how the flag-drift bug class gets prevented
+mechanically rather than by discipline. Copy their **three-outcome** convention
+too — passed / failed / **could not run** — where a guard that inspected nothing
+refuses to report success. `deliveryos-status` should gain that third state for
+the same reason.
+
+### Stage 2 — `deliveryos mcp`, six curated tools
+
+Stdio, in-process. Two things decide whether it is safe at all:
+
+- **Session-configured project scope, never a tool argument.** An MCP server has
+  no meaningful `cwd`, and every containment check in the engine validates paths
+  *within* `cwd` while validating `cwd` itself nowhere — so an agent-supplied
+  project path is a real escape. The project is registered once by the human,
+  out-of-band, and **every tool refuses when no project is configured** rather
+  than falling back to `process.cwd()`.
+- **Dry-run by default** — the right destination, but Stage-1-dependent, not an
+  afternoon. The reference gates one call at the end of a path that always plans
+  and always reports, because its CLI takes an injectable `io`/`spawn`.
+  DeliveryOS writes through `console.*` inside commander closures at **56 sites
+  across 11 files**, so planning and reporting aren't separable yet.
+  **And note:** `--no-wire` is *not* a safe substitute — it still runs
+  `execSync(manifest.post_install)` (`pull.ts:57` → `pull.ts:282`) despite help
+  text claiming otherwise. That wrong help string is its own bug.
+
+Exposes six task-shaped tools, not 42 operations — `agent-native`'s own code
+comment records that dumping ~105 schemas (~100k tokens) was a recurring footgun.
+And **advertised must equal callable**: excluded operations are stripped from the
+registry the server sees, not merely hidden from `tools/list`.
+
+### Stage 3 — decide `push`, `remove` and `config` separately, with evidence
+
+Each needs its own answer, not one policy: `push` needs a diff preview first (it
+is all-or-nothing over the whole folder today, with no confirmation); `remove`
+needs a confirmation story (the app confirm-gates it at `app.js:4780`, the CLI
+does not); `config --set` needs a by-reference form, because a literal secret in
+a tool call is in model context by construction (`agent-native` solved this with
+`${keys.NAME}` indirection plus keeping secret writes off agent actions
+entirely).
+
+### The safety rule this phase exists to protect
+
+Every `apply*` handler in the sidecar today **assumes a human already clicked
+something** (`src/sidecar.ts:520-524`, `556-557`) — that confirmation lives in
+the desktop UI, not the handler. So: exposure is **default-closed** (opt in per
+operation, never inherited), every gate wraps the handler rather than sitting
+beside it, and the six AI `request*`/`apply*` pairs (build-fix, wiring-merge,
+wiring-placement, anti-pattern-fix) stay off MCP entirely — each spends real
+money and writes real files on a human's prior say-so.
+
+**`remote add`/`remove` are excluded outright, not gated.** Register a remote,
+pull from it, and the manifest's `post_install` runs arbitrary shell — code
+execution from two tool calls. Two things make it worse than "most artifacts are
+unsigned": `install_target: .git/hooks` writes an executable hook via `cpSync`
+with **no `post_install` needed at all** (the auto-run denylist at
+`src/engine/pull/wiring.ts:46` is applied only to `wiring_actions.targetFile`,
+never to `install_target`); and **a valid signature doesn't gate any of it**,
+because `computePayloadDigest` never takes the manifest as an input
+(`src/engine/provenance/digest.ts:33-51`), leaving `post_install`,
+`install_target` and `wiring_actions` outside the signature entirely. Remote
+registration stays a human trust decision made out-of-band.
+
+`wire-with-claude` also stays CLI-only: it spawns a TTY-inheriting interactive
+session, which structurally cannot be a one-request/one-response tool call.
+
+### Deliberately not doing
+
+- **A full hexagonal refactor.** Ports for `fs`, clock and subprocess would each
+  have exactly one implementation; Cockburn's own guidance is that apps have
+  "two, three or four ports." `GithubClient` became a port only when a real
+  second consumer (tests) appeared.
+- **Adopting `@agent-native/core`** — one package, 77 runtime + 31 peer
+  dependencies (Drizzle, Nitro, React, yjs), no split. Steal the pattern, not the
+  framework. Its registry is also *not* a competitor to the catalog: shadcn-schema
+  doc distribution, no manifests or versioning.
+- **Fixing the known engine leaks** — `paths.ts:17` reading `DELIVERYOS_HOME`
+  from env, `githubAuth.ts:15` hardcoding `execFileSync('gh', …)`, three direct
+  `execSync` calls, `spawn('claude')`. All real, none blocking.
+- **An HTTP surface.** Nearly free once the registry exists; nobody has asked,
+  and it doesn't fit a local-filesystem tool.
+- **Persistent "always allow" approval.** `agent-native` has it, but scoped
+  per-tool-name and unbounded in time — approving one `push` would approve every
+  future one. Their single-use, argument-hash-bound grant is the half worth
+  copying; the persistent half is not.
+
+**Found along the way, and it settles a question parked earlier:** the
+SharePoint/S3 remote-backend idea from the discussion has a known shape now.
+`agent-native`'s `PlatformAdapter` and `FileUploadProvider` both use **explicit
+capability negotiation** instead of assumed uniformity — a backend declares what
+it can do, and call sites `assert` the capability. Ported here, that's a
+`RemoteBackend` port where GitHub declares `opensPullRequests: true`, SharePoint
+declares `false`, and `push` asserts it — so a SharePoint remote fails with a
+real message instead of half-working. Still its own future phase; no longer an
+open question about shape.
+
+**Open before Stage 2 is worth starting:** who is the first real MCP consumer?
+`deliveryos-check-first` already gives Claude Code catalog access by shelling out
+to the CLI, so the real gain is *other* harnesses. Stages 0 and 1 don't depend on
+that answer; Stage 2 does. Second open question: does `pull` via MCP genuinely
+help anyone once it's dry-run-first and wiring-free — because if not, Stage 2
+shrinks to catalog discovery and the case for MCP weakens.
+
 ## Tier 0 hardening — **In progress**
 
 A cross-cutting track: fix what's broken and prove someone outside the build
@@ -212,9 +404,78 @@ team benefits, rather than build more on an unproven foundation.
 - Done: the lockfile race between auto-sync and a manual pull/push; PR
   merge/close status polled on the same tick as version drift; the
   security/provenance model
+- Done: CI at `.github/workflows/ci.yml` — lint, typecheck, a generated-file
+  drift check, two browser audits and the full suite, on `windows-latest` for
+  its preinstalled Edge; `ui:screenshots` as `workflow_dispatch`, `ui:contrast`
+  excluded as a report that cannot fail
+- Done: 16 e2e teardowns moved onto `rmDirWithRetry` — the Windows EPERM/EBUSY
+  race that fails a whole file with every test in it passing
+- Done: `pristinePath` segment assertion, and `readLockfile` dropping entries
+  whose `id` is not usable as a single path segment — a hand-edited `lock.json`
+  could `rmSync` outside the project
+- Done: `install_target` checked against `SENSITIVE_TARGET_PREFIXES` at pull and
+  update time, with `.deliveryos/` added; `.claude/` deliberately excluded and
+  pinned by tests
+- Done: `install_params` newline injection into `.env.local` refused and
+  reported, at the write site rather than in the schema
+- Done: `install_target` read from the lockfile in `applyUpdate`, `catalog` and
+  `push` — the `push` path had been opening PRs deleting payloads upstream
+- Done: a vanished artifact reported by `check-updates --apply`, not a silent
+  no-op
+- Done: a failed post-push cache reset reported on `PushResult` and through
+  `onProgress`; `--no-wire`'s help text corrected, its behaviour left unchanged
+  and pinned as a characterization test
+- Done: 70 test files / 759 tests, from 69 / 710; lint and typecheck clean.
+  Full narrative in [CHANGELOG.md](CHANGELOG.md)
+- Done — the audit logs no longer store secrets in plaintext. Found while
+  checking this repo against `agent-native`'s rule that *"the audit log must
+  never become a secondary store of secrets."* `src/engine/audit/redact.ts` is
+  applied at all four `.jsonl` append helpers. The gitignore half of that item
+  is still open, below.
 - **Open**: get one engineer outside the build team to actually adopt it
 - **Open**: track real usage numbers — deferred until there's an adopter to
   design the tracking around
+- **Open — one live instance left of a silent-coercion bug class.**
+  `agent-native`'s `AGENTS.md` names this as the single most repeated cause of
+  user reports in that repo: *"a `catch`, default, or coercion that returns a
+  value callers cannot distinguish from success is a bug, not a guard… a dropped
+  payload is not an empty one."* The sidecar dropping skipped manifests is fixed,
+  as are the swallowed post-push cache reset and the unreported vanished
+  artifact. Still open: a stale remote cache makes `list` report "no such
+  artifact" for one that exists. It gets worse under Phase 16, because an agent
+  will relay it as fact.
+- **Open — the signature covers payload bytes only.** `computePayloadDigest`
+  (`src/engine/provenance/digest.ts:33-51`) never takes the manifest, so
+  `post_install`, `install_target` and `wiring_actions` all sit outside it — a
+  valid signature is compatible with an arbitrary `post_install`. Fixing it is a
+  breaking cross-repo protocol change against `growtharc-ai-helpers`' signing
+  workflow, and needs every signed artifact re-signed.
+- **Open — `post_remove`/`post_install` are read LIVE from the mutable remote**
+  at removal and update time, with nothing pinned. `removeArtifact` refuses to
+  re-read `install_target` because it is "remote-controlled, MUTABLE"
+  (`src/engine/pull/removeArtifact.ts:153`), then executes that same manifest's
+  *current* `post_remove` forty lines later. `LockEntry` records nothing to pin
+  to, and six existing tests depend on the live read.
+- **Open — two false status messages on the build path.** `verifyBuild`
+  (`src/engine/pull/verifyBuild.ts`) reports an unparseable `package.json`
+  identically to "no build script", and `pullAndAutoWire` returns `{ran: false}`
+  — defined as "no build command detected" — when it merely chose not to run
+  one. Both need a widened `BuildVerificationResult`; three existing tests assert
+  the wrong string today.
+- **Open — `test/` is not typechecked at all.** `tsconfig.json` excludes it
+  *and* scopes `include` to `src/**/*.ts`, and vitest transpiles without
+  checking. 7 real type errors hide there today, across 3 files.
+- **Open — `src-tauri/spike-ui/app.js` has zero lint coverage.** It is not in
+  ESLint's `ignores`; the only config object carrying rules is scoped to
+  `files: ['**/*.ts']`, so `--print-config` reports `rules: 0` for all 7,464
+  lines. ~15 browser globals would leave a 2-warning backlog. Blocks "Split
+  `app.js`" under What's next.
+- **Open — `.deliveryos/` is still not gitignored**, and the audit logs still
+  hold full file bodies. Redaction reduces credential exposure; it does not make
+  the directory safe to commit. Only `.env.local` gets a gitignore check today,
+  and that is a warning.
+- **Open — `redactEmbeddedSecrets` is a heuristic, not a parser.**
+  `export const authSecret = "hunter2"` (camelCase) still passes through.
 
 ---
 
@@ -225,14 +486,22 @@ Ordered by what blocks value, not by phase number.
 1. **Finish Phase 12** — responsive breakpoints (there are none today), error
    states on the remaining views, keyboard reachability, toast dismissal, and
    consolidating 10 chip classes and 5 card classes into one of each.
-2. **Make the gates real** — ESLint does not cover the 343KB desktop frontend
-   at all, `test/` is not typechecked, and there is no CI. Nothing enforces
-   any of it on a push.
+2. **Make the gates real** — CI now exists and runs lint, typecheck and the
+   full suite on every push, but ESLint still does not cover the 343KB desktop
+   frontend at all and `test/` is still not typechecked, so what CI enforces is
+   narrower than it looks.
 3. **Split `app.js`** — 7,464 lines in one IIFE. Deferred until ESLint covers
    it, so the move happens with a linter watching.
 4. **A shared command surface** — the CLI exposes 15 commands and the sidecar
-   40, with nothing shared between them, so they drift. `remote add`/`remove`
-   exist twice and only the sidecar copy has tests.
+   40, with nothing shared between them, so they drift. Now scoped properly as
+   **Phase 16** (see above), which found this is worse than described: the
+   `hasWiring` gate exists in three places, and the surfaces silently disagree on
+   things like whether `--remote` is required. The "only the sidecar copy has
+   tests" line was imprecise — sidecar `remote.add`/`remove` are genuinely
+   asserted, and so — contrary to what this line originally said — are the CLI
+   equivalents: `remote add`'s success path and `remote remove`'s
+   cache-directory deletion are both really asserted in
+   `test/e2e/pull.e2e.test.ts`.
 
 Deliberately unranked: **Phase 15 (delivery tooling)**'s v1 is proposed
 (3 PRs, awaiting review), but "done" is a real engagement using one of them —

@@ -270,6 +270,7 @@ changes by hand.
 | [docs/backend-plugin-lifecycle.md](docs/backend-plugin-lifecycle.md) | Every backend-plugin stage: install, wire, merge, uninstall, secrets, updates |
 | [docs/skills.md](docs/skills.md) | The six Claude Code skills: what each does, and how to get them |
 | [docs/release-process.md](docs/release-process.md) | Runbook for cutting a signed release with working auto-update |
+| [docs/manual-smoke-test-update-and-refusals.md](docs/manual-smoke-test-update-and-refusals.md) | By-hand runbook: the `src/`-project update path, the `install_target` denylist, and audit-log redaction |
 
 ---
 

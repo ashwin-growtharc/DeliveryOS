@@ -6,6 +6,288 @@ All notable changes to DeliveryOS are recorded here, newest first. See
 
 ---
 
+## CI, and the hardening it made worth doing (branch `tier0/hardening-and-ci`)
+
+CI where there was none, then the defects found by auditing what CI would now be
+protecting. Almost none of them were about the surface that prompted the audit —
+they were live bugs in `pull`, `push`, `update` and `remove` that surfaced only
+because someone re-read paths nobody had re-read since they were written. 69 test
+files / 710 tests before, 70 / 759 after; `lint --max-warnings 0` and `typecheck`
+clean.
+
+### CI
+
+- **Nothing ran any of the gates but a human who remembered to.** There was no
+  `.github/`, no workflow and no hook, while the repo shipped 58 unit test
+  files, ~10 e2e files, `lint --max-warnings 0`, `typecheck` and six `ui:*`
+  audit scripts — [PLAN.md](PLAN.md)'s own "What's next" already said so.
+  `.github/workflows/ci.yml` now runs them. The runner is **windows-latest, not
+  ubuntu**, for two reasons: Edge ships preinstalled, so
+  `chromium.launch({ channel: 'msedge' })` resolves — and the browser tests here
+  *hard-fail* rather than skip when no channel is available
+  (`test/e2e/uiOperationStore.e2e.test.ts:168`, `renderPreviewImage.test.ts`) —
+  and this project's real bug history is overwhelmingly Windows-specific. Step
+  order is deliberate: `npm ci` already runs the six codegen scripts (they are
+  package.json's `prepare`), so no generate step belongs in the workflow; `git
+  diff --exit-code` then proves nobody hand-edited a tracked generated file; and
+  the two browser audits run **before** `npm test`, so an unresolvable Edge
+  fails in one minute rather than twenty. Gates use `!cancelled()` rather than
+  `continue-on-error`, which would report the job green with a failing gate.
+- Checked and deliberately left out: `ui:contrast` is not a CI gate, because it
+  has no `process.exit` anywhere — it is a report that cannot fail, and
+  `test/unit/uiContrast.test.ts` already gates the same shared implementation
+  inside `npm test`. `ui:screenshots` asserts nothing either, so it is a
+  `workflow_dispatch` job that uploads PNGs instead of a gate.
+- **The e2e teardowns would have made that CI flaky.** Four unit tests already
+  used `rmDirWithRetry`, but no e2e test did — and `pull`/`wiring`/`checkUpdates`
+  e2e are exactly the files that spawn subprocesses. `src/engine/execHelpers.ts:52`
+  records why plain `fs.rmSync` is not enough: a killed process's surviving
+  grandchild holds a lock, and `rmSync`'s own `maxRetries` does not reliably
+  retry that EPERM/EBUSY, so on a slower runner the whole *file* reports failed
+  with every test in it passing. 16 teardowns converted across
+  `test/e2e/pull.e2e.test.ts`, `test/e2e/wiring.e2e.test.ts` and
+  `test/e2e/checkUpdates.e2e.test.ts`; three `it`s became async to await it.
+
+### The update path
+
+- **Three readers re-derived `install_target` instead of trusting the
+  lockfile.** `pullArtifact` records the `adaptSrcDirPath`-*shortened* target: in
+  a project with a root `app/` and no `src/`, an artifact declaring
+  `install_target: src/lib/x` actually lands in `lib/x`. One root cause, three
+  call sites, increasing severity. `src/engine/sync/applyUpdate.ts`'s relocation
+  guard compared the two and refused **every** update, forever, for every
+  artifact whose target starts with `src/`, with a message blaming the new
+  version for a move that never happened — no fixture used a `src/` prefix, so
+  no test caught it. `annotateCatalog` (`src/engine/catalog/catalog.ts`) diffed a
+  directory that does not exist; `listFilesRecursive` returns `[]` for a missing
+  root, so every pristine file read as `deleted` and the artifact was permanently
+  `edited_locally` no matter how cleanly it was pulled — which is also why fixing
+  only `applyUpdate` would have *looked* broken end to end. And
+  `src/engine/push/push.ts` built the same all-deleted changeset, where it is
+  destructive: the only guard is `changedFiles.length === 0`, which an
+  all-deleted set passes, so the staging loop `rmSync`'d every payload file in
+  the remote cache and **opened a PR deleting the artifact's entire payload
+  upstream**, on a shared remote. Found while auditing the other two, not
+  reported by a user. `catalog` and `push` now prefer `lockEntry.installTarget`
+  — where the payload actually landed, and both already had the entry in scope;
+  `applyUpdate` adapts the manifest value the way `pull` does and accepts
+  *either* spelling, because `adaptSrcDirPath` is filesystem-dependent and a
+  project that gained a root `app/` after the pull would otherwise produce a
+  fresh false relocation. Both candidates derive from the same manifest string,
+  so a genuine relocation still fails both. Regression tests in
+  `test/e2e/applyUpdate.e2e.test.ts`, verified failing first with the exact
+  "moved install_target" refusal.
+- Checked and deliberately not changed: the relocation guard itself. A new e2e
+  control case publishes a version that really does move `install_target` to a
+  different string and asserts it is **still** refused with nothing written — a
+  "fix" that made that case pass would have deleted a real safety guard.
+- **A vanished artifact reported nothing at all.** `applyAvailableUpdates`
+  (`src/engine/sync/applyUpdate.ts`) used a bare `continue` when an artifact was
+  not in the catalog, contradicting `ApplyUpdateResult`'s own documented contract
+  — "always set when `applied` is false — a person should never see a silent
+  no-op". Every other degradation in that loop calls `report()`; this one
+  returned nothing, so `check-updates --apply` printed "No updates available."
+  for a project whose artifact had actually been removed upstream, its remote
+  unregistered, or its manifest broken. `report` is now declared above the lookup
+  and `availableVersion` is optional — echoing `previousVersion` instead would
+  have read as "1.0.0 → 1.0.0 available". `src/cli/commands/checkUpdates.ts` grew
+  the absent-version branch; the sidecar and `app.js` needed no change (both read
+  the field only inside the `applied` branch), and the app's Update button now
+  surfaces the real reason instead of silently reporting nothing. Regression test
+  in `test/e2e/applyUpdate.e2e.test.ts`, which returned `[]` beforehand.
+- Checked and deliberately not changed: the *second* bare `continue`, for an
+  artifact that is present and already current. That one is intentional — a bulk
+  apply should stay focused on real updates — and a new test pins it so nobody
+  "fixes" it too.
+
+### Refusals
+
+- **A hand-edited lockfile entry could delete outside the project.**
+  `pristinePath` was the one path builder in `src/engine/paths.ts` that did not
+  sanitize its segment: `remoteCachePath`, `wireContextPath` and
+  `previewCachePath` all call `assertSafePathSegment`, while `pristinePath`
+  joined `id` straight in — and its result is what `removeArtifact` hands to
+  `fs.rmSync(recursive, force)`. Every other caller reaches it through a catalog
+  match, and `parser.ts` refuses any manifest whose id differs from its own
+  folder name, so a traversing id cannot arrive that way. `removeArtifact` is the
+  exception: it looks its entry up **only** in the lockfile (`resolveArtifact`'s
+  failure is tolerated), and `lock.json` is a plain project-local JSON file
+  anyone can hand-edit — an entry with id `../../victim` and a perfectly valid
+  contained `installTarget` deleted `<cwd>/.deliveryos/pristine/../../victim`.
+  Fixed in two layers: `readLockfile` now drops entries whose id is not usable as
+  a single path segment — dropped, never thrown, because every lockfile-touching
+  command reads through that one function and throwing over a single hand-edited
+  line would blank a whole catalog listing, so `LockfileCorruptError` keeps its
+  existing contract of JSON that will not parse at all and nothing else — and
+  `pristinePath` then asserts as its three siblings do, as a backstop for any
+  caller building an id some other way. Making it throw meant auditing its read
+  paths: `annotateCatalog` now wraps `pristinePath`, `readPayloadFootprint` and
+  `computeChangedFiles` in **one** `try`, so a single unusable entry degrades to
+  `pulled` for itself alone instead of taking every other artifact's listing with
+  it — this repo has blanked a catalog that way twice. `push` and
+  `removeArtifact` keep throwing, which is correct for single-artifact mutating
+  commands. Regression tests in `test/unit/removeArtifact.test.ts`,
+  `test/unit/lockfile.test.ts` and `test/unit/paths.test.ts`.
+- Checked and deliberately not changed: the filter validates `id` only, not
+  `version`/`remote`. Every real entry has all three, but widening it widens the
+  set of entries a real user could silently lose, and `remote` is already
+  asserted downstream by `remoteCachePath`.
+- **`install_target` could install an executable git hook with no `post_install`
+  involved at all.** `SENSITIVE_TARGET_PREFIXES` (`src/engine/pull/wiring.ts`)
+  has existed since a security review, but was only ever applied to
+  `wiring_actions.targetFile`. `install_target` walked straight past it into
+  `fs.cpSync`: the schema checks it only for `..` escapes, and `.git/hooks` *is*
+  inside the project, so containment passed too — an artifact could drop a git
+  hook or a CI workflow. Now refused at pull time (`src/engine/pull/pull.ts`) and
+  on the update path too, since an artifact pulled before this fix would
+  otherwise keep updating into one. `.deliveryos/` joins the list — it holds
+  `lock.json` and the pristine snapshots that every status check, push and update
+  diffs against. Refused at pull time and deliberately **not** in the manifest
+  schema: a schema rejection makes `discoverManifests` skip the manifest, which
+  vanishes the artifact from the catalog entirely — this file records exactly
+  that taking all 234 artifacts down. A refused pull is visible and specific.
+  Regression tests in `test/unit/pull.test.ts` and `test/unit/wiring.test.ts`;
+  all five denylist targets installed happily before the fix.
+- Checked and deliberately not changed: **`.claude/` is not on the denylist**,
+  and `test/unit/manifest.schema.test.ts:73` stays exactly as it is. `deliveryos
+  scan` itself *generates* `.claude/agents/<file>` and `.claude/skills/<dir>`
+  install targets, and real agent artifacts install to `.claude/agents/<id>.md`
+  — denying it would make every scanned agent and skill artifact in the catalog
+  unpullable, the same outage class. Both that and a `.gitlab/` lookalike are
+  pinned by tests so a later "tightening" fails loudly.
+- **A manifest's `install_params` could write arbitrary extra keys into a real
+  project's environment.** They were interpolated raw into `KEY=VALUE`
+  (`src/engine/pull/installParams.ts`); `key` is only `z.string().min(1)` and
+  `default` is an unconstrained string, so a newline in either ended the line
+  early and everything after it became its own top-level `.env.local` entry —
+  `NODE_OPTIONS`, `DATABASE_URL`, whatever the manifest chose. A **non-secret**
+  `default` is applied with zero user interaction, so nobody had to click
+  anything; and because `parseEnvLines` can never match a newline-bearing key,
+  the raw write always took the append branch, so the injection re-appended on
+  every single pull, compounding. Now refused and reported, never mangled — a
+  sanitized key would write the value under a name the manifest never declared,
+  and `readInstallParamValues` would then never find it again. Refused at the
+  **write** site rather than by tightening `InstallParamSchema`, for the same
+  skip-the-whole-manifest reason as above; the new `ENV_KEY_PATTERN` is
+  deliberately identical to `parseEnvLines`' own regex, so writer and reader
+  cannot drift apart. Surfaced as `installParamWarning` through `PullResult` →
+  CLI → sidecar → toast, mirroring `gitignoreWarning`'s existing path.
+  Regression tests in `test/unit/installParams.test.ts` and
+  `test/e2e/pull.e2e.test.ts`; four of the five cases verified failing first (the
+  fifth is an over-match negative control).
+
+### Redaction
+
+- **Three audit logs stored whole file bodies, with no redaction anywhere in the
+  engine** — `WiringMergeLogEntry` and `BuildFixLogEntry` (`before`/`after`), and
+  `DesignFixLogEntry`. The AI flows can target any file a manifest names, so a
+  credential in a touched file landed verbatim in a `.jsonl` under
+  `.deliveryos/`, which nothing gitignores; the only `sanitize` references in the
+  engine were about path segments, not values. `src/engine/audit/redact.ts` is a
+  port of `agent-native`'s `audit/redact.ts`, keeping only the two functions this
+  needs and dropping the structural-JSON half, which has no consumer here, and it
+  is applied at the three append helpers
+  (`src/engine/pull/requestWiringMerge.ts`, `src/engine/pull/fixBuildFailure.ts`,
+  `src/engine/scan/fixAntiPattern.ts`) rather than at the call sites, so no
+  future caller can forget. Rollback is unaffected, and asserted rather than
+  assumed: both `applyWiringMerge` and `applyBuildFix` restore from an in-memory
+  `before` read taken before the append, never from the log, and the new tests
+  force a real rollback and assert the restored file equals the original
+  **unredacted** bytes. Regression tests in `test/unit/redact.test.ts`,
+  `test/unit/requestWiringMerge.test.ts` and `test/unit/fixBuildFailure.test.ts`.
+- Three deviations from the ported source, all documented in the file header.
+  (1) `process.env.X` / `import.meta.env.X` references are preserved — without
+  this, `secret: process.env.AUTH_SECRET` redacted to `[redacted]`, and `auth.ts`
+  is the file the wiring-merge flow touches most often, so the Activity diff
+  would have gone blank exactly where it is most useful; a hardcoded literal is
+  still redacted, and an env reference contains no secret. (2) The key's leading
+  `\b` widened to `(?:\b|_)`, because a faithful port does **not** redact
+  `AUTH_SECRET = "hunter2"` at all: `_` is a word character, so there is no
+  boundary between `AUTH_` and `SECRET` and the pattern never matches — a
+  pre-existing upstream gap. The trailing `\b` is unchanged, which is what keeps
+  `max_tokens`, `MAX_TOKENS` and `user_token_count` from being flagged; verified.
+  (3) Connection strings are matched on the **value's** shape —
+  `scheme://user:pass@host` — rather than on the field name, because
+  `DATABASE_URL=postgres://user:pw@host/db` was not redacted at all:
+  `SENSITIVE_KEY` knows `webhook_url` but has no plain `url`. Adding a bare `url`
+  to `SENSITIVE_KEY` instead would have been far worse — `AUTH_URL`, `API_URL`
+  and `NEXT_PUBLIC_APP_URL` are ordinary non-secret config (`AUTH_URL` is a real
+  `install_param` in this repo's own fixtures), and blanking them would gut the
+  Activity diff for no gain. Only the credentials are replaced; the scheme, host
+  and path stay readable, because knowing *which* database was configured is
+  exactly what an audit log is for. The username may be empty —
+  `redis://:password@host` is a real form.
+- **There was a fourth audit log.** `wiring-placement-log.jsonl`
+  (`src/engine/scan/suggestWiringPlacement.ts`) stores no file bodies, so it
+  never had the before/after exposure the other three did, but its
+  `rebuildOutput` is a real project build's captured output — which can print an
+  environment dump on failure — and it was the one such field still appended raw.
+  Now redacted at its own append helper, matching the other three. Both this and
+  the connection-string gap were found by executing the new manual smoke-test
+  runbook end to end rather than by reading the code, which is the point of
+  having one.
+- Stated now rather than discovered later: this is a heuristic, not a parser —
+  `export const authSecret = "hunter2"` (camelCase) still passes through. And
+  redaction does **not** make `.deliveryos/` safe to commit; the logs still hold
+  full file bodies, so the gitignore gap stays open in [PLAN.md](PLAN.md).
+
+### Correctness
+
+- **The app silently dropped manifests it could not load** — two defects that
+  had to be fixed together. `buildCatalog` appended to a module-level
+  `lastSkippedManifests` and never cleared it; only `takeSkippedManifests`
+  drained it, so its own doc comment claiming "the most recent `buildCatalog()`
+  call" was simply false — a single process calls `buildCatalog` more than once
+  on several paths (`resolveArtifact`'s own default parameter, `pull`'s
+  resolve-then-pull, `push`'s collision check), and a later drain returned the
+  same skipped manifest once per call. It is now cleared at the start of the
+  build, which makes the contract true, and the declaration moved above
+  `buildCatalog` — it had worked only because nothing calls `buildCatalog` during
+  module evaluation. And `src/cli/commands/list.ts` was the **only** caller of
+  `takeSkippedManifests` in the whole tree: the sidecar never called it, so a
+  manifest that failed to parse was silently dropped from `catalog.list` — a
+  parse failure coerced into a clean empty result, and a broken artifact looked
+  simply *absent* in Browse while the CLI reported it. `catalog.list` and
+  `catalog.refresh` now return `{ entries, skipped }`. The two could not land
+  separately: wiring `takeSkippedManifests` into the sidecar on its own would
+  have returned N duplicate copies on the first call. The **wire format** had to
+  change rather than gain a `catalog.skipped` command, because the Tauri host
+  spawns one sidecar *process per RPC* (`src-tauri/src/lib.rs`) — a follow-up
+  call would be a brand-new process whose module-level record is empty, and would
+  always report nothing. `app.js` gained a `normalizeCatalogResult` accepting
+  both the old array and the new object, deliberately rather than out of
+  politeness: `test/e2e/uiOperationStore.e2e.test.ts` drives the real UI against
+  a stubbed engine returning an array, and that test has no reason to know about
+  an engine-side wire change. The skipped notice renders after the catalog, never
+  instead of it — the same rule `list.ts` already documents. Regression tests in
+  `test/unit/catalog.test.ts` ("does not duplicate it", verified failing with
+  length 2) and `test/e2e/sidecar.e2e.test.ts`.
+- Checked and deliberately not changed: the other six `buildCatalog` callers
+  (`pull`, `push`, `scan`, `applyUpdate`, `sync` ×2) still ignore the record.
+  They are mid-operation paths, not listings, and reporting a skipped manifest
+  from inside a pull would be noise.
+- **A failed post-push cache reset was swallowed by a bare `catch {}`.** That
+  reset (`src/engine/push/push.ts`) guards a real incident the comment above it
+  records — a pull straight after a push installed the user's own unreviewed PR
+  content — so swallowing its failure left exactly that state with nothing
+  anywhere saying so. "The next `fetchAndReset` would recover it" is not a
+  guarantee: `pullArtifact` never fetches, and this is the most likely reset to
+  fail, since it runs straight after the push's own network I/O. Now reported on
+  `PushResult` **and** through `onProgress` — both, because `onProgress` is the
+  only channel available when the push itself threw and no `PushResult` exists at
+  all. Regression test in `test/e2e/push.e2e.test.ts`, verified returning
+  `undefined` first.
+- **`--no-wire`'s help text described a behaviour it does not have.** It claimed
+  "nothing else in the project should be touched"; that branch calls
+  `pullArtifact`, which runs the manifest's `post_install` unconditionally
+  (`src/cli/commands/pull.ts`). The text is corrected. The **behaviour** is
+  deliberately unchanged — changing it would silently break any script relying on
+  `post_install` running — and is now pinned by a test named CHARACTERIZATION
+  (known defect) in `test/e2e/pull.e2e.test.ts`, so that giving `--no-wire` a
+  real no-execute mode stays a deliberate decision rather than an accident.
+
+---
+
 ## Design system and hygiene overhaul (branch `overhaul/design-system-and-hygiene`)
 
 Numbered phases stop here. [PLAN.md](PLAN.md) merged the original 32 into 15
