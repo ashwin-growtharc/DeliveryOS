@@ -379,3 +379,83 @@ describe('applyInstallParams return shape (gitignore coverage warning)', () => {
     expect(result.gitignoreWarning).toBeUndefined();
   });
 });
+
+describe('install_param key/value sanitization (write-site, agreeing with parseEnvLines)', () => {
+  let cwd: string;
+
+  beforeEach(() => {
+    cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'deliveryos-env-sanitize-test-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  });
+
+  // A manifest's install_params are untrusted: `key` is only
+  // z.string().min(1) and `default` is an unconstrained string, and both were
+  // interpolated raw into `KEY=VALUE`. A newline ends the line early, so
+  // everything after it became its own top-level .env entry -- and a
+  // NON-SECRET default is applied with zero user interaction.
+  it('refuses a key containing a newline instead of injecting extra .env.local lines', () => {
+    const result = applyInstallParams(cwd, { GOOD: '1', 'EVIL\nINJECTED': 'x' });
+
+    expect(fs.readFileSync(path.join(cwd, '.env.local'), 'utf-8')).toBe('GOOD=1\n');
+    expect(result.installParamWarning).toContain('EVIL');
+    expect(readExistingEnvValues(cwd)).toEqual({ GOOD: '1' });
+  });
+
+  it('refuses a VALUE containing a newline -- the shape a manifest default could carry with no user interaction', () => {
+    const result = applyInstallParams(cwd, {
+      SAFE: 'ok',
+      DATABASE_URL: 'x\nNODE_OPTIONS=--require ./evil.js',
+    });
+
+    const written = fs.readFileSync(path.join(cwd, '.env.local'), 'utf-8');
+    expect(written).toBe('SAFE=ok\n');
+    expect(written).not.toContain('NODE_OPTIONS');
+    expect(result.installParamWarning).toContain('DATABASE_URL');
+  });
+
+  it('does not re-append a refused key on every subsequent pull', () => {
+    // parseEnvLines can never match a newline-bearing key, so a raw write took
+    // the append branch forever: the injection compounded once per pull.
+    applyInstallParams(cwd, { 'EVIL\nINJECTED': 'x' });
+    const first = fs.existsSync(path.join(cwd, '.env.local'))
+      ? fs.readFileSync(path.join(cwd, '.env.local'), 'utf-8')
+      : '';
+    applyInstallParams(cwd, { 'EVIL\nINJECTED': 'x' });
+    const second = fs.existsSync(path.join(cwd, '.env.local'))
+      ? fs.readFileSync(path.join(cwd, '.env.local'), 'utf-8')
+      : '';
+
+    expect(second).toBe(first);
+    expect(second).not.toContain('INJECTED');
+  });
+
+  it('refuses keys the reader regex could never match, so writer and reader cannot disagree', () => {
+    for (const key of ['1LEADING_DIGIT', 'has-a-dash', 'has.a.dot', 'has space', '']) {
+      const result = applyInstallParams(cwd, { [key]: 'v' });
+      expect(result.installParamWarning).toBeDefined();
+      expect(readExistingEnvValues(cwd)[key]).toBeUndefined();
+    }
+  });
+
+  it('still writes every ordinary key exactly as before -- the check does not over-match', () => {
+    const result = applyInstallParams(cwd, {
+      AUTH_SECRET: 'abc123',
+      _LEADING_UNDERSCORE: 'ok',
+      MIXED_case_9: 'fine',
+      EMPTY_VALUE: '',
+      HAS_EQUALS: 'a=b=c',
+    });
+
+    expect(result.installParamWarning).toBeUndefined();
+    expect(readExistingEnvValues(cwd)).toEqual({
+      AUTH_SECRET: 'abc123',
+      _LEADING_UNDERSCORE: 'ok',
+      MIXED_case_9: 'fine',
+      EMPTY_VALUE: '',
+      HAS_EQUALS: 'a=b=c',
+    });
+  });
+});

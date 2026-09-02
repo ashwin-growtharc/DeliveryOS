@@ -2671,6 +2671,9 @@ ${bodyHtml}
       // A real secrets-exposure risk -- this is specifically the "you just
       // typed in a secret" moment, so it gets its own distinct toast, never
       // folded quietly into the message above where it could be missed.
+      if (result.installParamWarning) {
+        toastError(new Error(result.installParamWarning));
+      }
       if (result.gitignoreWarning) {
         toastError(new Error(result.gitignoreWarning));
       }
@@ -4605,6 +4608,9 @@ ${bodyHtml}
             // to the calm health summary above -- never folded into it,
             // where it could easily get missed among routine wiring/build
             // news.
+            if (pullResult.installParamWarning) {
+              toastError(new Error(pullResult.installParamWarning));
+            }
             if (pullResult.gitignoreWarning) {
               toastError(new Error(pullResult.gitignoreWarning));
             }
@@ -4632,6 +4638,9 @@ ${bodyHtml}
               cwd: state.projectDir,
             });
             toastSuccess(`Pulled ${result.manifest.id}`);
+            if (result.installParamWarning) {
+              toastError(new Error(result.installParamWarning));
+            }
             if (result.gitignoreWarning) {
               toastError(new Error(result.gitignoreWarning));
             }
@@ -4643,6 +4652,7 @@ ${bodyHtml}
             options: {},
           });
           toastSuccess(`Pushed ${entry.manifest.id}: opened PR #${result.number}`, result.url);
+          if (result.cacheResetWarning) toastError(new Error(result.cacheResetWarning));
         }
         endProgress(true, entry);
         await loadCatalog();
@@ -4870,6 +4880,7 @@ ${bodyHtml}
         });
         endProgress(true, entry);
         toastSuccess(`Updated ${entry.manifest.id} metadata: opened PR #${result.number} (${result.url})`);
+        if (result.cacheResetWarning) toastError(new Error(result.cacheResetWarning));
         $('detail-edit-form').hidden = true;
         await loadCatalog();
         refreshDetailIfShown(entry);
@@ -6805,6 +6816,7 @@ ${bodyHtml}
           },
         });
         toastSuccess(`Proposed ${id}: opened PR #${result.number}`, result.url);
+        if (result.cacheResetWarning) toastError(new Error(result.cacheResetWarning));
         resetAddNewForm();
         // Return to wherever this proposal actually came from -- Scan
         // (when reviewing a discovered candidate) or Browse (direct entry)

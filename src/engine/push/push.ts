@@ -99,6 +99,15 @@ export interface PushResult {
   url: string;
   number: number;
   branch: string;
+  /** Set only when the PR opened successfully but the local cache clone could
+   * NOT be reset back to the remote's tip afterwards. Until something else
+   * fetches, every read that doesn't fetch first -- `list`, `pull`, `config`,
+   * `wiring`, `catalog.list`, every preview compile -- sees this push's
+   * UNMERGED branch as if it were the remote's real state. That is the
+   * incident the reset exists to prevent: a `pull` immediately after a `push`
+   * installed the user's own unreviewed PR content. Absent on every ordinary
+   * push. */
+  cacheResetWarning?: string;
 }
 
 /** Copies a single file from `srcRoot/relPath` into `destRoot/relPath`,
@@ -228,6 +237,7 @@ export async function pushArtifact(
   // `git reset --hard` and silently discarded the staged edit -- a lost
   // update, not a crash. See withRemoteCacheLock's own doc comment.
   return withRemoteCacheLock(remoteName, async () => {
+    let result: PushResult | undefined;
     try {
     const client = octokit ?? (await createOctokit(getGithubToken()));
 
@@ -637,7 +647,11 @@ export async function pushArtifact(
       await upsertEntry(cwd, { ...lockEntry, pendingPr: { number: opened.number, url: opened.url } });
     }
 
-    return { url: opened.url, number: opened.number, branch: branchName };
+    // Captured rather than returned directly, so the `finally` below can
+    // still attach a warning to it: `finally` runs after the return value is
+    // evaluated, and this is the same object reference the caller receives.
+    result = { url: opened.url, number: opened.number, branch: branchName };
+    return result;
     } finally {
       // Leave the cache on the remote's real tip, never parked on the
       // branch this push just created.
@@ -650,13 +664,29 @@ export async function pushArtifact(
       // the remote's real state. A `pull` immediately after a `push`
       // installed the user's own unreviewed PR content.
       //
-      // Best-effort: a failure here must not mask the real outcome of the
-      // push (the PR is already open at this point), and the next
-      // fetchAndReset would recover the cache anyway.
+      // Best-effort in the sense that it must not mask the real outcome of
+      // the push (the PR is already open at this point) -- but NOT silent.
+      // Swallowing this left exactly the state described above with nothing
+      // anywhere saying so, and "the next fetchAndReset would recover it" is
+      // not a guarantee: pullArtifact never fetches. This is also the most
+      // likely reset to fail, since it runs straight after the push's own
+      // network I/O.
       try {
         await fetchAndReset(cachePath(remoteName));
-      } catch {
-        // Cache left as-is; the next refresh resets it.
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        const warning =
+          `The pull request was opened, but this machine's local cache of remote "${remoteName}" could not `
+          + `be reset back to its tip afterwards (${detail}). Until something fetches that remote again, a `
+          + `pull, list or preview from it may read THIS push's unmerged branch as if it were the remote's `
+          + `real state. Run "deliveryos list" (or the app's Refresh) against it before pulling.`;
+        // Reported through BOTH channels deliberately: onProgress is the only
+        // one available when the push itself threw, since no PushResult exists
+        // on that path at all.
+        onProgress?.('fetch', warning);
+        if (result) {
+          result.cacheResetWarning = warning;
+        }
       }
     }
   });

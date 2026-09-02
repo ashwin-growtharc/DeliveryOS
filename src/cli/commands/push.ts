@@ -152,5 +152,10 @@ export function registerPushCommand(program: Command): void {
       const options = toPushOptions(flags);
       const result = await pushArtifact(id, options, process.cwd());
       console.log(`Opened PR #${result.number}: ${result.url} (branch ${result.branch})`);
+      // Printed after the success line, never instead of it -- the PR really
+      // did open. Same posture as pull's own gitignoreWarning.
+      if (result.cacheResetWarning) {
+        console.log(result.cacheResetWarning);
+      }
     });
 }

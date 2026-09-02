@@ -927,6 +927,58 @@ describe('push e2e', () => {
         'utf-8',
       );
       expect(cachedReadme).not.toContain('unreviewed local edit');
+      // The happy path stays silent -- no warning on an ordinary push.
+      expect(result.cacheResetWarning).toBeUndefined();
+    },
+    120_000,
+  );
+
+  it(
+    'a push whose post-push cache reset fails reports it on PushResult instead of swallowing it',
+    async () => {
+      // The reset above guards a real incident (a pull straight after a push
+      // installed unreviewed PR content). It was wrapped in a bare `catch {}`,
+      // so when it failed the cache stayed parked on the unmerged push branch
+      // with nothing anywhere saying so. The stated mitigation -- "the next
+      // fetchAndReset would recover the cache anyway" -- is not a guarantee:
+      // pullArtifact never fetches.
+      const remoteName = 'test-remote-cache-reset-fails';
+      await registerAndClone(remoteName, fixtureRemoteDir);
+
+      const artifact = TEST_ARTIFACTS.find((a) => a.id === 'welcome-template')!;
+      const cwd = newScratchCwd('cache-reset-fails');
+      await pullArtifact(artifact.id, remoteName, cwd);
+
+      const editedPath = path.join(cwd, artifact.installTarget, 'README.md');
+      fs.writeFileSync(editedPath, '# welcome-template' + NL + NL + 'an edit.' + NL, 'utf-8');
+
+      // Break the cache's origin at the last possible moment: the initial
+      // fetchAndReset, the branch, the commit and the push have all already
+      // happened by the time pulls.create runs, so only the FINAL reset in the
+      // `finally` fails. That is exactly the window this warning is about.
+      const octokit = makeFakeOctokit();
+      octokit.rest.pulls.create.mockImplementation(async () => {
+        await simpleGit(cachePath(remoteName)).remote([
+          'set-url',
+          'origin',
+          path.join(scratchRoot, 'definitely-not-a-repo'),
+        ]);
+        return {
+          data: { html_url: 'https://github.com/test-owner/test-repo/pull/1', number: 1 },
+        };
+      });
+
+      const result = await pushArtifact(artifact.id, {}, cwd, octokit);
+
+      // The push itself still succeeded -- the PR really is open, and saying
+      // otherwise would be its own lie.
+      expect(result.number).toBe(1);
+      expect(await branchExistsInFixture(fixtureRemoteDir, result.branch)).toBe(true);
+
+      // ...but the caller is told the cache is now untrustworthy.
+      expect(result.cacheResetWarning).toBeDefined();
+      expect(result.cacheResetWarning).toContain(remoteName);
+      expect(result.cacheResetWarning).toContain('unmerged');
     },
     120_000,
   );

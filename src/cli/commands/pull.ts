@@ -32,11 +32,20 @@ export function registerPullCommand(program: Command): void {
       collectSetFlag,
       {},
     )
+    // The old text claimed this left the project untouched ("just copy the
+    // payload and write install_params ... where nothing else in the project
+    // should be touched"). That was wrong, and dangerously so: this branch
+    // calls pullArtifact, which runs the manifest's post_install
+    // unconditionally -- an arbitrary shell command, with the project root in
+    // its environment. The flag only ever opted out of the wiring/build step.
+    // See the characterization test in test/e2e/pull.e2e.test.ts, which pins
+    // the current behaviour so changing it stays a deliberate decision.
     .option(
       '--no-wire',
-      'Skip automatic wiring and the post-pull build check -- just copy the payload and '
-        + 'write install_params, the same as every DeliveryOS version before this default '
-        + 'changed. For scripted/CI use where nothing else in the project should be touched.',
+      'Skip automatic wiring and the post-pull build check, the same as every DeliveryOS '
+        + 'version before this default changed. The payload is still copied, install_params '
+        + 'are still written to .env.local, and the artifact\'s own post_install command is '
+        + 'still run -- this flag opts out of the wiring/build step only.',
     )
     .action(async (id: string, options: { remote?: string; set: Record<string, string>; wire: boolean }) => {
       // Resolved once up front (cheap -- reads the already-cloned remote,
@@ -70,6 +79,9 @@ export function registerPullCommand(program: Command): void {
         if (result.gitignoreWarning) {
           console.log(result.gitignoreWarning);
         }
+        if (result.installParamWarning) {
+          console.log(result.installParamWarning);
+        }
         return;
       }
 
@@ -81,6 +93,9 @@ export function registerPullCommand(program: Command): void {
       console.log(`Pulled "${pullResult.manifest.id}" -> ${pullResult.installTarget}`);
       if (pullResult.gitignoreWarning) {
         console.log(pullResult.gitignoreWarning);
+      }
+      if (pullResult.installParamWarning) {
+        console.log(pullResult.installParamWarning);
       }
       // One coherent plain-language summary of wiring/build/missing-params,
       // same text the desktop app's own Pull toast shows -- covers

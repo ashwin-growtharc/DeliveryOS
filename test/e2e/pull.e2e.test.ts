@@ -247,6 +247,46 @@ describe('pull e2e', () => {
     expect(result.stderr).toContain('never-registered');
   });
 
+
+  // CHARACTERIZATION TEST -- this pins a KNOWN DEFECT, it is not a spec.
+  //
+  // `--no-wire` reads as "touch nothing else", and its help text used to say
+  // exactly that. It is not true: this branch calls pullArtifact, which runs
+  // the manifest's post_install unconditionally -- an arbitrary shell command
+  // with the project root in its environment. The flag only ever opted out of
+  // the wiring/build step.
+  //
+  // The help text is now correct (see the test below). This test exists so the
+  // BEHAVIOUR cannot change by accident: giving --no-wire a genuine no-execute
+  // mode, or adding a separate --no-post-install flag, is a reasonable future
+  // change -- but it must be a deliberate one, and it must flip this assertion.
+  it('CHARACTERIZATION (known defect): `pull --no-wire` still runs the artifact\'s post_install', async () => {
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'deliveryos-e2e-nowire-postinstall-'));
+    try {
+      const result = runCli(
+        ['pull', 'handbook-doc', '--remote', 'test-remote', '--no-wire'],
+        cwd,
+        deliveryOsHome,
+      );
+      expect(result.status).toBe(0);
+
+      // handbook-doc is the one TEST_ARTIFACTS entry with hasPostInstall: true.
+      // Its post_install writes this marker into the install target.
+      expect(fs.existsSync(path.join(cwd, 'handbook', '.post_install_ran'))).toBe(true);
+    } finally {
+      await rmDirWithRetry(cwd);
+    }
+  }, 30_000);
+
+  it('`pull --help` no longer claims --no-wire leaves the rest of the project untouched', () => {
+    const result = runCli(['pull', '--help'], scratchCwd, deliveryOsHome);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).not.toContain('nothing else in the project should be touched');
+    // States the real behaviour instead of implying the opposite.
+    expect(result.stdout).toContain('post_install');
+  });
+
   it('check-pending-pushes reports nothing to check for a project with no pushed edits -- a real CLI/sidecar parity gap this closes (the sidecar\'s own sync.resolvePendingPushes RPC has always had this; the underlying engine function is already covered end to end in test/e2e/sync.resolvePendingPushes.test.ts, so this only confirms the CLI wiring)', () => {
     const result = runCli(['check-pending-pushes'], scratchCwd, deliveryOsHome);
     expect(result.status).toBe(0);

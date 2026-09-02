@@ -267,10 +267,11 @@ const commandTable: Record<string, CommandHandler> = {
       values,
       readExistingEnvValues(cwd),
     );
-    const { gitignoreWarning } = applyInstallParams(cwd, resolved.values);
+    const { gitignoreWarning, installParamWarning } = applyInstallParams(cwd, resolved.values);
     return {
       missingRequiredParams: resolved.missingRequired,
       gitignoreWarning,
+      installParamWarning,
       // Same real scope boundary the CLI's own `config` command has always
       // printed on every call (src/cli/commands/config.ts) -- this only
       // rotates the value sitting in .env.local, never re-running

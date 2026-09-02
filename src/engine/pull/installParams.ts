@@ -110,15 +110,62 @@ export function readExistingEnvValues(cwd: string): Record<string, string> {
  * Existing content is preserved -- only the given keys are inserted/updated;
  * every other line (including comments and blank lines) survives untouched,
  * in place. Values are written literally, with no shell-style quoting beyond
- * what's already valid `.env` syntax (a caller supplying a value containing
- * a newline or `=` is a real edge case, not attempted here). Always exactly
- * one trailing newline on write, regardless of whether the original file had
- * one, didn't exist yet, or ended mid-line.
+ * what's already valid `.env` syntax. A key or value this file format cannot
+ * represent is refused and reported rather than written -- see `refused`.
+ * Always exactly one trailing newline on write, regardless of whether the
+ * original file had one, didn't exist yet, or ended mid-line.
  */
-export function upsertEnvFile(filePath: string, values: Record<string, string>): void {
-  const keys = Object.keys(values);
+
+/** Exactly the shape `parseEnvLines` above can read back.
+ *
+ * Kept deliberately identical to that function's own regex: if the writer and
+ * the reader ever disagree about what a key is, `readExistingEnvValues` stops
+ * finding a key `upsertEnvFile` wrote, and the param reads as unconfigured
+ * forever. */
+const ENV_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+export interface UpsertEnvFileResult {
+  /** Keys this call refused to write, and why. Never a hard failure: losing
+   * an otherwise-successful pull over one malformed param would be worse than
+   * reporting it, and matches `missingRequired`'s own posture. */
+  refused: Array<{ key: string; reason: string }>;
+}
+
+export function upsertEnvFile(filePath: string, values: Record<string, string>): UpsertEnvFileResult {
+  // A manifest's install_params are untrusted input -- `key` is only
+  // `z.string().min(1)` and `default` is an unconstrained string -- and both
+  // used to be interpolated raw into `KEY=VALUE`. A newline in either ends the
+  // line early, so everything after it becomes its own top-level .env entry:
+  // a manifest could write arbitrary extra keys (NODE_OPTIONS, DATABASE_URL)
+  // into a project's real .env.local, and a NON-SECRET `default` is applied
+  // with zero user interaction.
+  //
+  // Refused and reported, never mangled. A sanitized key would write the value
+  // under a name the manifest never declared, and readInstallParamValues would
+  // then never find it again. Refused at the WRITE site rather than by
+  // tightening InstallParamSchema, because a schema rejection makes
+  // discoverManifests skip the whole manifest -- which is how a past
+  // tightening blanked every artifact in the catalog at once.
+  const refused: Array<{ key: string; reason: string }> = [];
+  const writable: Record<string, string> = {};
+  for (const [key, value] of Object.entries(values)) {
+    if (!ENV_KEY_PATTERN.test(key)) {
+      refused.push({ key, reason: 'is not a valid environment-variable name' });
+      continue;
+    }
+    if (/[\r\n]/.test(value)) {
+      refused.push({
+        key,
+        reason: 'has a value containing a line break, which this file format cannot represent',
+      });
+      continue;
+    }
+    writable[key] = value;
+  }
+
+  const keys = Object.keys(writable);
   if (keys.length === 0) {
-    return;
+    return { refused };
   }
 
   const existing = fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf-8') : '';
@@ -128,16 +175,17 @@ export function upsertEnvFile(filePath: string, values: Record<string, string>):
   const updatedLines = lines.map(({ key, line }) => {
     if (key && remaining.has(key)) {
       remaining.delete(key);
-      return `${key}=${values[key]}`;
+      return `${key}=${writable[key]}`;
     }
     return line;
   });
 
   for (const key of remaining) {
-    updatedLines.push(`${key}=${values[key]}`);
+    updatedLines.push(`${key}=${writable[key]}`);
   }
 
   fs.writeFileSync(filePath, `${updatedLines.join('\n')}\n`, 'utf-8');
+  return { refused };
 }
 
 /**
@@ -200,13 +248,21 @@ export interface ApplyInstallParamsResult {
    * nothing was written this call, so a caller can `if (result.gitignoreWarning)`
    * without needing to separately track "did we even attempt the check". */
   gitignoreWarning?: string;
+  /** Set only when a declared install_param could not be written at all --
+   * see `upsertEnvFile`. Absent for every ordinary artifact. */
+  installParamWarning?: string;
 }
 
 export function applyInstallParams(
   cwd: string,
   values: Record<string, string>,
 ): ApplyInstallParamsResult {
-  upsertEnvFile(path.join(cwd, '.env.local'), values);
+  const { refused } = upsertEnvFile(path.join(cwd, '.env.local'), values);
+  const installParamWarning = refused.length > 0
+    ? `${refused.length} install_param(s) could not be written to .env.local: `
+      + refused.map((r) => `"${r.key}" ${r.reason}`).join('; ')
+      + `. Check this artifact's manifest -- these values were NOT applied.`
+    : undefined;
 
   // Only worth checking when something was actually written THIS call --
   // `upsertEnvFile` itself no-ops entirely (never touches the file) when
@@ -217,7 +273,7 @@ export function applyInstallParams(
   if (Object.keys(values).length === 0) {
     return {};
   }
-  return { gitignoreWarning: checkEnvLocalGitignoreCoverage(cwd) };
+  return { gitignoreWarning: checkEnvLocalGitignoreCoverage(cwd), installParamWarning };
 }
 
 /**
