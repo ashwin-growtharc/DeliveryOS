@@ -348,17 +348,27 @@ export async function pullArtifact(
   // and the same posture: report what would be lost, never guess.
   if (!force) {
     const existingEntry = readLockfile(cwd).entries.find((e) => e.id === manifest.id);
-    if (existingEntry?.installTarget && fs.existsSync(existingEntry.installTarget)) {
+    // Compared against the target THIS pull is about to overwrite, not the raw
+    // absolute path off the lockfile.
+    //
+    // Every other consumer of `lockEntry.installTarget` re-validates it against
+    // cwd, and for good reason: it is an absolute path, so a renamed project
+    // folder or a lockfile from another machine makes it meaningless. Trusting
+    // it raw here would fail in the worse direction -- `existsSync` on a stale
+    // path is false, the whole guard would be skipped, and the pull would
+    // overwrite local edits exactly as it did before this fix. `installTarget`
+    // is already resolved above and is precisely what `fs.cpSync` will write to.
+    if (existingEntry && fs.existsSync(installTarget)) {
       const pristineForCheck = pristinePath(cwd, manifest.id);
       let localChanges: ReturnType<typeof computeChangedFiles> = [];
       try {
-        const rootInstall = isRootInstall(cwd, existingEntry.installTarget);
+        const rootInstall = isRootInstall(cwd, installTarget);
         const topLevelScope = rootInstall ? readPayloadFootprint(pristineForCheck) : undefined;
         // A root install with no snapshot has no knowable footprint, so there
         // is nothing to compare -- fall through rather than walk the whole
         // project, exactly as annotateCatalog does.
         if (!rootInstall || topLevelScope) {
-          localChanges = computeChangedFiles(existingEntry.installTarget, pristineForCheck, { topLevelScope });
+          localChanges = computeChangedFiles(installTarget, pristineForCheck, { topLevelScope });
         }
       } catch {
         // No pristine snapshot (a pull from before snapshots existed, or a

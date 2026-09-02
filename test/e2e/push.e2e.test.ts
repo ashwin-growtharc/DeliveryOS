@@ -935,6 +935,80 @@ describe('push e2e', () => {
   );
 
   it(
+    'does not refuse a second push just because YOUR OWN first push merged -- one cwd, one person, no second party',
+    async () => {
+      // The false positive the two-cwd stale-push test below structurally
+      // cannot catch. `push` records pendingPr but never advances
+      // lockEntry.version -- only resolvePendingPushes does, and that is a
+      // manual command plus a 20-minute background tick. So after your own PR
+      // merges, your lockfile still says the old version while your working
+      // copy already contains the merged content, and the guard accused you of
+      // reverting your own work.
+      //
+      // Content comparison cannot rescue this: a second edit legitimately
+      // differs from upstream while still CONTAINING it, and bytes cannot tell
+      // "builds on" from "overwrites". `pendingPr` can, because push is the
+      // only thing that sets it.
+      //
+      // Uses its OWN artifact rather than a shared TEST_ARTIFACTS entry: the
+      // id-collision test asserts that NO `deliveryos/handbook-doc/` branch
+      // exists anywhere in the fixture remote, so any test that pushes a shared
+      // artifact breaks it.
+      const artifactId = 'self-merge-artifact';
+      const artifactDir = path.join(fixtureRemoteDir, 'artifacts', artifactId);
+      fs.mkdirSync(path.join(artifactDir, 'payload'), { recursive: true });
+      fs.writeFileSync(path.join(artifactDir, 'payload', 'README.md'), '# self-merge' + NL, 'utf-8');
+      fs.writeFileSync(
+        path.join(artifactDir, 'manifest.yaml'),
+        [
+          'id: ' + artifactId,
+          'kind: doc',
+          'description: Pushed twice by one person, with a merge in between',
+          'owner: team-x',
+          'version: 1.0.0',
+          'source_repo: https://example.invalid/repo',
+          'install_target: self-merge',
+          'review_required: false',
+          '',
+        ].join(NL),
+        'utf-8',
+      );
+      const seedGit = simpleGit(fixtureRemoteDir);
+      await seedGit.add(['artifacts/' + artifactId]);
+      await seedGit.commit('seed ' + artifactId);
+
+      const remoteName = 'test-remote-self-merge';
+      await registerAndClone(remoteName, fixtureRemoteDir);
+      const defaultBranch = (await seedGit.status()).current;
+
+      const cwd = newScratchCwd('self-merge');
+      await pullArtifact(artifactId, remoteName, cwd);
+      const readme = path.join(cwd, 'self-merge', 'README.md');
+
+      // First push, then merge it -- exactly what one person shipping twice does.
+      fs.writeFileSync(readme, '# self-merge' + NL + NL + 'my first change.' + NL, 'utf-8');
+      const first = await pushArtifact(artifactId, {}, cwd, makeFakeOctokit());
+      await seedGit.checkout(defaultBranch);
+      await seedGit.merge([first.branch]);
+
+      // Still on the pre-push version -- the condition that used to trigger it.
+      expect(readLockfile(cwd).entries.find((e) => e.id === artifactId)?.version).toBe('1.0.0');
+      expect(readLockfile(cwd).entries.find((e) => e.id === artifactId)?.pendingPr).toBeDefined();
+
+      fs.writeFileSync(
+        readme,
+        '# self-merge' + NL + NL + 'my first change.' + NL + 'and my second.' + NL,
+        'utf-8',
+      );
+
+      const second = await pushArtifact(artifactId, {}, cwd, makeFakeOctokit());
+      expect(second.number).toBeGreaterThan(0);
+      expect(await branchExistsInFixture(fixtureRemoteDir, second.branch)).toBe(true);
+    },
+    120_000,
+  );
+
+  it(
     'refuses a push authored against a version someone else has already superseded, instead of silently reverting their merged change',
     async () => {
       // The multi-user failure this whole guard exists for, and it has never

@@ -54,6 +54,16 @@ export interface GitIdentity {
  */
 export async function getCommitIdentity(repoDir: string): Promise<GitIdentity> {
   const git = simpleGit(repoDir);
+  // Cleared BEFORE reading, not just before committing.
+  //
+  // A previous version of `commitPaths` persisted the pusher's identity into
+  // this clone's LOCAL config, and local wins over global in git's resolution
+  // order -- so on a shared machine, reading "whatever is ambient" would keep
+  // returning the first pusher's name to everyone else. Clearing it inside
+  // commitPaths alone fixed the write but not the read, which left the recovery
+  // one push late: the first push after upgrading would still be attributed to
+  // the wrong person, in the commit AND in the PR body's "Pushed by" line.
+  await clearPersistedIdentity(git);
   const name = (await readGitConfig(git, 'user.name')) ?? 'DeliveryOS';
   const email = (await readGitConfig(git, 'user.email')) ?? 'deliveryos@local.invalid';
   return { name, email };
@@ -136,7 +146,12 @@ export async function createBranch(repoDir: string, branchName: string): Promise
 async function clearPersistedIdentity(git: SimpleGit): Promise<void> {
   for (const key of ['user.name', 'user.email']) {
     try {
-      await git.raw(['config', '--local', '--unset', key]);
+      // `--unset-all`, not `--unset`: a key with more than one value makes
+      // plain `--unset` fail (exit 5, "has multiple values") and leave BOTH in
+      // place, so a clone that accumulated duplicate [user] entries would never
+      // recover. Exit 5 also means "not set at all", which is the ordinary case
+      // and the outcome we want -- indistinguishable, and both are fine here.
+      await git.raw(['config', '--local', '--unset-all', key]);
     } catch {
       // Not set locally. Nothing to clear.
     }

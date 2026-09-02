@@ -604,23 +604,59 @@ export async function pushArtifact(
       // The overlap is the part worth naming: files changed both upstream and
       // locally are the ones that actually lose work. Computed against the same
       // pristine snapshot both comparisons already use.
-      if (lockEntry && compareVersions(manifest.version, lockEntry.version) > 0) {
+      // A pending PR of your own is the one case this guard must NOT fire on.
+      //
+      // `push` records `pendingPr` and never advances `lockEntry.version` --
+      // only resolvePendingPushes does, and that is a manual command plus a
+      // 20-minute background tick. So the most ordinary flow there is (push,
+      // merge, push again) leaves your lockfile on the old version while your
+      // working copy already contains the merged change, and the guard accused
+      // you of reverting your own work.
+      //
+      // Content comparison cannot rescue this: your second edit legitimately
+      // differs from upstream while still CONTAINING it, and bytes cannot tell
+      // "builds on" from "overwrites" without a real three-way merge. But
+      // `pendingPr` is only ever set by push, so its presence means the change
+      // upstream is very likely yours. Skipping the refusal here trades a rare
+      // miss (someone else merged while your own PR was also open) for not
+      // blocking the single most common workflow -- and the miss is exactly
+      // what the PR review this opens is for.
+      const hasOwnPushInFlight = lockEntry?.pendingPr !== undefined;
+      if (lockEntry && !hasOwnPushInFlight && compareVersions(manifest.version, lockEntry.version) > 0) {
         const upstreamChanged = computeChangedFiles(payloadDestDir, pristine, { topLevelScope });
+        // Overlap is CONTENT-aware, not just path-aware.
+        //
+        // A file that changed upstream and whose local copy is now byte-identical
+        // to upstream cannot be reverted by pushing it -- there is nothing to
+        // revert. The path-only version got this badly wrong in the single most
+        // common case there is: your OWN push merging. `push` records
+        // `pendingPr` but never advances `lockEntry.version` (only
+        // resolvePendingPushes does), so after your PR merges your lockfile
+        // still says the old version while your working copy already contains
+        // the merged content. Comparing paths alone then accused you of being
+        // about to revert your own merged change.
+        const localVsUpstream = new Set(
+          computeChangedFiles(installTarget, payloadDestDir, { topLevelScope }).map((c) => c.relPath),
+        );
         const localPaths = new Set(changedFiles.map((c) => c.relPath));
-        const overlap = upstreamChanged.map((c) => c.relPath).filter((p) => localPaths.has(p));
+        const overlap = upstreamChanged
+          .map((c) => c.relPath)
+          .filter((p) => localPaths.has(p) && localVsUpstream.has(p));
 
         if (!options.force) {
           const overlapDetail = overlap.length > 0
             ? `\n\n${overlap.length} file(s) you changed also changed upstream -- pushing would revert `
               + `those changes:\n${overlap.slice(0, 10).map((p) => `  ${p}`).join('\n')}`
               + (overlap.length > 10 ? `\n  ...and ${overlap.length - 10} more` : '')
-            : '\n\nNone of the files you changed were touched upstream, so a merge would likely be clean '
-              + '-- but the version you edited against is no longer current.';
+            : '\n\nNone of the files you changed would revert an upstream change, so a merge would '
+              + 'likely be clean -- but the version you edited against is no longer current.';
           throw new StalePushError(
             `You edited "${id}" against v${lockEntry.version}, but remote "${remoteName}" is now at `
-              + `v${manifest.version} -- someone else's change merged in between.`
+              + `v${manifest.version}.`
               + overlapDetail
-              + `\n\nCommit your work to your own git first, then \`deliveryos pull ${id} --force\` to take `
+              + `
+
+Commit your work to your own git first, then \`deliveryos pull ${id} --force\` to take `
               + `the current version (that now refreshes from the remote), and re-apply your edit. `
               + `Or re-run with --force to push anyway; the pull request will say it was forced.`,
           );
