@@ -158,6 +158,7 @@
     // (from sync.checkForUpdates) as entries: { manifest, remoteName,
     // localStatus, installTarget, availableVersion? }[]
     catalog: [],
+    catalogSkipped: [],
     search: '',
     // Multi-select kind filter -- empty set means "All". A Set (not a
     // single string) so e.g. "agent" + "skill" can be viewed together; this
@@ -612,6 +613,7 @@
     renderFolderDisplay();
     if (!state.projectDir) {
       state.catalog = [];
+      state.catalogSkipped = [];
       renderChips();
       renderCards();
       refreshTagPickerSuggestions();
@@ -620,7 +622,9 @@
     const refreshBtn = $('refresh-btn');
     await withBusy(refreshBtn, 'Working...', async () => {
       try {
-        state.catalog = await call('catalog.list', { cwd: state.projectDir });
+        const listed = normalizeCatalogResult(await call('catalog.list', { cwd: state.projectDir }));
+        state.catalog = listed.entries;
+        state.catalogSkipped = listed.skipped;
         // Cleared on success, so a recovered load stops showing the old error.
         state.catalogError = null;
       } catch (err) {
@@ -630,11 +634,24 @@
         // looking exactly like an empty catalog.
         state.catalogError = errorText(err);
         state.catalog = [];
+        state.catalogSkipped = [];
       }
       renderChips();
       renderCards();
       refreshTagPickerSuggestions();
     });
+  }
+
+  /** `catalog.list`/`catalog.refresh` used to return a bare array and now
+   * return `{ entries, skipped }`. Tolerating BOTH shapes is deliberate, not
+   * politeness: test/e2e/uiOperationStore.e2e.test.ts drives this file against
+   * a stubbed engine that returns an array, and that test has no reason to
+   * know about a wire-format change on the engine side. */
+  function normalizeCatalogResult(result) {
+    if (Array.isArray(result)) {
+      return { entries: result, skipped: [] };
+    }
+    return { entries: result?.entries ?? [], skipped: result?.skipped ?? [] };
   }
 
   /** Bound only to the Refresh button's click -- unlike the plain
@@ -654,7 +671,9 @@
     const refreshBtn = $('refresh-btn');
     await withBusy(refreshBtn, 'Refreshing...', async () => {
       try {
-        state.catalog = await call('catalog.refresh', { cwd: state.projectDir });
+        const refreshed = normalizeCatalogResult(await call('catalog.refresh', { cwd: state.projectDir }));
+        state.catalog = refreshed.entries;
+        state.catalogSkipped = refreshed.skipped;
         state.catalogError = null;
       } catch (err) {
         toastError(err);
@@ -4506,6 +4525,22 @@ ${bodyHtml}
     errorHost.hidden = true;
     errorHost.innerHTML = '';
 
+    // Reported AFTER the catalog, never instead of it -- the same rule
+    // src/cli/commands/list.ts already documents for its own copy of this
+    // message. `grid` is cleared on every render, so this self-cleans.
+    if (state.catalogSkipped.length > 0) {
+      const notice = document.createElement('div');
+      notice.className = 'meta';
+      const shown = state.catalogSkipped
+        .slice(0, 3)
+        .map((s) => `${s.remoteName}: ${s.reason}`)
+        .join('; ');
+      const more =
+        state.catalogSkipped.length > 3 ? ` (+${state.catalogSkipped.length - 3} more)` : '';
+      notice.textContent = `${state.catalogSkipped.length} artifact(s) could not be loaded and were skipped: ${shown}${more}`;
+      grid.appendChild(notice);
+    }
+
     $('browse-empty').hidden = entries.length !== 0;
     $('browse-empty').textContent =
       state.search.trim() || state.activeKinds.size > 0
@@ -7435,7 +7470,9 @@ ${bodyHtml}
     if (stored) {
       state.projectDir = stored;
       try {
-        state.catalog = await call('catalog.list', { cwd: stored });
+        const restored = normalizeCatalogResult(await call('catalog.list', { cwd: stored }));
+        state.catalog = restored.entries;
+        state.catalogSkipped = restored.skipped;
       } catch (err) {
         // Stored path is no longer usable (removed, renamed, or otherwise
         // invalid) -- clear it and fall back to prompting for a folder
@@ -7445,6 +7482,7 @@ ${bodyHtml}
         state.projectDir = null;
         localStorage.removeItem(PROJECT_DIR_KEY);
         state.catalog = [];
+        state.catalogSkipped = [];
       }
     }
 

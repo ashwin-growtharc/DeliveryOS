@@ -32,7 +32,8 @@ import {
   buildCatalog,
   refreshCatalog,
   annotateCatalog,
-  CatalogListEntry,
+  takeSkippedManifests,
+  CatalogListResult,
 } from './engine/catalog/catalog';
 import { pullArtifact, resolveArtifact, ProgressCallback } from './engine/pull/pull';
 import { removeArtifact } from './engine/pull/removeArtifact';
@@ -146,10 +147,16 @@ function optionalStringRecord(args: Record<string, unknown>, key: string): Recor
   return result;
 }
 
-function catalogList(args: Record<string, unknown>): CatalogListEntry[] {
+function catalogList(args: Record<string, unknown>): CatalogListResult {
   const cwd = requireString(args, 'cwd');
   const remote = optionalString(args, 'remote');
-  return annotateCatalog(buildCatalog(), cwd, remote);
+  // Drained in the SAME call that built the catalog, and returned in the same
+  // response -- see CatalogListResult for why a separate `catalog.skipped`
+  // command could never work here. The CLI's `list` has always reported these;
+  // the app used to drop them, so a manifest that failed to parse looked
+  // simply absent rather than broken.
+  const entries = annotateCatalog(buildCatalog(), cwd, remote);
+  return { entries, skipped: takeSkippedManifests() };
 }
 
 /** Like `catalog.list`, but re-fetches every registered remote's local cache
@@ -159,11 +166,12 @@ function catalogList(args: Record<string, unknown>): CatalogListEntry[] {
 async function catalogRefresh(
   args: Record<string, unknown>,
   onProgress?: ProgressCallback,
-): Promise<CatalogListEntry[]> {
+): Promise<CatalogListResult> {
   const cwd = requireString(args, 'cwd');
   const remote = optionalString(args, 'remote');
-  const entries = await refreshCatalog(onProgress);
-  return annotateCatalog(entries, cwd, remote);
+  const catalog = await refreshCatalog(onProgress);
+  const entries = annotateCatalog(catalog, cwd, remote);
+  return { entries, skipped: takeSkippedManifests() };
 }
 
 async function remoteAdd(

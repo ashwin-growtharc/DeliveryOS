@@ -26,6 +26,31 @@ export interface CatalogListEntry {
   pendingPr?: { number: number; url: string };
 }
 
+export type SkippedCatalogManifest = SkippedManifest & { remoteName: string };
+
+/** What `catalog.list`/`catalog.refresh` hand back over the JSON-RPC boundary.
+ *
+ * An OBJECT, not the bare array this used to be. A manifest that could not be
+ * loaded has to travel WITH the catalog, in the same response, because the
+ * Tauri host spawns one sidecar PROCESS PER RPC (src-tauri/src/lib.rs) -- a
+ * follow-up `catalog.skipped` call would be a brand-new process whose
+ * module-level record is empty, and would always report nothing.
+ *
+ * The CLI's `list` has always reported these (src/cli/commands/list.ts); the
+ * app silently dropped them, so a broken artifact simply looked absent. */
+export interface CatalogListResult {
+  entries: CatalogListEntry[];
+  skipped: SkippedCatalogManifest[];
+}
+
+/** Manifests skipped by the most recent `buildCatalog()` call, if any.
+ *
+ * Deliberately a module-level record rather than a return value: `buildCatalog`
+ * has many callers and returning a tuple from all of them would be a wide,
+ * mechanical change for a signal that is purely advisory. Callers that want to
+ * warn read this immediately after calling. */
+const lastSkippedManifests: Array<SkippedManifest & { remoteName: string }> = [];
+
 /**
  * Aggregates manifests across every registered remote's local cache.
  *
@@ -36,6 +61,21 @@ export interface CatalogListEntry {
 export function buildCatalog(): CatalogEntry[] {
   const remotes = listRemotes();
   const entries: CatalogEntry[] = [];
+
+  // Cleared HERE, at the start of the build, rather than by whoever happens to
+  // drain it. Without this the module-level record only ever grew: a single
+  // process calls buildCatalog more than once on several paths
+  // (`resolveArtifact`'s own default parameter, `pull`'s resolve-then-pull,
+  // `push`'s collision check), so a later drain returned the same skipped
+  // manifest once per call. This is what makes the "most recent
+  // `buildCatalog()` call" contract below actually true rather than
+  // aspirational.
+  //
+  // Safe against the sidecar's concurrent dispatch: buildCatalog is fully
+  // synchronous, and `catalogList` runs buildCatalog -> annotateCatalog ->
+  // takeSkippedManifests with no `await` between them, so two builds cannot
+  // interleave.
+  lastSkippedManifests.length = 0;
 
   for (const remote of remotes) {
     const { manifests, skipped } = discoverManifests(cachePath(remote.name));
@@ -54,14 +94,6 @@ export function buildCatalog(): CatalogEntry[] {
 
   return entries;
 }
-
-/** Manifests skipped by the most recent `buildCatalog()` call, if any.
- *
- * Deliberately a module-level record rather than a return value: `buildCatalog`
- * has many callers and returning a tuple from all of them would be a wide,
- * mechanical change for a signal that is purely advisory. Callers that want to
- * warn read this immediately after calling. */
-const lastSkippedManifests: Array<SkippedManifest & { remoteName: string }> = [];
 
 /** Returns (and clears) the manifests skipped by the last `buildCatalog()`. */
 export function takeSkippedManifests(): Array<SkippedManifest & { remoteName: string }> {

@@ -355,7 +355,7 @@ describe('sidecar e2e', () => {
   );
 
   it(
-    'catalog.list with zero registered remotes returns an empty array, not a crash',
+    'catalog.list with zero registered remotes returns an empty catalog and no skipped manifests, not a crash',
     async () => {
       // Fresh cwd AND fresh DELIVERYOS_HOME so this scenario really sees
       // zero remotes, regardless of what earlier tests registered.
@@ -365,10 +365,57 @@ describe('sidecar e2e', () => {
       try {
         const resp = await session.request('catalog.list', { cwd });
         expect(resp.ok).toBe(true);
-        expect(resp.result).toEqual([]);
+        expect(resp.result).toEqual({ entries: [], skipped: [] });
       } finally {
         await session.close();
         fs.rmSync(freshHome, { recursive: true, force: true });
+      }
+    },
+    30_000,
+  );
+
+  it(
+    'catalog.list reports a manifest it could not load alongside the catalog, instead of silently dropping it',
+    async () => {
+      // The CLI's `list` has always reported skipped manifests
+      // (src/cli/commands/list.ts); the sidecar never called
+      // takeSkippedManifests at all, so the app showed a broken artifact as
+      // simply absent -- a parse failure coerced into a clean empty result.
+      // Rides in the SAME response because the Tauri host spawns one sidecar
+      // process per RPC, so a follow-up `catalog.skipped` call would always
+      // find an empty record.
+      const cwd = newScratchCwd('catalog-skipped');
+      const session = new SidecarSession(cwd, deliveryOsHome);
+      try {
+        const addResp = await session.request('remote.add', {
+          url: fixtureRemoteDir,
+          name: 'sidecar-remote-skipped',
+        });
+        expect(addResp.ok).toBe(true);
+
+        // Break one artifact's manifest directly in the clone: valid YAML,
+        // but missing every required field, so schema validation rejects it.
+        const brokenDir = path.join(cachePath('sidecar-remote-skipped'), 'artifacts', 'broken-artifact');
+        fs.mkdirSync(brokenDir, { recursive: true });
+        fs.writeFileSync(path.join(brokenDir, 'manifest.yaml'), 'id: broken-artifact\n', 'utf-8');
+
+        const listResp = await session.request('catalog.list', { cwd });
+        expect(listResp.ok).toBe(true);
+        const result = listResp.result as {
+          entries: CatalogListEntry[];
+          skipped: Array<{ remoteName: string; path: string; reason: string }>;
+        };
+
+        // The good artifacts are still listed -- reported alongside, never instead.
+        const ownEntries = result.entries.filter((e) => e.remoteName === 'sidecar-remote-skipped');
+        expect(ownEntries).toHaveLength(3);
+
+        const ownSkipped = result.skipped.filter((sk) => sk.remoteName === 'sidecar-remote-skipped');
+        expect(ownSkipped).toHaveLength(1);
+        expect(ownSkipped[0].path).toContain('broken-artifact');
+        expect(ownSkipped[0].reason.length).toBeGreaterThan(0);
+      } finally {
+        await session.close();
       }
     },
     30_000,
@@ -388,7 +435,7 @@ describe('sidecar e2e', () => {
 
         const listResp = await session.request('catalog.list', { cwd });
         expect(listResp.ok).toBe(true);
-        const entries = listResp.result as CatalogListEntry[];
+        const entries = (listResp.result as { entries: CatalogListEntry[] }).entries;
         // Filter to this test's own remote, since deliveryOsHome (and thus
         // the registry) is shared across scenarios in this file.
         const ownEntries = entries.filter((e) => e.remoteName === 'sidecar-remote-catalog');
@@ -435,7 +482,7 @@ describe('sidecar e2e', () => {
         );
 
         const listResp = await session.request('catalog.list', { cwd });
-        const entries = listResp.result as CatalogListEntry[];
+        const entries = (listResp.result as { entries: CatalogListEntry[] }).entries;
         const entry = entries.find(
           (e) => e.manifest.id === artifact.id && e.remoteName === 'sidecar-remote-pull',
         );
@@ -475,7 +522,7 @@ describe('sidecar e2e', () => {
         expect(fs.existsSync(path.join(installTarget, '.post_install_ran'))).toBe(true);
 
         const listResp = await session.request('catalog.list', { cwd });
-        const entries = listResp.result as CatalogListEntry[];
+        const entries = (listResp.result as { entries: CatalogListEntry[] }).entries;
         const entry = entries.find(
           (e) => e.manifest.id === artifact.id && e.remoteName === 'sidecar-remote-postinstall',
         );
@@ -515,7 +562,7 @@ describe('sidecar e2e', () => {
         );
 
         const listResp = await session.request('catalog.list', { cwd });
-        const entries = listResp.result as CatalogListEntry[];
+        const entries = (listResp.result as { entries: CatalogListEntry[] }).entries;
         const entry = entries.find(
           (e) => e.manifest.id === artifact.id && e.remoteName === 'sidecar-remote-edit',
         );

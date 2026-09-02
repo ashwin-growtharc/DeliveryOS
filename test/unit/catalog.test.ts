@@ -2,7 +2,12 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { buildCatalog, annotateCatalog, CatalogEntry } from '../../src/engine/catalog/catalog';
+import {
+  buildCatalog,
+  annotateCatalog,
+  takeSkippedManifests,
+  CatalogEntry,
+} from '../../src/engine/catalog/catalog';
 import { remotesRegistryPath, remoteCachePath } from '../../src/engine/paths';
 
 let deliveryOsHome: string;
@@ -145,5 +150,63 @@ describe('annotateCatalog', () => {
     } finally {
       fs.rmSync(cwd, { recursive: true, force: true });
     }
+  });
+});
+
+describe('buildCatalog skipped-manifest record', () => {
+  function writeRegistry(names: string[]): void {
+    fs.mkdirSync(deliveryOsHome, { recursive: true });
+    fs.writeFileSync(
+      remotesRegistryPath(),
+      JSON.stringify({
+        remotes: names.map((name) => ({
+          name,
+          url: `https://example.invalid/${name}`,
+          addedAt: new Date().toISOString(),
+        })),
+      }),
+      'utf-8',
+    );
+  }
+
+  function writeBrokenArtifact(remoteCacheDir: string, id: string): void {
+    const artifactDir = path.join(remoteCacheDir, 'artifacts', id);
+    fs.mkdirSync(path.join(artifactDir, 'payload'), { recursive: true });
+    // Valid YAML, invalid manifest -- `kind` and every other required field
+    // missing, so schema validation rejects it and parser.ts skips it.
+    fs.writeFileSync(path.join(artifactDir, 'manifest.yaml'), `id: ${id}\n`, 'utf-8');
+  }
+
+  it('reports a bad manifest exactly once, and a second buildCatalog call does not duplicate it', () => {
+    writeRegistry(['test-remote']);
+    const cacheDir = remoteCachePath('test-remote');
+    writeArtifact(cacheDir, 'good-artifact', 'doc');
+    writeBrokenArtifact(cacheDir, 'broken-artifact');
+
+    // Two builds in one process is not contrived: resolveArtifact's own
+    // default parameter calls buildCatalog, so `pull` alone does it twice.
+    // The record used to only ever grow, so the drain returned one copy per
+    // call and the doc comment's "most recent call" was simply false.
+    buildCatalog();
+    buildCatalog();
+
+    const skipped = takeSkippedManifests();
+    expect(skipped).toHaveLength(1);
+    expect(skipped[0].remoteName).toBe('test-remote');
+    expect(skipped[0].path).toContain('broken-artifact');
+  });
+
+  it('returns nothing after a clean build, even when an earlier build in the same process had a bad manifest', () => {
+    writeRegistry(['test-remote']);
+    const cacheDir = remoteCachePath('test-remote');
+    writeBrokenArtifact(cacheDir, 'broken-artifact');
+    buildCatalog();
+
+    // The bad artifact is gone; the next build must not still be reporting it.
+    fs.rmSync(path.join(cacheDir, 'artifacts', 'broken-artifact'), { recursive: true, force: true });
+    writeArtifact(cacheDir, 'good-artifact', 'doc');
+    buildCatalog();
+
+    expect(takeSkippedManifests()).toEqual([]);
   });
 });
