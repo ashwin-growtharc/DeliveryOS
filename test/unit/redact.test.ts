@@ -181,4 +181,42 @@ describe('redactEmbeddedSecrets (non-truncating form, for buildError/rebuildOutp
 
     expect(redactEmbeddedSecrets(buildError)).toBe(buildError);
   });
+
+  // Deviation 3: keyed on the VALUE's shape, not the field name. SENSITIVE_KEY
+  // knows `webhook_url` but not a plain `url`, so this leaked entirely. Adding
+  // bare `url` to that list instead would blank ordinary non-secret config --
+  // AUTH_URL is a real install_param in this repo's own test fixtures.
+  it('redacts the password embedded in a connection string, whatever key it arrives under', () => {
+    expect(redactEmbeddedSecrets('DATABASE_URL=postgres://user:pw@host/db')).toBe(
+      'DATABASE_URL=postgres://user:[redacted]@host/db',
+    );
+    expect(redactEmbeddedSecrets('mongodb+srv://admin:s3cret@cluster.example.net/app')).toBe(
+      'mongodb+srv://admin:[redacted]@cluster.example.net/app',
+    );
+  });
+
+  it('redacts a connection string with an empty username -- redis://:password@host is a real form', () => {
+    expect(redactEmbeddedSecrets('redis://:onlypass@127.0.0.1:6379')).toBe(
+      'redis://:[redacted]@127.0.0.1:6379',
+    );
+  });
+
+  it('keeps the scheme, host and path readable -- which database was configured is what an audit log is for', () => {
+    const out = redactEmbeddedSecrets('DATABASE_URL=postgres://user:pw@db.internal:5432/orders');
+
+    expect(out).toContain('postgres://');
+    expect(out).toContain('db.internal:5432/orders');
+    expect(out).not.toContain('pw@');
+  });
+
+  it('leaves ordinary URLs alone, including non-secret *_URL config and import specifiers', () => {
+    for (const kept of [
+      'AUTH_URL=http://localhost:3000',
+      'NEXT_PUBLIC_APP_URL=https://example.com/path',
+      'see https://example.com/a/b for docs',
+      'import x from "https://esm.sh/pkg"',
+    ]) {
+      expect(redactEmbeddedSecrets(kept)).toBe(kept);
+    }
+  });
 });

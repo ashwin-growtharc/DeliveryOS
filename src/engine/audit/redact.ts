@@ -116,12 +116,30 @@ function looksSecret(value: string): boolean {
  */
 export function redactEmbeddedSecrets(value: string): string {
   const bearer = value.replace(/\b(bearer\s+)([^\s"',}]+)/gi, `$1${REDACTED}`);
+  // A connection string carrying its own password: postgres://user:pw@host/db,
+  // mongodb+srv://..., redis://..., amqp://... Deviation 3 from the ported
+  // source, and it is keyed on the VALUE's shape rather than on the field name
+  // for a specific reason: SENSITIVE_KEY knows `webhook_url` but not a plain
+  // `url`, so DATABASE_URL=postgres://user:pw@host/db passed through
+  // completely untouched. Adding a bare `url` to that list instead would be
+  // far worse -- AUTH_URL, API_URL and NEXT_PUBLIC_APP_URL are ordinary
+  // non-secret config (AUTH_URL is a real install_param in this repo's own
+  // fixtures), and blanking them would gut the Activity diff for no gain.
+  // Only the credentials are replaced; the scheme, host and path stay
+  // readable, because knowing WHICH database was configured is exactly the
+  // sort of thing an audit log exists to record.
+  const credentialUrl = bearer.replace(
+    // The username may be EMPTY -- `redis://:password@host` is a real and
+    // common form, so `*` not `+` on that group.
+    /\b([a-z][a-z0-9+.-]*:\/\/)([^\s:/@"']*):([^\s@"']+)@/gi,
+    `$1$2:${REDACTED}@`,
+  );
   const credentialField = new RegExp(
     `(["']?(?:\\b|_)${SENSITIVE_KEY.source}\\b["']?\\s*[:=]\\s*)(["']?)`
     + `(?!bearer\\b)(?!process\\.env\\.)(?!import\\.meta\\.env\\.)([^"'\\s,}]+)\\2`,
     'gi',
   );
-  return bearer.replace(credentialField, `$1$2${REDACTED}$2`);
+  return credentialUrl.replace(credentialField, `$1$2${REDACTED}$2`);
 }
 
 /**
