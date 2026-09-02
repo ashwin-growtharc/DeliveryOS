@@ -1754,6 +1754,13 @@ color: var(--text-tertiary);
   color: var(--text-secondary);
   margin-top: var(--space-05);
   line-height: 1.45;
+  /* These are set via textContent, so without this a line break in a step's
+     description collapses to a single space. The post_install step quotes a
+     real shell command on its own line, and running it inline into the
+     surrounding prose is exactly what makes a command easy to skim past --
+     which would defeat the point of showing it. Every other step is a single
+     paragraph with no line breaks, so this changes nothing for them. */
+  white-space: pre-wrap;
 }
 
 .lifecycle-step-link {
