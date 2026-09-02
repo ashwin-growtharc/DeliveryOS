@@ -4276,6 +4276,7 @@ ${bodyHtml}
       const opKey = await beginProgress();
       let succeeded = 0;
       const failures = [];
+      const paramWarnings = [];
       // Every artifact pulled here shares the same `cwd`/`.gitignore`, so a
       // warning from one is the exact same warning every other would also
       // produce -- a single aggregated toast at the end is the right call,
@@ -4308,6 +4309,14 @@ ${bodyHtml}
             });
             succeeded += 1;
             gitignoreWarning = gitignoreWarning || result.gitignoreWarning;
+            // Per-artifact, unlike gitignoreWarning: it names WHICH keys were
+            // refused, so collapsing several into one toast would lose the only
+            // useful part. Kept OUT of `failures` -- the pull itself succeeded,
+            // and `endProgress(failures.length === 0)` would otherwise report
+            // the whole batch as failed over a refused param.
+            if (result.installParamWarning) {
+              paramWarnings.push(`${entry.manifest.id}: ${result.installParamWarning}`);
+            }
           }
         } catch (err) {
           failures.push(`${entry.manifest.id}: ${err instanceof Error ? err.message : String(err)}`);
@@ -4323,6 +4332,9 @@ ${bodyHtml}
       }
       if (gitignoreWarning) {
         toastError(new Error(gitignoreWarning));
+      }
+      for (const warning of paramWarnings) {
+        toastError(new Error(warning));
       }
       for (const failure of failures) {
         toastError(new Error(failure));
@@ -4534,9 +4546,18 @@ ${bodyHtml}
     if (state.catalogSkipped.length > 0) {
       const notice = document.createElement('div');
       notice.className = 'meta';
+      // Full width. `#card-grid` is a repeat(auto-fit, minmax(230px, 1fr))
+      // grid, so without this the notice renders as a single narrow cell in
+      // the top-left rather than a banner across the top.
+      notice.style.gridColumn = '1 / -1';
+      // `path` is what identifies WHICH artifact -- `reason` alone never
+      // names one (parser.ts produces "not valid YAML: ..." / "failed
+      // validation: ..."), so on a 234-artifact remote the message was
+      // unactionable without it. src/cli/commands/list.ts prints the path for
+      // exactly this reason.
       const shown = state.catalogSkipped
         .slice(0, 3)
-        .map((s) => `${s.remoteName}: ${s.reason}`)
+        .map((s) => `${s.remoteName}: ${s.path} (${s.reason})`)
         .join('; ');
       const more =
         state.catalogSkipped.length > 3 ? ` (+${state.catalogSkipped.length - 3} more)` : '';

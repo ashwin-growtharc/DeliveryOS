@@ -26,8 +26,10 @@
  * anything but flat strings. Porting it would have meant carrying dead code
  * that a future reader would reasonably assume was load-bearing.
  *
- * TWO DELIBERATE DEVIATIONS FROM THE SOURCE, both in
- * `redactEmbeddedSecrets`' `credentialField` regex:
+ * FOUR DELIBERATE DEVIATIONS FROM THE SOURCE, all in
+ * `redactEmbeddedSecrets`. Deviations 3 and 4 were added after the first two,
+ * when running the manual smoke-test runbook and an independent review of this
+ * file turned up cases the port still leaked:
  *
  *  1. Added `(?!process\.env\.)` and `(?!import\.meta\.env\.)` lookaheads
  *     beside the source's existing `(?!bearer\b)`. Without them, the single
@@ -53,6 +55,39 @@
  *     both left alone, since `token` there is followed by another word
  *     character. Fixing this upstream instead of here would leave
  *     DeliveryOS leaking until that landed.
+ *
+  *  3. Added a pass for connection strings that carry their own password
+ *     (`postgres://user:pw@host/db`), keyed on the VALUE's shape rather than
+ *     the field name. `SENSITIVE_KEY` knows `webhook_url` but not a plain
+ *     `url`, so `DATABASE_URL=postgres://user:pw@host/db` was untouched.
+ *     Adding a bare `url` to that list instead would be worse: `AUTH_URL`,
+ *     `API_URL` and `NEXT_PUBLIC_APP_URL` are ordinary non-secret config
+ *     (`AUTH_URL` is a real install_param in this repo's own fixtures). Only
+ *     the password is replaced -- scheme, host and path stay readable,
+ *     because which database was configured is what an audit log is for.
+ *     Its regex is anchored on `://` with a bounded lookbehind rather than
+ *     the obvious `[a-z0-9+.-]*://`, which is quadratic: measured at 7.1 s
+ *     for 128 KB and 11.5 minutes for 1 MB of one unbroken run of those
+ *     characters. That matters because this function is the NON-truncating
+ *     entry point -- `buildError`/`rebuildOutput` reach it at up to 10 MB.
+ *
+ *  4. Added a separate CASE-SENSITIVE pass for camelCase field names.
+ *     Deviation 2 fixed SCREAMING_SNAKE but does nothing for a case
+ *     transition, and camelCase is the dominant convention in exactly the
+ *     TypeScript files this exists to protect -- `const jwtSecret =
+ *     "hunter2"` leaked verbatim. It cannot be another alternative in the
+ *     boundary group, because the main pattern carries the `i` flag, under
+ *     which a `(?<=[a-z0-9])` lookbehind also matches after an uppercase
+ *     letter and would redact `notasecret`. Its suffix list is deliberately
+ *     narrower than SENSITIVE_KEY: bare `Key` is excluded, since `cacheKey`,
+ *     `rowKey` and `sortKey` are ordinary identifiers.
+ *
+ * KNOWN LIMIT, stated rather than discovered later: this is a heuristic, not a
+ * parser. It matches `<sensitive-key><:|=><value>`, `bearer <token>` and
+ * credential-bearing URLs. A secret that reaches a log in any other shape --
+ * assigned through an intermediate variable, say -- still passes. It reduces
+ * exposure; it does not eliminate it, and it does NOT make `.deliveryos/` safe
+ * to commit, since the logs still hold full file bodies.
  *
  * Everything else is byte-for-byte the source's behaviour. If the upstream
  * file changes, diff against it rather than re-deriving.
@@ -129,17 +164,52 @@ export function redactEmbeddedSecrets(value: string): string {
   // readable, because knowing WHICH database was configured is exactly the
   // sort of thing an audit log exists to record.
   const credentialUrl = bearer.replace(
+    // Anchored on `://` rather than on the scheme, and the scheme is matched
+    // BACKWARDS from there with a bounded, non-backtracking lookbehind.
+    //
+    // The obvious spelling -- /\b([a-z][a-z0-9+.-]*:\/\/)...` -- is quadratic:
+    // `[a-z0-9+.-]*` is unanchored and must be followed by `://`, so every
+    // position inside a long run of those characters consumes the whole run,
+    // fails, and gives back one character at a time. Measured on this engine:
+    // 8 KB took 25 ms, 32 KB took 375 ms, 128 KB took 7.1 s. That mattered
+    // because `redactEmbeddedSecrets` is deliberately the NON-truncating entry
+    // point -- `buildError` and `rebuildOutput` reach it at up to
+    // POST_INSTALL_MAX_BUFFER_BYTES (10 MB), and a build failure echoing a long
+    // run of chained semvers is an ordinary way to produce one.
+    //
     // The username may be EMPTY -- `redis://:password@host` is a real and
-    // common form, so `*` not `+` on that group.
-    /\b([a-z][a-z0-9+.-]*:\/\/)([^\s:/@"']*):([^\s@"']+)@/gi,
+    // common form -- so `*` not `+` on that group.
+    /(?<=^|[^A-Za-z0-9+.-])([a-z][a-z0-9+.-]{0,31}:\/\/)([^\s:/@"']*):([^\s@"']+)@/gi,
     `$1$2:${REDACTED}@`,
+  );
+  // Deviation 4: camelCase field names.
+  //
+  // Deviation 2 widened the leading `\b` to `(?:\b|_)`, which fixed
+  // SCREAMING_SNAKE (`AUTH_SECRET`) but does nothing for a case transition --
+  // and camelCase is the dominant convention in exactly the TypeScript files
+  // this module exists to protect. `const jwtSecret = "hunter2"` in an auth.ts
+  // touched by a wiring merge leaked verbatim. (`clientSecret` happened to
+  // work, but only by coincidence: `client[_-]?secret` is a whole alternative
+  // in SENSITIVE_KEY, so it spans the boundary on its own.)
+  //
+  // A separate, CASE-SENSITIVE pass rather than another alternative in the
+  // boundary group: the main pattern carries the `i` flag, under which a
+  // `(?<=[a-z0-9])` lookbehind also matches after an uppercase letter, so it
+  // would fire in the middle of any word and redact `notasecret`.
+  //
+  // The suffix list is deliberately narrower than SENSITIVE_KEY. Bare `Key` is
+  // excluded because `cacheKey`, `rowKey`, `sortKey` and `objectKey` are all
+  // ordinary non-secret identifiers; only the qualified forms are listed.
+  const camelCredentialField = credentialUrl.replace(
+    /(?<=[a-z0-9])(Secret|Passphrase|Password|Token|Credential|ApiKey|PrivateKey|AccessKey|SecretKey|SigningKey)(["']?\s*[:=]\s*)(["']?)(?!bearer\b)(?!process\.env\.)(?!import\.meta\.env\.)([^"'\s,}]+)\3/g,
+    `$1$2$3${REDACTED}$3`,
   );
   const credentialField = new RegExp(
     `(["']?(?:\\b|_)${SENSITIVE_KEY.source}\\b["']?\\s*[:=]\\s*)(["']?)`
     + `(?!bearer\\b)(?!process\\.env\\.)(?!import\\.meta\\.env\\.)([^"'\\s,}]+)\\2`,
     'gi',
   );
-  return credentialUrl.replace(credentialField, `$1$2${REDACTED}$2`);
+  return camelCredentialField.replace(credentialField, `$1$2${REDACTED}$2`);
 }
 
 /**

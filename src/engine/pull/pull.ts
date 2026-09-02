@@ -16,6 +16,7 @@ import { Manifest } from '../manifest/schema';
 import {
   resolveInstallParamValues,
   applyInstallParams,
+  refusedInstallParamKeys,
   readExistingEnvValues,
   applyEnvExamplePlaceholders,
 } from './installParams';
@@ -398,6 +399,17 @@ export async function pullArtifact(
     readExistingEnvValues(cwd),
   );
   const { gitignoreWarning, installParamWarning } = applyInstallParams(cwd, values);
+  // `resolveInstallParamValues` ran BEFORE the write, so it counted a required
+  // param as satisfied even when its key turned out to be unwritable -- leaving
+  // the health summary reporting "fully configured" for a value that never
+  // reached disk, directly contradicting the warning shown beside it. Folded
+  // back in here so the two agree.
+  for (const key of refusedInstallParamKeys(values)) {
+    const param = manifest.install_params.find((p) => p.key === key);
+    if (param?.required && !missingRequired.includes(key)) {
+      missingRequired.push(key);
+    }
+  }
   // Tier 1 of the wiring agent (Phase 7 item 6) -- derived straight from
   // install_params, no separate declared action. Same no-op guarantee as
   // applyInstallParams for the overwhelming majority of artifacts that

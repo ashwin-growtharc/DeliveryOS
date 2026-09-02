@@ -270,10 +270,36 @@ export function applyInstallParams(
   // artifacts (no install_params declared at all). Checking unconditionally
   // would mean every plain pull ever gets a pointless gitignore nag even
   // when nothing was written.
-  if (Object.keys(values).length === 0) {
-    return {};
+  //
+  // "Nothing was written" now also covers the case where every key was
+  // REFUSED. Returning the gitignore warning there told the user "DeliveryOS
+  // just wrote a real secret into .env.local" immediately after declining to
+  // write anything at all -- two toasts contradicting each other in the same
+  // stack.
+  const wroteSomething = Object.keys(values).length > refused.length;
+  if (!wroteSomething) {
+    return installParamWarning ? { installParamWarning } : {};
   }
   return { gitignoreWarning: checkEnvLocalGitignoreCoverage(cwd), installParamWarning };
+}
+
+/** The keys `applyInstallParams` refused to write, given the same `values` it
+ * was handed.
+ *
+ * Exists so a caller that computed `missingRequired` BEFORE the write can
+ * correct it afterwards. `resolveInstallParamValues` runs first and has no way
+ * to know a key will be rejected, so a required param with an unwritable key
+ * resolved to a value, counted as satisfied, and left the health summary
+ * reporting "fully configured" for a param whose value never reached disk --
+ * while the warning beside it said the opposite. */
+export function refusedInstallParamKeys(values: Record<string, string>): string[] {
+  const refusedKeys: string[] = [];
+  for (const [key, value] of Object.entries(values)) {
+    if (!ENV_KEY_PATTERN.test(key) || /[\r\n]/.test(value)) {
+      refusedKeys.push(key);
+    }
+  }
+  return refusedKeys;
 }
 
 /**

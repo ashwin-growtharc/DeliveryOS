@@ -498,13 +498,34 @@ export async function pushArtifact(
       // the only guard (`changedFiles.length === 0`) passed, and the staging
       // loop then rmSync'd every payload file in the cache and opened a PR
       // DELETING the artifact's whole payload upstream, on a shared remote.
-      const installTarget =
-        lockEntry?.installTarget
-        ?? resolveContainedPath(cwd, adaptSrcDirPath(cwd, manifest.install_target) ?? manifest.install_target);
+      // `lockEntry.installTarget` is an ABSOLUTE path, so it is only meaningful
+      // for the machine and the directory it was written on -- and `.deliveryos/`
+      // is not gitignored, so a lockfile really does travel to other clones. It
+      // is re-validated against THIS cwd before use, exactly as removeArtifact
+      // already re-validates the same field, rather than trusted blindly.
+      const recorded = lockEntry?.installTarget;
+      const recordedIsUsable = recorded !== undefined && resolveContainedPath(cwd, recorded) === recorded;
+      const installTarget = recordedIsUsable
+        ? recorded
+        : resolveContainedPath(cwd, adaptSrcDirPath(cwd, manifest.install_target) ?? manifest.install_target);
       if (!installTarget) {
         throw new ManifestValidationError(
           `Artifact "${id}"'s install_target ("${manifest.install_target}") resolves outside the project -- `
             + `refusing to push.`,
+        );
+      }
+      // The whole bug class this function keeps re-learning: `listFilesRecursive`
+      // returns [] for a directory that does not exist (diff.ts), so diffing a
+      // missing install target reports EVERY pristine file as `deleted` -- a
+      // changeset that sails past the `length === 0` guard below and makes the
+      // staging loop rmSync the cache and open a PR deleting the artifact's whole
+      // payload upstream. Refusing here is the one check that closes it for good,
+      // whatever produced the wrong path.
+      if (!fs.existsSync(installTarget)) {
+        throw new ManifestValidationError(
+          `Artifact "${id}"'s files are not at "${installTarget}" -- nothing there to push. If this project `
+            + `moved or was cloned from somewhere else, re-pull it once so its recorded location matches `
+            + `where the files actually are.`,
         );
       }
       const pristine = pristinePath(cwd, id);

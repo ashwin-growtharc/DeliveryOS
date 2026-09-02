@@ -1,3 +1,4 @@
+import * as fs from 'fs';
 import { listRemotes } from '../remote/remoteRegistry';
 import { cachePath, refreshRemoteCache } from '../remote/remoteCache';
 import { discoverManifests, SkippedManifest } from '../manifest/parser';
@@ -190,8 +191,20 @@ export function annotateCatalog(
     // directory that does not exist. listFilesRecursive returns [] for a
     // missing root, so every pristine file read as `deleted` and the artifact
     // was permanently `edited_locally` no matter how cleanly it was pulled.
-    const installTarget = lockEntry?.installTarget
-      ?? resolveContainedPath(cwd, adaptSrcDirPath(cwd, manifest.install_target) ?? manifest.install_target);
+    // Re-validated against THIS cwd, never trusted blindly: the recorded value
+    // is an ABSOLUTE path, and `.deliveryos/` is not gitignored, so a lockfile
+    // written on another machine (or before this project was renamed) really
+    // does turn up here. A stale one that still happened to be contained would
+    // make computeChangedFiles below diff a directory that does not exist and
+    // report the artifact `edited_locally` forever -- which is what enables the
+    // Push button, and push is where that becomes destructive.
+    const recorded = lockEntry?.installTarget;
+    const recordedIsUsable = recorded !== undefined
+      && resolveContainedPath(cwd, recorded) === recorded
+      && fs.existsSync(recorded);
+    const installTarget = recordedIsUsable
+      ? recorded
+      : resolveContainedPath(cwd, adaptSrcDirPath(cwd, manifest.install_target) ?? manifest.install_target);
 
     let localStatus: LocalStatus;
     if (!installTarget) {

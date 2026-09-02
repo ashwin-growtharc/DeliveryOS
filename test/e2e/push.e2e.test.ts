@@ -934,6 +934,43 @@ describe('push e2e', () => {
   );
 
   it(
+    'refuses to push when the recorded install location no longer exists, instead of proposing to delete the payload upstream',
+    async () => {
+      // `lockEntry.installTarget` is an ABSOLUTE path, and `.deliveryos/` is
+      // not gitignored -- so a lockfile written on one machine really does turn
+      // up in another clone, or survives the project folder being renamed.
+      //
+      // listFilesRecursive returns [] for a directory that does not exist
+      // (diff.ts), so diffing a stale target reports EVERY pristine file as
+      // `deleted` -- a changeset that sails past the `length === 0` guard and
+      // makes the staging loop rmSync the cache and open a PR removing the
+      // artifact's whole payload upstream. Exactly the incident the cache-reset
+      // guard elsewhere in this file exists to prevent, re-armed by a different
+      // trigger.
+      const remoteName = 'test-remote-stale-target';
+      await registerAndClone(remoteName, fixtureRemoteDir);
+
+      const artifact = TEST_ARTIFACTS.find((a) => a.id === 'welcome-template')!;
+      const cwd = newScratchCwd('stale-target');
+      await pullArtifact(artifact.id, remoteName, cwd);
+
+      // Simulate the clone/rename: the recorded absolute path is no longer
+      // where the files are.
+      const installed = path.join(cwd, artifact.installTarget);
+      fs.renameSync(installed, path.join(cwd, 'moved-elsewhere'));
+
+      await expect(pushArtifact(artifact.id, {}, cwd, makeFakeOctokit())).rejects.toThrow(
+        /not at|nothing there to push/i,
+      );
+
+      // The cache's payload is untouched -- nothing was staged for deletion.
+      const cachedPayload = path.join(cachePath(remoteName), 'artifacts', artifact.id, 'payload');
+      expect(fs.existsSync(path.join(cachedPayload, 'README.md'))).toBe(true);
+    },
+    120_000,
+  );
+
+  it(
     'a push whose post-push cache reset fails reports it on PushResult instead of swallowing it',
     async () => {
       // The reset above guards a real incident (a pull straight after a push

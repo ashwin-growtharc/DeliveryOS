@@ -219,4 +219,51 @@ describe('redactEmbeddedSecrets (non-truncating form, for buildError/rebuildOutp
       expect(redactEmbeddedSecrets(kept)).toBe(kept);
     }
   });
+
+  // Deviation 4. Deviation 2 fixed SCREAMING_SNAKE but does nothing for a case
+  // transition, and camelCase is the dominant convention in exactly the
+  // TypeScript files this exists to protect.
+  it('redacts camelCase credential fields, which the underscore widening alone did not reach', () => {
+    for (const leaky of [
+      'const jwtSecret = "hunter2";',
+      'const authSecret = "hunter2";',
+      'const apiToken = "hunter2";',
+      'const dbPassword = "hunter2";',
+      'const myApiKey = "sk_live_51H";',
+      'jwtSecret: "hunter2",',
+    ]) {
+      expect(redactEmbeddedSecrets(leaky)).not.toContain('hunter2');
+      expect(redactEmbeddedSecrets(leaky)).not.toContain('sk_live_51H');
+    }
+  });
+
+  it('does not over-match ordinary camelCase identifiers that merely end in Key', () => {
+    // Bare `Key` is deliberately excluded from the camelCase suffix list.
+    for (const kept of [
+      'const cacheKey = "users:1";',
+      'const rowKey = "abc";',
+      'const sortKey = "name";',
+      'const objectKey = "k";',
+      'const publicKey = "pk_test";',
+      'const notasecret = "fine";',
+    ]) {
+      expect(redactEmbeddedSecrets(kept)).toBe(kept);
+    }
+  });
+
+  // Deviation 3's regex was quadratic before it was anchored on `://`:
+  // 128 KB took 7.1 s and 1 MB took 11.5 minutes in a single synchronous
+  // replace. This function is the NON-truncating entry point, and
+  // buildError/rebuildOutput reach it at up to POST_INSTALL_MAX_BUFFER_BYTES
+  // (10 MB), so that was a reachable hang rather than a slow path.
+  it('stays linear on a long unbroken run of scheme-legal characters', () => {
+    const pathological = 'a.'.repeat(128000); // 256 KB, the shape that triggered it
+    const started = Date.now();
+
+    redactEmbeddedSecrets(pathological);
+
+    // Generous by three orders of magnitude against the 82s this used to take:
+    // this asserts "not catastrophic", not a performance budget.
+    expect(Date.now() - started).toBeLessThan(2000);
+  });
 });
