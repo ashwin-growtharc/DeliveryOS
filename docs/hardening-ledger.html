@@ -1,0 +1,928 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>DeliveryOS Hardening Ledger</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&display=swap">
+
+<style>
+  :root {
+    --ground:      #EEF1F3;
+    --surface:     #FFFFFF;
+    --surface-sub: #F6F8F9;
+    --ink:         #161B1F;
+    --ink-soft:    #3D474E;
+    --muted:       #626D75;
+    --faint:       #8C979E;
+    --rule:        #D5DCE0;
+    --rule-soft:   #E4E9EC;
+    --accent:      #2B4A68;
+    --accent-soft: #E8EEF4;
+
+    --crit:      #9E2B2B;
+    --crit-bg:   #F9EAEA;
+    --warn:      #7E5309;
+    --warn-bg:   #FBF1DF;
+    --info:      #235C8C;
+    --info-bg:   #E7F0F7;
+    --ok:        #1B6247;
+    --ok-bg:     #E4F1EB;
+
+    --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --serif: "Newsreader", Georgia, "Times New Roman", serif;
+    --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Consolas, monospace;
+
+    --measure: 68ch;
+    --pad: clamp(1.15rem, 4vw, 3rem);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:      #10151A;
+      --surface:     #171E24;
+      --surface-sub: #1C242B;
+      --ink:         #E3E9ED;
+      --ink-soft:    #C2CCD3;
+      --muted:       #8E9AA3;
+      --faint:       #6C7880;
+      --rule:        #2A343C;
+      --rule-soft:   #222C33;
+      --accent:      #86AED6;
+      --accent-soft: #1B2A38;
+
+      --crit:      #E9908C;
+      --crit-bg:   #2E1A1B;
+      --warn:      #E0B364;
+      --warn-bg:   #2C2314;
+      --info:      #8CBBE0;
+      --info-bg:   #16242F;
+      --ok:        #7CC3A4;
+      --ok-bg:     #14261F;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground:      #10151A;
+    --surface:     #171E24;
+    --surface-sub: #1C242B;
+    --ink:         #E3E9ED;
+    --ink-soft:    #C2CCD3;
+    --muted:       #8E9AA3;
+    --faint:       #6C7880;
+    --rule:        #2A343C;
+    --rule-soft:   #222C33;
+    --accent:      #86AED6;
+    --accent-soft: #1B2A38;
+
+    --crit:      #E9908C;
+    --crit-bg:   #2E1A1B;
+    --warn:      #E0B364;
+    --warn-bg:   #2C2314;
+    --info:      #8CBBE0;
+    --info-bg:   #16242F;
+    --ok:        #7CC3A4;
+    --ok-bg:     #14261F;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--serif);
+    font-size: 1.0625rem;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 62rem;
+    margin: 0 auto;
+    padding: var(--pad) var(--pad) 5rem;
+  }
+
+  /* ---------- masthead ---------- */
+
+  .mast {
+    border-bottom: 2px solid var(--ink);
+    padding-bottom: 1.5rem;
+    margin-bottom: 2.5rem;
+  }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    font-weight: 500;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--muted);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.25rem;
+    margin-bottom: 1.4rem;
+  }
+
+  h1 {
+    font-family: var(--sans);
+    font-weight: 700;
+    font-size: clamp(2rem, 5.5vw, 3.1rem);
+    line-height: 1.05;
+    letter-spacing: -0.022em;
+    margin: 0 0 0.7rem;
+    text-wrap: balance;
+  }
+
+  .standfirst {
+    font-size: clamp(1.05rem, 2.2vw, 1.25rem);
+    line-height: 1.5;
+    color: var(--ink-soft);
+    max-width: var(--measure);
+    margin: 0;
+  }
+
+  /* ---------- generic type ---------- */
+
+  h2 {
+    font-family: var(--sans);
+    font-weight: 600;
+    font-size: 1.55rem;
+    letter-spacing: -0.015em;
+    line-height: 1.2;
+    margin: 3.4rem 0 0.35rem;
+    text-wrap: balance;
+  }
+
+  h2:first-of-type { margin-top: 0; }
+
+  .sec-note {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--faint);
+    margin: 0 0 1.5rem;
+  }
+
+  h3 {
+    font-family: var(--sans);
+    font-weight: 600;
+    font-size: 1.08rem;
+    line-height: 1.3;
+    letter-spacing: -0.005em;
+    margin: 0 0 0.5rem;
+    text-wrap: balance;
+  }
+
+  p { max-width: var(--measure); margin: 0 0 1rem; }
+  p:last-child { margin-bottom: 0; }
+
+  a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  a:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+
+  code {
+    font-family: var(--mono);
+    font-size: 0.855em;
+    background: var(--surface-sub);
+    border: 1px solid var(--rule-soft);
+    border-radius: 3px;
+    padding: 0.08em 0.32em;
+    color: var(--ink-soft);
+    word-break: break-word;
+  }
+
+  strong { font-weight: 600; color: var(--ink); }
+
+  /* ---------- the call ---------- */
+
+  .call {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-left: 4px solid var(--accent);
+    border-radius: 4px;
+    padding: 1.6rem clamp(1.15rem, 3vw, 2rem);
+    margin-bottom: 3rem;
+  }
+
+  .call h2 { margin-top: 0; font-size: 1.3rem; }
+
+  .call ol {
+    max-width: var(--measure);
+    margin: 1rem 0 0;
+    padding-left: 1.3rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+  }
+
+  .call li::marker { font-family: var(--mono); font-size: 0.85rem; color: var(--muted); }
+
+  /* ---------- context strip ---------- */
+
+  .context {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 1.5rem;
+  }
+
+  .context > div {
+    background: var(--surface);
+    padding: 1.2rem 1.25rem;
+  }
+
+  .context .k {
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 0.55rem;
+  }
+
+  .context .v {
+    font-family: var(--sans);
+    font-size: 0.98rem;
+    font-weight: 600;
+    line-height: 1.35;
+    margin: 0 0 0.4rem;
+    color: var(--ink);
+  }
+
+  .context .d {
+    font-size: 0.9rem;
+    line-height: 1.45;
+    color: var(--muted);
+    margin: 0;
+  }
+
+  /* ---------- findings ---------- */
+
+  .findings {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+    margin-bottom: 1rem;
+  }
+
+  .f {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    border-left: 3px solid var(--sev, var(--rule));
+    padding: 1.15rem clamp(1rem, 2.5vw, 1.5rem);
+  }
+
+  .f.crit { --sev: var(--crit); }
+  .f.warn { --sev: var(--warn); }
+  .f.info { --sev: var(--info); }
+
+  .f-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.5rem 0.75rem;
+    margin-bottom: 0.55rem;
+  }
+
+  .f-head h3 { margin: 0; flex: 1 1 18rem; }
+
+  .pill {
+    font-family: var(--mono);
+    font-size: 0.64rem;
+    font-weight: 600;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    padding: 0.2rem 0.5rem;
+    border-radius: 3px;
+    white-space: nowrap;
+    flex: none;
+  }
+
+  .p-ver  { background: var(--ok-bg);   color: var(--ok); }
+  .p-rep  { background: var(--info-bg); color: var(--info); }
+  .p-crit { background: var(--crit-bg); color: var(--crit); }
+  .p-warn { background: var(--warn-bg); color: var(--warn); }
+
+  .f p { font-size: 0.985rem; margin-bottom: 0.7rem; }
+
+  .ref {
+    font-family: var(--mono);
+    font-size: 0.775rem;
+    line-height: 1.65;
+    color: var(--muted);
+    border-top: 1px solid var(--rule-soft);
+    padding-top: 0.65rem;
+    margin: 0.85rem 0 0;
+    max-width: none;
+  }
+
+  .ref b {
+    color: var(--faint);
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-size: 0.68rem;
+    margin-right: 0.4rem;
+  }
+
+  /* ---------- test table ---------- */
+
+  .tablewrap {
+    overflow-x: auto;
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    background: var(--surface);
+    margin-bottom: 1rem;
+  }
+
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    min-width: 42rem;
+    font-family: var(--sans);
+    font-size: 0.9rem;
+  }
+
+  thead th {
+    text-align: left;
+    font-family: var(--mono);
+    font-size: 0.66rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding: 0.8rem 1rem;
+    border-bottom: 1px solid var(--rule);
+    background: var(--surface-sub);
+    white-space: nowrap;
+  }
+
+  tbody td {
+    padding: 0.8rem 1rem;
+    border-bottom: 1px solid var(--rule-soft);
+    vertical-align: top;
+    line-height: 1.45;
+    color: var(--ink-soft);
+  }
+
+  tbody tr:last-child td { border-bottom: none; }
+  tbody td:first-child { color: var(--ink); font-weight: 500; }
+
+  td .where {
+    font-family: var(--mono);
+    font-size: 0.76rem;
+    color: var(--muted);
+    display: block;
+    margin-top: 0.25rem;
+  }
+
+  .cost {
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ---------- lists ---------- */
+
+  ul.plain {
+    max-width: var(--measure);
+    margin: 0 0 1rem;
+    padding-left: 1.15rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+  }
+
+  ul.plain li { padding-left: 0.15rem; }
+  ul.plain li::marker { color: var(--faint); }
+
+  /* ---------- not-doing ---------- */
+
+  .nd {
+    border-top: 1px solid var(--rule);
+    padding-top: 1rem;
+    margin-top: 1rem;
+    display: grid;
+    gap: 1.1rem;
+  }
+
+  .nd > div { max-width: var(--measure); }
+
+  .nd .t {
+    font-family: var(--sans);
+    font-weight: 600;
+    font-size: 0.97rem;
+    margin: 0 0 0.25rem;
+    color: var(--ink);
+  }
+
+  .nd .b { font-size: 0.95rem; color: var(--muted); margin: 0; }
+
+  /* ---------- footer ---------- */
+
+  .foot {
+    margin-top: 4rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--rule);
+    font-family: var(--mono);
+    font-size: 0.73rem;
+    line-height: 1.7;
+    color: var(--faint);
+    max-width: none;
+  }
+
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.25rem;
+    margin-bottom: 0.9rem;
+    align-items: center;
+  }
+</style>
+<style>
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; }
+  img { max-width: 100%; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <header class="mast">
+    <div class="eyebrow">
+      <span>DeliveryOS</span>
+      <span>Pre-Phase-16 triage</span>
+      <span>2 Sep 2026</span>
+    </div>
+    <h1>Hardening Ledger</h1>
+    <p class="standfirst">
+      Sixteen defects found while validating the MCP proposal — most of which have
+      nothing to do with MCP, and eleven of which affect people using DeliveryOS today.
+      Plus the one piece of missing infrastructure that makes the proposal's own
+      safety mechanism a no-op.
+    </p>
+  </header>
+
+  <div class="call">
+    <h2>The call</h2>
+    <p>
+      Don't write the MCP test suite. Write the tests that pay off whether or not MCP
+      ever ships — which is most of them — and fix the bugs the investigation turned up
+      along the way. Concretely, in this order:
+    </p>
+    <ol>
+      <li><strong>Add CI.</strong> There isn't any. One workflow running the three scripts that already exist.</li>
+      <li><strong>Fix the seven confirmed bugs</strong> in the ledger below. All are user-visible today; none require a design decision.</li>
+      <li><strong>Copy one file</strong> — <code>audit/redact.ts</code> — to stop writing plaintext secrets into the audit log.</li>
+      <li><strong>Then</strong> revisit Stage 1. The registry is a good idea whose payoff is invisible until CI can enforce it.</li>
+    </ol>
+  </div>
+
+  <h2>Three facts that reorder the plan</h2>
+  <p class="sec-note">Each one independently changes what's worth building first</p>
+
+  <div class="context">
+    <div>
+      <p class="k">Infrastructure</p>
+      <p class="v">There is no CI</p>
+      <p class="d">
+        No <code>.github/</code>, no workflows, no git hooks, no husky. Yet the repo ships
+        58 unit test files, ~10 e2e files, <code>lint --max-warnings 0</code>,
+        <code>typecheck</code>, and six <code>ui:*</code> audit scripts. Nothing runs any
+        of them but a human who remembers to.
+      </p>
+    </div>
+    <div>
+      <p class="k">Sponsor direction</p>
+      <p class="v">Building is on hold</p>
+      <p class="d">
+        From the 2 Sep call, ~37:44: <em>"right now, don't start coding anything."</em>
+        The week's priority is playbook material for leadership sign-off — <em>"then we
+        start building."</em> Stage 2 is premature by the sponsor's own instruction.
+      </p>
+    </div>
+    <div>
+      <p class="k">Existing coverage</p>
+      <p class="v">The scary paths are already tested</p>
+      <p class="d">
+        Path containment, <code>install_target</code> and <code>payload_path</code> escapes,
+        five <code>removeArtifact</code> containment cases, lockfile concurrency and
+        signature fail-closed paths all have tests. The proposal's §7 list is less novel
+        than it reads.
+      </p>
+    </div>
+  </div>
+
+  <p>
+    Together these invert the plan's priority. Its centrepiece is a static guard that
+    "fails the build" when a command reaches the MCP allowlist without a declared
+    <code>effect</code>. There is no build to fail. The reference implementation this was
+    drawn from enforces its equivalent with
+    <code>strictSkips = Boolean(process.env.CI)</code> — with no CI, the whole mechanism
+    silently no-ops, which is exactly the discipline-not-mechanism failure the guard
+    was meant to replace.
+  </p>
+
+  <h2>Confirmed bugs</h2>
+  <p class="sec-note">Verified against the source this session — each has a file:line you can open</p>
+
+  <div class="findings">
+
+    <article class="f crit">
+      <div class="f-head">
+        <h3>Projects without a <code>src/</code> directory can never update any artifact</h3>
+        <span class="pill p-ver">Verified</span>
+        <span class="pill p-crit">User-facing</span>
+      </div>
+      <p>
+        <code>pull</code> computes the install target through <code>adaptSrcDirPath</code>,
+        which strips a leading <code>src/</code> when the consuming project doesn't use that
+        convention, and records the shortened path in the lockfile. <code>applyUpdate</code>
+        resolves <code>manifest.install_target</code> raw. The two never match, so the
+        relocation guard fires on every update — forever — and blames the artifact:
+        <em>"This version moved install_target … Remove and re-pull it instead."</em>
+        Any <code>app/</code>-layout project pulling any <code>src/</code>-prefixed artifact
+        hits this permanently.
+      </p>
+      <p class="ref"><b>Where</b> <code>src/engine/sync/applyUpdate.ts:163</code> vs <code>src/engine/pull/pull.ts:218</code> · guard fires at <code>applyUpdate.ts:168</code></p>
+    </article>
+
+    <article class="f crit">
+      <div class="f-head">
+        <h3>The auto-run denylist guards one field and misses the other</h3>
+        <span class="pill p-ver">Verified</span>
+        <span class="pill p-crit">Security</span>
+      </div>
+      <p>
+        <code>SENSITIVE_TARGET_PREFIXES</code> — <code>.git/</code>,
+        <code>.github/workflows/</code>, <code>.vscode/</code>, <code>.husky/</code> — is
+        referenced exactly once, for <code>wiring_actions.targetFile</code>. Nothing applies
+        it to <code>install_target</code>, which the schema only checks for <code>..</code>
+        escapes. So <code>install_target: .git/hooks</code> parses, passes containment
+        (it <em>is</em> inside the project), and <code>cpSync</code> writes an executable
+        hook there. No <code>post_install</code> required. <code>.claude/</code> isn't on
+        the list at all, and the schema test suite explicitly blesses
+        <code>.claude/agents/my-agent.md</code> as an ordinary target.
+      </p>
+      <p class="ref"><b>Where</b> <code>src/engine/pull/wiring.ts:46</code> defined, <code>:176</code> sole use · <code>src/engine/manifest/schema.ts:147</code> · <code>test/unit/manifest.schema.test.ts:73</code></p>
+    </article>
+
+    <article class="f crit">
+      <div class="f-head">
+        <h3>A swallowed failure can leave the cache serving unmerged PR content</h3>
+        <span class="pill p-ver">Verified</span>
+        <span class="pill p-crit">Regression risk</span>
+      </div>
+      <p>
+        After a push, the remote cache is reset off the push branch. That reset is wrapped
+        in a bare <code>catch {}</code>. The comment twelve lines above documents the exact
+        production incident this guards against — <em>"A <code>pull</code> immediately after
+        a <code>push</code> installed the user's own unreviewed PR content"</em> — and the
+        catch re-opens it. The stated mitigation ("the next fetchAndReset would recover the
+        cache anyway") isn't a guarantee: <code>pullArtifact</code> never fetches. And this
+        is the most likely reset to fail, since it runs immediately after the push's network I/O.
+      </p>
+      <p class="ref"><b>Where</b> <code>src/engine/push/push.ts:638-642</code> · rationale for the guard at <code>:625-637</code></p>
+    </article>
+
+    <article class="f crit">
+      <div class="f-head">
+        <h3>The audit log writes file contents verbatim, with no redaction anywhere</h3>
+        <span class="pill p-ver">Verified</span>
+        <span class="pill p-crit">Secrets</span>
+      </div>
+      <p>
+        <code>WiringMergeLogEntry</code> and <code>BuildFixLogEntry</code> both store
+        <code>before</code> and <code>after</code> as full file contents. There is no
+        redaction pass anywhere in the engine — the only <code>sanitize</code> references
+        concern path segments. The AI flows can target any file a manifest names, so any
+        credential in a touched file lands verbatim in
+        <code>.deliveryos/wiring-merge-log.jsonl</code>. Aggravating: <code>.deliveryos/</code>
+        gets no gitignore check at all; only <code>.env.local</code> does, and that's a
+        warning rather than enforcement.
+      </p>
+      <p class="ref"><b>Where</b> <code>src/engine/pull/requestWiringMerge.ts:225-226</code> · <code>src/engine/pull/fixBuildFailure.ts:195-211</code> · gitignore check at <code>installParams.ts:164-170</code></p>
+    </article>
+
+    <article class="f warn">
+      <div class="f-head">
+        <h3><code>--no-wire</code> does not stop <code>post_install</code>, and its help text says it does</h3>
+        <span class="pill p-ver">Verified</span>
+        <span class="pill p-warn">Docs + design</span>
+      </div>
+      <p>
+        The <code>--no-wire</code> branch calls <code>pullArtifact</code>, which runs
+        <code>execSync(manifest.post_install)</code> unconditionally. The flag skips wiring
+        actions and the build check, nothing else — and the same branch prints the
+        post-install output eight lines later, so it is visibly running. The help text
+        ("just copy the payload and write install_params") is wrong. This is also what
+        breaks the MCP proposal's §4.5 mitigation and its §7.10 test, both of which assume
+        <code>--no-wire</code> means no execution.
+      </p>
+      <p class="ref"><b>Where</b> <code>src/cli/commands/pull.ts:57</code> → <code>src/engine/pull/pull.ts:282</code> · help text at <code>pull.ts:37-39</code></p>
+    </article>
+
+    <article class="f warn">
+      <div class="f-head">
+        <h3>Skipped manifests accumulate forever in the sidecar</h3>
+        <span class="pill p-ver">Verified</span>
+        <span class="pill p-warn">Latent</span>
+      </div>
+      <p>
+        <code>buildCatalog</code> appends to a module-level <code>lastSkippedManifests</code>
+        array and never clears it; only <code>takeSkippedManifests()</code> drains it. Its
+        own doc comment claims it holds "the most recent <code>buildCatalog()</code> call."
+        In the CLI this is invisible — one call, one take, process exits. In the long-lived
+        sidecar, <code>buildCatalog</code> runs on every list, pull, push, scan and sync,
+        and the array grows unbounded. <strong>This matters because of the fix below it:</strong>
+        the moment anyone wires <code>takeSkippedManifests()</code> into the sidecar, the
+        first call returns N duplicate copies. Fix both together or the fix produces a new
+        wrong answer.
+      </p>
+      <p class="ref"><b>Where</b> <code>src/engine/catalog/catalog.ts:50-52</code> appends · <code>:64</code> declares · <code>:66-68</code> drains</p>
+    </article>
+
+    <article class="f warn">
+      <div class="f-head">
+        <h3>The sidecar silently drops manifests the CLI reports</h3>
+        <span class="pill p-ver">Verified</span>
+        <span class="pill p-warn">Correctness</span>
+      </div>
+      <p>
+        <code>src/cli/commands/list.ts:25</code> is the only caller of
+        <code>takeSkippedManifests()</code> in the entire source tree. Six other
+        <code>buildCatalog()</code> call sites ignore it, the sidecar's
+        <code>catalog.list</code> among them. A manifest that failed to parse becomes an
+        absence rather than a reported problem — a parse failure coerced into a clean
+        empty list.
+      </p>
+      <p class="ref"><b>Where</b> <code>src/sidecar.ts:149-152</code> · other droppers: <code>pull.ts:83</code>, <code>push.ts:255</code>, <code>scan.ts:73</code>, <code>applyUpdate.ts:79</code>, <code>sync.ts:78</code>, <code>sync.ts:172</code></p>
+    </article>
+
+  </div>
+
+  <h2>Reported, not yet independently verified</h2>
+  <p class="sec-note">Single-source with a file:line — worth confirming before acting, listed by consequence</p>
+
+  <div class="findings">
+
+    <article class="f crit">
+      <div class="f-head">
+        <h3>Payload symlinks defeat containment entirely</h3>
+        <span class="pill p-rep">Reported</span>
+        <span class="pill p-crit">Security</span>
+      </div>
+      <p>
+        Containment is purely lexical — <code>path.resolve</code> plus a prefix check, never
+        <code>fs.realpathSync</code> — so a symlink anywhere in the destination path is
+        invisible to it, while <code>cpSync</code> runs with the default
+        <code>dereference: false</code>. Two escapes were reproduced empirically on Node
+        v24.14.1: a payload directory symlink pulled outside content <em>in</em>, and a
+        destination that already contained a junction let a re-pull write <em>out</em>.
+        The second shape is ordinary in pnpm and monorepo workspaces.
+      </p>
+      <p class="ref"><b>Where</b> <code>src/engine/pull/pull.ts:270</code> · <code>src/engine/paths.ts:197-199</code></p>
+    </article>
+
+    <article class="f crit">
+      <div class="f-head">
+        <h3>Signatures cover payload bytes only — not the fields that execute</h3>
+        <span class="pill p-rep">Reported</span>
+        <span class="pill p-crit">Trust model</span>
+      </div>
+      <p>
+        <code>computePayloadDigest</code> hashes files under the payload path; the manifest
+        is never an input. So <code>post_install</code>, <code>post_remove</code>,
+        <code>install_target</code>, <code>payload_path</code>, <code>install_params</code>
+        and <code>wiring_actions</code> are all outside the signature. A <em>fully valid</em>
+        signature is compatible with an arbitrary <code>post_install</code>. Separately,
+        an unsigned artifact skips verification silently at the first statement of the
+        function, and <code>PullResult</code> has no field in which to report that it was
+        never verified.
+      </p>
+      <p class="ref"><b>Where</b> <code>src/engine/provenance/verify.ts:25-27</code> · <code>src/engine/provenance/digest.ts:33-51</code> · <code>pull.ts:24-42</code></p>
+    </article>
+
+    <article class="f warn">
+      <div class="f-head">
+        <h3><code>post_remove</code> is re-read from the mutable remote after install</h3>
+        <span class="pill p-rep">Reported</span>
+        <span class="pill p-warn">Trust model</span>
+      </div>
+      <p>
+        <code>removeArtifact</code> deliberately refuses to re-read <code>install_target</code>
+        from the manifest because it is "a remote-controlled, MUTABLE field" — then forty
+        lines later re-resolves that same manifest and executes its <em>current</em>
+        <code>post_remove</code>. The same applies to <code>applyUpdate</code>: an artifact
+        with no <code>post_install</code> at v1.0.0 can ship one at v1.0.1, executed when
+        the user clicks Update. The fix is symmetry — pin the command to what the lockfile
+        recorded, exactly as <code>installTarget</code> already is.
+      </p>
+      <p class="ref"><b>Where</b> <code>removeArtifact.ts:150-170</code> vs <code>:228-241</code> · <code>applyUpdate.ts:201-223</code></p>
+    </article>
+
+    <article class="f warn">
+      <div class="f-head">
+        <h3>Three status messages state things about the project that aren't true</h3>
+        <span class="pill p-rep">Reported</span>
+        <span class="pill p-warn">Correctness</span>
+      </div>
+      <p>
+        An unparseable <code>package.json</code> returns <code>undefined</code> from build
+        detection, which renders as <em>"No build command was found, so nothing could be
+        verified automatically"</em> followed by <em>"There's nothing else to do."</em> —
+        about a project whose build config is broken. A pull with no wiring actions returns
+        <code>{ran: false}</code>, which is <em>defined</em> as "no build command could be
+        detected", producing the same false claim about projects that plainly have one. And
+        an artifact whose manifest failed to parse falls through <code>applyUpdate</code>'s
+        one bare <code>continue</code>, so asking about that specific artifact answers
+        <em>"No updates available."</em>
+      </p>
+      <p class="ref"><b>Where</b> <code>verifyBuild.ts:63-68</code> · <code>pullAndAutoWire.ts:40-46</code> with <code>postInstallHealthSummary.ts:101-125</code> · <code>applyUpdate.ts:86-90</code></p>
+    </article>
+
+    <article class="f info">
+      <div class="f-head">
+        <h3>Four smaller conflations</h3>
+        <span class="pill p-rep">Reported</span>
+      </div>
+      <p>
+        <code>install_params</code> keys and defaults are unconstrained strings written
+        into <code>.env.local</code> by raw interpolation, so a newline injects extra env
+        lines (<code>schema.ts:36,39</code> → <code>installParams.ts:136-140</code>).
+        <code>pristinePath</code> skips the <code>assertSafePathSegment</code> its sibling
+        path builders apply, and feeds a recursive delete (<code>paths.ts:119-121</code>).
+        <code>applyWiring</code> files a security refusal into the same
+        <code>needsReview</code> array as an ordinary "look at this file"
+        (<code>applyWiring.ts:38-66</code>). And both audit-log readers drop unparseable
+        lines without counting them, in logs whose own comments call torn writes routine
+        (<code>fixBuildFailure.ts:334-339</code>).
+      </p>
+    </article>
+
+  </div>
+
+  <h2>What to actually write</h2>
+  <p class="sec-note">Ordered by payoff per hour — every row uses infrastructure that already exists</p>
+
+  <div class="tablewrap">
+    <table>
+      <thead>
+        <tr>
+          <th scope="col">Work</th>
+          <th scope="col">What it buys</th>
+          <th scope="col">Cost</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>A CI workflow<span class="where">.github/workflows/ci.yml</span></td>
+          <td>Runs <code>lint</code>, <code>typecheck</code> and <code>test</code> — all three already exist and pass. Turns 58 test files from documentation into enforcement, and is the precondition for every guard in Phase 16.</td>
+          <td class="cost">~20 lines</td>
+        </tr>
+        <tr>
+          <td>Fix + test <code>applyUpdate</code>'s src-dir mismatch<span class="where">applyUpdate.ts:163</span></td>
+          <td>Unblocks updates for every non-<code>src/</code> project. Pull with <code>install_target: src/lib/x</code> into a project with a root <code>app/</code>, bump the version, assert <code>applied === true</code>.</td>
+          <td class="cost">1 line + 1 test</td>
+        </tr>
+        <tr>
+          <td>Copy <code>audit/redact.ts</code><span class="where">from agent-native, 195 lines</span></td>
+          <td>Zero imports, no framework coupling, ships with a 124-line spec. Apply at the two audit-log append sites. Closes the plaintext-secrets gap the same day.</td>
+          <td class="cost">copy + 2 calls</td>
+        </tr>
+        <tr>
+          <td>Run <code>install_target</code> through <code>isSensitiveTargetPath</code><span class="where">pull.ts, before cpSync</span></td>
+          <td>Closes the <code>.git/hooks</code> write. Table-test the prefixes plus <code>.claude/</code> and <code>.deliveryos/</code>; assert refusal and that the file is unchanged.</td>
+          <td class="cost">1 call + 6 cases</td>
+        </tr>
+        <tr>
+          <td>Give <code>buildCatalog</code> its own skip list<span class="where">catalog.ts:50-64</span></td>
+          <td>Must land before wiring skips into the sidecar, or the first call returns duplicates. Test: call <code>buildCatalog()</code> twice, take once, assert length 1.</td>
+          <td class="cost">2 lines + 1 test</td>
+        </tr>
+        <tr>
+          <td>Report the push cache-reset failure<span class="where">push.ts:638-642</span></td>
+          <td>Add a field to <code>PushResult</code>; stub <code>fetchAndReset</code> to throw on the second call and assert the warning surfaces rather than the cache silently sitting on the push branch.</td>
+          <td class="cost">1 field + 1 test</td>
+        </tr>
+        <tr>
+          <td>Symlink escape tests<span class="where">test/unit, no git needed</span></td>
+          <td>Two cases: a payload symlink pulling outside content in, and a junction in the destination letting a re-pull write out. Both were reproduced already, so the assertions are known before the fix.</td>
+          <td class="cost">2 tests</td>
+        </tr>
+        <tr>
+          <td>Extract <code>runCli</code> to a shared helper<span class="where">currently triplicated</span></td>
+          <td>Copy-pasted verbatim into three e2e files. Pure friction removal — every new e2e test currently starts with a fourth copy.</td>
+          <td class="cost">~15 lines</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    Two details that make all of this cheaper than it looks. First, hostile manifests
+    don't need checked-in fixtures or git: <code>test/unit/pull.test.ts</code> already
+    establishes writing the remote cache directly to disk under a temp
+    <code>DELIVERYOS_HOME</code>, which skips cloning entirely. Second, both
+    <code>pullArtifact</code> and <code>removeArtifact</code> take a test-only timeout
+    override as their last parameter — so a hostile <code>post_install</code> test doesn't
+    have to wait out a ten-minute ceiling. One Windows-specific trap: use
+    <code>rmDirWithRetry</code> from <code>execHelpers</code> in teardown for any test that
+    runs a subprocess, or a surviving grandchild holds a lock and cleanup fails with EPERM.
+  </p>
+
+  <h2>Deliberately not doing</h2>
+  <p class="sec-note">Each of these was considered and rejected for a stated reason</p>
+
+  <div class="nd">
+    <div>
+      <p class="t">The §7 MCP test suite</p>
+      <p class="b">
+        Ten scenarios for a surface that doesn't exist, whose sponsor has paused building,
+        and much of whose substance is already covered against the surfaces that do exist.
+        Two of them are worth writing the day an MCP server starts — the exact-equality
+        assertion on <code>tools/list</code> and its paired <code>tools/call</code> negative
+        proving an excluded tool is denied rather than merely hidden — and not before.
+      </p>
+    </div>
+    <div>
+      <p class="t">The static guard system, for now</p>
+      <p class="b">
+        Right idea, wrong order. A guard with no CI is a script someone remembers to run.
+        The contract is ~150 lines of dependency-free code and stays cheap to adopt later;
+        the three-outcome convention (pass / fail / <em>could not run</em>) is the part
+        genuinely worth copying, and it only means anything inside a CI run.
+      </p>
+    </div>
+    <div>
+      <p class="t">Dry-run-by-default as an early win</p>
+      <p class="b">
+        It reads like a copy and isn't. The reference implementation gates one call at the
+        end of a path that always plans and always reports, which works because its CLI
+        takes an injectable <code>io</code> and <code>spawn</code>. DeliveryOS writes through
+        <code>console.*</code> directly inside commander action closures — 56 sites across
+        11 files, no returned exit codes. That's a Stage 1 refactor, not an afternoon.
+      </p>
+    </div>
+    <div>
+      <p class="t">Diff-scoped guards</p>
+      <p class="b">
+        They exist upstream because that repo has thousands of pre-existing violations to
+        work around. A codebase this size should fail on the whole tree and fix the backlog.
+        Adopt the diff machinery only if a guard's first run produces one you won't clear.
+      </p>
+    </div>
+  </div>
+
+  <h2>One thing worth telling Vaibhav</h2>
+  <p class="sec-note">From the 2 Sep call — it makes Stage 1 an easier sell</p>
+
+  <p>
+    Around 33:00 he describes "Arc actions": wrapping any function with an input/output
+    schema plus "the security layer" so it becomes "understandable by LLMs — MCP in
+    itself," and concludes that you can expose an entire engine as MCP <em>but only if</em>
+    you wrap the whole thing as actions first. That is the command registry, described by
+    the person who'd approve it, months before the proposal was written.
+  </p>
+  <p>
+    Framing Stage 1 as <em>applying his pattern to DeliveryOS</em> rather than as a pattern
+    found in a reference repo is both more accurate and considerably easier to approve. The
+    same call also settles the shape of the SharePoint question — he named SharePoint, S3
+    and "a folder somewhere" as where clients actually keep their libraries, and today only
+    local and GitHub work. That's the one port with a real second implementation waiting,
+    which is exactly the bar he set for when a port is worth building at all.
+  </p>
+
+  <div class="foot">
+    <div class="legend">
+      <span class="pill p-ver">Verified</span>
+      <span>opened and confirmed in the source this session</span>
+    </div>
+    <div class="legend">
+      <span class="pill p-rep">Reported</span>
+      <span>single-source with a file:line — confirm before acting</span>
+    </div>
+    Sources: full read of both plan documents · the 1h34m call transcript ·
+    four parallel investigations across <code>src/engine</code>, <code>src/cli</code>,
+    <code>src/sidecar.ts</code>, <code>test/</code> and the <code>agent-native</code> reference repo ·
+    direct verification of every claim marked Verified.
+  </div>
+
+</div>
+</body>
+</html>
