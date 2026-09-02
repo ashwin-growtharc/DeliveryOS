@@ -251,6 +251,10 @@ describe('resolveWiringActions', () => {
       ['a GitHub Actions workflow', '.github/workflows/pwn.yml'],
       ['a VS Code auto-run task', '.vscode/tasks.json'],
       ['a husky git hook', '.husky/pre-commit'],
+      // Added when the same list was extended to cover install_target too:
+      // .deliveryos/ holds lock.json and the pristine snapshots that every
+      // status check, push and update diffs against.
+      ["DeliveryOS's own project state", '.deliveryos/lock.json'],
     ];
 
     for (const [label, targetFile] of cases) {

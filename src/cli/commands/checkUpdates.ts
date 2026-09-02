@@ -42,7 +42,13 @@ export function registerCheckUpdatesCommand(program: Command): void {
             console.log(`  ${result.note}`);
           }
         } else {
-          console.log(`${result.id} (${result.remote}): NOT updated (${result.previousVersion} -> ${result.availableVersion} available) -- ${result.reason}`);
+          // `availableVersion` is absent when the artifact is not in the
+          // catalog at all -- there is no upstream version to name, and
+          // interpolating it directly printed "1.0.0 -> undefined available".
+          const versions = result.availableVersion
+            ? `${result.previousVersion} -> ${result.availableVersion} available`
+            : `installed ${result.previousVersion}, nothing available upstream`;
+          console.log(`${result.id} (${result.remote}): NOT updated (${versions}) -- ${result.reason}`);
         }
       }
     });

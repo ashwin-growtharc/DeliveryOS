@@ -5,6 +5,7 @@ import { buildCatalog, CatalogEntry } from '../catalog/catalog';
 import { cachePath } from '../remote/remoteCache';
 import { upsertEntry, readLockfile } from '../lockfile/lockfile';
 import { pristinePath, resolveContainedPath, adaptSrcDirPath, isRootInstall } from '../paths';
+import { isSensitiveTargetPath } from './wiring';
 import {
   ArtifactResolutionError,
   ManifestValidationError,
@@ -226,6 +227,29 @@ export async function pullArtifact(
     throw new ManifestValidationError(
       `Artifact "${manifest.id}"'s install_target ("${manifest.install_target}") resolves outside the `
         + `project -- refusing to install.`,
+    );
+  }
+
+  // A location whose contents run on their own. The denylist has existed since
+  // a security review, but was only ever applied to `wiring_actions.targetFile`
+  // (wiring.ts) -- an install_target of `.github/workflows` or `.git/hooks`
+  // walked straight past it into the fs.cpSync below, because the schema only
+  // checks install_target for `..` escapes and those paths ARE inside the
+  // project, so containment passed too. No post_install required.
+  //
+  // Refused HERE, at pull time, and deliberately NOT in the manifest schema: a
+  // schema rejection makes discoverManifests skip the manifest entirely
+  // (parser.ts), which vanishes the artifact from the catalog -- CHANGELOG
+  // records exactly that taking all 234 artifacts down. A refused pull is
+  // visible and specific; a vanished artifact is neither.
+  //
+  // Checked against the ADAPTED target, not the raw one: the raw value could
+  // be `src/.github/...` (harmless) and the adapted one `.github/...` (not).
+  if (isSensitiveTargetPath(path.resolve(cwd), installTarget)) {
+    throw new ManifestValidationError(
+      `Artifact "${manifest.id}"'s install_target ("${effectiveInstallTarget}") is inside a location whose `
+        + `contents can run on their own -- a git hook, CI workflow, editor auto-run task, or DeliveryOS's `
+        + `own project state. Refusing to install; nothing was written. Review this manifest by hand.`,
     );
   }
 

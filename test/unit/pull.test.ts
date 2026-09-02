@@ -410,3 +410,63 @@ describe('pullArtifact lockfile recording (Phase 13 uninstall groundwork)', () =
     expect(entryAfter?.pendingPr).toEqual({ url: 'https://github.com/example/repo/pull/1', number: 1 });
   }, 30_000);
 });
+
+describe('pullArtifact refuses an install_target that can run code on its own', () => {
+  // SENSITIVE_TARGET_PREFIXES (wiring.ts) has existed since a security review,
+  // but was only ever applied to `wiring_actions.targetFile`. install_target
+  // walked straight past it into fs.cpSync -- the manifest schema only checks
+  // it for `..` escapes, and `.git/hooks` IS inside the project, so containment
+  // passed too. An artifact could drop an executable git hook with no
+  // post_install involved at all.
+  const REFUSED = [
+    ['a git hooks directory', '.git/hooks'],
+    ['a CI workflow directory', '.github/workflows'],
+    ['an editor auto-run directory', '.vscode'],
+    ['a git hook manager directory', '.husky/pre-commit'],
+    ["DeliveryOS's own project state", '.deliveryos/pristine'],
+  ] as const;
+
+  for (const [label, target] of REFUSED) {
+    it(`refuses ${label} (${target}) before writing anything`, async () => {
+      writeRegistry(['test-remote']);
+      writeArtifactWithInstallTarget('hostile-artifact', target);
+
+      await expect(pullArtifact('hostile-artifact', 'test-remote', cwd)).rejects.toThrow(
+        ManifestValidationError,
+      );
+
+      // The assertion that matters is on disk. A refusal printed after cpSync
+      // has already run is not a refusal.
+      const firstSegment = target.split('/')[0];
+      expect(fs.existsSync(path.join(cwd, firstSegment))).toBe(false);
+      expect(readLockfile(cwd).entries.find((e) => e.id === 'hostile-artifact')).toBeUndefined();
+    });
+  }
+
+  it('still installs an ordinary agent artifact to .claude/agents, which the denylist deliberately does not cover', async () => {
+    // The most important test here: `deliveryos scan` itself GENERATES
+    // install_target values of `.claude/agents/<file>` and `.claude/skills/<dir>`
+    // (scan.ts), and real agent artifacts install to `.claude/agents/<id>.md`.
+    // Adding `.claude/` to the denylist would make every scanned agent and
+    // skill artifact in the catalog unpullable -- exactly the outage class
+    // CHANGELOG records for the root-install_target guard. This is the guard
+    // against someone "tightening" the list later.
+    writeRegistry(['test-remote']);
+    writeArtifactWithInstallTarget('agent-artifact', '.claude/agents');
+
+    const result = await pullArtifact('agent-artifact', 'test-remote', cwd);
+
+    expect(result.installTarget).toBe(path.join(cwd, '.claude', 'agents'));
+    expect(fs.existsSync(path.join(cwd, '.claude', 'agents', 'README.md'))).toBe(true);
+  });
+
+  it('does not over-match a lookalike prefix such as .gitlab or a payload dir named github-actions', async () => {
+    writeRegistry(['test-remote']);
+    writeArtifactWithInstallTarget('gitlab-artifact', '.gitlab/ci');
+
+    const result = await pullArtifact('gitlab-artifact', 'test-remote', cwd);
+
+    expect(result.installTarget).toBe(path.join(cwd, '.gitlab', 'ci'));
+    expect(fs.existsSync(path.join(cwd, '.gitlab', 'ci', 'README.md'))).toBe(true);
+  });
+});

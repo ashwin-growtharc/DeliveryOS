@@ -375,4 +375,82 @@ describe('applyAvailableUpdates e2e', () => {
     30_000,
   );
 
+  it(
+    'reports (never silently skips) an artifact whose id is no longer in its remote catalog',
+    async () => {
+      // ApplyUpdateResult.reason is documented as "Always set when applied is
+      // false -- a person should never see a silent no-op." The !match branch
+      // was the one place in this loop that used a bare `continue` instead of
+      // report(), so `check-updates --apply` printed "No updates available."
+      // for a project whose artifact had actually vanished upstream.
+      const remoteName = 'apply-update-vanished';
+      const artifactId = 'vanishing-artifact';
+
+      const artifactDir = path.join(fixtureRemoteDir, 'artifacts', artifactId);
+      fs.mkdirSync(path.join(artifactDir, 'payload'), { recursive: true });
+      fs.writeFileSync(path.join(artifactDir, 'payload', 'README.md'), 'v1\n', 'utf-8');
+      fs.writeFileSync(
+        path.join(artifactDir, 'manifest.yaml'),
+        [
+          `id: ${artifactId}`,
+          'kind: doc',
+          'description: Removed from its remote after being pulled',
+          'owner: team-x',
+          'version: 1.0.0',
+          'source_repo: https://example.invalid/repo',
+          'install_target: vanishing',
+          'review_required: false',
+          '',
+        ].join('\n'),
+        'utf-8',
+      );
+      const git = simpleGit(fixtureRemoteDir);
+      await git.add([`artifacts/${artifactId}`]);
+      await git.commit(`add ${artifactId}`);
+
+      addRemoteEntry({ name: remoteName, url: fixtureRemoteDir, addedAt: new Date().toISOString() });
+      await cloneRemote(remoteName, fixtureRemoteDir);
+
+      const cwd = newScratchCwd('vanished');
+      await pullArtifact(artifactId, remoteName, cwd);
+
+      // Gone upstream, exactly as if someone deleted it from the catalog repo.
+      fs.rmSync(artifactDir, { recursive: true, force: true });
+      await git.add(['-A', `artifacts/${artifactId}`]);
+      await git.commit(`remove ${artifactId}`);
+
+      const results = await applyAvailableUpdates(cwd, undefined, artifactId);
+
+      // Used to be `[]` -- indistinguishable from "everything is up to date".
+      expect(results).toHaveLength(1);
+      expect(results[0].applied).toBe(false);
+      expect(results[0].reason).toContain('no longer in remote');
+      // No upstream version exists, so none is claimed. Echoing
+      // previousVersion here would read as "1.0.0 -> 1.0.0 available".
+      expect(results[0].availableVersion).toBeUndefined();
+    },
+    30_000,
+  );
+
+  it(
+    'still omits an already-current artifact entirely -- the OTHER bare continue is intentional and stays',
+    async () => {
+      // Guard against "fixing" the second bare continue too. A bulk
+      // `check-updates --apply` should stay focused on real updates rather
+      // than restating every already-current artifact.
+      const remoteName = 'apply-update-current';
+      addRemoteEntry({ name: remoteName, url: fixtureRemoteDir, addedAt: new Date().toISOString() });
+      await cloneRemote(remoteName, fixtureRemoteDir);
+
+      const artifact = TEST_ARTIFACTS.find((a) => a.id === 'lint-config')!;
+      const cwd = newScratchCwd('already-current');
+      await pullArtifact(artifact.id, remoteName, cwd);
+
+      const results = await applyAvailableUpdates(cwd, undefined, artifact.id);
+
+      expect(results).toEqual([]);
+    },
+    30_000,
+  );
+
 });
