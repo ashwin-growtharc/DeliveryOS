@@ -279,7 +279,7 @@ so ported as-is it would silently no-op here).
 > that in mind.
 
 The confirmed defects triaged in
-[docs/hardening-ledger.html](docs/hardening-ledger.html) landed with it, on
+[docs/hardening-ledger.md](docs/hardening-ledger.md) landed with it, on
 branch `tier0/hardening-and-ci`; they are listed in the Tier 0 track below.
 Against this list specifically:
 

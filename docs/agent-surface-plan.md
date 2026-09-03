@@ -610,7 +610,7 @@ files stay documentation rather than enforcement.
 Then, in order:
 
 - The confirmed bugs in
-  [docs/hardening-ledger.html](hardening-ledger.html) — seven of them are
+  [docs/hardening-ledger.md](hardening-ledger.md) — seven of them are
   user-visible today and none needs a design decision. The two that matter most
   here: `install_target` never passes through the auto-run denylist (§4.2), and
   `applyUpdate` resolves `install_target` raw while `pull` records the
