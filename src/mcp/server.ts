@@ -249,6 +249,88 @@ function failure(error: unknown): {
   return { content: [{ type: 'text', text: message }], isError: true };
 }
 
+/**
+ * The server's own description of itself, COMPOSED from which ports were
+ * actually supplied rather than written out once.
+ *
+ * This was a single unconditional literal, and it said: "These tools are
+ * READ-ONLY ... They cannot pull, push, or modify anything." That was true when
+ * written and false by the time `add_remote` and `contribute_artifact` shipped
+ * -- and unlike a stale comment, this string is RUNTIME OUTPUT. It is the first
+ * thing a connecting client reads, and the one statement an agent uses to
+ * decide what it may do. An agent holding a push tool while being told the
+ * surface cannot push has been handed a false model of its own capabilities,
+ * which is the exact opposite of what the contribution flow was built to
+ * guarantee: the preview exists so the file list is seen before publication,
+ * `initiatedBy` exists so a reviewer knows an agent assembled the diff, and the
+ * tool descriptions name every refusal. A server-level claim that none of it
+ * can happen undercuts all three.
+ *
+ * Composing it means the claim cannot drift again: a port that is not supplied
+ * contributes no prose, and a port that is cannot be silently omitted from it.
+ * `mcp.instructions.test.ts` asserts the two agree in both directions.
+ */
+function buildInstructions({ hasConfig, hasContribute }: {
+  hasConfig: boolean;
+  hasContribute: boolean;
+}): string {
+  const parts: string[] = [
+    'DeliveryOS distributes versioned artifacts (skills, agents, rules, commands, UI components, '
+      + 'templates, backend plugins) from git remotes into a project.',
+  ];
+
+  if (!hasConfig && !hasContribute) {
+    parts.push(
+      'These tools are READ-ONLY: they let you find an artifact and read what it contains, so you '
+        + 'can tell the user what is available and what it would do. They cannot install, '
+        + 'contribute, or modify anything.',
+    );
+  } else {
+    parts.push(
+      'Most of these tools are read-only -- they find artifacts and read what they contain. A few '
+        + 'write, and those are named below. None of them installs an artifact into a project.',
+    );
+  }
+
+  parts.push(
+    'To INSTALL an artifact, DeliveryOS is a CLI: run its `pullCommand` (returned by get_artifact) '
+      + 'in a terminal, the same way a person would. There is no install tool here. Read the '
+      + 'artifact first and tell the user what it will do -- especially its postInstall, which is a '
+      + 'shell command that runs on their machine.',
+    'Tools that act on a project need `cwd`, the absolute path of the project being worked in, '
+      + 'because whether an artifact is installed is a property of that project, not of the machine.',
+  );
+
+  if (hasConfig) {
+    parts.push(
+      'SETTING UP (writes: add_remote). If catalog_overview or search_artifacts comes back empty, do '
+        + 'not conclude there is nothing available -- check list_remotes first. An empty remote list '
+        + 'means no sources are configured yet, which is a different problem with a different '
+        + 'answer. When that is the case, interview the user rather than guessing: ask where their '
+        + 'shared work already lives -- do they have a UI component library? a set of Claude skills '
+        + 'or agents? project templates? backend plugins? -- and register each repository they name '
+        + 'with add_remote. A few questions is usually enough. Never invent a URL.',
+    );
+  }
+
+  if (hasContribute) {
+    parts.push(
+      'CONTRIBUTING BACK. If the user has edited an artifact and wants to share the change, ALWAYS '
+        + 'call preview_contribution first and show them the exact file list it returns. Push is '
+        + 'all-or-nothing over the whole installed folder, so an artifact someone filled in with '
+        + 'real client details would publish those to a shared repository -- the preview is how '
+        + 'that gets caught, and it is why this is two tools rather than one. Only once they have '
+        + 'seen that list, call contribute_artifact with the token the preview returned. That is '
+        + 'the tool that writes, and it reaches other people: it opens a pull request on a shared '
+        + 'remote. The token authorises exactly the previewed diff, once. It cannot force over a '
+        + 'colleague\'s merged change, and it refuses while an earlier pull request from this '
+        + 'project is still open.',
+    );
+  }
+
+  return parts.join(' ');
+}
+
 export interface McpServerDeps {
   /** Required, not defaulted. Defaulting it to `createEngineReadPort()` here
    * would make this file import engine BEHAVIOUR for the sake of convenience,
@@ -280,27 +362,10 @@ export function buildMcpServer({ port: engine, configPort, contributePort, versi
     { name: 'deliveryos', version },
     {
       capabilities: { tools: {} },
-      instructions:
-        'DeliveryOS distributes versioned artifacts (skills, agents, rules, commands, '
-        + 'UI components, templates, backend plugins) from git remotes into a project. '
-        + 'These tools are READ-ONLY: they let you find an artifact and read what it '
-        + 'contains, so you can tell the user what is available and what it would do. '
-        + 'They cannot pull, push, or modify anything. That is not a dead end: '
-        + 'DeliveryOS is a CLI, so to install an artifact you run its `pullCommand` '
-        + '(returned by get_artifact) in a terminal, the same way a person would. '
-        + 'Read the artifact first and tell the user what it will do -- especially '
-        + 'its postInstall, which is a shell command that runs on their machine. '
-        + 'Every tool except the two configuration ones needs `cwd`, the absolute '
-        + 'path of the project being worked in, because whether an artifact is already '
-        + 'installed is a property of that project, not of the machine. '
-        + 'SETTING UP. If catalog_overview or search_artifacts comes back empty, do not '
-        + 'conclude there is nothing available -- check list_remotes first. An empty remote '
-        + 'list means no sources are configured yet, which is a different problem with a '
-        + 'different answer. When that is the case, interview the user rather than guessing: '
-        + 'ask where their shared work already lives -- do they have a UI component library? '
-        + 'a set of Claude skills or agents? project templates? backend plugins? -- and '
-        + 'register each repository they name with add_remote. A few questions is usually '
-        + 'enough. Never invent a URL.',
+      instructions: buildInstructions({
+        hasConfig: configPort !== undefined,
+        hasContribute: contributePort !== undefined,
+      }),
     },
   );
 

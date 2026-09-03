@@ -90,6 +90,73 @@ were already comfortable with git, DeliveryOS would mostly be unnecessary. The
 entire reason it exists is that most of the intended audience (sales, HR,
 PMs) isn't, and shouldn't need to be.
 
+## 3.5 Where the code lives
+
+The repository is a **hexagon**: one engine, and several driving adapters over
+it. That is not aspiration — `test/unit/mcp.architecture.test.ts` fails the
+build if the newest adapter reaches past its port.
+
+```
+src/
+├─ engine/                    THE CORE — 72 files, 21 domains
+│  │                          Zero `console.*`, zero `process.cwd()`, zero
+│  │                          `commander` imports. Returns structured data to
+│  │                          every caller; never prints, never assumes a
+│  │                          surface.
+│  ├─ pull/                   install, remove, wiring, install_params
+│  ├─ push/                   contribute back: diff, PR content, planPush
+│  ├─ catalog/                aggregate manifests across remotes
+│  ├─ remote/                 registry + cache clones (manageRemotes)
+│  ├─ manifest/              schema, parser, version
+│  ├─ lockfile/               per-project record of what is installed
+│  ├─ sync/                   updates, pending-PR resolution
+│  ├─ scan/                   find reusable content, AI suggestions
+│  ├─ preview/                sandboxed component rendering (esbuild)
+│  ├─ github/                 GithubClient — a DRIVEN port, two impls
+│  ├─ git/, payload/, provenance/, audit/, drift/,
+│  │  guidelines/, routes/, claude/
+│  └─ paths.ts                every ~/.deliveryos and ./.deliveryos path
+│
+├─ capabilities.ts            THE DECLARATION — all 43 operations, with
+│                             mutates / destructive / executesShell /
+│                             costsRealMoney / network / needsProjectDir.
+│                             One source for risk, consumed by the adapters.
+│
+├─ cli/                       DRIVING ADAPTER 1 — 15 commands (+ `mcp`)
+│  └─ commands/               printing lives here; decisions should not
+│
+├─ sidecar.ts                 DRIVING ADAPTER 2 — 40 NDJSON RPCs for Tauri
+│
+└─ mcp/                       DRIVING ADAPTER 3 — the only one with a
+   │                          DECLARED PORT, and the pattern to copy
+   ├─ ports.ts                DeliveryOsReadPort / ConfigPort / ContributePort
+   ├─ engineAdapter.ts        the ONLY file here that reaches the engine
+   ├─ contributionToken.ts    single-use grant binding a push to its preview
+   └─ server.ts               tools, validation, formatting — no engine imports
+```
+
+**Why the third adapter looks different.** The CLI and the sidecar each wired
+themselves straight into engine functions, with no declared interface between
+them — which is why testing the sidecar needs a 1,283-line subprocess harness,
+while the MCP tool surface tests against a fake port in 87 ms. The engine was
+always clean; what was missing was a declaration above it.
+
+**What is enforced mechanically**, not by convention:
+
+| Rule | Guard |
+|---|---|
+| `server.ts` imports no engine *behaviour*, only types | `mcp.architecture.test.ts` |
+| Exactly one file in `src/mcp/` reaches the core | same |
+| The read port has exactly three methods | same (an allowlist, not a denylist) |
+| The server stays stdio-only | same — the `cwd`-as-argument decision depends on it |
+| No `console.*` in `src/engine/**` or `src/mcp/**` | ESLint + `mcp.architecture.test.ts` |
+| Every command, RPC and tool is declared in `capabilities.ts` exactly once | `capabilities.test.ts` |
+| No writing capability reaches MCP without a named, reasoned exemption | `annotationsFor`, at server-construction time |
+| The server's own `instructions` match the ports it was built with | `mcp.instructions.test.ts` |
+
+Every one of those exists because the property it protects was once asserted in
+a comment and turned out to be false.
+
 ## 4. Full architecture — five layers
 
 ```

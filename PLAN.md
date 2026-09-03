@@ -321,7 +321,7 @@ too — passed / failed / **could not run** — where a guard that inspected not
 refuses to report success. `deliveryos-status` should gain that third state for
 the same reason.
 
-### Stage 2 — `deliveryos mcp` — **read-only half landed**
+### Stage 2 — `deliveryos mcp` — **complete, and CI-verified**
 
 **What shipped:** `deliveryos mcp`, a stdio MCP server exposing four read-only
 tools (`search_artifacts`, `get_artifact`, `catalog_overview`,
@@ -496,7 +496,7 @@ open question about shape.
 **Answered.** The first consumer is Claude Code in this repo, and it is wired:
 `.mcp.json` is committed, running `npx tsx src/index.ts mcp` so a fresh clone
 needs only `npm install`. Verified through the SDK's own `StdioClientTransport`
-— the one Claude Code uses — with all four tools, the error paths, and a real
+— the one Claude Code uses — with every tool, the error paths, and a real
 `refresh_catalog` against the live remotes. Note this does change every
 teammate's Claude Code session: they will be prompted to approve the server on
 opening the repo. The remaining question is the useful one: **does an agent

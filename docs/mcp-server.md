@@ -2,7 +2,12 @@
 
 `deliveryos mcp` runs a Model Context Protocol server over stdio, exposing the
 catalog to an MCP client (Claude Code, Claude Desktop, or anything else that
-speaks the protocol). It is **read-only**.
+speaks the protocol).
+
+**Eight tools: six that read, two that write.** It installs nothing — there is
+no `pull` tool and that is deliberate. The two writes are `add_remote`, which
+registers where artifacts come from, and `contribute_artifact`, which opens a
+pull request from local edits and is reachable only through a preview.
 
 ---
 
@@ -99,19 +104,39 @@ nothing else**.
 
 ## The tools
 
-All four require `cwd` — the absolute path of the project being worked in.
-Whether an artifact is installed is a property of that project, not the machine.
+Everything that acts on a project needs `cwd`, the absolute path of the project
+being worked in — whether an artifact is installed is a property of that
+project, not of the machine. The two remote tools need no project at all.
 
-| Tool | Does | Network |
-|---|---|---|
-| `search_artifacts` | Finds by query, kind, remote, install status. Ranked, capped, reports the total. | No |
-| `get_artifact` | Full manifest plus the primary document. | No |
-| `catalog_overview` | Counts by kind/remote/status; names any manifest that failed to load. | No |
-| `refresh_catalog` | Fetches every remote from git, then summarises. | **Yes** |
+| Tool | Does | Writes | Network |
+|---|---|---|---|
+| `search_artifacts` | Finds by query, kind, remote, install status. Ranked, capped, reports the total. | — | No |
+| `get_artifact` | Full manifest plus the primary document, `postInstall` quoted verbatim, and the exact `pullCommand`. | — | No |
+| `catalog_overview` | Counts by kind/remote/status; names any manifest that failed to load. | — | No |
+| `list_remotes` | Where artifacts come from, with URLs. Says plainly when nothing is configured. | — | No |
+| `refresh_catalog` | Fetches every remote from git, then summarises. | `~/.deliveryos` | **Yes** |
+| `add_remote` | Registers a git repository as a source and clones it. | `~/.deliveryos` | **Yes** |
+| `preview_contribution` | What contributing would publish: every file, its status, the version bump. Publishes nothing. | — | No |
+| `contribute_artifact` | Opens a pull request from local edits. Requires a token from the preview. | **a shared remote** | **Yes** |
 
-`refresh_catalog` is the only one annotated `readOnlyHint: false` /
-`openWorldHint: true`. It writes to the caches under `~/.deliveryos` and can
-hang on an unreachable remote. Saying otherwise would be convenient and false.
+**The annotations are derived from `src/capabilities.ts`, not typed here.** That
+matters because they decide behaviour: Anthropic's directory requirements state
+that read-only tools may run *without per-call confirmation* while destructive
+ones always prompt. So "what does this operation do" has one source, and a tool
+registered without a capability entry throws rather than taking SDK defaults.
+
+Note `preview_contribution` is annotated as a write despite publishing nothing.
+It is declared against `artifact.push`, which mutates; annotating it read-only
+would be convenient and would misstate which capability it belongs to.
+
+**The server's own `instructions` are composed from the ports it was built
+with.** A server with no config or contribute port says it is read-only; one
+with them names its writing tools. That string was once an unconditional
+literal claiming *"They cannot pull, push, or modify anything"* while
+`add_remote` and `contribute_artifact` were live — a description asserting the
+opposite of the code, in runtime output rather than a comment.
+`mcp.instructions.test.ts` now asserts the prose and the composition agree in
+both directions.
 
 ### Two details worth knowing
 
@@ -129,22 +154,94 @@ signed" accurately.
 
 ---
 
-## Why read-only
+## Why it does not install anything
 
 Every mutating operation in this system either writes into a person's project
-or opens a PR against a shared remote. The multi-user work in the preceding
-batch exists precisely because those paths destroy work when two actors
-disagree — a stale `push` silently reverted a colleague's merged change, and a
-CLI `pull` overwrote local edits with no guard.
+or opens a PR against a shared remote. The multi-user work that preceded this
+exists precisely because those paths destroy work when two actors disagree — a
+stale `push` silently reverted a colleague's merged change, and a CLI `pull`
+overwrote local edits with no guard.
 
-An agent is a second actor. Adding mutation is a separate decision with its own
-consent model, not a widening of this interface — which is why "no mutating
-method" is enforced on the **port**, not just on today's tool list.
+An agent is a second actor. So exposure is decided per operation, in
+`src/capabilities.ts`, and enforced at server-construction time: a capability
+declared `mutates` cannot be registered as a tool unless it is named in
+`RISKY_CAPABILITIES_ALLOWED_ON_MCP` with a written reason. Three are:
+
+| Capability | Why it is allowed |
+|---|---|
+| `catalog.refresh` | Writes only the caches under `~/.deliveryos`; touches no project file |
+| `remote.add` | Clones into `~/.deliveryos`; needs no project directory at all; refuses a duplicate name before cloning |
+| `artifact.push` | Only reachable behind a preview and a single-use token — see below |
+
+`pull` is **not** on that list, and the reasons are recorded rather than vague:
+`pullArtifact` has no atomicity or rollback on any path, `post_install` is
+arbitrary shell from a manifest that no approval dialog can honestly summarise,
+and the worst case (10 min `post_install` + 5 min build) exceeds MCP client
+timeouts.
+
+## Contributing back, and why it is two tools
+
+`contribute_artifact` is the only tool here whose mistakes land on **other
+people's work**. `docs/agent-surface-plan.md` recorded why push was not an
+agent surface at all:
+
+> Push is all-or-nothing over the whole pulled folder with **no diff preview
+> and no confirmation** (verified). An agent pushing a filled-in risk register
+> would publish client data to a shared repo.
+
+That is concrete. Phase 15 ships a `risk-register` whose own README says *"fill
+in your own copy, never push it back"*, and a scoping calculator whose instance
+half is *"a specific client's quoted number"* — against `ARCHITECTURE.md`'s hard
+rule, *"No customer data in any DeliveryOS-shared remote, ever."*
+
+So the precondition is met rather than waived:
+
+1. **`preview_contribution`** returns the exact file list, statuses and version
+   bump, publishing nothing. `planPush.equivalence.e2e.test.ts` pins that the
+   preview promises exactly what the push commits — proven by making the
+   preview hide a file and watching the test report *"the push committed
+   BRAND-NEW.md, which the preview never promised."*
+2. **`contribute_artifact`** requires the token that preview returned. The token
+   is a digest over the project, the artifact, the exact file set and the
+   versions — so editing a file afterwards invalidates it. It is consumed
+   **before** the push is attempted, so a failure burns it too, and it mixes a
+   per-instance nonce so a restart invalidates every outstanding token.
+
+Three refusals, each for a stated reason:
+
+- **`force` is unreachable** — there is no parameter for it. `push.ts:653-658`
+  records that the desktop app has no force affordance because *"a one-click
+  force over a colleague's merged change is exactly the operation that should
+  stay hard."* An MCP tool is a one-click affordance.
+- **An open `pendingPr` refuses.** Not politeness: `push.ts:624` reads it as
+  `hasOwnPushInFlight` and **disables the stale-push guard entirely** for the
+  next push. Contributing on top of one removes a safety check rather than
+  queueing behind it.
+- **Propose-new refuses.** That is authoring, not contributing, and
+  `push.ts:772` never records a `pendingPr` for it — so DeliveryOS would never
+  follow the PR up.
+
+The PR body says an agent assembled the diff. The precedent is the forced-stale
+block: *"the PR reviewer is the only remaining safeguard and has to be told
+explicitly."*
+
+### Why the token consumption order matters
+
+If `pushBranch` succeeds and `pulls.create` then fails, a branch is already on
+the shared remote and **nothing deletes it** (`git.ts:76-82` documents the
+leftover as an expected condition), with no `pendingPr` written because that
+happens only after the PR opens. Agents retry by default. Consuming the token
+on success alone would let a retry create a second branch, then a third.
+
+The nonce covers the same case across a restart: the token is *derived*, so it
+would still recompute identically while the consumed set is empty — accepted,
+second orphaned branch. `pendingPr` cannot cover it, because the PR never
+opened.
 
 ### So how does an agent actually install something?
 
 It runs the CLI, the same way a person would. DeliveryOS is a command-line tool,
-and Claude Code already has a terminal — so read-only MCP costs the agent
+and Claude Code already has a terminal — so having no install tool costs the agent
 nothing it could otherwise do. What changes is *where the approval happens*: the
 user sees `deliveryos pull <id> --remote <r>` and approves that specific
 command, rather than approving a tool named `artifact_pull` once and having it
@@ -233,7 +330,7 @@ a devDependency, and pointing at `bin.deliveryos` instead would require a build
 because that resolves to the gitignored `dist/`.
 
 Verified through the SDK's own `StdioClientTransport` — the transport Claude
-Code itself uses — not just a hand-rolled spawn: all four tools respond, the
+Code itself uses — not just a hand-rolled spawn: every tool responds, the
 error paths refuse correctly, and `npx` resolves fine on Windows because
 `cross-spawn` handles the `.cmd` shim. Cold start is **~4.3 s** (that is `npx`
 plus `tsx` compiling, paid once per session, not per call). Pointing at
@@ -286,7 +383,7 @@ then driving `build/deliveryos-cli.exe mcp` over stdio returns the real
 ### Why not fastmcp
 
 `fastmcp` wraps the same SDK and adds sessions, auth, SSE and OpenAPI import —
-all dead weight for a stdio server with four read-only tools. It depends on
+all dead weight for a stdio server with a small curated tool set. It depends on
 **zod ^4** while this repo is on zod 3.25, which is the same type-identity
 collision described below but across a major version inside a dependency we do
 not control. And its tail (`execa`, `file-type`, `@apidevtools/swagger-parser`)

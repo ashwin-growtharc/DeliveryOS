@@ -6,6 +6,97 @@ All notable changes to DeliveryOS are recorded here, newest first. See
 
 ---
 
+## Contributing back over MCP, behind a preview (PR #27)
+
+`deliveryos mcp` gained two tools: `preview_contribution` and
+`contribute_artifact`. The order between them is the safety property — the
+second is unreachable without a token the first mints.
+
+### The argument that approved the tool was false
+
+The plan said push *"writes to a branch and a PR — never to the user's
+project — so despite sounding like the scariest tool it is the safest mutating
+one"*, and `capabilities.ts` carried the same claim as the stated justification
+for exposing it. Two thirds of it was wrong:
+
+- **It does write to the project.** `push.ts:772-774` puts `pendingPr` in the
+  lockfile, and `push.ts:624` reads it back to **disable the stale-push guard**
+  for the next push. Opening a PR silently removes a safety check for whoever
+  pushes next.
+- **It is not the safest.** It is the only operation whose blast radius reaches
+  other people, and it publishes the *whole* pulled folder.
+
+### The precondition was already recorded, with a concrete reason
+
+`docs/agent-surface-plan.md`: *"An agent pushing a filled-in risk register would
+publish client data to a shared repo."* Phase 15 ships a `risk-register` whose
+own README says *"fill in your own copy, never push it back"*, against
+`ARCHITECTURE.md`'s *"No customer data in any DeliveryOS-shared remote, ever"* —
+whose stated reason is that `doc`/`dataset` kinds *"make it much easier to tempt
+someone into uploading a real client deliverable."* An agent with a push tool is
+that temptation automated.
+
+So `planPush` was built: everything `pushArtifact` computes before its first
+remote mutation and then throws away. Deliberately **not** a refactor of
+`pushArtifact` — that function's own comments record a bug that opened a PR
+*deleting an artifact's entire payload* on a shared remote. The cost of two
+implementations is paid by an equivalence test, proven by making the preview
+hide a file: *"the push committed BRAND-NEW.md, which the preview never
+promised."*
+
+### A fail-open the design nearly shipped with
+
+The token is a derived digest, so authorisation needs no stored grant. But
+single-use does: a digest cannot tell a first presentation from a second.
+
+An early draft claimed a restart "fails closed" without a nonce. **Backwards.**
+After a restart the digest still recomputes identically while the consumed set
+is empty — accepted, and `pendingPr` cannot cover it because the PR never
+opened. That is precisely the orphaned-branch case: `pushBranch` succeeding and
+`pulls.create` failing leaves a branch nothing deletes, and agents retry by
+default. Fixed with a per-instance nonce, proven by deleting it and watching the
+restart test report `expected null to be 'mismatch'`.
+
+An earlier design also offered a test hook to clear the consumed set — which
+**was** the fail-open case wearing a test's clothes, since it cleared the set
+while keeping the nonce. Replaced with a factory, so "a restart" is a second
+instance.
+
+### The server was telling agents it could not push
+
+The `instructions` string — **runtime output**, the first thing a connecting
+client reads — was a single unconditional literal saying *"These tools are
+READ-ONLY … They cannot pull, push, or modify anything."* It stayed that way
+through `add_remote` and `contribute_artifact` shipping, and contradicted itself
+two sentences later by referring to "the two configuration ones".
+
+This is the same defect class this batch keeps finding — a description
+asserting the opposite of the code — but one layer out, where the manifest gate
+cannot see it: that gate checks declarations, not prose. An agent told the
+surface cannot push, while holding a push tool, has a false model of its own
+capabilities, which is the opposite of what the contribution flow was built to
+guarantee.
+
+Now composed from the supplied ports, so it cannot drift again, and
+`mcp.instructions.test.ts` asserts prose and composition agree **in both
+directions** — a server that writes must say so, and one that does not must not
+claim it does.
+
+### Also
+
+- `addRemote`/`removeRemote` orchestration hoisted to
+  `engine/remote/manageRemotes.ts`; the contribute port would have been its
+  third copy.
+- `prContent` gained `initiatedBy`, so an agent-opened PR says so above the
+  metadata line.
+- `ARCHITECTURE.md` gained **§3.5 Where the code lives** — the real folder
+  structure, and a table of which architectural rules are enforced by a test
+  rather than by convention.
+
+865 tests before this doc pass, 870 after. CI green on an isolated runner.
+
+---
+
 ## CI ran for the first time, and immediately earned its keep (PR #27)
 
 `.github/workflows/ci.yml` was added weeks ago and had **never executed**. It
