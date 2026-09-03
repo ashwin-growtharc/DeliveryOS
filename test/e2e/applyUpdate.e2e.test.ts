@@ -532,4 +532,113 @@ describe('applyAvailableUpdates e2e', () => {
     120_000,
   );
 
+
+  // ---------------------------------------------------------------------
+  // post_install output redaction on the UPDATE path.
+  //
+  // pull.ts redacts post_install output at four sites; applyUpdate.ts did it
+  // at NONE, so the same credential leak survived in the other half of the
+  // same feature -- reachable from `check-updates --apply` and from the
+  // desktop app's Apply Update. The failure path is the riskier of the two:
+  // execSync's message embeds "Command failed: <the whole command line>", so
+  // a credential passed as an ARGUMENT leaks even when the child prints
+  // nothing at all.
+
+  /** A credential in the shape real tooling actually emits. */
+  const LEAKED_PASSWORD = 's3cr3t-pw-should-not-survive';
+  const LEAKED_URL = `postgres://admin:${LEAKED_PASSWORD}@localhost:5432/app`;
+
+  /** Rewrites an artifact's post_install AND version upstream in one commit,
+   * so the update actually runs the new command. Returns the original
+   * manifest text; callers restore it in a `finally` so this shared fixture
+   * remote is left as it was found. */
+  async function setUpstreamPostInstall(id: string, command: string, newVersion: string): Promise<string> {
+    const manifestPath = path.join(fixtureRemoteDir, 'artifacts', id, 'manifest.yaml');
+    const original = fs.readFileSync(manifestPath, 'utf-8');
+    const rewritten = original
+      .replace(/^version: .*$/m, `version: ${newVersion}`)
+      .replace(/^post_install: .*$/m, `post_install: ${command}`);
+    expect(rewritten, 'fixture manifest should have both fields to rewrite').not.toBe(original);
+    fs.writeFileSync(manifestPath, rewritten, 'utf-8');
+    const git = simpleGit(fixtureRemoteDir);
+    await git.add([`artifacts/${id}/manifest.yaml`]);
+    await git.commit(`redaction fixture: ${id} -> ${newVersion}`);
+    return original;
+  }
+
+  async function restoreUpstreamManifest(id: string, original: string): Promise<void> {
+    const manifestPath = path.join(fixtureRemoteDir, 'artifacts', id, 'manifest.yaml');
+    fs.writeFileSync(manifestPath, original, 'utf-8');
+    const git = simpleGit(fixtureRemoteDir);
+    await git.add([`artifacts/${id}/manifest.yaml`]);
+    await git.commit(`restore ${id} after redaction fixture`);
+  }
+
+  it(
+    'redacts a credential post_install printed on the UPDATE path, without eating the rest of the output',
+    async () => {
+      const remoteName = 'apply-update-redaction-ok';
+      addRemoteEntry({ name: remoteName, url: fixtureRemoteDir, addedAt: new Date().toISOString() });
+      await cloneRemote(remoteName, fixtureRemoteDir);
+
+      const artifact = TEST_ARTIFACTS.find((a) => a.hasPostInstall)!;
+      const cwd = newScratchCwd('redaction-update-ok');
+      await pullArtifact(artifact.id, remoteName, cwd);
+
+      const original = await setUpstreamPostInstall(
+        artifact.id,
+        `node -e "console.log('installing'); console.log('DATABASE_URL=${LEAKED_URL}'); console.log('done')"`,
+        '2.0.0',
+      );
+      try {
+        const results = await applyAvailableUpdates(cwd);
+        expect(results).toHaveLength(1);
+        expect(results[0].applied).toBe(true);
+
+        const output = results[0].postInstallOutput ?? '';
+        expect(output, 'post_install should have produced output').not.toBe('');
+        expect(output).not.toContain(LEAKED_PASSWORD);
+        // Still readable as build output. A redactor that ate the whole field
+        // would satisfy the assertion above and be useless.
+        expect(output).toContain('installing');
+        expect(output).toContain('done');
+      } finally {
+        await restoreUpstreamManifest(artifact.id, original);
+      }
+    },
+    60_000,
+  );
+
+  it(
+    'redacts the credential on the update FAILURE path, where it lands in a reason the CLI prints and the app toasts',
+    async () => {
+      const remoteName = 'apply-update-redaction-fail';
+      addRemoteEntry({ name: remoteName, url: fixtureRemoteDir, addedAt: new Date().toISOString() });
+      await cloneRemote(remoteName, fixtureRemoteDir);
+
+      const artifact = TEST_ARTIFACTS.find((a) => a.hasPostInstall)!;
+      const cwd = newScratchCwd('redaction-update-fail');
+      await pullArtifact(artifact.id, remoteName, cwd);
+
+      const original = await setUpstreamPostInstall(
+        artifact.id,
+        `node -e "console.log('DATABASE_URL=${LEAKED_URL}'); process.exit(1)"`,
+        '2.1.0',
+      );
+      try {
+        const results = await applyAvailableUpdates(cwd);
+        expect(results).toHaveLength(1);
+        expect(results[0].applied).toBe(false);
+
+        const reason = results[0].reason ?? '';
+        expect(reason, 'a refusal must always say why').not.toBe('');
+        expect(reason).toContain('post_install');
+        expect(reason).not.toContain(LEAKED_PASSWORD);
+      } finally {
+        await restoreUpstreamManifest(artifact.id, original);
+      }
+    },
+    60_000,
+  );
+
 });

@@ -10,6 +10,7 @@ import { pristinePath, resolveContainedPath, isRootInstall, readPayloadFootprint
 import { ProgressCallback, POST_INSTALL_TIMEOUT_MS, POST_INSTALL_MAX_BUFFER_BYTES, writePristineSnapshot } from '../pull/pull';
 import { isSensitiveTargetPath } from '../pull/wiring';
 import { isExecError, isToolNotFoundError } from '../execHelpers';
+import { redactEmbeddedSecrets } from '../audit/redact';
 import { compareVersions } from './sync';
 
 /** One artifact's real update-apply outcome -- either it was actually
@@ -281,7 +282,7 @@ export async function applyAvailableUpdates(
     let postInstallOutput: string | undefined;
     if (manifest.post_install) {
       try {
-        postInstallOutput = execSync(manifest.post_install, {
+        const rawPostInstall = execSync(manifest.post_install, {
           cwd: installTarget,
           stdio: 'pipe',
           timeout: POST_INSTALL_TIMEOUT_MS,
@@ -302,11 +303,22 @@ export async function applyAvailableUpdates(
           // failure rather than anything that names the real cause.
           maxBuffer: POST_INSTALL_MAX_BUFFER_BYTES,
         }).toString('utf-8');
+        // Redacted before it leaves this function, for exactly the reasons
+        // pull.ts's own post_install call documents -- this is the SAME
+        // manifest command, just on the update path. Missed when the pull
+        // side was fixed, so `check-updates --apply` still surfaced raw
+        // registry URLs and connection strings to the CLI and to the app.
+        postInstallOutput = redactEmbeddedSecrets(rawPostInstall);
       } catch (err) {
         const stdout = isExecError(err) ? err.stdout?.toString('utf-8') ?? '' : '';
         const stderr = isExecError(err) ? err.stderr?.toString('utf-8') ?? '' : '';
-        const detail = err instanceof Error ? err.message : String(err);
-        const output = [stdout, stderr].filter((s) => s.trim().length > 0).join('\n');
+        // Both need redacting, and `detail` is the one easy to miss: it is
+        // `execSync`'s message, which embeds the COMMAND it ran ("Command
+        // failed: <the whole command line>"), so a credential passed as an
+        // argument leaks even when the child printed nothing at all. See
+        // pull.ts's failure path for the full reasoning.
+        const detail = redactEmbeddedSecrets(err instanceof Error ? err.message : String(err));
+        const output = redactEmbeddedSecrets([stdout, stderr].filter((s) => s.trim().length > 0).join('\n'));
         // Files are already updated on disk at this point -- there's no
         // coherent "old version" left to roll back to (the same accepted
         // gap pullArtifact's own post_install failure has, see its doc
