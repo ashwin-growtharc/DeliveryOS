@@ -609,6 +609,31 @@
 
   // ---------- browse ----------
 
+  /** True for the three `assertUsableProjectDir` refusals -- not absolute,
+   * does not exist, not a directory. They are the only failures where the
+   * right response is to forget the stored folder and ask for another one;
+   * every other error is about an artifact or a remote, not the project.
+   *
+   * Matched on the message because these cross the sidecar's JSON-RPC
+   * boundary as plain Errors carrying no distinguishing type. src/engine/paths.ts
+   * owns the wording, and test/e2e/detailDisclosure.e2e.test.ts pins the two
+   * sides together so a reword there cannot silently disable this. */
+  function isUnusableProjectDirError(err) {
+    return /^The project directory /.test(errorText(err) || '');
+  }
+
+  /** Forgets the stored project folder and returns to "No folder selected" --
+   * the recovery init() already performs on a stale stored path, lifted out so
+   * the in-session paths can share it instead of getting stuck. */
+  function forgetUnusableProjectDir() {
+    state.projectDir = null;
+    localStorage.removeItem(PROJECT_DIR_KEY);
+    state.catalog = [];
+    state.catalogSkipped = [];
+    state.catalogError = null;
+    renderFolderDisplay();
+  }
+
   async function loadCatalog() {
     renderFolderDisplay();
     if (!state.projectDir) {
@@ -629,12 +654,21 @@
         state.catalogError = null;
       } catch (err) {
         toastError(err);
-        // Recorded, not just toasted. Setting the catalog to [] and relying on
-        // a 5-second toast to explain why is how a failed load ended up
-        // looking exactly like an empty catalog.
-        state.catalogError = errorText(err);
-        state.catalog = [];
-        state.catalogSkipped = [];
+        if (isUnusableProjectDirError(err)) {
+          // Retrying cannot fix a folder that is gone, and the error state
+          // below offers a Retry bound to refreshCatalogFromRemotes() that
+          // would re-throw this exact error every time -- leaving the only
+          // real escape hatch buried in Settings. Recover the way init()
+          // already does instead.
+          forgetUnusableProjectDir();
+        } else {
+          // Recorded, not just toasted. Setting the catalog to [] and relying on
+          // a 5-second toast to explain why is how a failed load ended up
+          // looking exactly like an empty catalog.
+          state.catalogError = errorText(err);
+          state.catalog = [];
+          state.catalogSkipped = [];
+        }
       }
       renderChips();
       renderCards();
@@ -677,7 +711,17 @@
         state.catalogError = null;
       } catch (err) {
         toastError(err);
-        state.catalogError = errorText(err);
+        if (isUnusableProjectDirError(err)) {
+          forgetUnusableProjectDir();
+        } else {
+          state.catalogError = errorText(err);
+          // Cleared here too, matching loadCatalog's own catch. Leaving the
+          // previous entries in state behind the error banner is invisible
+          // today only because renderCards early-returns on catalogError --
+          // exactly the asymmetry that bites the moment that return moves.
+          state.catalog = [];
+          state.catalogSkipped = [];
+        }
       }
       renderChips();
       renderCards();
@@ -7270,6 +7314,16 @@ ${bodyHtml}
         toastSuccess(`${after - before} new update(s) available.`);
       }
     } catch (err) {
+      // A background timer must not nag, and must not throw away a setting for
+      // a condition that may well be transient (an unmounted network drive
+      // comes back). Before this, a stale project folder toasted the same
+      // "does not exist" error every 20 minutes for the life of the session,
+      // with no way to stop it short of restarting the app. Stay quiet here
+      // and let the foreground paths -- where someone is actually present to
+      // answer the prompt -- do the recovering.
+      if (isUnusableProjectDirError(err)) {
+        return;
+      }
       toastError(err);
     } finally {
       autoSyncInFlight = false;

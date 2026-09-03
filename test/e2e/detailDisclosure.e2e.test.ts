@@ -67,7 +67,15 @@ async function bootApp(catalogResult: unknown): Promise<void> {
 
     const engine = async (command: string, args: Record<string, unknown>) => {
       calls.push({ command, args });
-      if (command === 'catalog.list' || command === 'catalog.refresh') return result;
+      if (command === 'catalog.list' || command === 'catalog.refresh') {
+        // Lets a test flip the engine to failing AFTER boot. That is the only
+        // way to reach the in-session recovery paths: init() has its own catch
+        // for a bad stored folder, so a boot-time failure would exercise that
+        // and prove nothing about loadCatalog/refreshCatalogFromRemotes.
+        const failure = (w as { __failCatalog?: string }).__failCatalog;
+        if (failure) throw new Error(failure);
+        return result;
+      }
       if (command === 'remote.list') return [{ name: 'test-remote', url: 'https://example.invalid/r' }];
       if (command === 'artifact.pull') {
         return { manifest: { id: 'command-only-artifact' }, installTarget: 'command-only', missingRequiredParams: [] };
@@ -206,4 +214,41 @@ describe('Detail: what a person can see before pulling', () => {
     },
     120_000,
   );
+
+  // The `cwd` tightening (assertUsableProjectDir) turned a stale project
+  // folder from "a catalog where everything reads not_pulled" into a hard
+  // error. init() already recovered from that at startup; the two IN-SESSION
+  // paths did not, and the error state's Retry is bound to
+  // refreshCatalogFromRemotes(), which re-throws the same error every press.
+  it(
+    'a project folder that disappears mid-session is forgotten, not left behind a Retry that can never work',
+    async () => {
+      await bootApp(CATALOG);
+      expect(
+        await page.evaluate(() => localStorage.getItem('deliveryos.projectDir')),
+        'the folder should be stored after a clean boot',
+      ).toBe('C:/fake/project');
+
+      // The folder goes away while the app is running.
+      await page.evaluate(() => {
+        (window as unknown as Record<string, unknown>).__failCatalog =
+          'The project directory "C:/fake/project" does not exist.';
+      });
+      await page.locator('#refresh-btn').click();
+
+      await page.waitForFunction(
+        () => localStorage.getItem('deliveryos.projectDir') === null,
+        null,
+        // Generous, but not so long that a regression takes half a minute to report.
+        { timeout: 10_000 },
+      );
+      expect(await page.locator('#folder-path').textContent()).toBe('No folder selected');
+      expect(
+        await page.locator('#browse-error').isHidden(),
+        'the dead Retry must not be offered for a folder that no longer exists',
+      ).toBe(true);
+    },
+    120_000,
+  );
+
 });
