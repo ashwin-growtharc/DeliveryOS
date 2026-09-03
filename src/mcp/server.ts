@@ -58,19 +58,116 @@ function toRow(entry: CatalogListEntry): SearchRow {
   };
 }
 
-/** Additive, so an artifact matching on both id and description outranks one
- * matching on either alone. Deterministic and explainable on purpose -- an
- * agent that cannot predict the ranking will just request everything. */
+/** Words too common to narrow anything, and present in most natural questions.
+ * Dropped so "a skill for reviewing code" scores on `reviewing`/`code` rather
+ * than on whatever happens to contain "for". */
+const IGNORED_QUERY_WORDS = new Set([
+  'a', 'an', 'the', 'for', 'to', 'of', 'in', 'on', 'with', 'and', 'or',
+  'my', 'me', 'is', 'are', 'that', 'this', 'it', 'something', 'anything',
+  'how', 'do', 'does', 'help', 'need', 'want', 'use', 'using', 'about',
+]);
+
+/** Splits text into comparable words. Ids are hyphenated, descriptions are
+ * prose, tags are free text -- all three become the same shape here. */
+function words(text: string): string[] {
+  return text.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+}
+
+/**
+ * How well one query term matches one indexed word. 2 = the same word,
+ * 1 = a shared stem, 0 = unrelated.
+ *
+ * Word-level, NOT substring, because substring matching was wrong in BOTH
+ * directions and each direction produced a different bad answer:
+ *
+ *  - **False positives.** "setting up authentication" ranked `docs-lookup` and
+ *    `doc-updater` top, because "up" is inside "lookup" and "updater". A
+ *    question about auth answered with three documentation artifacts.
+ *  - **False negatives.** "reviewing" never matched `code-reviewer`, since
+ *    `'code-reviewer'.includes('reviewing')` is false. Substring matching only
+ *    works when the query term is SHORTER than the indexed word, which is not
+ *    a property natural questions have.
+ *
+ * The prefix rule covers the morphology this catalog actually contains --
+ * review/reviewer/reviewing, test/testing, auth/authentication -- without a
+ * stemmer. Four characters is the floor because below it prefixes stop
+ * discriminating: "api" and "app" would collide at three.
+ */
+function termMatch(term: string, word: string): number {
+  if (word === term) return 2;
+  const [shorter, longer] = term.length < word.length ? [term, word] : [word, term];
+  return shorter.length >= 4 && longer.startsWith(shorter) ? 1 : 0;
+}
+
+/** Best match for a term anywhere in one field. */
+function bestMatch(term: string, indexed: string[]): number {
+  let best = 0;
+  for (const word of indexed) {
+    best = Math.max(best, termMatch(term, word));
+    if (best === 2) break;
+  }
+  return best;
+}
+
+/**
+ * Scores an artifact against a query, PER TERM and PER WORD.
+ *
+ * This used to match the whole query as one substring, and the bug that
+ * exposed was severe in exactly the case the tool exists for: **"reviewing a
+ * pull request" returned zero matches** against a catalog containing
+ * `code-reviewer`, `pr-review-reality-checker` and `java-api-review`. A single
+ * word worked ("review" -> 34 matches); a natural question did not, because no
+ * id or description contains that exact phrase.
+ *
+ * Every test here used a single-word query, because that is what the
+ * implementation was built for -- so the tests agreed with the code and both
+ * were wrong. It surfaced the first time the tool was asked a question the way
+ * an agent would actually ask one, which no test was going to do.
+ *
+ * The failure mode is the worst available: an empty result reads as an answer.
+ * An agent concludes nothing is available -- precisely what the server
+ * instructions warn against for unconfigured remotes.
+ *
+ * Still additive and deterministic: an agent that cannot predict the ranking
+ * will just request everything.
+ */
 function score(entry: CatalogListEntry, query: string): number {
-  const q = query.toLowerCase();
+  const whole = query.trim().toLowerCase();
   const id = entry.manifest.id.toLowerCase();
+
+  // An exact id match wins outright, whatever the tokeniser makes of it.
+  if (id === whole) return 1000;
+
+  const terms = words(whole).filter((t) => t.length >= 3 && !IGNORED_QUERY_WORDS.has(t));
+  // A query of nothing but stop-words ("how do I") is not a search. Returning
+  // 0 filters it out rather than ranking the catalog arbitrarily.
+  if (terms.length === 0) return 0;
+
+  const idWords = words(id);
+  const descWords = words(entry.manifest.description);
+  const tagWords = flattenTags(entry).flatMap(words);
+  const kind = entry.manifest.kind.toLowerCase();
+
   let total = 0;
-  if (id === q) total += 100;
-  else if (id.includes(q)) total += 60;
-  if (entry.manifest.description.toLowerCase().includes(q)) total += 30;
-  if (flattenTags(entry).some((t) => t.toLowerCase().includes(q))) total += 20;
-  if (entry.manifest.kind.toLowerCase() === q) total += 15;
-  return total;
+  let matchedTerms = 0;
+
+  for (const term of terms) {
+    // An exact word in the id is the strongest signal a catalog like this
+    // offers -- ids are short and hand-written, so a word in one was chosen.
+    const termScore = bestMatch(term, idWords) * 40
+      + bestMatch(term, descWords) * 12
+      + bestMatch(term, tagWords) * 10
+      + termMatch(term, kind) * 8;
+
+    if (termScore > 0) matchedTerms += 1;
+    total += termScore;
+  }
+
+  if (matchedTerms === 0) return 0;
+
+  // Breadth over depth: something matching `pull` AND `request` is a better
+  // answer than something mentioning `pull` three times.
+  return total + matchedTerms * 30;
 }
 
 /**

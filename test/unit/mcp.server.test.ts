@@ -270,6 +270,66 @@ describe('MCP tool surface', () => {
     await close();
   });
 
+  describe('search answers questions the way they are actually asked', () => {
+    // Every search test here used a SINGLE WORD, because that is what the
+    // scorer was built for -- so the tests agreed with the code and both were
+    // wrong. Dogfooding the tool against the real catalog found it in under a
+    // minute: "reviewing a pull request" returned ZERO matches against a
+    // catalog containing `code-reviewer`, `pr-review-reality-checker` and
+    // `java-api-review`, because the whole phrase was matched as one substring.
+    //
+    // The failure mode is the worst available -- an empty result reads as an
+    // answer, and an agent concludes nothing is available.
+
+    it('finds an artifact from a multi-word question', async () => {
+      const { client, close } = await connect();
+      const res = await call(client, 'search_artifacts', {
+        cwd: '/p',
+        query: 'reviewing a diff for defects',
+      });
+      expect(res.data.results.map((r) => r.id)).toContain('code-review');
+      await close();
+    });
+
+    it('matches a word stem, since questions do not use catalog spelling', async () => {
+      // "reviewing" must reach `code-review`. Substring matching cannot do
+      // this in that direction -- 'code-review'.includes('reviewing') is false.
+      const { client, close } = await connect();
+      const res = await call(client, 'search_artifacts', { cwd: '/p', query: 'reviewing' });
+      expect(res.data.results.map((r) => r.id)).toContain('code-review');
+      await close();
+    });
+
+    it('does not match a short word hiding inside a longer one', async () => {
+      // The other direction, and the one that produced nonsense answers:
+      // "up" is inside "lookup" and "updater", so "setting up authentication"
+      // ranked documentation artifacts first. Word-level matching means a
+      // fragment matches nothing.
+      const { client, close } = await connect();
+      const res = await call(client, 'search_artifacts', { cwd: '/p', query: 'utt' });
+      expect(res.data.total, '"utt" is a fragment of "button" and must not match it').toBe(0);
+      await close();
+    });
+
+    it('ranks something matching two terms above something matching one', async () => {
+      // Breadth over depth. Without it, an artifact mentioning one term
+      // repeatedly outranks one that actually answers the whole question.
+      const { client, close } = await connect();
+      const res = await call(client, 'search_artifacts', { cwd: '/p', query: 'button component' });
+      expect(res.data.results[0].id).toBe('react-button');
+      await close();
+    });
+
+    it('returns nothing for a query of only filler words', async () => {
+      // "how do I" is not a search. Ranking the whole catalog for it would be
+      // worse than saying nothing.
+      const { client, close } = await connect();
+      const res = await call(client, 'search_artifacts', { cwd: '/p', query: 'how do I' });
+      expect(res.data.total).toBe(0);
+      await close();
+    });
+  });
+
   it('ranks an exact id match above a description-only match', async () => {
     const { client, close } = await connect();
     const res = await call(client, 'search_artifacts', { cwd: '/p', query: 'code-review' });
