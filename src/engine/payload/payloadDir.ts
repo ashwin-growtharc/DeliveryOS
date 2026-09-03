@@ -1,5 +1,6 @@
 import * as path from 'path';
 import { resolveArtifact } from '../pull/pull';
+import { CatalogEntry } from '../catalog/catalog';
 import { cachePath } from '../remote/remoteCache';
 import { resolveContainedPath } from '../paths';
 import { ManifestValidationError } from '../errors';
@@ -15,8 +16,18 @@ import { ManifestValidationError } from '../errors';
  * `resolveContainedPath` rather than a plain `path.join`, so a value like
  * `"../../../../evil"` can't escape the remote's own clone.
  */
-export function resolvePayloadDir(remoteName: string, id: string): string {
-  const entry = resolveArtifact(id, remoteName);
+export function resolvePayloadDir(
+  remoteName: string,
+  id: string,
+  catalog?: CatalogEntry[],
+): string {
+  // `catalog` is an optional already-built catalog, mirroring
+  // `resolveArtifact`'s own parameter of the same shape. Without it a caller
+  // that resolves an artifact and THEN its payload builds the catalog twice
+  // -- ~141ms each against the real 230-artifact remote, for identical input.
+  const entry = catalog
+    ? resolveArtifact(id, remoteName, catalog)
+    : resolveArtifact(id, remoteName);
   const { manifest } = entry;
   const remoteDir = cachePath(remoteName);
   if (!manifest.payload_path) {
