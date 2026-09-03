@@ -65,17 +65,52 @@ describe('MCP adapter boundary', () => {
     expect(reaching).toEqual([...COMPOSITION_FILES]);
   });
 
-  it('exposes no mutating operation on the port', () => {
-    // Read-only is a property of the INTERFACE, not just of today's tool list.
-    // Adding `pull` here would let a future tool write to a person's project
-    // without anyone revisiting the consent question that decision deserves.
+  /** Every method name declared on `DeliveryOsReadPort`, in source order.
+   *
+   * Read from the interface body rather than the whole file, so a method on
+   * some other type cannot satisfy or trip the assertion below. */
+  function declaredPortMethods(): string[] {
     const source = fs.readFileSync(path.join(MCP_DIR, 'ports.ts'), 'utf-8');
-    for (const forbidden of ['pull', 'push', 'remove', 'install', 'write', 'delete', 'apply']) {
+    const start = source.indexOf('export interface DeliveryOsReadPort {');
+    // Anti-vacuity: if the interface is renamed or removed, this test must
+    // FAIL rather than quietly find zero methods and report success. The guard
+    // that checks nothing is worse than no guard, because it reads as one.
+    expect(start, 'DeliveryOsReadPort not found in ports.ts -- this guard is checking nothing').toBeGreaterThan(-1);
+
+    const body = source.slice(start, source.indexOf('\n}', start));
+    const names = [...body.matchAll(/^ {2}(\w+)\s*\(/gm)].map((m) => m[1]);
+    expect(names.length, 'parsed zero methods off DeliveryOsReadPort -- the parser is broken, not the port').toBeGreaterThan(0);
+    return names;
+  }
+
+  it('exposes exactly the three read operations on the port, and nothing else', () => {
+    // An ALLOWLIST, not a denylist of suspicious-looking names.
+    //
+    // The previous version of this test matched seven substrings
+    // (pull|push|remove|install|write|delete|apply). It would have waved
+    // through `readInstallParamValues` -- which returns raw `.env.local`
+    // values including secrets -- and equally `configure`, `set`, `run` and
+    // `exec`. It asserted a naming convention while claiming to assert a
+    // property, which is the failure mode where a guard reads as protection
+    // and is not.
+    //
+    // Naming the permitted set instead means ANY new method fails this test,
+    // including one nobody thought to forbid. Widening the port then requires
+    // editing this list, which is exactly where the consent question belongs.
+    expect(declaredPortMethods().sort()).toEqual(['listCatalog', 'readArtifact', 'refreshCatalog']);
+  });
+
+  it('keeps the port free of anything that returns secrets', () => {
+    // Separate from the allowlist above because it survives a deliberate
+    // widening: if someone adds a legitimate method later, they must still not
+    // add this one. `artifact.readInstallParamValues` (sidecar.ts) returns the
+    // project's real `.env.local` values -- the whole point of `secret: true`
+    // in the manifest schema is that those never reach a model.
+    for (const banned of ['readInstallParamValues', 'installParamValues', 'readEnv', 'secrets']) {
       expect(
-        new RegExp(`^\\s{2}${forbidden}\\w*\\s*\\(`, 'im').test(source),
-        `DeliveryOsReadPort declares a "${forbidden}"-shaped method. Mutation through an agent is a `
-          + 'separate decision with its own consent model, not a widening of this interface.',
-      ).toBe(false);
+        declaredPortMethods(),
+        `"${banned}" would put real secret values into model context.`,
+      ).not.toContain(banned);
     }
   });
 

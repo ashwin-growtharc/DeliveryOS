@@ -41,6 +41,45 @@ export function remoteCachePath(name: string): string {
   return path.join(remotesCacheRoot(), name);
 }
 
+/**
+ * Refuses a project directory that cannot be one.
+ *
+ * Every containment check in this file validates a path *within* a root
+ * (`resolveContainedPath`, `pristinePath`, `adaptSrcDirPath`). Nothing
+ * validated the root itself, which is a real gap once `cwd` arrives from
+ * anywhere but a shell: a relative path resolves against the *calling
+ * process*, not the project, so an operation reports on — or writes to — a
+ * directory nobody named. Worse in combination with `install_target: "."`,
+ * a supported shape (see `isRootInstall`), where `installTarget === cwd` and
+ * the payload copy plus `post_install` land directly in it.
+ *
+ * This lives in the engine rather than in one adapter because all three
+ * driving surfaces take a `cwd` and had three different answers to it: the
+ * CLI passes `process.cwd()` (never wrong), the MCP adapter checked it, and
+ * the sidecar accepted any non-empty string off the wire.
+ *
+ * Deliberately does NOT check that the directory is a *project* (no lockfile
+ * or `package.json` requirement): `pull` into an empty directory is a
+ * legitimate first use, and demanding a marker file would break it.
+ */
+export function assertUsableProjectDir(cwd: string): void {
+  if (!path.isAbsolute(cwd)) {
+    throw new Error(
+      `The project directory must be an absolute path, got "${cwd}". A relative path resolves `
+        + 'against the process that received the request, which is not the project.',
+    );
+  }
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(cwd);
+  } catch {
+    throw new Error(`The project directory "${cwd}" does not exist.`);
+  }
+  if (!stat.isDirectory()) {
+    throw new Error(`The project directory "${cwd}" is not a directory.`);
+  }
+}
+
 /** Project-local (cwd-scoped) DeliveryOS directory. */
 export function projectDeliveryOsDir(cwd: string): string {
   return path.join(cwd, '.deliveryos');

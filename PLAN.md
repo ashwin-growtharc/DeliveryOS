@@ -373,10 +373,10 @@ them. So `mcp.architecture.test.ts` has a fourth structural gate asserting the
 server is stdio-only. Adding a second transport means deleting that test, and
 deleting it is where this decision gets re-examined instead of inherited.
 
-**Still open from this section:** dry-run-by-default remains Stage-1-dependent
-(the 56 `console.*` sites across 11 files are still not separable into plan and
-report), and it is not needed by a read-only surface. The `--no-wire` warning
-stands unchanged.
+**Still open from this section:** dry-run-by-default is not needed by a
+read-only surface, so it stays open — but it is **much cheaper than this
+document claimed**, and the claim is corrected below rather than repeated. The
+`--no-wire` warning stands unchanged.
 
 #### The original design, for reference
 
@@ -393,10 +393,25 @@ Stdio, in-process. Two things decide whether it is safe at all:
 - **Dry-run by default** — the right destination, but Stage-1-dependent, not an
   afternoon. The reference gates one call at the end of a path that always plans
   and always reports, because its CLI takes an injectable `io`/`spawn`.
-  DeliveryOS writes through `console.*` inside commander closures at **56 sites
-  across 11 files**, so planning and reporting aren't separable yet.
+  ~~DeliveryOS writes through `console.*` inside commander closures at 56 sites
+  across 11 files, so planning and reporting aren't separable yet.~~
+  **Corrected — this was wrong, and it was never right.** Counted against the
+  real source: `src/engine/**` has **zero** `console.*` in hand-written code
+  (the 44 apparent hits are string literals inside `*.generated.ts` vendored
+  bundles). Every site is CLI-layer — 74 across 12 files in
+  `src/cli/commands/`, 88 across 13 including `src/cli/output.ts`. The site
+  count matched nothing then or now.
+  The *inference* was the real error: **CLI print sites cannot block plan/apply
+  separation, because the engine never prints.** It already returns structured
+  data to every caller, `src/cli/output.ts` is already a presentation module,
+  and `deliveryos check-updates` vs `--apply` is a working plan/apply split
+  over a mutating operation. Most decisively, `applyUpdate.ts:262` already
+  computes `computeChangedFiles(payloadSrc, pristineTarget)` — the plan —
+  *before* the `rmSync` at `:275`, then discards it on every refusal path.
+  A real `planPull()` is ~60–80 lines composing already-pure functions, not a
+  phase of work. This contradicted `PLAN.md`'s own line above, which was right.
   **And note:** `--no-wire` is *not* a safe substitute — it still runs
-  `execSync(manifest.post_install)` (`pull.ts:57` → `pull.ts:282`). The help
+  `execSync(manifest.post_install)` (`src/cli/commands/pull.ts:93` → `src/engine/pull/pull.ts:407`). The help
   text that claimed otherwise was corrected under Tier 0; the behaviour is
   unchanged and pinned by a characterization test, so this remains true of any
   MCP surface that reaches for `--no-wire` as a safety measure.
@@ -410,7 +425,7 @@ registry the server sees, not merely hidden from `tools/list`.
 
 Each needs its own answer, not one policy: `push` needs a diff preview first (it
 is all-or-nothing over the whole folder today, with no confirmation); `remove`
-needs a confirmation story (the app confirm-gates it at `app.js:4780`, the CLI
+needs a confirmation story (the app confirm-gates it at `app.js:4867-4871`, the CLI
 does not); `config --set` needs a by-reference form, because a literal secret in
 a tool call is in model context by construction (`agent-native` solved this with
 `${keys.NAME}` indirection plus keeping secret writes off agent actions
@@ -419,7 +434,7 @@ entirely).
 ### The safety rule this phase exists to protect
 
 Every `apply*` handler in the sidecar today **assumes a human already clicked
-something** (`src/sidecar.ts:520-524`, `556-557`) — that confirmation lives in
+something** (`src/sidecar.ts:536-546`, `:569-579` -- the APPLY halves; `:524`/`:554` are the read halves, which write nothing) — that confirmation lives in
 the desktop UI, not the handler. So: exposure is **default-closed** (opt in per
 operation, never inherited), every gate wraps the handler rather than sitting
 beside it, and the six AI `request*`/`apply*` pairs (build-fix, wiring-merge,

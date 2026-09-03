@@ -26,7 +26,7 @@ of ignoring that from 2× to 3×.
 code (the only hits under `src/engine/` are inside generated third-party
 bundles), zero `process.cwd()`, zero `commander` imports. `interface GithubClient`
 (`src/engine/github/github.ts:6-31`) is already a real driven port with two
-implementations. `ProgressCallback` (`src/engine/pull/pull.ts:53`) is already an
+implementations. `ProgressCallback` (`src/engine/pull/pull.ts:62`) is already an
 injected output port.
 
 **What's missing is one layer above it.** Neither surface derives argument
@@ -36,12 +36,12 @@ drift is invisible:
 
 | Invisible drift | Evidence |
 |---|---|
-| `--remote` optional in CLI `wiring`, **required** in sidecar `checkSourceDrift` | `src/cli/commands/wiring.ts` vs `src/sidecar.ts:708` |
+| ~~`--remote` optional in CLI `wiring`, required in sidecar `checkSourceDrift`~~ **Withdrawn — compares two different operations.** All 13 overlapping pairs agree on remote-requiredness. The real defect is *intra-sidecar*: `applyBuildFix` takes `remote`/`id` **optional** (`sidecar.ts:543`) while its siblings `applyWiringMerge` (`:573`) and `applyWiringPlacement` (`:606`) require them — and `readBuildFixLog` filters on both, so an unattributed entry is permanently unreadable (the engine says so at `fixBuildFailure.ts:343`) | `src/cli/commands/wiring.ts` vs `src/sidecar.ts:708` (the miscited pair) |
 | CLI `list` reports skipped manifests; sidecar **silently drops them** | `src/cli/commands/list.ts:25-37` |
 | 91 lines of `toPushOptions` exist **only** on the CLI; sidecar casts raw | `src/cli/commands/push.ts:65` vs `src/sidecar.ts:410` |
 | CLI `check-updates --apply` hits **all** artifacts; sidecar requires an `id` | `src/sidecar.ts:457` |
 | **No CLI equivalent of `catalog.refresh`** | the cache-staleness gap `README.md` already documents |
-| `hasWiring` dispatch gate written **three times** | `pull.ts:54-57`, `app.js:4554`, split across two sidecar keys |
+| `hasWiring` dispatch gate written **four times** (was "three") | `src/cli/commands/pull.ts:71`, `app.js:4633` (Pull), `app.js:4236` (Update — a second copy in the same file), and encoded as two sidecar keys (`artifact.pull` / `artifact.pullAndAutoWire`). The engine holds the same predicate twice more (`pullAndAutoWire.ts:44`, `applyUpdate.ts:339`) |
 | `remote add`/`remove` orchestration written twice | `remoteAdd.ts:13-27` vs `sidecar.ts:169-187` — the sidecar comment admits it *"mirrors `runRemoteAdd`'s order exactly"* |
 
 **Scale:** 42 distinct operations after dedup (25 sidecar-only, 2 CLI-only,
@@ -245,14 +245,21 @@ This one I initially missed entirely. Consider:
 
 Two findings make this materially worse than "most artifacts are unsigned":
 
-- **You don't even need `post_install`.** The auto-run denylist
+- ~~**You don't even need `post_install`.** The auto-run denylist
   (`SENSITIVE_TARGET_PREFIXES`, `src/engine/pull/wiring.ts:46`) is applied
-  **only** to `wiring_actions.targetFile` (`:176`, its sole use). Nothing applies
-  it to `install_target`, which the schema checks only for `..` escapes. So
-  `install_target: .git/hooks` parses, passes containment (it *is* inside the
-  project), and `cpSync` writes an executable hook there. `.claude/` isn't on the
-  list at all — and `test/unit/manifest.schema.test.ts:73` explicitly blesses
-  `.claude/agents/my-agent.md` as an ordinary target.
+  **only** to `wiring_actions.targetFile` (`:176`, its sole use). Nothing
+  applies it to `install_target` … so `install_target: .git/hooks` parses,
+  passes containment, and `cpSync` writes an executable hook there.~~
+  **Fixed since this was written.** The denylist is now applied to
+  `install_target` at `src/engine/pull/pull.ts:295` and
+  `src/engine/sync/applyUpdate.ts:234`; `.git/`, `.github/workflows/`,
+  `.vscode/`, `.husky/` and `.deliveryos/` are all refused with a
+  `ManifestValidationError`. Recorded in `PLAN.md`; this document was not
+  updated at the time.
+  Still true, and deliberately so: `.claude/` is **not** on the list, because
+  installing agent assets there is the catalogue's single most common shape
+  (213 of 237 artifacts) — and `test/unit/manifest.schema.test.ts:73` blesses
+  `.claude/agents/my-agent.md` as an ordinary target on purpose.
 - **A valid signature does not gate any of it.** `computePayloadDigest` hashes
   files under the payload path; **the manifest is never an input**
   (`src/engine/provenance/digest.ts:33-51`). So `post_install`, `post_remove`,
@@ -446,12 +453,38 @@ It is the right destination — MCP `pull` returning *"here is what would land,
 and what it would overwrite"*, with `apply: true` triggering the argument-bound
 approval round-trip from §5.
 
-**But it is not the cheap early win I first called it.** The reference gates one
-call at the end of a path that always plans and always reports, which works
-because its CLI takes an injectable `io` and `spawn`. DeliveryOS writes through
-`console.*` **directly inside commander action closures — 56 sites across 11
-files, with no returned exit codes.** Planning and reporting aren't separable
-today. So this depends on Stage 1, not an afternoon.
+~~**But it is not the cheap early win I first called it.** … DeliveryOS writes
+through `console.*` directly inside commander action closures — 56 sites across
+11 files … Planning and reporting aren't separable today. So this depends on
+Stage 1, not an afternoon.~~
+
+**Corrected: it *is* the cheap early win, and the paragraph above was wrong on
+both the number and the conclusion.**
+
+The number was never accurate — counted against real source, `src/engine/**`
+has **zero** `console.*` in hand-written code, and every site is CLI-layer (74
+across 12 files in `src/cli/commands/`, 88 across 13 with `src/cli/output.ts`).
+
+The conclusion was the worse error. This very paragraph names the location
+correctly — *"inside commander action closures"* — and then draws the opposite
+inference. **CLI print sites cannot block plan/apply separation, because the
+engine never prints.** The engine already returns structured data to every
+caller; `src/cli/output.ts` is already a dedicated presentation module;
+`check-updates` vs `check-updates --apply` is already a working plan/apply
+split over a mutating operation; and `applyUpdate.ts:262` already computes the
+per-file change plan *before* the writes at `:275`/`:279`, then throws it away
+on every refusal path.
+
+A genuine `planPull()` composes functions that are already exported and already
+pure — `computeChangedFiles`, `resolveWiringActions`,
+`resolveInstallParamValues`, `detectBuildCommand`, `isSensitiveTargetPath` —
+in ~60–80 lines, plus extracting the payload/target resolution from
+`pull.ts` into a shared helper so plan and apply cannot drift. It does not
+depend on Stage 1.
+
+What a dry-run still cannot predict is what `post_install` *does*: it is an
+opaque shell string, so the honest plan ends with "and then it runs `<command>`
+in `<dir>` with your environment" and claims nothing further.
 
 ## 7. Edge cases, and the tests that prove them
 

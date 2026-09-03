@@ -5,8 +5,7 @@ import {
 } from '../engine/catalog/catalog';
 import { resolveArtifact } from '../engine/pull/pull';
 import { resolvePrimaryDoc } from '../engine/payload/primaryDoc';
-import * as fs from 'fs';
-import * as path from 'path';
+import { assertUsableProjectDir } from '../engine/paths';
 import { ArtifactDetail, CatalogSnapshot, DeliveryOsReadPort } from './ports';
 
 /**
@@ -34,25 +33,15 @@ import { ArtifactDetail, CatalogSnapshot, DeliveryOsReadPort } from './ports';
  *
  * So the argument is kept -- an MCP client whose whole job is the project it is
  * open in should not need out-of-band registration to ask what is installed --
- * and the part of the rule that still applies is enforced: `cwd` must be an
- * absolute path to a directory that exists. When `pull` is reconsidered
- * (PLAN.md Stage 3), the session-scope rule applies to it in full.
+ * and the part of the rule that still applies is enforced by
+ * `assertUsableProjectDir`, which now lives in `engine/paths.ts` because all
+ * three driving surfaces needed it and had three different answers. When
+ * `pull` is reconsidered, a WRITE needs a registered root rather than an
+ * argued one; this exemption does not carry forward to a mutating tool.
+ *
+ * The stdio-only gate in `mcp.architecture.test.ts` pins the transport this
+ * argument depends on.
  */
-function assertUsableProjectDir(cwd: string): void {
-  if (!path.isAbsolute(cwd)) {
-    throw new Error(
-      `cwd must be an absolute path to the project directory, got "${cwd}". A relative path `
-        + 'would resolve against the MCP server process, which is not the project.',
-    );
-  }
-  let stat: fs.Stats;
-  try {
-    stat = fs.statSync(cwd);
-  } catch {
-    throw new Error(`cwd "${cwd}" does not exist.`);
-  }
-  if (!stat.isDirectory()) throw new Error(`cwd "${cwd}" is not a directory.`);
-}
 
 export function createEngineReadPort(): DeliveryOsReadPort {
   function snapshot(cwd: string, remote: string | undefined): CatalogSnapshot {

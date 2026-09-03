@@ -6,6 +6,7 @@ import { cachePath, refreshRemoteCache } from '../remote/remoteCache';
 import { upsertEntry, readLockfile } from '../lockfile/lockfile';
 import { pristinePath, resolveContainedPath, adaptSrcDirPath, isRootInstall, ensureProjectDeliveryOsDir, readPayloadFootprint } from '../paths';
 import { isSensitiveTargetPath } from './wiring';
+import { redactEmbeddedSecrets } from '../audit/redact';
 import {
   ArtifactResolutionError,
   ManifestValidationError,
@@ -403,7 +404,7 @@ export async function pullArtifact(
     // that stream mid-line. Capturing it instead and returning it lets each
     // caller (CLI vs. sidecar) decide how to surface it.
     try {
-      postInstallOutput = execSync(manifest.post_install, {
+      const rawPostInstall = execSync(manifest.post_install, {
         cwd: installTarget,
         stdio: 'pipe',
         timeout: postInstallTimeoutMs,
@@ -428,11 +429,37 @@ export async function pullArtifact(
         env: { ...process.env, DELIVERYOS_PROJECT_ROOT: cwd },
         maxBuffer: POST_INSTALL_MAX_BUFFER_BYTES,
       }).toString('utf-8');
+      // Redacted before it leaves this function. `post_install` is almost
+      // always a package-manager invocation, and those routinely echo registry
+      // URLs with embedded tokens and connection strings. Every caller of this
+      // value shows it to somebody: the CLI prints it, the app renders it in
+      // Activity, and an MCP tool would put it straight into model context.
+      // Redacting at the source means no caller has to remember. Uses the
+      // non-truncating variant, so it stays readable as build output.
+      postInstallOutput = redactEmbeddedSecrets(rawPostInstall);
     } catch (err) {
       const stdout = isExecError(err) ? err.stdout?.toString('utf-8') ?? '' : '';
       const stderr = isExecError(err) ? err.stderr?.toString('utf-8') ?? '' : '';
-      const detail = err instanceof Error ? err.message : String(err);
-      const output = [stdout, stderr].filter((s) => s.trim().length > 0).join('\n');
+      // THREE things need redacting here, not one, and the two extra ones are
+      // easy to miss:
+      //
+      //  - `output`, the child's own stdout/stderr. Obvious.
+      //  - `detail`, which is `execSync`'s error message -- and that embeds the
+      //    COMMAND it ran ("Command failed: <the whole command line>"). So a
+      //    credential passed as an argument leaks through the error even when
+      //    the child printed nothing at all.
+      //  - `manifest.post_install` itself, interpolated verbatim into the
+      //    timeout and tool-not-found branches below. A manifest that hardcodes
+      //    `postgres://user:pw@host/db` in its command puts that password into
+      //    an error message the CLI prints and the app renders.
+      //
+      // Found by the failure-path test in `postInstallRedaction.test.ts`, which
+      // still leaked after the success path was fixed.
+      const detail = redactEmbeddedSecrets(err instanceof Error ? err.message : String(err));
+      const output = redactEmbeddedSecrets(
+        [stdout, stderr].filter((s) => s.trim().length > 0).join('\n'),
+      );
+      const safeCommand = redactEmbeddedSecrets(manifest.post_install);
 
       // Confirmed empirically: `execSync` killed for exceeding its
       // `timeout` throws with `code: 'ETIMEDOUT'` -- unlike the
@@ -441,14 +468,14 @@ export async function pullArtifact(
       // doc comment).
       if (isExecError(err) && err.code === 'ETIMEDOUT') {
         throw new PostInstallError(
-          `post_install command timed out after ${postInstallTimeoutMs}ms for artifact "${manifest.id}" (still running/hung, no result was produced): ${manifest.post_install}`
+          `post_install command timed out after ${postInstallTimeoutMs}ms for artifact "${manifest.id}" (still running/hung, no result was produced): ${safeCommand}`
             + (output ? `\n${output}` : ''),
         );
       }
 
       if (isToolNotFoundError([detail, output].join('\n'))) {
         throw new PostInstallError(
-          `post_install command's tool was not found on this machine's PATH for artifact "${manifest.id}": ${manifest.post_install}`
+          `post_install command's tool was not found on this machine's PATH for artifact "${manifest.id}": ${safeCommand}`
             + (output ? `\n${output}` : ''),
         );
       }

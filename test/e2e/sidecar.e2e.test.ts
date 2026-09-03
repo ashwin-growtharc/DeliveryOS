@@ -213,6 +213,56 @@ describe('sidecar e2e', () => {
   // {"ok":true,"result":"[object Undefined]"}. The map now has a null
   // prototype and dispatch checks own-property + callability.
   it(
+    'refuses a project directory that is relative or absent -- on a MUTATING command, not just a read',
+    async () => {
+      // `cwd` arrives over JSON-RPC from the Tauri host, and for months the
+      // only check was `requireString` -- "a non-empty string". A relative
+      // path resolves against the SIDECAR PROCESS, not the project. Combined
+      // with `install_target: "."` (a supported shape, see `isRootInstall`),
+      // `installTarget === cwd`, so the payload copy and then `post_install`
+      // land in whatever directory the caller named.
+      //
+      // Asserted on `artifact.pull` specifically: the read-only MCP surface
+      // validated this while the writing surface did not, which is backwards,
+      // and a test that only covered `catalog.list` would have missed it.
+      const cwd = newScratchCwd('cwd-validation');
+      const session = new SidecarSession(cwd, deliveryOsHome);
+      try {
+        const relative = await session.request('artifact.pull', {
+          cwd: 'some/relative/path',
+          id: 'anything',
+        });
+        expect(relative.ok, 'a relative cwd must be refused on a mutating command').toBe(false);
+        expect(JSON.stringify(relative.error)).toContain('absolute');
+
+        const missing = await session.request('artifact.pull', {
+          cwd: path.join(cwd, 'definitely-not-here'),
+          id: 'anything',
+        });
+        expect(missing.ok).toBe(false);
+        expect(JSON.stringify(missing.error)).toContain('does not exist');
+
+        // The empty string was already refused by `requireString`; keep it
+        // covered so the two checks can't be collapsed into one by mistake.
+        const empty = await session.request('artifact.pull', { cwd: '', id: 'anything' });
+        expect(empty.ok).toBe(false);
+
+        // Reads are held to the same rule -- a bad cwd there reports install
+        // status for a project nobody named, which is the same defect quieter.
+        const read = await session.request('catalog.list', { cwd: 'relative/again' });
+        expect(read.ok, 'reads must validate cwd too').toBe(false);
+
+        // And the session survives all of it.
+        const healthy = await session.request('remote.list', {});
+        expect(healthy.ok).toBe(true);
+      } finally {
+        expect(await session.close()).toBe(0);
+      }
+    },
+    30_000,
+  );
+
+  it(
     'refuses Object.prototype members as commands instead of dispatching them',
     async () => {
       const cwd = newScratchCwd('proto-dispatch');
