@@ -825,8 +825,8 @@ describe('sidecar e2e', () => {
   );
 
   it(
-    'artifact.push emits early progress stages (fetch, diff, ...) before hitting the real '
-      + 'GitHub-auth wall',
+    'artifact.push reports progress as far as GitHub lets it get -- which is nowhere at all '
+      + 'when there is no token, since auth is checked first',
     async () => {
       // Same split as the existing "artifact.push (edit mode)" coverage-gap
       // test above: a fake github.com-shaped URL registered directly (so
@@ -866,15 +866,44 @@ describe('sidecar e2e', () => {
         expect(['GithubAuthError', 'GithubApiError']).toContain(pushResp.error?.type);
 
         const stages = session.takeProgressLines().map((p) => p.stage);
-        // How far push gets before hitting the real GitHub-auth wall could
-        // vary slightly machine-to-machine (gh CLI installed/logged in or
-        // not) -- assert a reasonable early prefix rather than the exact
-        // full stage list, to avoid flakiness.
-        expect(stages.length).toBeGreaterThan(0);
-        expect(stages.slice(0, 2)).toEqual(['fetch', 'diff']);
-        for (const stage of stages) {
-          expect(typeof stage).toBe('string');
-          expect(stage.length).toBeGreaterThan(0);
+
+        // Keyed off the ERROR TYPE, because that determines how far push got
+        // and nothing else does.
+        //
+        // This test previously asserted `stages.length > 0` unconditionally,
+        // with a comment acknowledging that "how far push gets ... could vary
+        // slightly machine-to-machine (gh CLI installed/logged in or not)".
+        // The variance is real but the floor was wrong: it is ZERO, not one.
+        //
+        // `pushArtifact` calls `getGithubToken()` at push.ts:249 and emits its
+        // first applicable progress line at push.ts:253. (The `render-preview`
+        // line at :159 only fires for ui-component artifacts; this fixture is
+        // a template.) So with no `gh` auth at all, push throws BEFORE any
+        // progress -- which makes the original test title, "emits early
+        // progress stages ... before hitting the real GitHub-auth wall",
+        // false for this artifact kind.
+        //
+        // Both outcomes are correct behaviour, and failing fast on auth before
+        // doing filesystem work is the better of the two. So assert each:
+        //
+        //   GithubAuthError -> no token, threw at :249, zero stages.
+        //   GithubApiError  -> got a token, so :253 ran and the fake repo
+        //                      failed later at `fetchRepoInfo` (:293).
+        //
+        // Found by the first CI run this repo has ever had. It passed on the
+        // developer machine for one reason: `gh` was logged in there.
+        if (pushResp.error?.type === 'GithubAuthError') {
+          expect(
+            stages,
+            'without a GitHub token, push must fail at getGithubToken before emitting progress',
+          ).toEqual([]);
+        } else {
+          expect(stages.length).toBeGreaterThan(0);
+          expect(stages.slice(0, 2)).toEqual(['fetch', 'diff']);
+          for (const stage of stages) {
+            expect(typeof stage).toBe('string');
+            expect(stage.length).toBeGreaterThan(0);
+          }
         }
       } finally {
         await session.close();
