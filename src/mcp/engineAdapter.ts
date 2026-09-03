@@ -8,7 +8,10 @@ import { resolvePrimaryDoc } from '../engine/payload/primaryDoc';
 import { assertUsableProjectDir } from '../engine/paths';
 import { listRemotes } from '../engine/remote/remoteRegistry';
 import { addRemote } from '../engine/remote/manageRemotes';
-import { ArtifactDetail, CatalogSnapshot, DeliveryOsConfigPort, DeliveryOsReadPort } from './ports';
+import { planPush } from '../engine/push/planPush';
+import { pushArtifact } from '../engine/push/push';
+import type { ContributionTokens } from './contributionToken';
+import { ArtifactDetail, CatalogSnapshot, DeliveryOsConfigPort, DeliveryOsContributePort, DeliveryOsReadPort } from './ports';
 
 /**
  * The one file that binds the MCP driving port to the real DeliveryOS core.
@@ -113,6 +116,87 @@ export function createEngineConfigPort(): DeliveryOsConfigPort {
 
     addRemote({ url, name }) {
       return addRemote(url, name);
+    },
+  };
+}
+
+/**
+ * Binds the contribute port to the real engine.
+ *
+ * Still translation only, but with two decisions that belong here rather than
+ * in `server.ts`, because they are about how the engine is *called*:
+ *
+ *  - `assertUsableProjectDir` is applied explicitly. `pushArtifact` never
+ *    validates `cwd` (`push.ts:183-189`) -- the sidecar does it, the CLI passes
+ *    `process.cwd()`, and nothing would have here. For a write that publishes
+ *    project bytes to a shared remote, an unvalidated directory is the whole
+ *    exposure.
+ *  - `force` is never forwarded, and there is no parameter to forward it from.
+ *    `push.ts:653-658` records that the desktop app has no force affordance
+ *    because "a one-click force over a colleague's merged change is exactly the
+ *    operation that should stay hard". An MCP tool is a one-click affordance.
+ */
+export function createEngineContributePort(
+  tokens: ContributionTokens,
+): DeliveryOsContributePort {
+  return {
+    preview({ cwd, id }) {
+      assertUsableProjectDir(cwd);
+      const plan = planPush(id, cwd);
+      return { plan, token: tokens.mint(cwd, plan) };
+    },
+
+    async contribute({ cwd, id, token }) {
+      assertUsableProjectDir(cwd);
+
+      // Re-planned from scratch, deliberately. The token is verified against
+      // the project as it stands NOW, not against whatever was true when the
+      // preview ran -- so a file edited in between invalidates it. The reviewer
+      // approved that diff, not this one.
+      const plan = planPush(id, cwd);
+
+      // Refused BEFORE the token is spent, because this one is recoverable by
+      // running `deliveryos check-pending-pushes` -- unlike a spent token,
+      // which costs another preview.
+      if (plan.pendingPr) {
+        throw new Error(
+          `"${id}" already has pull request #${plan.pendingPr.number} open from this project `
+            + `(${plan.pendingPr.url}), and an open PR silently disables the stale-push guard for the `
+            + 'next push. Resolve it first -- run `deliveryos check-pending-pushes` -- then preview again.',
+        );
+      }
+
+      // Consumed BEFORE the push is attempted. If `pushBranch` succeeds and
+      // `pulls.create` then fails, a branch is already on the shared remote and
+      // nothing deletes it; burning the token here is what stops an agent's
+      // retry from creating a second one.
+      const rejection = tokens.consume(token, cwd, plan);
+      if (rejection === 'already-used') {
+        throw new Error(
+          'This preview has already been used. A contribution token authorises exactly one push, '
+            + 'including when that push fails partway -- run the preview again to see the current '
+            + 'state before retrying.',
+        );
+      }
+      if (rejection === 'mismatch') {
+        throw new Error(
+          'This token does not match the project as it stands now -- the files or the version '
+            + 'changed since the preview, or it was minted by a different session. Run the preview '
+            + 'again and review the current diff before pushing.',
+        );
+      }
+
+      const result = await pushArtifact(
+        id,
+        { initiatedBy: 'the DeliveryOS MCP server' },
+        cwd,
+      );
+      return {
+        url: result.url,
+        number: result.number,
+        branch: result.branch,
+        ...(result.cacheResetWarning ? { cacheResetWarning: result.cacheResetWarning } : {}),
+      };
     },
   };
 }

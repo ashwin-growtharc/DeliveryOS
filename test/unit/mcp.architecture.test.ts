@@ -44,11 +44,23 @@ function engineValueImports(source: string): string[] {
 describe('MCP adapter boundary', () => {
   const files = fs.readdirSync(MCP_DIR).filter((f) => f.endsWith('.ts'));
 
-  it('has the three files the shape requires', () => {
-    expect(files.sort()).toEqual(['engineAdapter.ts', 'ports.ts', 'server.ts']);
+  it('has the files the shape requires, and no others', () => {
+    // Pinned as a list rather than a count, so a new file is a deliberate
+    // addition rather than a silent one. `contributionToken.ts` is the fourth:
+    // it holds the single-use grant that binds a push to a preview, and it is
+    // here rather than in the engine because the nonce that makes it fail
+    // CLOSED across a restart is a property of this server process, not of
+    // DeliveryOS. It imports `PushPlan` as a type only, so the boundary rules
+    // below still cover it.
+    expect(files.sort()).toEqual([
+      'contributionToken.ts',
+      'engineAdapter.ts',
+      'ports.ts',
+      'server.ts',
+    ]);
   });
 
-  it.each(['server.ts', 'ports.ts'])(
+  it.each(['server.ts', 'ports.ts', 'contributionToken.ts'])(
     '%s reaches the core only for types, never for behaviour',
     (file) => {
       const source = fs.readFileSync(path.join(MCP_DIR, file), 'utf-8');

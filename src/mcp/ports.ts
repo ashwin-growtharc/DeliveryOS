@@ -1,5 +1,6 @@
 import type { CatalogListEntry, SkippedCatalogManifest } from '../engine/catalog/catalog';
 import type { PrimaryDoc } from '../engine/payload/primaryDoc';
+import type { PushPlan } from '../engine/push/planPush';
 
 /**
  * The driving port the MCP adapter talks to.
@@ -122,5 +123,48 @@ export interface DeliveryOsConfigPort {
     name: string;
     url: string;
     dest: string;
+  }>;
+}
+
+/**
+ * Previewing and contributing an edit back to the artifact's own remote.
+ *
+ * A THIRD port, separate again, and for a sharper reason than the config one.
+ * `push` is the only operation in the manifest whose blast radius reaches other
+ * people: it publishes bytes from the project to a shared git remote. The
+ * read port is read-only by construction and the config port touches only
+ * ~/.deliveryos; folding either shape into this one would erase a property that
+ * a test currently enforces.
+ *
+ * WHY A PREVIEW IS PART OF THE PORT, not a convenience beside it.
+ * `docs/agent-surface-plan.md:379-382` records why push was not an agent
+ * surface: *"Push is all-or-nothing over the whole pulled folder with no diff
+ * preview and no confirmation (verified). An agent pushing a filled-in risk
+ * register would publish client data to a shared repo."* That is concrete --
+ * Phase 15 ships a `risk-register` whose own README says "fill in your own
+ * copy, never push it back", against `ARCHITECTURE.md`'s hard rule of "No
+ * customer data in any DeliveryOS-shared remote, ever". So the preview is the
+ * control, and the port shape enforces the order: you cannot reach `contribute`
+ * without a token that only `preview` mints.
+ */
+export interface DeliveryOsContributePort {
+  /** What a push WOULD do. Reaches no network, writes nothing. Returns the
+   * plan plus the single-use token that authorises exactly this push. */
+  preview(input: { cwd: string; id: string }): {
+    plan: PushPlan;
+    token: string;
+  };
+
+  /** Opens the pull request the token was minted for.
+   *
+   * Refuses if the token is missing, does not match the project's current
+   * state, or has already been presented -- including after a FAILED push,
+   * because `pushBranch` succeeding and `pulls.create` failing leaves a branch
+   * on the shared remote that nothing deletes. */
+  contribute(input: { cwd: string; id: string; token: string }): Promise<{
+    url: string;
+    number: number;
+    branch: string;
+    cacheResetWarning?: string;
   }>;
 }

@@ -183,7 +183,7 @@ describe('capability manifest', () => {
     expect(
       leaked.map((c) => c.name).sort(),
       'a mutating capability is exposed over MCP -- see PLAN.md Phase 2 before allowing this',
-    ).toEqual(['catalog.refresh', 'remote.add']);
+    ).toEqual(['artifact.push', 'catalog.refresh', 'remote.add']);
 
     // Exactly two deliberate exceptions, and the property they share is what
     // they do NOT write: both touch only the caches under ~/.deliveryos, never
@@ -199,12 +199,22 @@ describe('capability manifest', () => {
     //
     // Asserted as a list rather than a count, so adding a third requires
     // editing this line -- which is where the consent question belongs.
-    for (const name of ['catalog.refresh', 'remote.add']) {
+    for (const name of ['artifact.push', 'catalog.refresh', 'remote.add']) {
       const capability = CAPABILITIES.find((c) => c.name === name);
       expect(capability?.destructive, `${name} must not be destructive`).toBe(false);
       expect(capability?.costsRealMoney, `${name} must not spend money`).toBe(false);
       expect(capability?.executesShell, `${name} must not run shell`).toBe(false);
     }
+
+    // `artifact.push` is the third exception and the only one whose mistakes
+    // land on OTHER PEOPLE. It is here on a different footing from the other
+    // two: they are safe because of what they do not touch, this one is safe
+    // only because of what wraps it -- a preview that shows the exact file
+    // list, and a single-use token binding the push to it. If either of the
+    // two tools below disappears, that argument is gone and this entry should
+    // go with it.
+    const push = CAPABILITIES.find((c) => c.name === 'artifact.push');
+    expect(push?.mcp).toEqual(['preview_contribution', 'contribute_artifact']);
     // And the one that genuinely needs no project directory is the new one.
     expect(CAPABILITIES.find((c) => c.name === 'remote.add')?.needsProjectDir).toBe(false);
   });

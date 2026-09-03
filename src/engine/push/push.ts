@@ -100,6 +100,16 @@ export interface PushOptions {
    * what it silently used to do. When set, the PR body says it was forced and
    * names the overlapping files, so the escape hatch leaves a trace. */
   force?: boolean;
+
+  /** Names the surface that opened this PR, when it was not a person at a
+   * terminal -- stamped into the PR body by `buildInitiatorSection`.
+   *
+   * Absent for the CLI, the sidecar and the app, all of which render exactly
+   * as before. Set by the MCP contribute tool, because a reviewer deciding how
+   * carefully to read a diff is entitled to know a model assembled it, and
+   * `**Pushed by:**` cannot tell them -- that is a git config identity, which
+   * says who the commit is attributed to rather than what drove the push. */
+  initiatedBy?: string;
 }
 
 export interface PushResult {
@@ -735,6 +745,7 @@ export async function pushArtifact(
         // Undefined on every ordinary push; set only when --force pushed over a
         // version that had already moved upstream.
         stalePush: stalePushWarning,
+        initiatedBy: options.initiatedBy,
         previewImageGitPath,
         previewImageUrl:
           previewImageGitPath && !isPrivateRepo

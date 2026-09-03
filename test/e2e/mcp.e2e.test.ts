@@ -183,8 +183,10 @@ describe('deliveryos mcp, as a real subprocess', () => {
     expect(res.result!.tools.map((t) => t.name).sort()).toEqual([
       'add_remote',
       'catalog_overview',
+      'contribute_artifact',
       'get_artifact',
       'list_remotes',
+      'preview_contribution',
       'refresh_catalog',
       'search_artifacts',
     ]);
@@ -227,7 +229,7 @@ describe('deliveryos mcp, as a real subprocess', () => {
     // The process must still be serving afterwards -- an agent's bad guess
     // should not take the server down.
     const after = await mcp.request<ToolsListResult>('tools/list');
-    expect(after.result!.tools).toHaveLength(6);
+    expect(after.result!.tools).toHaveLength(8);
   }, 60_000);
 
   it('refuses a cwd that is relative or absent, rather than silently answering about the wrong project', async () => {

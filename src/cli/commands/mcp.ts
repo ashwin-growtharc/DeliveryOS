@@ -1,6 +1,11 @@
 import { Command } from 'commander';
 import { runMcpServer } from '../../mcp/server';
-import { createEngineConfigPort, createEngineReadPort } from '../../mcp/engineAdapter';
+import {
+  createEngineConfigPort,
+  createEngineContributePort,
+  createEngineReadPort,
+} from '../../mcp/engineAdapter';
+import { createContributionTokens } from '../../mcp/contributionToken';
 
 /**
  * A subcommand rather than a second binary.
@@ -34,6 +39,12 @@ export function registerMcpCommand(program: Command): void {
         // it the server exposes no configuration tools at all -- which is the
         // shape any other embedder gets unless it asks for more.
         configPort: createEngineConfigPort(),
+        // The token store is created HERE, once per server process. That is
+        // what makes a restart invalidate every outstanding preview: a new
+        // process means a new nonce, so a token minted by the old one no
+        // longer verifies. Hoisting it to module scope would quietly undo
+        // that.
+        contributePort: createEngineContributePort(createContributionTokens()),
         version: program.version() ?? '0.0.0',
       });
     });

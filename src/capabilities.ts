@@ -297,10 +297,26 @@ export const CAPABILITIES: Capability[] = [
     summary: 'Open a pull request on the artifact\'s own remote from local edits',
     cli: 'push <id>',
     sidecar: 'artifact.push',
-    // Writes to a SHARED remote, not the project -- the only operation here
-    // whose blast radius reaches other people. Not destructive to the local
-    // machine, which is why it is the safest mutating operation to expose to
-    // an agent despite sounding like the scariest.
+    mcp: ['preview_contribution', 'contribute_artifact'],
+    // CORRECTED. This previously read "Writes to a SHARED remote, not the
+    // project ... which is why it is the safest mutating operation to expose
+    // to an agent". Two thirds of that was false, and it was the stated
+    // justification for exposing it:
+    //
+    //  - It DOES write to the project. `push.ts:772-774` puts `pendingPr` in
+    //    the lockfile on success, and `push.ts:624` reads it back as
+    //    `hasOwnPushInFlight` to DISABLE the stale-push guard for the next
+    //    push. Opening a PR silently removes a safety check for whoever
+    //    pushes next.
+    //  - It is not the safest. It is the only operation whose blast radius
+    //    reaches other people, and it publishes the WHOLE pulled folder --
+    //    which is how `ARCHITECTURE.md:363` ("No customer data in any
+    //    DeliveryOS-shared remote, ever") becomes reachable from here, via a
+    //    `risk-register` artifact whose own README says "never push it back".
+    //
+    // Exposed anyway, but only behind a preview that shows the exact file list
+    // first and a single-use token binding the push to it. See
+    // RISKY_CAPABILITIES_ALLOWED_ON_MCP in src/mcp/server.ts.
     mutates: true,
     network: true,
     emitsProgress: true,

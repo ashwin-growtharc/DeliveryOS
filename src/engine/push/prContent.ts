@@ -64,6 +64,10 @@ export interface EditPrContentParams extends PreviewImageParams {
   gitUserName: string;
   gitUserEmail: string;
   changedFiles: ChangedFile[];
+  /** The surface that opened this PR, when it was not a person at a terminal
+   * -- e.g. "the DeliveryOS MCP server". Absent for the CLI and the app, which
+   * render exactly as before. */
+  initiatedBy?: string;
   // Git-relative root the changed files are reported under: `'payload'`
   // (the historical abbreviated form, dropping the `artifacts/<id>/`
   // prefix) by default, or the artifact's `payload_path` when set, so the
@@ -107,6 +111,31 @@ function buildStalePushSection(stale: EditPrContentParams['stalePush']): string 
   ].join('\n');
 }
 
+/**
+ * Names the surface that opened this PR, when it was not a person at a
+ * terminal.
+ *
+ * `prContent` had no concept of an initiating actor: the trailer says
+ * `deliveryos push` whether the CLI, the desktop app or the sidecar produced
+ * it, and `**Pushed by:**` is a *git config identity*, not an actor -- it says
+ * who the commit is attributed to, not what drove the push.
+ *
+ * That gap stops mattering the moment an agent can open one. The precedent is
+ * the forced-stale block above: it exists because "the PR reviewer is the only
+ * remaining safeguard and has to be told explicitly". A reviewer deciding how
+ * carefully to read a diff is entitled to know a model assembled it.
+ *
+ * Empty string when absent, so every existing caller renders byte-identically.
+ */
+function buildInitiatorSection(initiatedBy?: string): string {
+  if (!initiatedBy) return '';
+  return `
+> [!NOTE]
+> Opened via ${initiatedBy}. A person approved it, but the diff was assembled
+> by an agent -- read it on that basis.
+`;
+}
+
 /** Builds the PR title/body for an edit-mode push (a diff against an
  * already-tracked artifact). One bullet per changed file, in the same
  * order `computeChangedFiles` returned them. */
@@ -123,9 +152,10 @@ export function buildEditPrContent(params: EditPrContentParams): PrContent {
 
   const previewSection = buildPreviewSection(params);
   const staleSection = buildStalePushSection(params.stalePush);
+  const initiatorSection = buildInitiatorSection(params.initiatedBy);
 
   const body = `## DeliveryOS push: update \`${id}\`
-${staleSection}
+${initiatorSection}${staleSection}
 **Kind:** ${kind}   **Owner:** ${owner}   **Version:** ${versionDisplay}
 **Pushed by:** ${gitUserName} <${gitUserEmail}>
 ${previewSection}

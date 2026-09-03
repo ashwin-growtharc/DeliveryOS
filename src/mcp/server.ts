@@ -2,7 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import type { CatalogListEntry } from '../engine/catalog/catalog';
-import type { DeliveryOsConfigPort, DeliveryOsReadPort } from './ports';
+import type { DeliveryOsConfigPort, DeliveryOsContributePort, DeliveryOsReadPort } from './ports';
 import { CAPABILITIES } from '../capabilities';
 
 /**
@@ -125,6 +125,32 @@ const RISKY_CAPABILITIES_ALLOWED_ON_MCP: Record<string, string> = {
   // fetch into a cache directory, not code execution -- nothing runs a
   // cloned repo -- and the tool is annotated so a client prompts.
   'remote.add': 'Clones into ~/.deliveryos only; never writes a project file; refuses duplicates before cloning.',
+
+  // The one operation here whose mistakes land on OTHER PEOPLE'S work, and the
+  // only entry in this list that needed a real argument rather than a short
+  // one. `docs/agent-surface-plan.md:379-382` recorded why it was not an agent
+  // surface: "Push is all-or-nothing over the whole pulled folder with no diff
+  // preview and no confirmation (verified). An agent pushing a filled-in risk
+  // register would publish client data to a shared repo." That is concrete --
+  // Phase 15 ships a `risk-register` whose own README says "fill in your own
+  // copy, never push it back", against ARCHITECTURE.md:363's hard rule.
+  //
+  // What changed is that the precondition is now met rather than waived:
+  //
+  //  - `preview_contribution` shows the exact file list, statuses and version
+  //    bump BEFORE anything is published, and `planPush.equivalence.e2e.test.ts`
+  //    pins that the preview promises exactly what the push commits.
+  //  - `contribute_artifact` requires a single-use token minted by that
+  //    preview, consumed BEFORE the attempt, and invalidated across a restart
+  //    by a per-instance nonce -- the "argument-bound single-use grant" that
+  //    doc itself recommends over an unbounded per-tool "always allow".
+  //  - `force` is unreachable: there is no parameter for it, so a stale push
+  //    refuses rather than reverting a colleague's merged change.
+  //  - An open `pendingPr` refuses, because it would silently disable the
+  //    stale-push guard for the next push.
+  //  - The PR body says an agent assembled the diff, so the reviewer -- the
+  //    last safeguard -- knows to read it on that basis.
+  'artifact.push': 'Only reachable via a preview-bound single-use token; force and pendingPr both refused; PR body discloses agent authorship.',
 };
 
 /**
@@ -236,6 +262,11 @@ export interface McpServerDeps {
    * the question "may an agent change how this machine is configured" should
    * be answered by a caller, not inherited. */
   configPort?: DeliveryOsConfigPort;
+  /** Optional, absent by default, and separate from `configPort` on purpose:
+   * registering where artifacts come from and publishing project bytes to a
+   * shared remote are different consent questions, and an embedder should be
+   * able to answer them differently. */
+  contributePort?: DeliveryOsContributePort;
   /** Passed in rather than declared here. `src/cli/program.ts` owns the one
    * version literal in this codebase and `test/unit/cliVersion.test.ts` fails
    * the build when it drifts from package.json -- a second literal here would
@@ -243,7 +274,7 @@ export interface McpServerDeps {
   version: string;
 }
 
-export function buildMcpServer({ port: engine, configPort, version }: McpServerDeps): McpServer {
+export function buildMcpServer({ port: engine, configPort, contributePort, version }: McpServerDeps): McpServer {
 
   const server = new McpServer(
     { name: 'deliveryos', version },
@@ -555,6 +586,96 @@ export function buildMcpServer({ port: engine, configPort, version }: McpServerD
             nextStep:
               'Registered. Run catalog_overview to see what this remote provides, or add_remote '
               + 'again for another source.',
+          });
+        } catch (error) {
+          return failure(error);
+        }
+      },
+    );
+  }
+
+  // -------------------------------------------------------- contributing
+  //
+  // Two tools, and the ORDER between them is the safety property: `contribute`
+  // is unreachable without a token only `preview` mints. That is the
+  // "argument-bound single-use grant" `docs/agent-surface-plan.md:701-707`
+  // recommends over an unbounded per-tool "always allow", and it is what closes
+  // the objection recorded at `:379-382` -- push being all-or-nothing over the
+  // whole pulled folder with no diff preview.
+  if (contributePort) {
+    server.registerTool(
+      'preview_contribution',
+      {
+        title: 'See what contributing would publish',
+        description:
+          'Shows exactly what pushing an artifact\'s local edits would publish: every file, its '
+          + 'status, and the version bump -- WITHOUT publishing anything. Always call this first '
+          + 'and show the file list to the user before contributing. It matters: push is '
+          + 'all-or-nothing over the whole installed folder, so an artifact someone filled in '
+          + 'with real client details would publish those to a shared repository. Reaches no '
+          + 'network and writes nothing.',
+        inputSchema: {
+          cwd: cwdSchema,
+          id: z.string().min(1).describe('The artifact id, as search_artifacts reported it'),
+        },
+        annotations: annotationsFor('preview_contribution'),
+      },
+      async ({ cwd, id }) => {
+        try {
+          const { plan, token } = contributePort.preview({ cwd, id });
+          return json({
+            id: plan.id,
+            remote: plan.remoteName,
+            versionBump: `${plan.previousVersion} -> ${plan.newVersion}`,
+            fileCount: plan.changedFiles.length,
+            files: plan.changedFiles.map((f) => ({ status: f.status, path: f.relPath })),
+            stale: plan.stale,
+            ...(plan.upstreamVersion ? { upstreamVersion: plan.upstreamVersion } : {}),
+            pendingPr: plan.pendingPr ?? null,
+            confirmationToken: token,
+            nextStep:
+              'Show the user this file list before going further. If they approve, call '
+              + 'contribute_artifact with this confirmationToken. The token authorises exactly '
+              + 'this diff, once.',
+          });
+        } catch (error) {
+          return failure(error);
+        }
+      },
+    );
+
+    server.registerTool(
+      'contribute_artifact',
+      {
+        title: 'Open a pull request with local edits',
+        description:
+          'Opens a pull request on the artifact\'s own remote from this project\'s local edits. '
+          + 'Requires a confirmationToken from preview_contribution, which authorises exactly the '
+          + 'diff that was previewed, once -- editing a file after previewing invalidates it. '
+          + 'Refuses to force over a colleague\'s merged change, and refuses while a previous '
+          + 'pull request from this project is still open. The PR body records that an agent '
+          + 'assembled the diff.',
+        inputSchema: {
+          cwd: cwdSchema,
+          id: z.string().min(1).describe('The artifact id, matching the preview'),
+          confirmationToken: z
+            .string()
+            .min(1)
+            .describe('From preview_contribution. Single-use, and tied to the exact previewed diff.'),
+        },
+        annotations: annotationsFor('contribute_artifact'),
+      },
+      async ({ cwd, id, confirmationToken }) => {
+        try {
+          const result = await contributePort.contribute({ cwd, id, token: confirmationToken });
+          return json({
+            ...result,
+            // A warning on SUCCESS, not a failure: the PR really did open, but
+            // local reads will see this unmerged branch as the remote's state
+            // until something fetches.
+            ...(result.cacheResetWarning
+              ? { warning: result.cacheResetWarning }
+              : {}),
           });
         } catch (error) {
           return failure(error);
