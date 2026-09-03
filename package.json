@@ -30,7 +30,8 @@
     "generate:vendored-tailwind-preflight": "node scripts/generate-vendored-tailwind-preflight.mjs",
     "generate:vendored-marked": "node scripts/generate-vendored-marked.mjs",
     "generate:vendored-xterm": "node scripts/generate-vendored-xterm.mjs",
-    "generate:vendored-fonts": "node scripts/generate-vendored-fonts.mjs"
+    "generate:vendored-fonts": "node scripts/generate-vendored-fonts.mjs",
+    "walkthrough": "node scripts/walkthrough/capture.mjs && node scripts/walkthrough/build.mjs && node scripts/walkthrough/shots.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
