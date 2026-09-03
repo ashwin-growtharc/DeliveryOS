@@ -62,6 +62,28 @@ function actualMcpTools(): string[] {
   return names;
 }
 
+/** Every sidecar command name the DESKTOP APP actually calls.
+ *
+ * app.js is the one surface with no compiler and no linter behind it:
+ * `eslint --print-config` reports `rules: 0` for it (its only rule-bearing
+ * block is scoped to TypeScript files), and tsconfig's `include` never reaches
+ * `src-tauri/`. So a renamed sidecar command passes every gate in CI and
+ * surfaces as a runtime toast in front of a user.
+ *
+ * A comment that quotes a real call (`app.js:1330` mentions
+ * `call('preview.compile', ...)`) is deliberately not filtered out: it names a
+ * command that must exist anyway, so matching it costs nothing and a filter
+ * would just be another thing to get wrong. */
+function actualAppRpcNames(): string[] {
+  const source = fs.readFileSync(
+    path.join(REPO_ROOT, 'src-tauri', 'spike-ui', 'app.js'),
+    'utf-8',
+  );
+  const names = [...source.matchAll(/\bcall\(\s*'([a-zA-Z]+\.[a-zA-Z]+)'/g)].map((m) => m[1]);
+  expect(names.length, 'parsed zero app.js RPC calls -- this guard is checking nothing').toBeGreaterThan(30);
+  return names;
+}
+
 /** `pull` legitimately backs two capabilities (`artifact.pull` and
  * `artifact.pullAndAutoWire`), chosen by the `hasWiring` gate. That gate is
  * itself the duplication PLAN.md Phase 4 removes; until then this is a real
@@ -102,6 +124,36 @@ describe('capability manifest', () => {
 
     expect(new Set(declared).size, 'a sidecar key is declared twice').toBe(declared.length);
     expect(declared.sort()).toEqual([...actual].sort());
+  });
+
+  // The desktop app is the FOURTH surface, and the only unguarded one. This
+  // direction is deliberately one-way: plenty of sidecar commands exist that
+  // the app never calls (CLI- and MCP-only operations), so requiring the
+  // reverse would be wrong. What must hold is that everything the app asks
+  // for actually exists.
+  //
+  // Names only. Argument and result SHAPES stay uncovered -- the existing
+  // browser tests stub the sidecar with hand-written fixtures, so a changed
+  // result shape still passes everything. Catching that needs a real-sidecar
+  // browser harness, which this is not.
+  it('every sidecar command app.js calls exists in the dispatch table and is declared', () => {
+    const called = new Set(actualAppRpcNames());
+    const dispatch = new Set(actualSidecarKeys());
+    const declared = new Set(
+      CAPABILITIES.map((c) => c.sidecar).filter((s): s is string => s !== undefined),
+    );
+
+    for (const name of called) {
+      expect(
+        dispatch.has(name),
+        `app.js calls "${name}", which src/sidecar.ts does not dispatch -- `
+        + 'the app would show a runtime error for this button',
+      ).toBe(true);
+      expect(
+        declared.has(name),
+        `app.js calls "${name}", which src/capabilities.ts does not declare`,
+      ).toBe(true);
+    }
   });
 
   it('declares every MCP tool exactly once, and invents none', () => {
