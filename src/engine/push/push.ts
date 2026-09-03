@@ -650,15 +650,22 @@ export async function pushArtifact(
               + (overlap.length > 10 ? `\n  ...and ${overlap.length - 10} more` : '')
             : '\n\nNone of the files you changed would revert an upstream change, so a merge would '
               + 'likely be clean -- but the version you edited against is no longer current.';
+          // Deliberately surface-neutral. This message reaches the desktop app
+          // too, where telling someone to "re-run with --force" names a flag
+          // they have no way to pass -- the app has no force affordance for
+          // push, and that is on purpose: a one-click force over a colleague's
+          // merged change is exactly the operation that should stay hard. The
+          // safe resolution the app CAN offer is the one described first.
           throw new StalePushError(
             `You edited "${id}" against v${lockEntry.version}, but remote "${remoteName}" is now at `
               + `v${manifest.version}.`
               + overlapDetail
-              + `
-
-Commit your work to your own git first, then \`deliveryos pull ${id} --force\` to take `
-              + `the current version (that now refreshes from the remote), and re-apply your edit. `
-              + `Or re-run with --force to push anyway; the pull request will say it was forced.`,
+              + `\n\nTo resolve: commit your work somewhere safe, take the current version of the `
+              + `artifact (discarding your local copy), and re-apply your change on top of it. `
+              + `In the CLI that is \`deliveryos pull ${id} --force\`, then push again; in the app it `
+              + `is Detail's "discard local edit and re-sync".`
+              + `\n\nThe CLI can also push anyway with --force, which stamps the overlap into the `
+              + `pull request so a reviewer sees it.`,
           );
         }
         // Forced: proceed, but make it visible to whoever reviews the PR.
