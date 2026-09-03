@@ -4,7 +4,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { buildMcpServer } from '../../src/mcp/server';
 import { DeliveryOsReadPort, CatalogSnapshot } from '../../src/mcp/ports';
 import { CatalogListEntry } from '../../src/engine/catalog/catalog';
-import { CAPABILITIES } from '../../src/capabilities';
+import { CAPABILITIES, Capability } from '../../src/capabilities';
 
 /**
  * The whole tool surface, driven through a real MCP client over a real
@@ -300,6 +300,90 @@ describe('MCP tool surface', () => {
       expect(tool.annotations?.openWorldHint, `${tool.name}.openWorldHint`).toBe(capability!.network);
     }
     await close();
+  });
+
+  describe('the manifest as a gate, not just a data source', () => {
+    // Deriving `destructiveHint` tells a client to PROMPT. It does not stop a
+    // destructive operation being exposed at all. Those are different
+    // guarantees, and only the second answers "can an agent reach this".
+    //
+    // This is the `needsApproval` failure shape recorded in
+    // docs/agent-surface-plan.md: a declared risk flag that no code refuses to
+    // act on is a flag an adapter can forget to read.
+
+    /** Temporarily reclassifies a real capability, because the gate reads the
+     * live manifest -- there is no way to fake it that also proves the
+     * production path. Restored in `finally` so one failure cannot poison the
+     * rest of the file. */
+    function reclassified(name: string, patch: Partial<Capability>, run: () => void): void {
+      const capability = CAPABILITIES.find((c) => c.name === name) as Capability;
+      expect(capability, `${name} must exist for this test to mean anything`).toBeDefined();
+
+      // Restore by key, and DELETE keys the snapshot did not have.
+      // `Object.assign(capability, {...before})` cannot remove a key that was
+      // absent before the patch -- so patching `mcp` onto a capability that
+      // had none left it there afterwards and poisoned every later test in
+      // this file. The anti-vacuity test below is what caught it.
+      const touched = Object.keys(patch) as (keyof Capability)[];
+      const before = new Map(touched.map((k) => [k, [k in capability, capability[k]] as const]));
+      Object.assign(capability, patch);
+      try {
+        run();
+      } finally {
+        for (const key of touched) {
+          const [existed, value] = before.get(key)!;
+          if (existed) (capability as Record<string, unknown>)[key] = value;
+          else delete (capability as Record<string, unknown>)[key];
+        }
+      }
+    }
+
+    it('refuses to build a server exposing a destructive capability', () => {
+      // `catalog.list` backs two live tools. Reclassifying it destructive is
+      // the same situation as someone adding `mcp:` to `artifact.remove`,
+      // which deletes an install target with no local-edit guard.
+      reclassified('catalog.list', { destructive: true, mutates: true }, () => {
+        expect(() => buildMcpServer({ port: fakePort(), version: '9.9.9' }))
+          .toThrow(/can destroy work its caller cannot recover/);
+      });
+    });
+
+    it('refuses to build a server exposing a capability that spends real money', () => {
+      // Eight operations make paid model calls. An agent has no way to know it
+      // is spending, and two of the eight are CLI-only -- so nobody reading
+      // the sidecar would even find them.
+      reclassified('catalog.list', { costsRealMoney: true }, () => {
+        expect(() => buildMcpServer({ port: fakePort(), version: '9.9.9' }))
+          .toThrow(/spends real money/);
+      });
+    });
+
+    it('refuses a tool name claimed by two capabilities', () => {
+      // With `find` instead of `filter` this passed silently: the first
+      // claimant won and a risky second one inherited its clean annotations.
+      reclassified('artifact.remove', { mcp: ['search_artifacts'] }, () => {
+        expect(() => buildMcpServer({ port: fakePort(), version: '9.9.9' }))
+          .toThrow(/claimed by more than one capability/);
+      });
+    });
+
+    it('still builds normally once every reclassification is reverted', () => {
+      // Anti-vacuity. If the assertions above passed because the server always
+      // throws, or because a `finally` failed to restore, this fails and says so.
+      expect(() => buildMcpServer({ port: fakePort(), version: '9.9.9' })).not.toThrow();
+      expect(CAPABILITIES.find((c) => c.name === 'catalog.list')?.destructive).toBe(false);
+      expect(CAPABILITIES.find((c) => c.name === 'artifact.remove')?.mcp).toBeUndefined();
+    });
+
+    it('allows a risky capability only when it is named, with a reason', () => {
+      // `catalog.refresh` mutates (the ~/.deliveryos caches) and is the single
+      // deliberate exception. Allowlisted BY CAPABILITY NAME, so renaming a
+      // tool cannot inherit an exemption meant for another operation.
+      const refresh = CAPABILITIES.find((c) => c.name === 'catalog.refresh');
+      expect(refresh?.mutates).toBe(true);
+      expect(refresh?.destructive).toBe(false);
+      expect(refresh?.costsRealMoney).toBe(false);
+    });
   });
 
   it('passes cwd and remote through to the port unchanged', async () => {

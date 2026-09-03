@@ -87,14 +87,109 @@ function score(entry: CatalogListEntry, query: string): number {
  * without a capability entry would otherwise silently get whatever defaults
  * the SDK picks, which for a write is the wrong way to fail.
  */
+/**
+ * Capabilities allowed to reach an agent despite carrying real risk, each
+ * named individually with the reason.
+ *
+ * This is an ALLOWLIST, and it is the gate rather than the annotation. Deriving
+ * `destructiveHint` from the manifest tells a client to prompt; it does not
+ * stop a destructive operation being exposed in the first place. Those are
+ * different guarantees, and the second is the one that matters when the
+ * question is "can an agent reach this at all".
+ *
+ * The lesson this shape comes from is `agent-native`'s own recorded bug, cited
+ * in `docs/agent-surface-plan.md`: `authorize` is honoured on all six of its
+ * surfaces because it is baked INSIDE `run`, while `needsApproval` is
+ * "honoured only inside the agent loop" because it took the flag route. A
+ * declared risk flag that no code refuses to act on is exactly that flag route.
+ *
+ * Keyed by capability name, not tool name, so renaming a tool cannot silently
+ * inherit an exemption meant for a different operation.
+ */
+const RISKY_CAPABILITIES_ALLOWED_ON_MCP: Record<string, string> = {
+  // Writes only the remote caches under ~/.deliveryos, never the user's
+  // project. `destructive: false` because resetting a cache to upstream is
+  // what a cache is for. Annotated openWorldHint/readOnlyHint:false so a
+  // client still prompts if it chooses to.
+  'catalog.refresh': 'Writes only ~/.deliveryos caches; touches no project file.',
+};
+
+/**
+ * The tool's annotations, DERIVED from `src/capabilities.ts` rather than typed
+ * out here -- and the point at which an operation too risky to expose is
+ * refused outright.
+ *
+ * The annotations are not cosmetic: Anthropic's directory requirements state
+ * that "read-only tools can run without per-call confirmation; destructive
+ * tools always prompt", so these values decide whether a person is asked
+ * before a tool runs. Getting them from the declaration means the answer
+ * cannot differ between what the manifest says an operation does and what this
+ * file claims.
+ *
+ * Refuses, loudly, in three cases -- all of them at server-construction time,
+ * so a bad registration cannot reach a client at all:
+ *
+ *  1. **Undeclared.** A tool with no capability entry would otherwise take
+ *     whatever defaults the SDK picks, which for a write is the wrong way to
+ *     fail.
+ *  2. **Declared destructive, not allowlisted.** Eight operations in this
+ *     system spend real money and five can destroy unrecoverable work; none
+ *     should become agent-reachable because somebody added an `mcp:` line.
+ *  3. **Declared paid, not allowlisted.** Same, for the money.
+ */
 function annotationsFor(toolName: string) {
-  const capability = CAPABILITIES.find((c) => c.mcp?.includes(toolName));
-  if (!capability) {
+  // `filter`, not `find`. With `find`, a SECOND capability claiming an
+  // already-claimed tool name is silently ignored because the first match
+  // wins -- so a destructive operation could be attached to an existing
+  // read-only tool's name and inherit its clean annotations. Found by the
+  // gate's own test, which is why the test claims a taken name on purpose.
+  const claimants = CAPABILITIES.filter((c) => c.mcp?.includes(toolName));
+
+  if (claimants.length === 0) {
     throw new Error(
       `MCP tool "${toolName}" has no entry in src/capabilities.ts. Declare it there `
         + '(and in the surfaces list) so its risk classification has one source.',
     );
   }
+  if (claimants.length > 1) {
+    throw new Error(
+      `MCP tool "${toolName}" is claimed by more than one capability `
+        + `(${claimants.map((c) => c.name).join(', ')}). One tool must map to exactly one `
+        + 'operation, or its risk classification is ambiguous.',
+    );
+  }
+
+  const capability = claimants[0];
+
+  const exempt = Object.prototype.hasOwnProperty.call(
+    RISKY_CAPABILITIES_ALLOWED_ON_MCP,
+    capability.name,
+  );
+
+  // Gated on `mutates`, not only on `destructive`/`costsRealMoney`.
+  //
+  // The narrower version was decorative: `catalog.refresh` is the only
+  // mutating tool exposed today and it is neither destructive nor paid, so
+  // removing it from the allowlist changed nothing and the allowlist proved
+  // nothing. Anything that WRITES should be an explicit, named decision --
+  // that is the whole question ("can an agent reach this at all"), and it is
+  // the decision Phase 2's `remote.add` will need to make on purpose rather
+  // than inherit.
+  if (!exempt && (capability.mutates || capability.destructive || capability.costsRealMoney)) {
+    const why = [
+      capability.destructive && 'can destroy work its caller cannot recover',
+      capability.costsRealMoney && 'spends real money',
+      capability.mutates && 'writes',
+    ].filter(Boolean).join(', ');
+
+    throw new Error(
+      `Capability "${capability.name}" ${why}, so it cannot be exposed as MCP tool "${toolName}" `
+        + 'without an explicit decision. Whether an agent may reach a writing operation is a '
+        + 'consent question, not a registration detail -- add it to '
+        + 'RISKY_CAPABILITIES_ALLOWED_ON_MCP with the reason it is safe.',
+    );
+  }
+
   return {
     readOnlyHint: !capability.mutates,
     destructiveHint: capability.destructive,
