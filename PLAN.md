@@ -163,7 +163,7 @@ Goal: make the hardest kind authorable, and the catalog navigable.
   pulling one into a fresh project
 - Starter Kits and Backend Plugins as their own sidebar destinations
 
-## Phase 15 — Delivery tooling — **v1 proposed, awaiting PR review**
+## Phase 15 — Delivery tooling — **v1 merged; "done" still needs a real engagement**
 
 Goal: carry a delivery methodology — a scoping calculator, a risk register, a
 friction log — the same way the catalog already carries code, without client
@@ -178,7 +178,10 @@ used one, not that these three PRs merged.
 
 - Three artifacts, each a real, working payload plus a required `README.md`
   stating the rule (fill in your own copy, never push it back) and the
-  named owner: `scoping-calculator` (`dataset` — a real `.xlsx` with working
+  named owner — and that rule is now enforced beyond the README, since these are
+  exactly the artifacts `contribute_artifact` was designed around: pushing a
+  filled-in copy is the harm case `preview_contribution` exists to catch (see
+  Phase 16 Stage 2): `scoping-calculator` (`dataset` — a real `.xlsx` with working
   formulas: day rate × complexity multiplier × days per phase, phases
   matching the delivery playbook order), `risk-register` (`doc` — a
   pre-listed risk library by engagement type: data platform / web app /
@@ -190,8 +193,10 @@ used one, not that these three PRs merged.
 - Proposed as real PRs against `growtharc-ai-helpers`: [#70](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/70)
   (risk-register), [#71](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/71)
   (friction-log), [#72](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/72)
-  (scoping-calculator) — none merged yet, pending the same human review every
-  other artifact goes through
+  (scoping-calculator). **All three have since merged** and are live in the
+  `ai-helpers` remote at v1.0.0 — verified against the running catalog, not
+  from the PR pages. This line previously read "none merged yet", which had
+  gone stale
 - The shared blank and the filled-in copy are **never the same file** — blank
   inside `install_target`, filled copy outside it, so `push` structurally
   cannot see client data. Same split `.env.example`/`.env.local` already uses
