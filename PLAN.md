@@ -316,8 +316,10 @@ Stdio, in-process. Two things decide whether it is safe at all:
   DeliveryOS writes through `console.*` inside commander closures at **56 sites
   across 11 files**, so planning and reporting aren't separable yet.
   **And note:** `--no-wire` is *not* a safe substitute — it still runs
-  `execSync(manifest.post_install)` (`pull.ts:57` → `pull.ts:282`) despite help
-  text claiming otherwise. That wrong help string is its own bug.
+  `execSync(manifest.post_install)` (`pull.ts:57` → `pull.ts:282`). The help
+  text that claimed otherwise was corrected under Tier 0; the behaviour is
+  unchanged and pinned by a characterization test, so this remains true of any
+  MCP surface that reaches for `--no-wire` as a safety measure.
 
 Exposes six task-shaped tools, not 42 operations — `agent-native`'s own code
 comment records that dumping ~105 schemas (~100k tokens) was a recurring footgun.
@@ -347,10 +349,12 @@ money and writes real files on a human's prior say-so.
 **`remote add`/`remove` are excluded outright, not gated.** Register a remote,
 pull from it, and the manifest's `post_install` runs arbitrary shell — code
 execution from two tool calls. Two things make it worse than "most artifacts are
-unsigned": `install_target: .git/hooks` writes an executable hook via `cpSync`
-with **no `post_install` needed at all** (the auto-run denylist at
-`src/engine/pull/wiring.ts:46` is applied only to `wiring_actions.targetFile`,
-never to `install_target`); and **a valid signature doesn't gate any of it**,
+unsigned": `install_target: .git/hooks` **used to** write an executable hook via
+`cpSync` with no `post_install` needed at all, because the auto-run denylist at
+`src/engine/pull/wiring.ts:46` was applied only to `wiring_actions.targetFile`.
+That half is closed — Tier 0 now checks `install_target` against the same list
+at pull and update time. What still stands: **a valid signature doesn't gate any
+of it**,
 because `computePayloadDigest` never takes the manifest as an input
 (`src/engine/provenance/digest.ts:33-51`), leaving `post_install`,
 `install_target` and `wiring_actions` outside the signature entirely. Remote
@@ -476,6 +480,32 @@ team benefits, rather than build more on an unproven foundation.
   project's own `.gitignore`, which belongs to whoever owns the repo. This is
   also what makes the stale-absolute-path bug unreachable: a committed
   `lock.json` was the delivery mechanism.
+- Done: `push` refuses a stale-version push, naming the files that changed both
+  upstream and locally — the second pusher's edits reverted a merged change as
+  an ordinary forward diff git had no reason to flag, and two concurrent pushes
+  bumping to the same version left the loser's change never offered as an update
+  to anyone; `--force` stamps the overlap into the PR body
+- Done: `pull` refuses to overwrite local edits on the CLI (the app had always
+  confirm-gated it), and `--force` fetches first — `pullArtifact` was the one
+  major operation that never fetched
+- Done: `post_install` surfaced before a pull, verbatim and ungated, in Detail,
+  `list --json` and the CLI; the Configuration tab no longer hides itself for an
+  artifact whose only side effect is a command
+- Done: `check-updates --apply` prints the changed-file set `applyUpdate` had
+  already computed, used to delete files, and thrown away
+- Done: commit identity passed with `git -c` instead of baked into the shared
+  cache clone, and existing baked-in config cleared with `--unset-all` — the
+  first pusher on a shared box had won forever
+- Done: four defects an independent review found in those guards, one of which
+  broke a single user's ordinary push → merge → push; the stale-push guard now
+  skips while your own `pendingPr` is in flight, since content comparison cannot
+  tell "builds on" from "overwrites"
+- Done: first real browser coverage of the desktop UI —
+  `test/e2e/detailDisclosure.e2e.test.ts`, four tests against the real
+  `index.html` with a stubbed engine; one UI defect had already shipped because
+  nothing in the repo could catch it
+- Done: 775 tests, from 766; lint and typecheck clean. Full narrative in
+  [CHANGELOG.md](CHANGELOG.md)
 - **Open — the audit logs still hold full file bodies.** Redaction reduces
   credential exposure and the directory is no longer committed by accident, but
   a private project's source is still copied verbatim into a local file. Worth
@@ -485,6 +515,53 @@ team benefits, rather than build more on an unproven foundation.
   (`authSecret`) and SCREAMING_SNAKE are both covered now, but a secret reaching
   a log in any other shape — assigned through an intermediate variable, say —
   still passes.
+- **Open — `compareVersions` is asymmetric on prerelease versions.**
+  `1.0.0-beta.1` vs `1.0.0` and the reverse **both** return 1:
+  `Number('0-beta')` is `NaN`, `NaN !== NaN` is true, and the comparator then
+  takes the "greater" branch in both directions
+  (`src/engine/sync/sync.ts:28`). Unreachable from `manifest.version` — the
+  schema enforces `/^\d+\.\d+\.\d+$/` — and reachable only from a hand-edited
+  lockfile. Shared by `checkForUpdates`, `applyUpdate` and now the push
+  staleness check.
+- **Open — the signing pipeline structurally excludes 92% of the catalog.**
+  `sign-artifacts.mjs:98` in the artifact repo is
+  `if (manifest.kind !== 'backend-plugin') continue;`, so all 213 skills,
+  agents, rules and commands are unsigned **by design**, not adoption lag. 3 of
+  230 artifacts are signed.
+- **Open — signatures are self-attesting.** The artifact declares its own
+  `certificate_identity`, which `src/engine/provenance/verify.ts:59` passes
+  straight to sigstore — the party being verified chooses the verification
+  parameters. A "require signatures" setting would need a pinned expected
+  identity **per remote**, and `RemoteEntry`
+  (`src/engine/remote/remoteRegistry.ts:7`) is `{ name, url, addedAt }` with
+  nowhere to put one.
+- **Open — `review_required` is read by nothing.** Declared and required in the
+  manifest schema (`src/engine/manifest/schema.ts:159`), written only on
+  `push --new`, unsettable from the desktop wizard, and `false` in 229 of 230
+  manifests.
+- **Open — `owner` is unverified free text.** Never compared to the pushing
+  identity; already `ai-helpers-import` on 210 of 230.
+- **Open — an in-flight change is invisible to everyone else.** `pendingPr` is
+  per-project-per-machine and `GithubClient` has no `pulls.list`, so nobody can
+  see that a colleague already has a PR open on the artifact they are about to
+  edit.
+- Decided, not open: **the app has no force affordance for `push`, and should
+  not get one.** A one-click force over a colleague's merged change is exactly
+  the operation that should stay hard, and the app already has the safe
+  resolution — discard the local edit, take the current version, re-apply.
+  Recorded here so it is not later filed as a gap.
+- **Open — performance, measured against the real 230-artifact catalog.** Not
+  in scope for this track, but the numbers contradict the assumption that
+  artifact *count* is what hurts. The Tauri host spawns a fresh 118 MB sidecar
+  **per RPC** with a measured ~1.1 s floor, and opening one Detail card fires
+  10–13 of them unqueued, four being literal duplicates. `computeChangedFiles`
+  (`src/engine/push/diff.ts:142`) costs ~5 ms per pulled file pair and runs on
+  every Browse navigation — 811 ms measured for one 153-file design kit.
+  `refreshCatalog` (`src/engine/catalog/catalog.ts:127`) fetches every remote
+  sequentially with no timeout, ~6–8 s each. The preview cache is unbounded and
+  never evicts stale compiler generations — 70.9 MB for 9 artifacts, 33.8 MB of
+  it already dead. And `buildCatalog` is 141 ms for 237 entries with no
+  memoization, called ~2× per RPC.
 
 ---
 
@@ -498,7 +575,11 @@ Ordered by what blocks value, not by phase number.
 2. **Make the gates real** — CI now exists and runs lint, typecheck and the
    full suite on every push, but ESLint still does not cover the 343KB desktop
    frontend at all and `test/` is still not typechecked, so what CI enforces is
-   narrower than it looks.
+   narrower than it looks. The frontend now has its first real *behavioural*
+   gate — `test/e2e/detailDisclosure.e2e.test.ts`, four browser tests against
+   the real `index.html` — which is what caught the last UI defect class, but
+   it is coverage, not static analysis: the 7,464 lines still lint to
+   `rules: 0`.
 3. **Split `app.js`** — 7,464 lines in one IIFE. Deferred until ESLint covers
    it, so the move happens with a linter watching.
 4. **A shared command surface** — the CLI exposes 15 commands and the sidecar

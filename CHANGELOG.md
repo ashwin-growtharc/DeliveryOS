@@ -6,6 +6,200 @@ All notable changes to DeliveryOS are recorded here, newest first. See
 
 ---
 
+## Two people, one artifact (branch `tier0/multi-user-hardening`)
+
+The multi-user paths here were not lightly tested — they had never run. 257
+commits, one author, five and a half weeks, so every guard that only matters
+once a second person exists had never been exercised by one. The previous batch
+already showed what that costs: a payload-deleting `push` bug that had never
+fired for exactly one reason, which was that there had only ever been one
+pusher. This batch went looking for the rest — and then an independent review
+found four more defects in the fixes themselves, one of which broke the
+*single*-user workflow. 766 tests before, 775 after; `lint --max-warnings 0` and
+`typecheck` clean.
+
+### Push
+
+- **`push` never checked whether you had edited a stale version.**
+  `lockEntry.version` was read into scope and never used; there was no
+  `compareVersions` in `src/engine/push/push.ts` at all. Your files are the
+  version you pulled plus your edits, and the staging loop copies them
+  *wholesale* over current upstream — and since the commit is made off the
+  current tip, any file two people both touched came back as an ordinary forward
+  diff reverting the first person's merged change. Git had no reason to flag it,
+  and the PR body said only "modified: foo.ts". There was a second, quieter
+  flavour: two concurrent pushes both bumping `1.0.0 → 1.0.1` merge cleanly,
+  because it is the same change on both sides, and `sync.ts`'s
+  `compareVersions(remote, local) > 0` is then false **forever** — so the second
+  person's change was never offered as an update to anyone, on any machine.
+  Refused now, naming the files that changed both upstream *and* locally, since
+  that is what says whether work is about to be lost. Regression test in
+  `test/e2e/push.e2e.test.ts`, verified failing first — without the guard it
+  shows A's merged change silently reverted.
+- **`--force` exists, and stamps the overlap into the PR body.** A wall with no
+  door is wrong when several people are validating one artifact — but a forced
+  stale push can still revert a merged change, and the reviewer is then the only
+  safeguard left, so the overlapping files are written into the PR body
+  (`src/engine/push/prContent.ts`) rather than resolved silently.
+
+### Pull
+
+- **`pull` overwrote local edits with no guard at all on the CLI.** The desktop
+  app has always confirm-gated this; the CLI had nothing — and "re-pull to get
+  the latest" is exactly the instinct people reach for once artifacts are
+  shared. `pullArtifact` copies the payload over `install_target` wholesale, so
+  on an artifact someone had edited, that was silent data loss. Refused now
+  unless `--force` (`src/engine/pull/pull.ts`, `LocalEditsWouldBeLostError` in
+  `src/engine/errors.ts`). The app passes `force: true` after its own confirm
+  dialog, so its overwrite button is unchanged. Regression test in
+  `test/e2e/applyUpdate.e2e.test.ts`.
+- **And `--force` now fetches first, because `pullArtifact` was the one major
+  operation that never fetched** — `push`, `applyUpdate`, `checkForUpdates`,
+  `refreshCatalog` and `scan` all do. That is not a convenience: without it,
+  `--force` would have discarded real edits in favour of an arbitrarily stale
+  cache, destroying work for nothing. The two refusal messages were written as a
+  pair — `push` says "commit, then `pull --force`", which is only sound advice
+  because `pull --force` actually refreshes. The regression test's `--force`
+  assertion deliberately bumps the fixture remote in between, so a non-fetching
+  force fails it.
+
+### What you can see before a pull
+
+- **`post_install` was shown nowhere before a pull.** Every occurrence in
+  `src-tauri/spike-ui/app.js` was a `!!` coercion. It was absent from Detail,
+  absent from `list --json` — the surface `deliveryos-check-first` reads
+  specifically to judge trust *without* pulling — and was only announced
+  mid-pull, after the payload had already been copied. Meanwhile
+  `wiring_actions`, which is declarative and reviewable, has always been fully
+  surfaced with snippets; the arbitrary shell string was not. Now in all three
+  places, verbatim (`src/engine/catalog/catalog.ts`, `src/cli/output.ts`,
+  `app.js`). The Configuration tab also no longer hides itself for an artifact
+  whose only side effect is a command.
+- Checked and deliberately not changed: no new gate or prompt in front of it.
+  Printing matches how `wiring` already shows its snippets, and a confirmation
+  prompt would change what every existing script does.
+
+### Update
+
+- **`update` told you a version number and nothing else** — while `applyUpdate`
+  had already computed the old-vs-new file sets, *deleted* files based on them,
+  and thrown the comparison away. A hundred lines further up, the refusal path
+  will happily name five of your own changed files. Now carried on the result
+  and printed (`src/engine/sync/applyUpdate.ts`,
+  `src/cli/commands/checkUpdates.ts`). Regression test in
+  `test/e2e/applyUpdate.e2e.test.ts`.
+
+### Identity
+
+- **Commit identity was baked into the shared cache clone.**
+  `addConfig(..., 'local')` persisted it into
+  `~/.deliveryos/remotes/<name>/.git/config` and nothing ever cleared it
+  (`src/engine/git/git.ts`). On a personal machine that is a harmless rewrite of
+  the same value, which is why it never surfaced; on any shared box or CI runner
+  the **first** pusher's identity won over everyone else's global config from
+  then on. Passed with `git -c` now, and existing baked-in config is cleared so
+  affected machines recover.
+- Also corrected: two code comments this branch's predecessor made stale, which
+  still claimed `.deliveryos/` is not gitignored.
+
+---
+
+### What the review of these fixes caught
+
+An independent review found four defects in the guards above. One of them broke
+a single person's ordinary workflow — guards written to protect a second user
+instead broke the first. Recorded plainly, because the suite was green for all
+four.
+
+- **The stale-push guard fired on your own merged push.** `push` records
+  `pendingPr` but never advances `lockEntry.version` — only
+  `resolvePendingPushes` does, and that is a manual command plus a 20-minute
+  background tick. So the most ordinary flow there is, push → merge → push
+  again, left the lockfile on the old version while the working copy already
+  contained the merged content. The guard then told a solo CLI user "someone
+  else's change merged in between", named their own file as one they were about
+  to revert, and pointed them at `pull --force` — which would have discarded the
+  edit in progress. All three claims false. **Content comparison could not
+  rescue this, and it was tried first**: a second edit legitimately differs from
+  upstream while still *containing* it, and bytes cannot distinguish "builds on"
+  from "overwrites" without a real three-way merge. `pendingPr` can, because
+  `push` is the only thing that sets it — the guard now skips while your own
+  push is in flight, trading a rare miss (someone else merging while your PR is
+  also open, which the PR review then catches) for not blocking the single most
+  common workflow. The overlap calculation is content-aware regardless, so the
+  message no longer accuses you of reverting a file whose local copy already
+  matches upstream. The existing two-cwd e2e test structurally could not catch
+  this, because A's merge never lands against A's own lockfile; the regression
+  test in `test/e2e/push.e2e.test.ts` uses **one** cwd and one person, seeds its
+  own artifact, and was verified failing with the exact false message it was
+  written against.
+- **The identity fix recovered one push late.** `getCommitIdentity` reads
+  *effective* git config, where local wins, and it ran ~450 lines before
+  `clearPersistedIdentity` — so on a shared box already poisoned by the old
+  behaviour, the first push after upgrading still resolved and committed under
+  the first pusher's name. Cleared before the read now, not just before the
+  commit. And `--unset-all` rather than `--unset`: a key with multiple values
+  made `--unset` fail and leave both in place, so a clone with duplicated
+  `[user]` entries never recovered at all (`src/engine/git/git.ts`).
+- **`pull --force` could announce one command and run another.** The CLI
+  resolved the manifest from the local cache and printed `post_install` from it,
+  but `--force` makes `pullArtifact` fetch and re-resolve — so the command that
+  actually executed came from a different manifest, which directly undermines
+  the point of surfacing it. The announce now comes from the engine's own
+  progress hook, which fires from the manifest it is about to execute, so it is
+  right in both cases (`src/cli/commands/pull.ts`, `src/engine/pull/pull.ts`).
+- **The new pull guard used the lockfile's raw absolute path.** Every other
+  consumer of `lockEntry.installTarget` re-validates it against cwd, and this
+  was the one new one that did not — so a renamed project folder made
+  `existsSync` false, the whole guard silently vanished, and the pull overwrote
+  local edits exactly as before. It now compares the target this pull is
+  actually about to write to.
+- Every one of the four has a regression test proven failing first.
+
+### The desktop UI
+
+- **A UI defect shipped because nothing in this repo could catch it.**
+  `src-tauri/spike-ui/app.js` is the one part of this codebase no tooling
+  reaches: ESLint's only rule-bearing config is scoped to `**/*.ts` —
+  `--print-config` reports `rules: 0` for all 7,464 lines — tsconfig excludes
+  it, and `lint:css` checks design-token bypasses rather than whether rendered
+  text says what it means. Every UI change in this work was signed off "reviewed
+  by hand," and one shipped anyway: the new `post_install` lifecycle step quotes
+  a real shell command with blank lines around it, but
+  `.lifecycle-step-description` is set via `textContent` and had no
+  `white-space` rule, so both line breaks collapsed to single spaces and the
+  command ran inline into the surrounding prose. Legibility is the entire point
+  of surfacing it, and a command buried mid-paragraph is exactly what someone
+  skims past. Fixed in `src-tauri/spike-ui/style.css`; every other lifecycle
+  description is a single paragraph with no line breaks (verified: 0 of 8), so
+  `pre-wrap` changes nothing for them.
+- **The desktop UI has real browser test coverage for the first time.**
+  `test/e2e/detailDisclosure.e2e.test.ts` drives the real `index.html` in a real
+  browser against a stubbed engine, on the seam
+  `test/e2e/uiOperationStore.e2e.test.ts` established —
+  `invoke('sidecar_call', ...)` rather than `window.DeliveryOS.call`, because
+  `sidecar.js` loads afterwards and overwrites the latter. Four tests, all
+  covering things only a browser can see: the `post_install` command appears
+  verbatim **and** on its own line, asserted through computed `white-space`
+  rather than the string, because the string was always right and the rendering
+  was not (verified to fail when the CSS rule is removed); the Configuration
+  section shows for a command-only artifact, asserted on the *section* rather
+  than a tab button, since with one applicable tab the app deliberately skips
+  the tab chrome and what matters is whether a person can see it; `catalog.list`
+  is accepted in **both** the old bare-array and the new `{ entries, skipped }`
+  shapes, which is what `normalizeCatalogResult` exists for; and the
+  skipped-manifest notice names *which* artifact, since `reason` alone never
+  does and the notice was unactionable without it.
+- **`StalePushError` told everyone to "re-run with `--force`", including desktop
+  users, who have no way to pass a flag.** The message now describes the
+  resolution that actually exists in the app — discard the local edit, take the
+  current version, re-apply — in both surfaces, and mentions the CLI flag as the
+  CLI's own option (`src/engine/push/push.ts`).
+- Checked and deliberately not changed: **the app has no force affordance for
+  push, and should not get one.** A one-click force over a colleague's merged
+  change is exactly the operation that should stay hard, and the app already has
+  the safe resolution.
+
 ## CI, and the hardening it made worth doing (branch `tier0/hardening-and-ci`)
 
 CI where there was none, then the defects found by auditing what CI would now be
