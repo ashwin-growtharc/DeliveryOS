@@ -30,6 +30,12 @@ Full detail and client configuration in [docs/mcp-server.md](docs/mcp-server.md)
 > and opening a PR without merging would exercise both the suite and the CI file
 > itself for the first time.
 
+`.mcp.json` is committed, so Claude Code offers to enable the server on opening
+this repo — verified end to end through the SDK's own `StdioClientTransport`,
+the transport Claude Code itself uses, rather than only a hand-rolled spawn.
+**This changes every teammate's Claude Code session:** they get an approval
+prompt on first open.
+
 ### The third driving adapter
 
 DeliveryOS already had two adapters over one core -- the CLI and the Tauri

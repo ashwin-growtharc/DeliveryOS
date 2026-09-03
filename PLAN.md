@@ -473,13 +473,15 @@ declares `false`, and `push` asserts it — so a SharePoint remote fails with a
 real message instead of half-working. Still its own future phase; no longer an
 open question about shape.
 
-**Partly answered by the read-only surface — but read the next sentence
-carefully.** The intended first consumer is Claude Code in this repo, and
-[docs/mcp-server.md](docs/mcp-server.md) carries the exact client config. **No
-`.mcp.json` is committed**, so the server is built and tested but nothing is
-wired to call it: that is a planned consumer, not a real one. Committing one
-changes every teammate's Claude Code session, so it is left as a deliberate
-one-line decision rather than assumed. Who is the first real MCP consumer?
+**Answered.** The first consumer is Claude Code in this repo, and it is wired:
+`.mcp.json` is committed, running `npx tsx src/index.ts mcp` so a fresh clone
+needs only `npm install`. Verified through the SDK's own `StdioClientTransport`
+— the one Claude Code uses — with all four tools, the error paths, and a real
+`refresh_catalog` against the live remotes. Note this does change every
+teammate's Claude Code session: they will be prompted to approve the server on
+opening the repo. The remaining question is the useful one: **does an agent
+reading this catalog actually change what gets built** — which only shows up in
+use, not in a test.
 `deliveryos-check-first` already gives Claude Code catalog access by shelling out
 to the CLI, so the real gain is *other* harnesses. Stages 0 and 1 don't depend on
 that answer; Stage 2 does. Second open question: does `pull` via MCP genuinely

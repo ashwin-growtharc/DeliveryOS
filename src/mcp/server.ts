@@ -109,8 +109,12 @@ export function buildMcpServer({ port: engine, version }: McpServerDeps): McpSer
         + 'UI components, templates, backend plugins) from git remotes into a project. '
         + 'These tools are READ-ONLY: they let you find an artifact and read what it '
         + 'contains, so you can tell the user what is available and what it would do. '
-        + 'They cannot pull, push, or modify anything -- to install an artifact, tell '
-        + 'the user to run `deliveryos pull <id>`. Every tool needs `cwd`, the absolute '
+        + 'They cannot pull, push, or modify anything. That is not a dead end: '
+        + 'DeliveryOS is a CLI, so to install an artifact you run its `pullCommand` '
+        + '(returned by get_artifact) in a terminal, the same way a person would. '
+        + 'Read the artifact first and tell the user what it will do -- especially '
+        + 'its postInstall, which is a shell command that runs on their machine. '
+        + 'Every tool needs `cwd`, the absolute '
         + 'path of the project being worked in, because whether an artifact is already '
         + 'installed is a property of that project, not of the machine.',
     },
@@ -257,6 +261,14 @@ export function buildMcpServer({ port: engine, version }: McpServerDeps): McpSer
               ? null
               : { path: doc.relPath, truncated: doc.truncated, content: doc.content },
           hasDoc: doc !== null,
+          // The exact command, ready to run, rather than leaving the agent to
+          // assemble it. These tools are read-only on purpose, so installing is
+          // always a handoff -- and a handoff that hands over a half-specified
+          // command is where an agent guesses at `--remote` and pulls the wrong
+          // artifact from the wrong place. `--remote` is always included even
+          // when the id is currently unambiguous, because ambiguity is a
+          // property of the catalog at the moment it runs, not of this answer.
+          pullCommand: `deliveryos pull ${m.id} --remote ${entry.remoteName}`,
         });
       } catch (error) {
         return failure(error);

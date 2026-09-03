@@ -97,6 +97,7 @@ interface ToolJson {
   byRemote: Record<string, number>;
   byStatus: Record<string, number>;
   postInstall: string | null;
+  pullCommand: string;
   doc: { path: string; content: string; truncated: boolean } | null;
   hasDoc: boolean;
 }
@@ -210,6 +211,18 @@ describe('MCP tool surface', () => {
     const { client, close } = await connect();
     const res = await call(client, 'get_artifact', { cwd: '/p', id: 'auth-prisma' });
     expect(res.data.postInstall).toBe('npm install @auth/prisma-adapter');
+    await close();
+  });
+
+  it('hands back the exact pull command, since installing is always a handoff', async () => {
+    // These tools are read-only on purpose, so every install is a handoff to
+    // the CLI. A handoff that hands over a half-specified command is where an
+    // agent guesses at --remote and pulls the wrong artifact from the wrong
+    // remote -- so the remote is always named, even when the id happens to be
+    // unambiguous today.
+    const { client, close } = await connect();
+    const res = await call(client, 'get_artifact', { cwd: '/p', id: 'auth-prisma' });
+    expect(res.data.pullCommand).toBe('deliveryos pull auth-prisma --remote internal');
     await close();
   });
 

@@ -141,6 +141,48 @@ An agent is a second actor. Adding mutation is a separate decision with its own
 consent model, not a widening of this interface — which is why "no mutating
 method" is enforced on the **port**, not just on today's tool list.
 
+### So how does an agent actually install something?
+
+It runs the CLI, the same way a person would. DeliveryOS is a command-line tool,
+and Claude Code already has a terminal — so read-only MCP costs the agent
+nothing it could otherwise do. What changes is *where the approval happens*: the
+user sees `deliveryos pull <id> --remote <r>` and approves that specific
+command, rather than approving a tool named `artifact_pull` once and having it
+invoked on their behalf thereafter.
+
+`get_artifact` returns the command ready to run, so the handoff is exact rather
+than reconstructed:
+
+```
+found        : email-code-auth (backend-plugin)
+installs to  : <project>/src/lib/auth
+post_install : "cd ../../.. && npm install next-auth@beta"
+signed       : yes
+=> run       : deliveryos pull email-code-auth --remote ai-helpers
+```
+
+That `post_install` line is the point. It is an arbitrary shell command from a
+manifest that executes on the user's machine (`pull.ts` → `execSync`), and
+before this surface existed it was invisible until it had already run — the
+desktop app coerced it to `!!` in both places it touched it. An agent can now
+read it out **before** anyone runs anything.
+
+Note the honest limit: if the user approves the pull, that command runs either
+way. The gain is disclosure and a per-invocation decision, not a sandbox.
+
+### What would have to be true to expose `pull`
+
+Recorded in PLAN.md Stage 3, not attempted here:
+
+1. **Plan/apply separation.** The engine writes through `console.*` at 56 sites
+   across 11 files, so "tell me what this would do" is not separable from doing
+   it. Dry-run-by-default needs that first.
+2. **`--no-wire` is not a substitute.** It still runs `execSync(post_install)`.
+3. **The refusal paths need an agent-legible contract.** Stale-push and
+   local-edit refusals now throw typed errors; an agent driving `pull` has to
+   handle them rather than retry with `--force`, which is exactly how a second
+   actor destroys a first actor's work.
+
 ---
 
 ## Why `cwd` is a tool argument
@@ -184,10 +226,18 @@ deleting that test, and deleting it is where this decision gets re-examined.
 The server is a subcommand, not a second binary, so it shares one `bin`, one
 SEA build and one version string with the CLI.
 
-**Nothing is wired up yet.** No `.mcp.json` is committed to this repo, so the
-server is built and tested but nothing calls it — a planned consumer, not a real
-one. Committing one changes every teammate's Claude Code session, so it is left
-as a deliberate decision rather than assumed.
+**This repo is already wired.** [`.mcp.json`](../.mcp.json) is committed, so
+Claude Code offers to enable the server on opening the repo. It runs
+`npx tsx src/index.ts mcp`, which needs nothing beyond `npm install` — `tsx` is
+a devDependency, and pointing at `bin.deliveryos` instead would require a build
+because that resolves to the gitignored `dist/`.
+
+Verified through the SDK's own `StdioClientTransport` — the transport Claude
+Code itself uses — not just a hand-rolled spawn: all four tools respond, the
+error paths refuse correctly, and `npx` resolves fine on Windows because
+`cross-spawn` handles the `.cmd` shim. Cold start is **~4.3 s** (that is `npx`
+plus `tsx` compiling, paid once per session, not per call). Pointing at
+`node dist/index.js mcp` after `npm run build` is faster if that ever matters.
 
 **Claude Code** (`.mcp.json` in the project, or `claude mcp add`):
 
@@ -274,9 +324,11 @@ Measured against the live 237-artifact catalog:
 
 | | |
 |---|---|
-| `catalog_overview` | 352 ms |
-| `search_artifacts` | 227 ms |
-| `get_artifact` | ~186 ms each |
+| `catalog_overview` | 271–352 ms |
+| `search_artifacts` | 135–227 ms |
+| `get_artifact` | ~108–186 ms |
+| `refresh_catalog` | **5.9 s** — three remotes, real git fetch |
+| cold start via `npx tsx` | ~4.3 s, once per session |
 
 `get_artifact` rebuilds the catalog per call (`buildCatalogWithSkipped` is
 ~141 ms of it). Memoizing is the obvious fix and is deliberately **not** done

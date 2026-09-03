@@ -107,12 +107,43 @@ It needs Rust and, on Windows, MSVC Build Tools — see
 |---|---|
 | `mcp` | Run a read-only MCP server over stdio, so an agent can search and read the catalog |
 
-`deliveryos mcp` exposes four tools — `search_artifacts`, `get_artifact`,
-`catalog_overview`, `refresh_catalog` — over the same engine the CLI and the
-desktop app use. It is read-only: an agent can tell you what exists and what an
-artifact would do, but cannot pull, push or remove anything. Setup, client
-configuration and the design rationale are in
-[docs/mcp-server.md](docs/mcp-server.md).
+The catalog is 237 artifacts across three remotes. Until now the only ways to
+look at it were this CLI and the desktop app — so the agent working in your
+project, the one most likely to benefit from knowing there is already a
+`code-reviewer` agent for the job, was the only party that could not ask.
+
+`deliveryos mcp` fixes that. Four tools over the same engine the CLI and the
+desktop app use:
+
+| Tool | Answers | Network |
+|---|---|---|
+| `search_artifacts` | "what is there for X?" — by query, kind, remote or install status | No |
+| `get_artifact` | "what does this actually do?" — full manifest plus its SKILL.md/README | No |
+| `catalog_overview` | "what kinds of thing exist here?" — counts, plus any manifest that failed to load | No |
+| `refresh_catalog` | the above, after fetching every remote from git | **Yes** |
+
+**It is read-only, by construction rather than by policy.** An agent can tell
+you what exists and what an artifact would do; it cannot pull, push or remove
+anything. There is no mutating method on the port at all, so there is nothing
+to accidentally expose — enforced by a test, not a convention.
+
+That does not stop an agent installing things. DeliveryOS is a CLI and Claude
+Code has a terminal, so it installs the way you do — `get_artifact` even hands
+back the exact command. What read-only changes is *where you approve*: you see
+`deliveryos pull email-code-auth --remote ai-helpers` and decide on that, rather
+than approving a tool once and having it act on your behalf afterwards. And
+because the agent reads the artifact first, it can tell you that this particular
+one runs `cd ../../.. && npm install next-auth@beta` on your machine — which was
+invisible until it had already happened.
+
+**Already wired up.** [`.mcp.json`](.mcp.json) is committed, so Claude Code
+will offer to enable the server the next time you open this repo — approve it
+once and the tools are available. It runs `npx tsx src/index.ts mcp`, so a
+fresh clone needs nothing beyond `npm install`.
+
+Client configuration for other setups (including the Windows `.cmd` caveat and
+the packaged `.exe`), the architecture, and the reasoning behind the read-only
+decision are in [docs/mcp-server.md](docs/mcp-server.md).
 
 ## Claude Code skills
 

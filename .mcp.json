@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "deliveryos": {
+      "command": "npx",
+      "args": ["tsx", "src/index.ts", "mcp"]
+    }
+  }
+}
