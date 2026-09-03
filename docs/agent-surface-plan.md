@@ -44,7 +44,7 @@ drift is invisible:
 | `hasWiring` dispatch gate written **four times** (was "three") | `src/cli/commands/pull.ts:71`, `app.js:4633` (Pull), `app.js:4236` (Update — a second copy in the same file), and encoded as two sidecar keys (`artifact.pull` / `artifact.pullAndAutoWire`). The engine holds the same predicate twice more (`pullAndAutoWire.ts:44`, `applyUpdate.ts:339`) |
 | `remote add`/`remove` orchestration written twice | `remoteAdd.ts:13-27` vs `sidecar.ts:169-187` — the sidecar comment admits it *"mirrors `runRemoteAdd`'s order exactly"* |
 
-**Scale:** 42 distinct operations after dedup (25 sidecar-only, 2 CLI-only,
+**Scale:** **43** distinct operations after dedup (this said 42; counted against the real surfaces while building `src/capabilities.ts`, which declares 43 and is the source of truth). Roughly 25 sidecar-only, 2 CLI-only,
 15↔13 overlapping). Coverage through the real surface: sidecar 12/40 (30%), CLI
 9/15 (60%). Real coverage lives in the engine — 59 files in `test/unit/`.
 
@@ -390,7 +390,7 @@ did not.
 
 ## 6. The MCP surface is curated, not generated
 
-42 operations do **not** become 42 tools. A large tool surface burns client
+43 operations do **not** become 43 tools. A large tool surface burns client
 context and makes the agent worse at choosing. The registry is internal; the MCP
 surface is a deliberately small, task-shaped facade:
 

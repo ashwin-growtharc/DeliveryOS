@@ -6,6 +6,66 @@ All notable changes to DeliveryOS are recorded here, newest first. See
 
 ---
 
+## CI ran for the first time, and immediately earned its keep (PR #27)
+
+`.github/workflows/ci.yml` was added weeks ago and had **never executed**. It
+existed only on the `tier0/*` branches; `origin/main` has no `.github/`
+directory, so GitHub had never had a workflow to run. Every green result
+reported for this work -- 842 tests, `lint --max-warnings 0`, `typecheck`,
+`build`, a packaged `deliveryos-cli.exe` driven over stdio -- came from **one
+developer machine**, which is exactly the failure mode the CI file was written
+to end.
+
+Opening PR #27 as a draft ran it. Two things came out of that.
+
+### The CI file itself is now verified, not just the code
+
+The plan depended on `pull_request:` resolving the workflow from the **merge
+commit** rather than from the base branch. If it had resolved from base, the
+`.github`-less `main` would have produced **zero runs** -- which presents as
+*nothing happening* rather than as a failure, and would have been easy to read
+as success. Both runs report `event: pull_request` against the branch head, so
+that assumption is settled.
+
+### It found a test that passed locally for one reason: `gh` was logged in
+
+The two failures predicted as environmental -- the codegen byte-identity check
+and Edge resolution for the three browser steps -- **both passed**. What failed
+was the test suite, the one thing reported green across 28 commits.
+
+`artifact.push emits early progress stages ...` asserted `stages.length > 0`
+and got `0`. `pushArtifact` calls `getGithubToken()` (`push.ts:249`) before
+emitting its first applicable progress line (`:253`) -- the `render-preview`
+line at `:159` fires only for `ui-component` artifacts, and the fixture is a
+template. So with no `gh` auth, push throws before emitting anything, and the
+original test title ("...*before* hitting the real GitHub-auth wall") was false
+for this artifact kind.
+
+The instructive part: **the test's own comment had already spotted the hazard**
+-- *"how far push gets ... could vary slightly machine-to-machine (gh CLI
+installed/logged in or not)"* -- and then set the bound one off. The variance
+was real; the floor was zero, not one. Spotting a risk and mis-setting the
+threshold is a more useful failure than missing it entirely, and it is the kind
+that only an independent machine finds.
+
+Fixed by asserting on the **error type**, which is what actually determines how
+far push got: `GithubAuthError` means it threw at `:249` and zero stages is
+correct; `GithubApiError` means it got a token, so `fetch`/`diff` must be
+present. Deliberately **not** relaxed to `>= 0`, which would have made the test
+vacuous. The engine is unchanged -- failing fast on auth before doing
+filesystem work is the better behaviour; only the test's claim about it was
+wrong.
+
+Reproduced locally by removing GitHub CLI from `PATH` until the message matched
+CI character-for-character, then confirmed the *old* assertion still fails
+under that condition -- the step that separates fixing the cause from
+coincidentally passing.
+
+**Do not loosen that assertion back to a bare `> 0`.** It will pass on any
+developer machine with `gh` authenticated and fail on every clean runner.
+
+---
+
 ## The catalog, readable by an agent (branch `tier0/multi-user-hardening`)
 
 `deliveryos mcp` runs a Model Context Protocol server over stdio. It exposes

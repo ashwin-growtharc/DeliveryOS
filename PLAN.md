@@ -240,11 +240,12 @@ command-injection finding, Phase 11's argv-splitting bug). An HTTP API is also
 wrong here: DeliveryOS operates on the local project, the local lockfile and
 local git — the agent runs on the same machine as the files.
 
-### Stage 0 — CI first, then the real bugs (do this regardless of MCP) — **Mostly landed**
+### Stage 0 — CI first, then the real bugs (do this regardless of MCP) — **Landed and verified**
 
-**CI was the precondition for everything else in this phase. The file now
-exists — but it has never executed, and until it does, nothing here is
-independently verified.** `.github/workflows/ci.yml` runs lint, typecheck, a
+**CI was the precondition for everything else in this phase, and it has now
+run green on an independent machine** (draft PR #27, run `33742110681`).
+Every step passed: install, codegen drift, lint, typecheck, design tokens, the
+theme matrix and font-resolution browser audits, and the full 842-test suite. `.github/workflows/ci.yml` runs lint, typecheck, a
 generated-file drift check, two browser audits and the full suite on
 `windows-latest`; the runner choice and step ordering are in
 [CHANGELOG.md](CHANGELOG.md). Until it landed, nothing ran any of the gates but
@@ -253,20 +254,24 @@ remembers to run, which is the exact failure the guard was meant to replace (the
 reference implementation even gates its strictness on `Boolean(process.env.CI)`,
 so ported as-is it would silently no-op here).
 
-> **The workflow has run zero times, and currently cannot.** It exists only on
-> the unpushed `tier0/*` branches; `origin/main` has no `.github` directory at
-> all, and GitHub only executes workflows present on the remote. So every green
-> result reported for this work — 813 tests, `lint --max-warnings 0`,
-> `typecheck`, `build`, the packaged `.exe` — comes from **one developer
-> machine**, which is precisely the failure mode the CI file was written to end.
-> Read any "all gates pass" claim in [CHANGELOG.md](CHANGELOG.md) as "passes
-> locally, unverified by CI."
+> **It has now run, and it worked.** Draft PR #27 executed it for the first
+> time. Both runs report `event: pull_request` against the branch head, which
+> settles the assumption the plan rested on: `pull_request:` resolves the
+> workflow from the merge commit, not from the base branch. Had it resolved
+> from base, the `.github`-less `main` would have produced **zero runs** —
+> which presents as *nothing happening* rather than as a failure.
 >
-> The cheapest way to fix that is to push a `tier0/*` branch and open a PR
-> **without merging**: the `pull_request:` trigger is unfiltered, and for a
-> same-repo PR the workflow runs from the merge commit — so the CI file finally
-> gets exercised against `main` without anything landing on it. That is also the
-> first real test of the CI file itself, which no one has run either.
+> It found a real defect on the first attempt, and not either of the two
+> predicted as environmental (both of those passed). `artifact.push`'s progress
+> assertion passed locally only because `gh` was authenticated on the developer
+> machine; on a clean runner push throws at `getGithubToken()` before emitting
+> anything. See [CHANGELOG.md](CHANGELOG.md) for the full account and the
+> reason that assertion must not be loosened back to a bare `> 0`.
+>
+> So "all gates pass" no longer carries a silent "on one machine" caveat — for
+> anything verified on or after `3b336c8`. Earlier claims in this file and in
+> [CHANGELOG.md](CHANGELOG.md) predate the first run and should be read with
+> that in mind.
 
 The confirmed defects triaged in
 [docs/hardening-ledger.html](docs/hardening-ledger.html) landed with it, on
@@ -416,7 +421,7 @@ Stdio, in-process. Two things decide whether it is safe at all:
   unchanged and pinned by a characterization test, so this remains true of any
   MCP surface that reaches for `--no-wire` as a safety measure.
 
-Exposes six task-shaped tools, not 42 operations — `agent-native`'s own code
+Exposes six task-shaped tools, not 43 operations — `agent-native`'s own code
 comment records that dumping ~105 schemas (~100k tokens) was a recurring footgun.
 And **advertised must equal callable**: excluded operations are stripped from the
 registry the server sees, not merely hidden from `tools/list`.
