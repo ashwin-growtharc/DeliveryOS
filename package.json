@@ -33,6 +33,7 @@
     "generate:vendored-fonts": "node scripts/generate-vendored-fonts.mjs"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@octokit/rest": "^22.0.1",
     "commander": "^12.1.0",
     "esbuild": "^0.28.1",

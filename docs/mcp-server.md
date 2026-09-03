@@ -1,0 +1,250 @@
+# The MCP server
+
+`deliveryos mcp` runs a Model Context Protocol server over stdio, exposing the
+catalog to an MCP client (Claude Code, Claude Desktop, or anything else that
+speaks the protocol). It is **read-only**.
+
+---
+
+## Why this exists
+
+An agent working in a project cannot currently see what DeliveryOS has. The
+catalog is 237 artifacts across three remotes — 80 skills, 68 agents, 35 rules,
+30 commands, plus components, templates and backend plugins — and the only ways
+to look at it are a CLI a person types into and a desktop app a person clicks.
+So the agent that would most benefit from knowing "there is already a
+`code-reviewer` agent for this" is the one party that cannot ask.
+
+This closes that, and nothing more. It does not let an agent install anything.
+
+---
+
+## Architecture: before and after
+
+### Before
+
+Two driving adapters, each wired straight into the engine:
+
+```
+   CLI (src/cli/**)  ─────────┐
+                              ├──────►  engine (src/engine/**)  ──►  git, fs, GitHub
+   Tauri sidecar             ─┘
+   (src/sidecar.ts)
+```
+
+Neither adapter declared what it needed from the core; both imported engine
+functions directly and shaped arguments inline. That is fine until you want to
+test an adapter in isolation, at which point there is no seam:
+`test/e2e/sidecar.e2e.test.ts` builds a ~100-line subprocess harness with manual
+request/response correlation, because driving the sidecar any other way is
+impossible.
+
+### After
+
+A third driving adapter, and the first one with a declared port:
+
+```
+                                     ┌─ ports.ts ─────────────┐
+   MCP (src/mcp/server.ts) ─────────►│  DeliveryOsReadPort    │
+                                     │  listCatalog           │
+                                     │  refreshCatalog        │
+                                     │  readArtifact          │
+                                     └───────────┬────────────┘
+                                                 │
+                              engineAdapter.ts ──┴──►  engine  ──►  git, fs
+                                     ▲
+   CLI ─────────────────────────────┘ (composition root:
+   src/cli/commands/mcp.ts             binds the port to the real engine)
+
+   CLI (other commands) ──────────►  engine        (unchanged)
+   Tauri sidecar        ──────────►  engine        (unchanged)
+```
+
+Three files, one rule each:
+
+| File | Role | May import the engine? |
+|---|---|---|
+| `src/mcp/ports.ts` | Declares `DeliveryOsReadPort` | Types only |
+| `src/mcp/server.ts` | Tool definitions, validation, formatting | Types only |
+| `src/mcp/engineAdapter.ts` | Binds the port to `src/engine/**` | Yes — the only one |
+
+`src/cli/commands/mcp.ts` is the composition root: it is where
+`createEngineReadPort()` is actually called. `buildMcpServer` takes its port as
+a **required** argument rather than defaulting to the real one, which is what
+keeps `server.ts` free of any runtime dependency on the core.
+
+**This is checked, not asserted.** `test/unit/mcp.architecture.test.ts` fails
+the build if `server.ts` or `ports.ts` gains a value import from `../engine/`,
+if more than one file in `src/mcp/` reaches the core at runtime, or if the port
+grows a `pull`/`push`/`remove`-shaped method. Without that, the seam decays
+silently: the fake port in the tests stops resembling production while every
+test keeps passing.
+
+### What the seam bought
+
+`test/unit/mcp.server.test.ts` covers the entire tool surface — 14 tests — with
+a fake port. No subprocess, no filesystem, no git remote, no fixtures. It runs
+in **87 ms**. The equivalent coverage for the sidecar needs a spawned process
+per scenario, and `vitest.config.ts` already caps workers to half the cores
+because those tests were starving each other.
+
+`test/e2e/mcp.e2e.test.ts` then covers only what a subprocess can prove and an
+in-memory transport cannot: that the command is wired into the CLI, that the
+adapter reaches a real catalog on disk, and that **stdout carries JSON-RPC and
+nothing else**.
+
+---
+
+## The tools
+
+All four require `cwd` — the absolute path of the project being worked in.
+Whether an artifact is installed is a property of that project, not the machine.
+
+| Tool | Does | Network |
+|---|---|---|
+| `search_artifacts` | Finds by query, kind, remote, install status. Ranked, capped, reports the total. | No |
+| `get_artifact` | Full manifest plus the primary document. | No |
+| `catalog_overview` | Counts by kind/remote/status; names any manifest that failed to load. | No |
+| `refresh_catalog` | Fetches every remote from git, then summarises. | **Yes** |
+
+`refresh_catalog` is the only one annotated `readOnlyHint: false` /
+`openWorldHint: true`. It writes to the caches under `~/.deliveryos` and can
+hang on an unreachable remote. Saying otherwise would be convenient and false.
+
+### Two details worth knowing
+
+**Results are capped.** `search_artifacts` defaults to 20 rows, max 100, and
+reports `total` and `truncated`. Returning 237 full manifests would spend an
+agent's context on a directory listing.
+
+**`post_install` is exposed as the command string.** The desktop app coerced it
+to `!!` in both places it touched it, so nobody could see *what* would run on
+their machine. An agent recommending an artifact can now quote the command.
+`contentDigest` and `signature` are exposed the same way — usually `null`,
+because only 3 of 230 artifacts are signed (`sign-artifacts.mjs` skips every
+kind except `backend-plugin`), and an agent should be able to say "this is not
+signed" accurately.
+
+---
+
+## Why read-only
+
+Every mutating operation in this system either writes into a person's project
+or opens a PR against a shared remote. The multi-user work in the preceding
+batch exists precisely because those paths destroy work when two actors
+disagree — a stale `push` silently reverted a colleague's merged change, and a
+CLI `pull` overwrote local edits with no guard.
+
+An agent is a second actor. Adding mutation is a separate decision with its own
+consent model, not a widening of this interface — which is why "no mutating
+method" is enforced on the **port**, not just on today's tool list.
+
+---
+
+## Configuring a client
+
+The server is a subcommand, not a second binary, so it shares one `bin`, one
+SEA build and one version string with the CLI.
+
+**Claude Code** (`.mcp.json` in the project, or `claude mcp add`):
+
+```json
+{
+  "mcpServers": {
+    "deliveryos": {
+      "command": "deliveryos",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+**On Windows**, `bin.deliveryos` resolves to `deliveryos.cmd`, and a `.cmd`
+cannot be `CreateProcess`'d directly — the same `EINVAL` that
+`scripts/build-sidecar.mjs` documents for `npx.cmd`. Either go through `cmd`:
+
+```json
+{ "command": "cmd", "args": ["/c", "deliveryos", "mcp"] }
+```
+
+or point at the packaged executable, which sidesteps it entirely:
+
+```json
+{ "command": "C:\\path\\to\\deliveryos-cli.exe", "args": ["mcp"] }
+```
+
+---
+
+## Packaging
+
+The server survives Node SEA packaging, and this was verified by building a
+real `.exe` and driving it over stdio — not assumed. `@modelcontextprotocol/sdk`
+has no dynamic `require()`, no `createRequire`, no `import()`, and never reads
+its own `package.json`, so esbuild resolves every import statically and nothing
+is left for the SEA `require` shim to fail on. That is exactly the property
+`playwright-core` lacks, which is why `renderPreviewImage.ts:26-55` has to
+document a workaround for it.
+
+`scripts/build-cli.mjs` needed no changes: it already bundles `dist/index.js`.
+Verified in this repo, not only in a scratch directory -- `npm run build:cli`
+then driving `build/deliveryos-cli.exe mcp` over stdio returns the real
+237-artifact catalog. Cost is about +1.3 MB, mostly `ajv`.
+
+### Why not fastmcp
+
+`fastmcp` wraps the same SDK and adds sessions, auth, SSE and OpenAPI import —
+all dead weight for a stdio server with four read-only tools. It depends on
+**zod ^4** while this repo is on zod 3.25, which is the same type-identity
+collision described below but across a major version inside a dependency we do
+not control. And its tail (`execa`, `file-type`, `@apidevtools/swagger-parser`)
+is precisely the dynamic-require class that already breaks under SEA. The
+official SDK was proven end-to-end; taking the unproven path bought nothing.
+
+### The one build gotcha
+
+`tsconfig.json` needed this:
+
+```json
+"paths": {
+  "zod/v3": ["./node_modules/zod/v3/index.d.cts"],
+  "zod/v4/core": ["./node_modules/zod/v4/core/index.d.cts"]
+}
+```
+
+The SDK's `server/zod-compat.d.ts` imports `zod/v3` and `zod/v4/core`. Under
+`moduleResolution: node10`, which ignores `exports` maps entirely, those resolve
+to the `.d.ts` twins while our own `import { z } from 'zod'` resolves via the
+`types` field to `.d.cts` — producing two structurally identical but distinct
+declarations of every zod class. The symptom is
+`TS2589: Type instantiation is excessively deep and possibly infinite` and
+`tsc` exit 2. It is not avoidable by choosing a different SDK API; the low-level
+`Server` + `setRequestHandler` route hits it too, plus a hard `TS2345`.
+
+Blast radius is nil — nothing else in `src/` imports either specifier, and no
+`baseUrl` is needed (TS ≥4.1 resolves `paths` relative to the tsconfig).
+
+---
+
+## Known costs
+
+Measured against the live 237-artifact catalog:
+
+| | |
+|---|---|
+| `catalog_overview` | 352 ms |
+| `search_artifacts` | 227 ms |
+| `get_artifact` | ~186 ms each |
+
+`get_artifact` rebuilds the catalog per call (`buildCatalogWithSkipped` is
+~141 ms of it). Memoizing is the obvious fix and is deliberately **not** done
+here: the module-level catalog state removed in this same batch is exactly what
+a naive cache would reintroduce, and cache invalidation for a long-lived process
+that `refresh_catalog` can mutate underneath needs its own design. An agent
+reading ten artifacts pays about two seconds; that is acceptable, and it is
+recorded rather than hidden.
+
+## Not covered
+
+`wire-with-claude` is structurally impossible over MCP: it is the only
+`stdio: 'inherit'` call in `src/` (`launchInteractiveClaudeSession.ts:51`) and
+hands the terminal to an interactive Claude session. It cannot be a tool call.

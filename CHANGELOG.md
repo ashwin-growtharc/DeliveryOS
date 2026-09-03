@@ -6,6 +6,162 @@ All notable changes to DeliveryOS are recorded here, newest first. See
 
 ---
 
+## The catalog, readable by an agent (branch `tier0/multi-user-hardening`)
+
+`deliveryos mcp` runs a Model Context Protocol server over stdio. It exposes
+four read-only tools over the same engine the CLI and the desktop app use, so
+an agent working in a project can finally see what DeliveryOS has.
+
+The gap it closes: the catalog is 237 artifacts across three remotes -- 80
+skills, 68 agents, 35 rules, 30 commands, plus components, templates and
+backend plugins -- and the only ways to look at it were a CLI a person types
+into and an app a person clicks. The one party that would most benefit from
+knowing "there is already a `code-reviewer` agent for this" was the only one
+that could not ask.
+
+775 tests before, 813 after. `lint --max-warnings 0` and `typecheck` clean.
+Full detail and client configuration in [docs/mcp-server.md](docs/mcp-server.md).
+
+### The third driving adapter
+
+DeliveryOS already had two adapters over one core -- the CLI and the Tauri
+sidecar -- but neither declared what it needed from the engine; both imported
+engine functions directly. That works until you want to test one, at which
+point there is no seam: `test/e2e/sidecar.e2e.test.ts` builds a ~100-line
+subprocess harness with manual request/response correlation because driving the
+sidecar any other way is impossible.
+
+This adapter declares a port. `src/mcp/server.ts` depends on
+`DeliveryOsReadPort` and nothing under `src/engine/**`; `engineAdapter.ts` is
+the one file that binds it; `src/cli/commands/mcp.ts` is the composition root
+where the binding actually happens. `buildMcpServer` takes its port as a
+**required** argument rather than defaulting to the real one -- the convenience
+of a default would have cost exactly the property that makes the seam worth
+having.
+
+The payoff is not architectural taste. `test/unit/mcp.server.test.ts` covers
+the whole tool surface with a fake port -- no subprocess, no filesystem, no git
+remote -- in **87 ms**. That is the difference between a guardrail people keep
+and one they delete when it gets slow.
+
+- **The boundary is enforced, not documented.**
+  `test/unit/mcp.architecture.test.ts` fails the build if `server.ts` or
+  `ports.ts` gains a value import from `../engine/`, if more than one file in
+  `src/mcp/` reaches the core at runtime, or if the port grows a
+  `pull`/`push`/`remove`-shaped method. Verified by injecting each violation
+  and watching it go red. Without it the seam decays silently -- the fake port
+  stops resembling production while every test keeps passing.
+
+### Read-only, on purpose
+
+Every mutating operation here either writes into someone's project or opens a
+PR against a shared remote, and the multi-user batch immediately preceding this
+one exists *because* those paths destroy work when two actors disagree. An
+agent is a second actor. So there is no `pull`, `push` or `remove` tool, and
+"no mutating method" is enforced on the **port** rather than on today's tool
+list -- adding mutation should require revisiting the consent question, not
+just appending a `registerTool` call.
+
+`test/unit/mcp.server.test.ts` asserts `artifact_pull`, `artifact_push` and
+`artifact_remove` are all uncallable -- via `tools/call`, not merely absent
+from `tools/list`. Asserted on `isError` rather than `rejects.toThrow()`,
+because `McpServer` converts an unknown-tool `-32602` into a *resolved* result:
+the rejection form passes for the wrong reason and would keep passing the day
+someone actually exposes `artifact_pull`.
+
+### Removed the module-level catalog state
+
+`buildCatalog` recorded skipped manifests into a module-level array that callers
+drained afterwards via `takeSkippedManifests()`. That was safe only by accident
+-- the Tauri host spawns one sidecar **process per RPC**, so no two builds ever
+overlapped in one process. A long-lived MCP server removes that mask, and
+`refreshCatalog` awaits every remote fetch before building, so one request could
+drain another's list and report a broken catalog as a clean one. Silent, and
+pointing the wrong way: you would be told the catalog is fine when a manifest
+had been skipped.
+
+`buildCatalogWithSkipped()` now returns `{ entries, skipped }` with the array
+local to the call. Two independent agents flagged this as the blocker before any
+long-lived process, and it was fixed before the server was written rather than
+after it misbehaved.
+
+### `resolvePrimaryDoc`
+
+`resolvePayloadDir` returns two different *kinds* of path and every caller had
+to know which it got: the `payload_path` escape hatch "may name a single file or
+a directory" (`schema.ts:150-158`), and both shapes are common. A caller that
+assumes "directory" reads nothing for the first group; one that assumes "file"
+throws `EISDIR` on the second.
+
+Measured against the real catalog: of 100 artifacts sampled, **45 resolve to a
+file and 49 to a document inside a directory**. A naive implementation would
+have silently returned nothing for roughly half the catalog. The fork is now
+resolved once, in the core, and reports which shape it found.
+
+It also truncates at 64 KB and *says* it truncated -- an agent handed half a
+document without being told will answer confidently from the half it saw.
+
+### stdout is a wire, not a log
+
+`src/sidecar.ts:5-8` had asserted this in a comment since the sidecar was
+written, and nothing enforced it. A stray `console.log` corrupts the JSON-RPC
+stream and reaches the user as an opaque parse error nowhere near its cause --
+and every other file in `src/cli/commands/` opens with one, so copying a
+neighbour in is the obvious mistake.
+
+Now three things enforce it: an ESLint `no-console` rule scoped to
+`src/mcp/**`, `src/engine/**`, `src/sidecar.ts` and `src/cli/commands/mcp.ts`
+(which passed with zero violations on the day it was added); a static test; and
+an end-to-end assertion that every stdout line from a real spawned
+`deliveryos mcp` parses as JSON-RPC. Verified by injecting a `console.log` and
+watching all of them fail.
+
+### One deliberate deviation from the plan
+
+`docs/agent-surface-plan.md` Stage 2 required *session-configured project
+scope, never a tool argument*, because "every containment check in the engine
+validates paths within `cwd` while validating `cwd` itself nowhere." That is
+correct for a surface that **writes** -- `pull` into an agent-chosen directory
+is a genuine escape.
+
+This surface writes nothing. `cwd` is read-only here: the lockfile, and a
+comparison of install targets against pristine snapshots. The tools return
+`localStatus` and `installTarget`, never file contents, which come from the
+remote cache. Against a residual existence oracle over paths the calling agent
+can usually `stat` anyway, out-of-band registration would make the server
+unusable in the client that matters most -- an editor whose whole job is the
+project it is open in.
+
+So `cwd` stays an argument, and the half of the rule that still bites is
+enforced: absolute path, existing directory, checked on every tool, with e2e
+coverage. A relative `cwd` would otherwise resolve against the *server*
+process and report install status for a directory nobody named. **This does not
+carry forward to a mutating tool** -- PLAN.md records that the session-scope
+rule applies to `pull` in full.
+
+### Build notes
+
+- **Not `fastmcp`.** It wraps the same SDK and adds sessions, auth, SSE and
+  OpenAPI import -- all dead weight for a stdio server with four read-only
+  tools. It depends on **zod ^4** against this repo's 3.25, and its tail
+  (`execa`, `file-type`, `swagger-parser`) is the dynamic-require class that
+  already breaks under SEA. The official SDK was verified end to end, including
+  a real SEA `.exe` driven over stdio; the unproven path bought nothing.
+- **One `tsconfig.json` change**, six lines: `paths` mapping `zod/v3` and
+  `zod/v4/core` to their `.d.cts` twins. Under `moduleResolution: node10`,
+  which ignores `exports` maps, the SDK's `zod-compat.d.ts` and our own
+  `import { z } from 'zod'` resolve to two structurally identical but distinct
+  declarations of every zod class -- `TS2589`, `tsc` exit 2. Not avoidable by
+  picking a different SDK API. Blast radius nil: nothing else in `src/` imports
+  either specifier.
+- **`get_artifact` costs ~186 ms** against the live catalog because it rebuilds
+  the catalog per call. Memoizing is deliberately not done here -- it would
+  reintroduce exactly the module-level state removed above, and invalidation
+  for a process `refresh_catalog` can mutate underneath needs its own design.
+  Recorded rather than hidden.
+
+---
+
 ## Two people, one artifact (branch `tier0/multi-user-hardening`)
 
 The multi-user paths here were not lightly tested — they had never run. 257

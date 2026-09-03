@@ -204,7 +204,7 @@ used one, not that these three PRs merged.
 - **Definition of done, still open**: one real engagement used one of these
   and we know whether it helped — not "three PRs merged"
 
-## Phase 16 — One core, many surfaces — **Not started**
+## Phase 16 — One core, many surfaces — **Stage 2 read-only surface landed**
 
 Goal: make the engine reachable from a third consumer (an MCP server, so any AI
 harness can drive DeliveryOS) without tripling the CLI-vs-sidecar drift this
@@ -300,7 +300,60 @@ too — passed / failed / **could not run** — where a guard that inspected not
 refuses to report success. `deliveryos-status` should gain that third state for
 the same reason.
 
-### Stage 2 — `deliveryos mcp`, six curated tools
+### Stage 2 — `deliveryos mcp` — **read-only half landed**
+
+**What shipped:** `deliveryos mcp`, a stdio MCP server exposing four read-only
+tools (`search_artifacts`, `get_artifact`, `catalog_overview`,
+`refresh_catalog`). Architecture, client configuration and measured costs in
+[docs/mcp-server.md](docs/mcp-server.md).
+
+It is the third driving adapter and the first with a **declared port**.
+`src/mcp/server.ts` depends on `DeliveryOsReadPort` and nothing under
+`src/engine/**`; `engineAdapter.ts` is the single binding;
+`src/cli/commands/mcp.ts` is the composition root. Enforced by
+`test/unit/mcp.architecture.test.ts`, not by convention.
+
+**"Advertised must equal callable" is satisfied structurally rather than by
+stripping a registry:** there is no mutating method on the port at all, so
+there is nothing to strip. The architecture test fails the build if the port
+grows a `pull`/`push`/`remove`-shaped method.
+
+**One correction to what this section said.** The planned test —
+`await expect(client.callTool(...)).rejects.toThrow()` — does not work.
+`McpServer` converts an unknown-tool `-32602` into a **resolved** result
+`{ isError: true, ... }`. The rejection form passes for the wrong reason and
+would keep passing the day someone actually exposes `artifact_pull`. Assert on
+`res.isError`.
+
+**One deliberate deviation, and why.** This section required
+*session-configured project scope, never a tool argument*, on the grounds that
+"every containment check in the engine validates paths within `cwd` while
+validating `cwd` itself nowhere — so an agent-supplied project path is a real
+escape." That reasoning is correct for a surface that **writes**: `pull` into
+an agent-chosen directory is a genuine escape.
+
+This surface writes nothing. `cwd` is used only to read the lockfile and to
+compare install targets against pristine snapshots; the tools return
+`localStatus` and `installTarget`, never file contents (those come from the
+remote cache). The residual exposure is an existence oracle over paths the
+calling agent can almost always already `stat` itself. Against that, requiring
+out-of-band registration would make the server unusable in the one client that
+matters most — an editor whose whole job is the project it is open in.
+
+So `cwd` stays a tool argument, and the part of the rule that still bites is
+enforced: it must be an absolute path to a directory that exists
+(`assertUsableProjectDir`, with e2e coverage). **When `pull` is reconsidered
+under Stage 3, the session-scope rule applies to it in full** — this deviation
+does not carry forward to a mutating tool.
+
+**Still open from this section:** dry-run-by-default remains Stage-1-dependent
+(the 56 `console.*` sites across 11 files are still not separable into plan and
+report), and it is not needed by a read-only surface. The `--no-wire` warning
+stands unchanged.
+
+#### The original design, for reference
+
+
 
 Stdio, in-process. Two things decide whether it is safe at all:
 
@@ -393,7 +446,7 @@ declares `false`, and `push` asserts it — so a SharePoint remote fails with a
 real message instead of half-working. Still its own future phase; no longer an
 open question about shape.
 
-**Open before Stage 2 is worth starting:** who is the first real MCP consumer?
+**Partly answered by the read-only surface.** Who is the first real MCP consumer?
 `deliveryos-check-first` already gives Claude Code catalog access by shelling out
 to the CLI, so the real gain is *other* harnesses. Stages 0 and 1 don't depend on
 that answer; Stage 2 does. Second open question: does `pull` via MCP genuinely
