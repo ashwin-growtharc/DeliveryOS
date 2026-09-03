@@ -79,6 +79,43 @@ describe('MCP adapter boundary', () => {
     }
   });
 
+  it('is stdio-only, because the cwd-as-tool-argument decision depends on it', () => {
+    // This is the fourth structural gate, and it exists to stop a safety
+    // argument from being silently inherited.
+    //
+    // `docs/agent-surface-plan.md` Stage 2 required session-configured project
+    // scope. This surface takes `cwd` as a tool argument instead, and the
+    // justification is written in `engineAdapter.ts`: the residual exposure is
+    // "an existence oracle over paths the calling agent can almost always
+    // already stat itself."
+    //
+    // That sentence is only true because the transport is stdio and the client
+    // is a local process with its own filesystem access. Add a streamable-HTTP
+    // or SSE transport and the caller is remote: an agent-supplied `cwd` then
+    // probes the SERVER's filesystem, which it could not otherwise reach, and
+    // the argument quietly stops holding while the code still reads as safe.
+    //
+    // This is the same failure shape as the `needsApproval` bug recorded in
+    // PLAN.md's Phase 16 -- a gate that holds on one surface and is assumed to
+    // hold on all of them. Whoever adds a second transport has to delete this
+    // test, and deleting it is where the cwd decision gets re-examined.
+    const sources = files.map((f) => fs.readFileSync(path.join(MCP_DIR, f), 'utf-8'));
+
+    for (const transport of ['streamableHttp', 'sse']) {
+      const importers = files.filter((f, i) => sources[i].includes(`/${transport}.js`));
+      expect(
+        importers,
+        `src/mcp/ imports the ${transport} transport. The cwd-as-tool-argument decision was made `
+          + 'for a LOCAL stdio client and does not carry over to a remote one -- re-read the '
+          + 'rationale in engineAdapter.ts before allowing this.',
+      ).toEqual([]);
+    }
+
+    // And the stdio transport IS what it connects with, so the rule above is
+    // about a real property rather than an absence.
+    expect(sources.some((s) => s.includes('server/stdio.js'))).toBe(true);
+  });
+
   it('never writes to stdout from the MCP or engine layers', () => {
     // Belt to the ESLint rule's braces. stdout is the JSON-RPC wire; a stray
     // `console.log` corrupts the stream and surfaces to the user as a parse

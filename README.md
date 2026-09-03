@@ -101,6 +101,19 @@ It needs Rust and, on Windows, MSVC Build Tools — see
 | `check-pending-pushes` | Ask GitHub what actually happened to your open PRs |
 | `check-drift <id> -r <remote> -s <path>` | Has the artifact's original external source changed? |
 
+### For AI agents
+
+| Command | What it does |
+|---|---|
+| `mcp` | Run a read-only MCP server over stdio, so an agent can search and read the catalog |
+
+`deliveryos mcp` exposes four tools — `search_artifacts`, `get_artifact`,
+`catalog_overview`, `refresh_catalog` — over the same engine the CLI and the
+desktop app use. It is read-only: an agent can tell you what exists and what an
+artifact would do, but cannot pull, push or remove anything. Setup, client
+configuration and the design rationale are in
+[docs/mcp-server.md](docs/mcp-server.md).
+
 ## Claude Code skills
 
 DeliveryOS ships six skills, in two groups.

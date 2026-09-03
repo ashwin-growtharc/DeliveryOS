@@ -22,6 +22,14 @@ that could not ask.
 775 tests before, 813 after. `lint --max-warnings 0` and `typecheck` clean.
 Full detail and client configuration in [docs/mcp-server.md](docs/mcp-server.md).
 
+> **Every gate result in this entry is from one developer machine.** The CI
+> workflow added in the preceding batch has executed **zero** times: it exists
+> only on unpushed `tier0/*` branches, and `origin/main` has no `.github`
+> directory, so GitHub has never had a workflow to run. Read "clean" throughout
+> this entry as "clean locally, unverified by CI." Pushing a `tier0/*` branch
+> and opening a PR without merging would exercise both the suite and the CI file
+> itself for the first time.
+
 ### The third driving adapter
 
 DeliveryOS already had two adapters over one core -- the CLI and the Tauri
@@ -138,6 +146,17 @@ coverage. A relative `cwd` would otherwise resolve against the *server*
 process and report install status for a directory nobody named. **This does not
 carry forward to a mutating tool** -- PLAN.md records that the session-scope
 rule applies to `pull` in full.
+
+**The argument is also pinned to the transport it rests on.** "The calling agent
+can already `stat` that path itself" is true for a local stdio client and false
+for a remote one: over streamable HTTP or SSE, an agent-supplied `cwd` probes
+the *server's* filesystem, and the justification stops holding while the code
+still reads as safe. That is the `needsApproval` failure shape -- a gate that
+holds on one surface and is assumed to hold on all of them. So the architecture
+test has a fourth assertion: the server is stdio-only. Adding a transport means
+deleting that test, which is where the decision gets re-examined rather than
+inherited. Verified by injecting a `streamableHttp` import and watching it name
+the offending file.
 
 ### Build notes
 

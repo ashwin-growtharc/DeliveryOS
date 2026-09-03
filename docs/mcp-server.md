@@ -75,10 +75,12 @@ keeps `server.ts` free of any runtime dependency on the core.
 
 **This is checked, not asserted.** `test/unit/mcp.architecture.test.ts` fails
 the build if `server.ts` or `ports.ts` gains a value import from `../engine/`,
-if more than one file in `src/mcp/` reaches the core at runtime, or if the port
-grows a `pull`/`push`/`remove`-shaped method. Without that, the seam decays
-silently: the fake port in the tests stops resembling production while every
-test keeps passing.
+if more than one file in `src/mcp/` reaches the core at runtime, if the port
+grows a `pull`/`push`/`remove`-shaped method, if anything in `src/mcp/**` or
+`src/engine/**` writes to stdout, or if the server gains a non-stdio transport
+(see [Why `cwd` is a tool argument](#why-cwd-is-a-tool-argument)). Without that,
+the seam decays silently: the fake port in the tests stops resembling production
+while every test keeps passing.
 
 ### What the seam bought
 
@@ -141,10 +143,51 @@ method" is enforced on the **port**, not just on today's tool list.
 
 ---
 
+## Why `cwd` is a tool argument
+
+`docs/agent-surface-plan.md` Stage 2 required *session-configured project scope,
+never a tool argument*, on the grounds that the engine validates paths **within**
+`cwd` while validating `cwd` itself nowhere — so an agent-supplied project path
+is an escape.
+
+That is correct for a surface that **writes**. Pulling a payload into an
+agent-chosen directory is a genuine escape. This surface writes nothing:
+
+- document contents come from the **remote cache**, never from `cwd`
+  (`resolvePrimaryDoc(entry.remoteName, manifest.id, …)`)
+- `cwd` reaches only the lockfile read and the pristine-snapshot comparison
+- the tools return `localStatus` and `installTarget` — never file contents
+
+So the residual exposure is an existence oracle over paths the calling agent can
+almost always already `stat` itself. Against that, out-of-band registration
+would make the server unusable in the one client that matters — an editor whose
+whole job is the project it is open in.
+
+The half of the rule that still bites **is** enforced: `assertUsableProjectDir`
+requires an absolute path to a directory that exists, on every tool, with e2e
+coverage. It lives in the adapter rather than in each `cwd` zod schema
+deliberately — one gate every tool funnels through beats four copies.
+
+**This argument depends on the transport, and that dependency is pinned.**
+"The caller can already `stat` it" holds for a local stdio client and fails for
+a remote one: over streamable HTTP or SSE the agent would be probing the
+*server's* filesystem, which it could not otherwise reach — and the code would
+still read as safe. That is the `needsApproval` failure shape PLAN.md's Phase 16
+is built around: a gate that holds on one surface and is *assumed* to hold on
+all of them. Hence the fourth architecture gate. Adding a transport means
+deleting that test, and deleting it is where this decision gets re-examined.
+
+---
+
 ## Configuring a client
 
 The server is a subcommand, not a second binary, so it shares one `bin`, one
 SEA build and one version string with the CLI.
+
+**Nothing is wired up yet.** No `.mcp.json` is committed to this repo, so the
+server is built and tested but nothing calls it — a planned consumer, not a real
+one. Committing one changes every teammate's Claude Code session, so it is left
+as a deliberate decision rather than assumed.
 
 **Claude Code** (`.mcp.json` in the project, or `claude mcp add`):
 

@@ -242,15 +242,31 @@ local git — the agent runs on the same machine as the files.
 
 ### Stage 0 — CI first, then the real bugs (do this regardless of MCP) — **Mostly landed**
 
-**CI was the precondition for everything else in this phase, and it now
-exists.** `.github/workflows/ci.yml` runs lint, typecheck, a generated-file
-drift check, two browser audits and the full suite on `windows-latest`; the
-runner choice and step ordering are in [CHANGELOG.md](CHANGELOG.md). Until it
-landed, nothing ran any of the gates but a human who remembered to — and a
-static guard without CI is a script someone remembers to run, which is the exact
-failure the guard was meant to replace (the reference implementation even gates
-its strictness on `Boolean(process.env.CI)`, so ported as-is it would silently
-no-op here).
+**CI was the precondition for everything else in this phase. The file now
+exists — but it has never executed, and until it does, nothing here is
+independently verified.** `.github/workflows/ci.yml` runs lint, typecheck, a
+generated-file drift check, two browser audits and the full suite on
+`windows-latest`; the runner choice and step ordering are in
+[CHANGELOG.md](CHANGELOG.md). Until it landed, nothing ran any of the gates but
+a human who remembered to — and a static guard without CI is a script someone
+remembers to run, which is the exact failure the guard was meant to replace (the
+reference implementation even gates its strictness on `Boolean(process.env.CI)`,
+so ported as-is it would silently no-op here).
+
+> **The workflow has run zero times, and currently cannot.** It exists only on
+> the unpushed `tier0/*` branches; `origin/main` has no `.github` directory at
+> all, and GitHub only executes workflows present on the remote. So every green
+> result reported for this work — 813 tests, `lint --max-warnings 0`,
+> `typecheck`, `build`, the packaged `.exe` — comes from **one developer
+> machine**, which is precisely the failure mode the CI file was written to end.
+> Read any "all gates pass" claim in [CHANGELOG.md](CHANGELOG.md) as "passes
+> locally, unverified by CI."
+>
+> The cheapest way to fix that is to push a `tier0/*` branch and open a PR
+> **without merging**: the `pull_request:` trigger is unfiltered, and for a
+> same-repo PR the workflow runs from the merge commit — so the CI file finally
+> gets exercised against `main` without anything landing on it. That is also the
+> first real test of the CI file itself, which no one has run either.
 
 The confirmed defects triaged in
 [docs/hardening-ledger.html](docs/hardening-ledger.html) landed with it, on
@@ -345,6 +361,17 @@ enforced: it must be an absolute path to a directory that exists
 (`assertUsableProjectDir`, with e2e coverage). **When `pull` is reconsidered
 under Stage 3, the session-scope rule applies to it in full** — this deviation
 does not carry forward to a mutating tool.
+
+**And the argument is pinned to the transport it depends on.** "The calling
+agent can already `stat` that path itself" is true for a *local stdio* client
+and false for a remote one — over streamable HTTP or SSE, an agent-supplied
+`cwd` probes the **server's** filesystem, which the caller could not otherwise
+reach, and the safety argument silently stops holding while the code still reads
+as safe. That is the same shape as the `needsApproval` bug this phase is built
+around: a gate that holds on one surface and is *assumed* to hold on all of
+them. So `mcp.architecture.test.ts` has a fourth structural gate asserting the
+server is stdio-only. Adding a second transport means deleting that test, and
+deleting it is where this decision gets re-examined instead of inherited.
 
 **Still open from this section:** dry-run-by-default remains Stage-1-dependent
 (the 56 `console.*` sites across 11 files are still not separable into plan and
@@ -446,7 +473,13 @@ declares `false`, and `push` asserts it — so a SharePoint remote fails with a
 real message instead of half-working. Still its own future phase; no longer an
 open question about shape.
 
-**Partly answered by the read-only surface.** Who is the first real MCP consumer?
+**Partly answered by the read-only surface — but read the next sentence
+carefully.** The intended first consumer is Claude Code in this repo, and
+[docs/mcp-server.md](docs/mcp-server.md) carries the exact client config. **No
+`.mcp.json` is committed**, so the server is built and tested but nothing is
+wired to call it: that is a planned consumer, not a real one. Committing one
+changes every teammate's Claude Code session, so it is left as a deliberate
+one-line decision rather than assumed. Who is the first real MCP consumer?
 `deliveryos-check-first` already gives Claude Code catalog access by shelling out
 to the CLI, so the real gain is *other* harnesses. Stages 0 and 1 don't depend on
 that answer; Stage 2 does. Second open question: does `pull` via MCP genuinely

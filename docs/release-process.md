@@ -1,11 +1,17 @@
 # Release process (manual)
 
-There is no CI/GitHub-Actions automation for DeliveryOS yet — this is a
-deliberate scope boundary, not an oversight. Every release is built and
-published by hand, from the builder's own machine, following the steps
-below. Automating this (a GitHub Actions workflow that builds, signs, and
-publishes on tag push) is a reasonable next step once releases stop being
-solo-developer-local, but it is out of scope for now.
+No GitHub-Actions automation **releases** DeliveryOS — this is a deliberate
+scope boundary, not an oversight. Every release is built and published by hand,
+from the builder's own machine, following the steps below. Automating this (a
+workflow that builds, signs, and publishes on tag push) is a reasonable next
+step once releases stop being solo-developer-local, but it is out of scope for
+now.
+
+A *verification* workflow now exists — `.github/workflows/ci.yml`, running lint,
+typecheck, a codegen drift check and the full suite — but **it has never
+executed**: it lives only on unpushed `tier0/*` branches, and `origin/main` has
+no `.github` directory, so GitHub has never had a workflow to run. It does not
+build or publish anything, so nothing below changes because of it.
 
 This process exists because auto-update (see PLAN.md's Phase 3 checklist) is
 wired up: the app checks `tauri.conf.json`'s `plugins.updater.endpoints` for a
@@ -167,3 +173,7 @@ is built, signed, and published by hand from the builder's own machine. This
 is deliberate for the project's current solo-developer stage, not a gap
 waiting to be filled incidentally — automating it is a real (but currently
 out of scope) future task.
+
+The `ci.yml` verification workflow added on the `tier0/*` branches does not
+change this: it runs the test gates, never a build or a publish, and as of this
+writing it has not run at all (see the note at the top of this file).
