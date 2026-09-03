@@ -1,0 +1,191 @@
+import { describe, it, expect } from 'vitest';
+import * as fs from 'fs';
+import * as path from 'path';
+import { CAPABILITIES, paidCapabilities, mutatingCapabilities } from '../../src/capabilities';
+
+/**
+ * The guard that makes `src/capabilities.ts` worth having.
+ *
+ * A manifest nobody checks is a comment. This asserts the declaration and the
+ * three real surfaces agree in both directions: every command, RPC key and
+ * tool that exists is declared exactly once, and nothing is declared that does
+ * not exist. Adding an operation to one surface without declaring it fails the
+ * build, which is the whole point -- the surfaces already disagree in ways
+ * nobody noticed for months (`check-updates --apply` scope, `applyBuildFix`
+ * attribution), and both would have been caught here.
+ *
+ * Guard hygiene, learned from a sibling repo where the boundary written as a
+ * mechanical test held and the one written as a doc leaked: every extractor
+ * below carries an ANTI-VACUITY assertion. A guard that silently scans nothing
+ * reports success, which is worse than no guard because it reads as one.
+ */
+
+const REPO_ROOT = path.join(__dirname, '..', '..');
+const CLI_COMMANDS_DIR = path.join(REPO_ROOT, 'src', 'cli', 'commands');
+
+/** Every `.command('...')` string across the CLI command modules.
+ *
+ * `remote`'s three subcommands are qualified, because "add" and "remove" are
+ * meaningless on their own and `remove <id>` is a different, top-level
+ * operation that deletes an installed artifact. */
+function actualCliCommands(): string[] {
+  const found: string[] = [];
+  for (const file of fs.readdirSync(CLI_COMMANDS_DIR).filter((f) => f.endsWith('.ts'))) {
+    const source = fs.readFileSync(path.join(CLI_COMMANDS_DIR, file), 'utf-8');
+    const names = [...source.matchAll(/\.command\('([^']+)'\)/g)].map((m) => m[1]);
+    // remoteAdd.ts declares the parent `remote` plus three children.
+    if (names.includes('remote')) {
+      for (const n of names) {
+        if (n !== 'remote') found.push(`remote ${n}`);
+      }
+    } else {
+      found.push(...names);
+    }
+  }
+  expect(found.length, 'parsed zero CLI commands -- this guard is checking nothing').toBeGreaterThan(0);
+  return found;
+}
+
+/** Every key in the sidecar's dispatch table. */
+function actualSidecarKeys(): string[] {
+  const source = fs.readFileSync(path.join(REPO_ROOT, 'src', 'sidecar.ts'), 'utf-8');
+  const keys = [...source.matchAll(/^ {2}'([a-zA-Z]+\.[a-zA-Z]+)':/gm)].map((m) => m[1]);
+  expect(keys.length, 'parsed zero sidecar keys -- this guard is checking nothing').toBeGreaterThan(0);
+  return keys;
+}
+
+/** Every tool name passed to `registerTool`. */
+function actualMcpTools(): string[] {
+  const source = fs.readFileSync(path.join(REPO_ROOT, 'src', 'mcp', 'server.ts'), 'utf-8');
+  const names = [...source.matchAll(/registerTool\(\s*\n\s*'([a-z_]+)'/g)].map((m) => m[1]);
+  expect(names.length, 'parsed zero MCP tools -- this guard is checking nothing').toBeGreaterThan(0);
+  return names;
+}
+
+/** `pull` legitimately backs two capabilities (`artifact.pull` and
+ * `artifact.pullAndAutoWire`), chosen by the `hasWiring` gate. That gate is
+ * itself the duplication PLAN.md Phase 4 removes; until then this is a real
+ * one-command-two-operations case rather than a declaration error. */
+const CLI_COMMANDS_BACKING_TWO_CAPABILITIES = new Set([
+  // Gated on `hasWiring` -- `artifact.pull` vs `artifact.pullAndAutoWire`.
+  'pull <id>',
+  // `check-updates` is a safe read; `check-updates --apply` is a destructive
+  // write. One command, two operations, distinguished only by a flag.
+  'check-updates',
+]);
+
+/** Not an operation: the composition root that boots the MCP server. */
+const CLI_NON_OPERATIONS = new Set(['mcp']);
+
+describe('capability manifest', () => {
+  it('declares every CLI command exactly once, and invents none', () => {
+    const actual = actualCliCommands().filter((c) => !CLI_NON_OPERATIONS.has(c));
+    const declared = CAPABILITIES.map((c) => c.cli).filter((c): c is string => c !== undefined);
+
+    for (const command of new Set(actual)) {
+      const times = declared.filter((d) => d === command).length;
+      const expected = CLI_COMMANDS_BACKING_TWO_CAPABILITIES.has(command) ? 2 : 1;
+      expect(times, `CLI command "${command}" is declared ${times}x, expected ${expected}x`).toBe(expected);
+    }
+
+    for (const command of new Set(declared)) {
+      expect(
+        actual,
+        `capabilities.ts declares CLI command "${command}", which no command module registers`,
+      ).toContain(command);
+    }
+  });
+
+  it('declares every sidecar RPC key exactly once, and invents none', () => {
+    const actual = actualSidecarKeys();
+    const declared = CAPABILITIES.map((c) => c.sidecar).filter((s): s is string => s !== undefined);
+
+    expect(new Set(declared).size, 'a sidecar key is declared twice').toBe(declared.length);
+    expect(declared.sort()).toEqual([...actual].sort());
+  });
+
+  it('declares every MCP tool exactly once, and invents none', () => {
+    const actual = actualMcpTools();
+    const declared = CAPABILITIES.flatMap((c) => c.mcp ?? []);
+
+    expect(new Set(declared).size, 'an MCP tool is declared twice').toBe(declared.length);
+    expect(declared.sort()).toEqual([...actual].sort());
+  });
+
+  it('gives every capability a unique canonical name', () => {
+    const names = CAPABILITIES.map((c) => c.name);
+    expect(new Set(names).size).toBe(names.length);
+  });
+
+  it('exposes every capability on at least one surface', () => {
+    // A declaration nothing implements is dead weight that will rot.
+    const orphans = CAPABILITIES.filter((c) => !c.cli && !c.sidecar && !c.mcp?.length);
+    expect(orphans.map((c) => c.name)).toEqual([]);
+  });
+
+  it('pins the operations that spend real money', () => {
+    // Pinned by NAME, not by count, so adding a paid operation forces an
+    // explicit edit here rather than silently moving a number. Two of these
+    // are CLI-only -- an audit of the sidecar alone reports six and misses
+    // `wireWithClaude` and `scaffoldBackendPlugin`.
+    expect(paidCapabilities().map((c) => c.name).sort()).toEqual([
+      'artifact.requestAntiPatternFix',
+      'artifact.requestBuildFix',
+      'artifact.requestWiringMerge',
+      'artifact.requestWiringPlacement',
+      'artifact.scaffoldBackendPlugin',
+      'artifact.suggestAntiPatterns',
+      'artifact.suggestMetadata',
+      'artifact.wireWithClaude',
+    ]);
+  });
+
+  it('pins the operations that can destroy unrecoverable work', () => {
+    // The set an approval dialog actually needs. `destructive` is deliberately
+    // narrower than `mutates`: writing `.env.local` is a mutation; deleting an
+    // edited install target is not recoverable from inside DeliveryOS.
+    expect(CAPABILITIES.filter((c) => c.destructive).map((c) => c.name).sort()).toEqual([
+      'artifact.applyUpdate',
+      'artifact.pull',
+      'artifact.pullAndAutoWire',
+      'artifact.remove',
+      'remote.remove',
+    ]);
+  });
+
+  it('pins the operations that run shell commands from a manifest', () => {
+    expect(CAPABILITIES.filter((c) => c.executesShell).map((c) => c.name).sort()).toEqual([
+      'artifact.applyUpdate',
+      'artifact.pull',
+      'artifact.pullAndAutoWire',
+      'artifact.remove',
+      'artifact.verifyBuild',
+      'artifact.wireWithClaude',
+      'preview.compile',
+      'preview.compileLocal',
+      'preview.compilePayloadComponent',
+    ]);
+  });
+
+  it('never marks a capability destructive without also marking it mutating', () => {
+    // Destructive is a strict subset. A surface that gates only on `mutates`
+    // must not be able to miss a destructive operation.
+    const inconsistent = CAPABILITIES.filter((c) => c.destructive && !c.mutates);
+    expect(inconsistent.map((c) => c.name)).toEqual([]);
+  });
+
+  it('keeps every mutating capability off the read-only MCP surface', () => {
+    // The MCP server is read-only by construction (`src/mcp/ports.ts`). This
+    // asserts the same property from the manifest's side, so the two
+    // declarations cannot drift apart -- if a mutating operation ever gains an
+    // `mcp` entry, this fails even if the port test was edited to allow it.
+    const leaked = mutatingCapabilities().filter((c) => (c.mcp?.length ?? 0) > 0);
+    expect(
+      leaked.map((c) => c.name),
+      'a mutating capability is exposed over MCP -- see PLAN.md Phase 2 before allowing this',
+    ).toEqual(['catalog.refresh']);
+    // `catalog.refresh` is the one deliberate exception: it writes only to the
+    // remote caches under ~/.deliveryos, touches nothing in the project, and is
+    // annotated `readOnlyHint: false` / `openWorldHint: true` accordingly.
+  });
+});

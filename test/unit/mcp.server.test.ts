@@ -4,6 +4,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { buildMcpServer } from '../../src/mcp/server';
 import { DeliveryOsReadPort, CatalogSnapshot } from '../../src/mcp/ports';
 import { CatalogListEntry } from '../../src/engine/catalog/catalog';
+import { CAPABILITIES } from '../../src/capabilities';
 
 /**
  * The whole tool surface, driven through a real MCP client over a real
@@ -274,6 +275,30 @@ describe('MCP tool surface', () => {
     // network. Saying otherwise would be convenient and false.
     expect(byName.refresh_catalog?.readOnlyHint).toBe(false);
     expect(byName.refresh_catalog?.openWorldHint).toBe(true);
+    await close();
+  });
+
+  it('annotates every tool from the capability manifest, not from a second hand-typed copy', async () => {
+    // Annotations decide whether a person is asked before a tool runs --
+    // Anthropic's directory rules state that read-only tools may run without
+    // per-call confirmation while destructive ones always prompt. So "what
+    // does this operation do" must have exactly one source, or the answer can
+    // differ between the manifest and the wire.
+    //
+    // Asserted against the DECLARATION rather than against literals, so this
+    // test cannot be satisfied by editing both copies to agree while both are
+    // wrong about the operation.
+    const { client, close } = await connect();
+    const { tools } = await client.listTools();
+
+    expect(tools.length).toBeGreaterThan(0);
+    for (const tool of tools) {
+      const capability = CAPABILITIES.find((c) => c.mcp?.includes(tool.name));
+      expect(capability, `tool "${tool.name}" is not declared in src/capabilities.ts`).toBeDefined();
+      expect(tool.annotations?.readOnlyHint, `${tool.name}.readOnlyHint`).toBe(!capability!.mutates);
+      expect(tool.annotations?.destructiveHint, `${tool.name}.destructiveHint`).toBe(capability!.destructive);
+      expect(tool.annotations?.openWorldHint, `${tool.name}.openWorldHint`).toBe(capability!.network);
+    }
     await close();
   });
 

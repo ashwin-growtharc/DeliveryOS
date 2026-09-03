@@ -3,6 +3,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 import type { CatalogListEntry } from '../engine/catalog/catalog';
 import type { DeliveryOsReadPort } from './ports';
+import { CAPABILITIES } from '../capabilities';
 
 /**
  * The MCP driving adapter: it translates tool calls into port calls and
@@ -70,6 +71,36 @@ function score(entry: CatalogListEntry, query: string): number {
   if (flattenTags(entry).some((t) => t.toLowerCase().includes(q))) total += 20;
   if (entry.manifest.kind.toLowerCase() === q) total += 15;
   return total;
+}
+
+/**
+ * The tool's annotations, DERIVED from `src/capabilities.ts` rather than typed
+ * out here.
+ *
+ * These are not cosmetic: Anthropic's directory requirements state that
+ * "read-only tools can run without per-call confirmation; destructive tools
+ * always prompt", so these values decide whether a person is asked before a
+ * tool runs. Getting them from the declaration means the answer cannot differ
+ * between what the manifest says an operation does and what this file claims.
+ *
+ * Throws for an undeclared tool. That is deliberate -- a tool registered here
+ * without a capability entry would otherwise silently get whatever defaults
+ * the SDK picks, which for a write is the wrong way to fail.
+ */
+function annotationsFor(toolName: string) {
+  const capability = CAPABILITIES.find((c) => c.mcp?.includes(toolName));
+  if (!capability) {
+    throw new Error(
+      `MCP tool "${toolName}" has no entry in src/capabilities.ts. Declare it there `
+        + '(and in the surfaces list) so its risk classification has one source.',
+    );
+  }
+  return {
+    readOnlyHint: !capability.mutates,
+    destructiveHint: capability.destructive,
+    idempotentHint: !capability.mutates || !capability.destructive,
+    openWorldHint: capability.network,
+  };
 }
 
 function json(value: unknown): { content: [{ type: 'text'; text: string }] } {
@@ -162,7 +193,7 @@ export function buildMcpServer({ port: engine, version }: McpServerDeps): McpSer
           .optional()
           .describe(`Maximum rows to return (default ${DEFAULT_SEARCH_LIMIT}, max ${MAX_SEARCH_LIMIT})`),
       },
-      annotations: { readOnlyHint: true, openWorldHint: false },
+      annotations: annotationsFor('search_artifacts'),
     },
     async ({ cwd, query, kind, remote, status, limit }) => {
       try {
@@ -222,7 +253,7 @@ export function buildMcpServer({ port: engine, version }: McpServerDeps): McpSer
           .optional()
           .describe('Include the primary document body (default true). Set false for the manifest alone.'),
       },
-      annotations: { readOnlyHint: true, openWorldHint: false },
+      annotations: annotationsFor('get_artifact'),
     },
     async ({ cwd, id, remote, includeDoc }) => {
       try {
@@ -285,7 +316,7 @@ export function buildMcpServer({ port: engine, version }: McpServerDeps): McpSer
         + 'failed to load. Use this to orient before searching -- it answers "what kinds of thing '
         + 'are available here" in one call instead of paging through hundreds of rows.',
       inputSchema: { cwd: cwdSchema, remote: remoteSchema },
-      annotations: { readOnlyHint: true, openWorldHint: false },
+      annotations: annotationsFor('catalog_overview'),
     },
     async ({ cwd, remote }) => {
       try {
@@ -305,16 +336,13 @@ export function buildMcpServer({ port: engine, version }: McpServerDeps): McpSer
         + 'summary as catalog_overview. Slow -- seconds per remote, and it can hang if a remote '
         + 'is unreachable. Call it when the catalog looks stale, not routinely.',
       inputSchema: { cwd: cwdSchema, remote: remoteSchema },
-      annotations: {
-        // Not read-only: it mutates the local remote caches under
-        // ~/.deliveryos. It touches nothing in the user's project, hence not
-        // destructive, and it does reach the network, hence open-world. Stated
-        // precisely because a client may gate on these.
-        readOnlyHint: false,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: true,
-      },
+      // Derived, and the derivation gets this one right for free: the
+      // capability declares `mutates: true` (it writes the remote caches under
+      // ~/.deliveryos), `destructive: false` (a reset to upstream is what a
+      // cache is for), and `network: true` -- so this comes out
+      // readOnlyHint:false / destructiveHint:false / openWorldHint:true, which
+      // is what was previously typed here by hand.
+      annotations: annotationsFor('refresh_catalog'),
     },
     async ({ cwd, remote }) => {
       try {
