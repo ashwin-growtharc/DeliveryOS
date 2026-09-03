@@ -181,11 +181,31 @@ describe('capability manifest', () => {
     // `mcp` entry, this fails even if the port test was edited to allow it.
     const leaked = mutatingCapabilities().filter((c) => (c.mcp?.length ?? 0) > 0);
     expect(
-      leaked.map((c) => c.name),
+      leaked.map((c) => c.name).sort(),
       'a mutating capability is exposed over MCP -- see PLAN.md Phase 2 before allowing this',
-    ).toEqual(['catalog.refresh']);
-    // `catalog.refresh` is the one deliberate exception: it writes only to the
-    // remote caches under ~/.deliveryos, touches nothing in the project, and is
-    // annotated `readOnlyHint: false` / `openWorldHint: true` accordingly.
+    ).toEqual(['catalog.refresh', 'remote.add']);
+
+    // Exactly two deliberate exceptions, and the property they share is what
+    // they do NOT write: both touch only the caches under ~/.deliveryos, never
+    // a file in the user's project.
+    //
+    //  - `catalog.refresh` fetches remotes and re-reads. It DOES take a `cwd`,
+    //    because it reports install status for a project -- so it is not an
+    //    example of "needs no project directory". It writes nothing there.
+    //  - `remote.add` clones a URL into the cache and refuses a duplicate name
+    //    before cloning. It needs no project at all, which is precisely why it
+    //    could ship while every install tool waits: the project-root authority
+    //    problem does not apply to an operation that never touches a project.
+    //
+    // Asserted as a list rather than a count, so adding a third requires
+    // editing this line -- which is where the consent question belongs.
+    for (const name of ['catalog.refresh', 'remote.add']) {
+      const capability = CAPABILITIES.find((c) => c.name === name);
+      expect(capability?.destructive, `${name} must not be destructive`).toBe(false);
+      expect(capability?.costsRealMoney, `${name} must not spend money`).toBe(false);
+      expect(capability?.executesShell, `${name} must not run shell`).toBe(false);
+    }
+    // And the one that genuinely needs no project directory is the new one.
+    expect(CAPABILITIES.find((c) => c.name === 'remote.add')?.needsProjectDir).toBe(false);
   });
 });

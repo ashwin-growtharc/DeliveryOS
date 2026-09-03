@@ -6,7 +6,9 @@ import {
 import { resolveArtifact } from '../engine/pull/pull';
 import { resolvePrimaryDoc } from '../engine/payload/primaryDoc';
 import { assertUsableProjectDir } from '../engine/paths';
-import { ArtifactDetail, CatalogSnapshot, DeliveryOsReadPort } from './ports';
+import { listRemotes } from '../engine/remote/remoteRegistry';
+import { addRemote } from '../engine/remote/manageRemotes';
+import { ArtifactDetail, CatalogSnapshot, DeliveryOsConfigPort, DeliveryOsReadPort } from './ports';
 
 /**
  * The one file that binds the MCP driving port to the real DeliveryOS core.
@@ -86,6 +88,31 @@ export function createEngineReadPort(): DeliveryOsReadPort {
         catalog: entries,
       });
       return { entry, doc } satisfies ArtifactDetail;
+    },
+  };
+}
+
+/**
+ * Binds the configuration port to the real engine.
+ *
+ * Separate from `createEngineReadPort` for the same reason the ports are
+ * separate: a caller that wants only reads should not be able to construct
+ * write access by accident. `buildMcpServer` takes this optionally, so the
+ * read-only server is still the default shape.
+ *
+ * Thin, like its sibling -- `addRemote` in `engine/remote/manageRemotes.ts`
+ * owns the order that matters (check the name before cloning, so a duplicate
+ * leaves no stray directory). That orchestration used to exist twice, in the
+ * CLI and the sidecar; this would have been the third copy.
+ */
+export function createEngineConfigPort(): DeliveryOsConfigPort {
+  return {
+    listRemotes() {
+      return listRemotes().map((r) => ({ name: r.name, url: r.url, addedAt: r.addedAt }));
+    },
+
+    addRemote({ url, name }) {
+      return addRemote(url, name);
     },
   };
 }

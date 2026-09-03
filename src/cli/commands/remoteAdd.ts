@@ -1,29 +1,12 @@
-import * as fs from 'fs';
 import { Command } from 'commander';
-import {
-  addRemoteEntry,
-  findRemote,
-  removeRemoteEntry,
-  deriveNameFromUrl,
-  listRemotes,
-} from '../../engine/remote/remoteRegistry';
-import { cloneRemote, cachePath } from '../../engine/remote/remoteCache';
-import { RemoteRegistryError } from '../../engine/errors';
+import { listRemotes } from '../../engine/remote/remoteRegistry';
+import { addRemote, removeRemote } from '../../engine/remote/manageRemotes';
 
 export async function runRemoteAdd(gitUrl: string, nameOption: string | undefined): Promise<void> {
-  const name = nameOption ?? deriveNameFromUrl(gitUrl);
-
-  // Check for an existing registration before cloning anything, so a
-  // duplicate name fails fast without corrupting the existing entry or
-  // leaving behind a stray clone.
-  if (findRemote(name)) {
-    throw new RemoteRegistryError(`A remote named "${name}" is already registered`);
-  }
-
-  const dest = await cloneRemote(name, gitUrl);
-  await addRemoteEntry({ name, url: gitUrl, addedAt: new Date().toISOString() });
-
-  console.log(`Added remote "${name}" (${gitUrl}) -> ${dest}`);
+  // Orchestration lives in `engine/remote/manageRemotes.ts` -- it was
+  // duplicated here and in the sidecar, and the sidecar's copy said so.
+  const { name, url, dest } = await addRemote(gitUrl, nameOption);
+  console.log(`Added remote "${name}" (${url}) -> ${dest}`);
 }
 
 /** Removes a remote's registry entry and deletes its local cache clone.
@@ -33,11 +16,7 @@ export async function runRemoteAdd(gitUrl: string, nameOption: string | undefine
  * The cache directory not existing at all (e.g. it was already deleted by
  * hand) is not an error -- there's simply nothing extra to clean up. */
 export async function runRemoteRemove(name: string): Promise<void> {
-  await removeRemoteEntry(name); // throws RemoteRegistryError if not registered
-  const dest = cachePath(name);
-  if (fs.existsSync(dest)) {
-    fs.rmSync(dest, { recursive: true, force: true });
-  }
+  await removeRemote(name); // throws RemoteRegistryError if not registered
   console.log(`Removed remote "${name}"`);
 }
 
@@ -86,6 +65,3 @@ export function registerRemoteCommand(program: Command): void {
       runRemoteList(Boolean(options.json));
     });
 }
-
-// Re-export for convenience where only the cache path is needed.
-export { cachePath };

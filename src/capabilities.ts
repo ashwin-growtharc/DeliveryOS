@@ -105,6 +105,12 @@ export const CAPABILITIES: Capability[] = [
     summary: 'Register a git remote and clone it into the local cache',
     cli: 'remote add <git-url>',
     sidecar: 'remote.add',
+    // The one WRITING operation an agent may reach, and the exception is
+    // named in RISKY_CAPABILITIES_ALLOWED_ON_MCP with its reason rather than
+    // inherited. It is the onboarding interview the transcript describes
+    // (00:36:16, "our MCP will ask the user. Hey, do you have a UI library?")
+    // and it never touches a project -- see `needsProjectDir: false` below.
+    mcp: ['add_remote'],
     mutates: true,
     network: true,
     needsProjectDir: false,
@@ -127,6 +133,10 @@ export const CAPABILITIES: Capability[] = [
     summary: 'List registered remotes',
     cli: 'remote list',
     sidecar: 'remote.list',
+    // Distinct from `catalog_overview`, which reports counts keyed by remote
+    // NAME and never the URL. An agent running the interview has to know what
+    // is already registered before it starts asking.
+    mcp: ['list_remotes'],
     needsProjectDir: false,
   },
 

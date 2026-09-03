@@ -35,6 +35,7 @@ import {
   CatalogListResult,
 } from './engine/catalog/catalog';
 import { assertUsableProjectDir } from './engine/paths';
+import { addRemote, removeRemote } from './engine/remote/manageRemotes';
 import { pullArtifact, resolveArtifact, ProgressCallback } from './engine/pull/pull';
 import { removeArtifact } from './engine/pull/removeArtifact';
 import { resolveInstallParamValues, applyInstallParams, readExistingEnvValues } from './engine/pull/installParams';
@@ -55,16 +56,8 @@ import { detectArtifactMetadata } from './engine/scan/detectArtifactMetadata';
 import { suggestMetadata } from './engine/scan/suggestMetadata';
 import { suggestAntiPatterns } from './engine/scan/suggestAntiPatterns';
 import { getCommitIdentity } from './engine/git/git';
-import {
-  listRemotes,
-  addRemoteEntry,
-  removeRemoteEntry,
-  findRemote,
-  deriveNameFromUrl,
-} from './engine/remote/remoteRegistry';
-import { cloneRemote, cachePath } from './engine/remote/remoteCache';
-import * as fs from 'fs';
-import { RemoteRegistryError, UnknownCommandError } from './engine/errors';
+import { listRemotes } from './engine/remote/remoteRegistry';
+import { UnknownCommandError } from './engine/errors';
 import {
   compileArtifactPreview,
   compileLocalPreview,
@@ -195,21 +188,11 @@ async function catalogRefresh(
 async function remoteAdd(
   args: Record<string, unknown>,
 ): Promise<{ name: string; url: string; dest: string }> {
-  const url = requireString(args, 'url');
-  const name = optionalString(args, 'name') ?? deriveNameFromUrl(url);
-
-  // Check for an existing registration before cloning anything, so a
-  // duplicate name fails fast without corrupting the existing entry or
-  // leaving behind a stray clone -- mirrors `runRemoteAdd`'s order exactly
-  // (src/cli/commands/remoteAdd.ts).
-  if (findRemote(name)) {
-    throw new RemoteRegistryError(`A remote named "${name}" is already registered`);
-  }
-
-  const dest = await cloneRemote(name, url);
-  await addRemoteEntry({ name, url, addedAt: new Date().toISOString() });
-
-  return { name, url, dest };
+  // Orchestration lives in `engine/remote/manageRemotes.ts`. This used to
+  // reimplement it, and the comment here said so -- "mirrors `runRemoteAdd`'s
+  // order exactly". Two copies of an order that matters (check before clone,
+  // so a duplicate name leaves no stray directory) is one copy too many.
+  return addRemote(requireString(args, 'url'), optionalString(args, 'name'));
 }
 
 /** Unregisters a remote and deletes its local cache clone -- mirrors
@@ -217,12 +200,7 @@ async function remoteAdd(
  * Doesn't touch any project's lockfile/pulled files, only this remote's
  * own registration + cache. */
 async function remoteRemove(args: Record<string, unknown>): Promise<{ name: string }> {
-  const name = requireString(args, 'name');
-  await removeRemoteEntry(name); // throws RemoteRegistryError if not registered
-  const dest = cachePath(name);
-  if (fs.existsSync(dest)) {
-    fs.rmSync(dest, { recursive: true, force: true });
-  }
+  const { name } = await removeRemote(requireString(args, 'name'));
   return { name };
 }
 

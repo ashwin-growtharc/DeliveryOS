@@ -2,7 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import type { CatalogListEntry } from '../engine/catalog/catalog';
-import type { DeliveryOsReadPort } from './ports';
+import type { DeliveryOsConfigPort, DeliveryOsReadPort } from './ports';
 import { CAPABILITIES } from '../capabilities';
 
 /**
@@ -112,6 +112,19 @@ const RISKY_CAPABILITIES_ALLOWED_ON_MCP: Record<string, string> = {
   // what a cache is for. Annotated openWorldHint/readOnlyHint:false so a
   // client still prompts if it chooses to.
   'catalog.refresh': 'Writes only ~/.deliveryos caches; touches no project file.',
+
+  // The onboarding interview the transcript describes (00:36:16). Allowed
+  // because of what it does NOT do: it registers a git URL and clones it into
+  // ~/.deliveryos, and touches no project file at all -- `needsProjectDir:
+  // false` in the manifest, which is why the project-root authority problem
+  // that gates every install tool does not apply here. It cannot overwrite
+  // anything either: a duplicate name is refused before the clone starts.
+  //
+  // The remaining exposure is real and worth naming: an agent can cause a
+  // clone of an attacker-supplied URL onto the user's disk. That is a network
+  // fetch into a cache directory, not code execution -- nothing runs a
+  // cloned repo -- and the tool is annotated so a client prompts.
+  'remote.add': 'Clones into ~/.deliveryos only; never writes a project file; refuses duplicates before cloning.',
 };
 
 /**
@@ -217,6 +230,12 @@ export interface McpServerDeps {
    * root and is the only caller that has to know. What it buys is that
    * `src/mcp/server.ts` has no runtime dependency on the core at all. */
   port: DeliveryOsReadPort;
+  /** Optional, and its absence is the default. A server built without it
+   * exposes no configuration tools at all, so the read-only surface that
+   * shipped stays exactly what it was. Opt-in rather than opt-out, because
+   * the question "may an agent change how this machine is configured" should
+   * be answered by a caller, not inherited. */
+  configPort?: DeliveryOsConfigPort;
   /** Passed in rather than declared here. `src/cli/program.ts` owns the one
    * version literal in this codebase and `test/unit/cliVersion.test.ts` fails
    * the build when it drifts from package.json -- a second literal here would
@@ -224,7 +243,7 @@ export interface McpServerDeps {
   version: string;
 }
 
-export function buildMcpServer({ port: engine, version }: McpServerDeps): McpServer {
+export function buildMcpServer({ port: engine, configPort, version }: McpServerDeps): McpServer {
 
   const server = new McpServer(
     { name: 'deliveryos', version },
@@ -240,9 +259,17 @@ export function buildMcpServer({ port: engine, version }: McpServerDeps): McpSer
         + '(returned by get_artifact) in a terminal, the same way a person would. '
         + 'Read the artifact first and tell the user what it will do -- especially '
         + 'its postInstall, which is a shell command that runs on their machine. '
-        + 'Every tool needs `cwd`, the absolute '
+        + 'Every tool except the two configuration ones needs `cwd`, the absolute '
         + 'path of the project being worked in, because whether an artifact is already '
-        + 'installed is a property of that project, not of the machine.',
+        + 'installed is a property of that project, not of the machine. '
+        + 'SETTING UP. If catalog_overview or search_artifacts comes back empty, do not '
+        + 'conclude there is nothing available -- check list_remotes first. An empty remote '
+        + 'list means no sources are configured yet, which is a different problem with a '
+        + 'different answer. When that is the case, interview the user rather than guessing: '
+        + 'ask where their shared work already lives -- do they have a UI component library? '
+        + 'a set of Claude skills or agents? project templates? backend plugins? -- and '
+        + 'register each repository they name with add_remote. A few questions is usually '
+        + 'enough. Never invent a URL.',
     },
   );
 
@@ -447,6 +474,94 @@ export function buildMcpServer({ port: engine, version }: McpServerDeps): McpSer
       }
     },
   );
+
+  // --------------------------------------------------------- configuration
+  //
+  // Registered only when a config port was supplied. The transcript's MCP is
+  // interrogative -- "our MCP will ask the user. Hey, do you have a UI
+  // library? ... So after three, four questions, [initialisation] is done"
+  // (00:36:16) -- and these two tools are what an agent needs to run that
+  // interview.
+  //
+  // Deliberately NOT built on MCP elicitation. Elicitation would let the
+  // server ask directly, which is closer to the literal words, but it is
+  // supported in Claude Code and returns `-32601 Method not found` in Claude
+  // Desktop -- so it would work in exactly one client. The agent is a better
+  // interviewer anyway: it already has the conversation, it can ask follow-up
+  // questions the server never anticipated, and this shape works in every
+  // client that speaks MCP at all. The interview lives in the server
+  // `instructions` and these descriptions; the agent drives it.
+  if (configPort) {
+    server.registerTool(
+      'list_remotes',
+      {
+        title: 'List where artifacts come from',
+        description:
+          'Lists the git remotes DeliveryOS is configured to read artifacts from, with their '
+          + 'URLs. Call this FIRST when helping someone set DeliveryOS up: if it returns an '
+          + 'empty list, nothing is configured yet and the catalog will be empty for a reason '
+          + 'that has nothing to do with the project. Distinct from catalog_overview, which '
+          + 'counts artifacts per remote but never shows a URL.',
+        inputSchema: {},
+        annotations: annotationsFor('list_remotes'),
+      },
+      async () => {
+        try {
+          const remotes = configPort.listRemotes();
+          return json({
+            count: remotes.length,
+            remotes,
+            // Said plainly rather than left for the agent to infer from an
+            // empty array, because "the catalog is empty" and "no sources are
+            // configured" look identical otherwise and lead to very different
+            // advice.
+            configured: remotes.length > 0,
+          });
+        } catch (error) {
+          return failure(error);
+        }
+      },
+    );
+
+    server.registerTool(
+      'add_remote',
+      {
+        title: 'Register a source of artifacts',
+        description:
+          'Registers a git repository as a source of DeliveryOS artifacts and clones it into '
+          + "the local cache under the user's home directory. Use this to set DeliveryOS up: ask "
+          + 'the user where their shared artifacts live -- a UI component library, a set of '
+          + 'Claude skills, project templates, backend plugins -- and register each repository '
+          + 'they name. Ask before calling; do not guess a URL. Writes nothing into the '
+          + "project, and refuses a name that is already registered before cloning anything.",
+        inputSchema: {
+          url: z
+            .string()
+            .min(1)
+            .describe('Git URL of the repository, exactly as the user gave it'),
+          name: z
+            .string()
+            .min(1)
+            .optional()
+            .describe('Short local name. Derived from the URL when omitted, which is usually right.'),
+        },
+        annotations: annotationsFor('add_remote'),
+      },
+      async ({ url, name }) => {
+        try {
+          const added = await configPort.addRemote({ url, name });
+          return json({
+            ...added,
+            nextStep:
+              'Registered. Run catalog_overview to see what this remote provides, or add_remote '
+              + 'again for another source.',
+          });
+        } catch (error) {
+          return failure(error);
+        }
+      },
+    );
+  }
 
   return server;
 }

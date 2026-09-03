@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { runMcpServer } from '../../mcp/server';
-import { createEngineReadPort } from '../../mcp/engineAdapter';
+import { createEngineConfigPort, createEngineReadPort } from '../../mcp/engineAdapter';
 
 /**
  * A subcommand rather than a second binary.
@@ -30,6 +30,10 @@ export function registerMcpCommand(program: Command): void {
       // port is bound to the real DeliveryOS engine.
       await runMcpServer({
         port: createEngineReadPort(),
+        // Opt-in, and taken here because this is the composition root. Without
+        // it the server exposes no configuration tools at all -- which is the
+        // shape any other embedder gets unless it asks for more.
+        configPort: createEngineConfigPort(),
         version: program.version() ?? '0.0.0',
       });
     });

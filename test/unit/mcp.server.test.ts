@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { buildMcpServer } from '../../src/mcp/server';
-import { DeliveryOsReadPort, CatalogSnapshot } from '../../src/mcp/ports';
+import { DeliveryOsConfigPort, DeliveryOsReadPort, CatalogSnapshot } from '../../src/mcp/ports';
 import { CatalogListEntry } from '../../src/engine/catalog/catalog';
 import { CAPABILITIES, Capability } from '../../src/capabilities';
 
@@ -115,6 +115,121 @@ async function call(client: Client, name: string, args: Record<string, unknown>)
   }
   return { isError: res.isError === true, text, data };
 }
+
+/** A config port whose remotes start empty, so the onboarding interview has
+ * something real to be interviewing ABOUT. */
+function fakeConfigPort(seed: Array<{ name: string; url: string }> = []) {
+  const remotes = seed.map((r) => ({ ...r, addedAt: '2026-01-01T00:00:00.000Z' }));
+  return {
+    port: {
+      listRemotes: () => remotes,
+      addRemote: async ({ url, name }: { url: string; name?: string }) => {
+        const resolved = name ?? 'derived-name';
+        if (remotes.some((r) => r.name === resolved)) {
+          throw new Error(`A remote named "${resolved}" is already registered`);
+        }
+        remotes.push({ name: resolved, url, addedAt: '2026-01-01T00:00:00.000Z' });
+        return { name: resolved, url, dest: `/cache/${resolved}` };
+      },
+    } satisfies DeliveryOsConfigPort,
+    remotes,
+  };
+}
+
+async function connectWithConfig(configPort: DeliveryOsConfigPort) {
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const server = buildMcpServer({ port: fakePort(), configPort, version: '9.9.9' });
+  const client = new Client({ name: 'test', version: '1.0.0' });
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+  return {
+    client,
+    async close() {
+      await client.close();
+      await server.close();
+    },
+  };
+}
+
+describe('the interrogative MCP -- onboarding, not artifact movement', () => {
+  // The transcript's actual MCP vision (00:36:16): "our MCP will ask the user.
+  // Hey, do you have a UI library? ... you store skills? ... So after three,
+  // four questions, [initialisation] is done." It is neither pull nor push.
+
+  it('exposes no configuration tools at all when no config port is supplied', async () => {
+    // Opt-in, not opt-out. The read-only server that shipped stays exactly
+    // what it was, and an embedder gets write access only by asking.
+    const { client, close } = await connect();
+    const { tools } = await client.listTools();
+    expect(tools.map((t) => t.name)).not.toContain('add_remote');
+    expect(tools.map((t) => t.name)).not.toContain('list_remotes');
+    await close();
+  });
+
+  it('tells an agent that nothing is configured, rather than looking like an empty catalog', async () => {
+    // The distinction this exists for: "no artifacts match" and "no sources
+    // are registered" look identical from search results and lead to
+    // completely different advice.
+    const { port } = fakeConfigPort();
+    const { client, close } = await connectWithConfig(port);
+    const res = await call(client, 'list_remotes', {});
+    const data = JSON.parse(res.text) as { count: number; configured: boolean };
+    expect(data.count).toBe(0);
+    expect(data.configured).toBe(false);
+    await close();
+  });
+
+  it('registers what the user names, and reports it back', async () => {
+    const { port, remotes } = fakeConfigPort();
+    const { client, close } = await connectWithConfig(port);
+
+    const res = await call(client, 'add_remote', {
+      url: 'https://example.invalid/ui-library',
+      name: 'ui-library',
+    });
+    expect(res.isError).toBe(false);
+    expect(remotes.map((r) => r.name)).toEqual(['ui-library']);
+
+    const after = JSON.parse((await call(client, 'list_remotes', {})).text) as { configured: boolean };
+    expect(after.configured).toBe(true);
+    await close();
+  });
+
+  it('surfaces a duplicate registration as an error the agent can read', async () => {
+    const { port } = fakeConfigPort([{ name: 'ui-library', url: 'https://example.invalid/ui' }]);
+    const { client, close } = await connectWithConfig(port);
+    const res = await call(client, 'add_remote', { url: 'https://example.invalid/other', name: 'ui-library' });
+    expect(res.isError).toBe(true);
+    expect(res.text).toContain('already registered');
+    await close();
+  });
+
+  it('needs no project directory, which is why it could ship before install tools', async () => {
+    // `remote.add` is declared `needsProjectDir: false`, so the project-root
+    // authority problem that gates every install tool does not apply. Asserted
+    // through the WIRE: the tool must not require a `cwd` argument.
+    const { port } = fakeConfigPort();
+    const { client, close } = await connectWithConfig(port);
+    const { tools } = await client.listTools();
+    for (const name of ['add_remote', 'list_remotes']) {
+      const tool = tools.find((t) => t.name === name);
+      expect(tool, `${name} should be advertised`).toBeDefined();
+      expect(tool?.inputSchema?.required ?? [], `${name} must not require cwd`).not.toContain('cwd');
+    }
+    await close();
+  });
+
+  it('annotates add_remote as a write, so a client prompts', async () => {
+    const { port } = fakeConfigPort();
+    const { client, close } = await connectWithConfig(port);
+    const { tools } = await client.listTools();
+    const add = tools.find((t) => t.name === 'add_remote');
+    expect(add?.annotations?.readOnlyHint).toBe(false);
+    expect(add?.annotations?.destructiveHint).toBe(false);
+    const list = tools.find((t) => t.name === 'list_remotes');
+    expect(list?.annotations?.readOnlyHint).toBe(true);
+    await close();
+  });
+});
 
 describe('MCP tool surface', () => {
   it('advertises exactly the four read-only tools, and no mutating one', async () => {

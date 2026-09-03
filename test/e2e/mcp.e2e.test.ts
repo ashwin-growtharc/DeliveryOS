@@ -173,13 +173,30 @@ describe('deliveryos mcp, as a real subprocess', () => {
   }, 60_000);
 
   it('advertises its tools over a real transport', async () => {
+    // SIX, not the four the in-memory tests see. `buildMcpServer` takes its
+    // config port optionally and defaults to exposing nothing, so a bare
+    // server is read-only -- but `src/cli/commands/mcp.ts` is the composition
+    // root and supplies one. That difference is the point of the opt-in, and
+    // this is the only test that exercises the real composition rather than a
+    // hand-built server.
     const res = await mcp.request<ToolsListResult>('tools/list');
     expect(res.result!.tools.map((t) => t.name).sort()).toEqual([
+      'add_remote',
       'catalog_overview',
       'get_artifact',
+      'list_remotes',
       'refresh_catalog',
       'search_artifacts',
     ]);
+  }, 60_000);
+
+  it('advertises the configuration tools as a write and a read respectively', async () => {
+    // Annotations decide whether a client prompts before running a tool, and
+    // these two are the first write the MCP surface has ever exposed.
+    const res = await mcp.request<ToolsListResult>('tools/list');
+    const byName = Object.fromEntries(res.result!.tools.map((t) => [t.name, t.annotations]));
+    expect((byName.add_remote as { readOnlyHint?: boolean })?.readOnlyHint).toBe(false);
+    expect((byName.list_remotes as { readOnlyHint?: boolean })?.readOnlyHint).toBe(true);
   }, 60_000);
 
   it('reads the real catalog from disk through the engine adapter', async () => {
@@ -210,7 +227,7 @@ describe('deliveryos mcp, as a real subprocess', () => {
     // The process must still be serving afterwards -- an agent's bad guess
     // should not take the server down.
     const after = await mcp.request<ToolsListResult>('tools/list');
-    expect(after.result!.tools).toHaveLength(4);
+    expect(after.result!.tools).toHaveLength(6);
   }, 60_000);
 
   it('refuses a cwd that is relative or absent, rather than silently answering about the wrong project', async () => {

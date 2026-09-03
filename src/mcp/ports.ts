@@ -71,3 +71,56 @@ export interface DeliveryOsReadPort {
     maxDocBytes?: number;
   }): ArtifactDetail;
 }
+
+/**
+ * Registering where artifacts live. A SEPARATE port from the read one, and
+ * deliberately so.
+ *
+ * Folding these two methods into `DeliveryOsReadPort` would have been less
+ * code and would have quietly destroyed the property that makes that
+ * interface worth having -- "read-only by construction", enforced by an
+ * allowlist in `mcp.architecture.test.ts`. A port that is read-only except
+ * for the parts that are not is just a port.
+ *
+ * So configuration is its own interface, its own binding, and its own opt-in:
+ * `buildMcpServer` takes it optionally, and a server constructed without it
+ * exposes no configuration tools at all. The read-only server that shipped
+ * stays exactly what it was.
+ *
+ * WHY THIS EXISTS AT ALL is worth recording, because it is the one part of
+ * the MCP surface that comes straight from the transcript rather than from
+ * inference. Vaibhav, describing the MCP he wants (00:36:16):
+ *
+ *   "our MCP will ask the user. Hey, do you have a UI library? And we will say
+ *    yes, we have a UI library. Okay, fine. you store skills? Okay, we have
+ *    it. do you have any kind of artefact ... So after three, four questions,
+ *    [initialisation] is done."
+ *
+ * That MCP is INTERROGATIVE. It is neither pull nor push -- it asks what you
+ * already have and configures itself from the answers. Nothing else in this
+ * codebase addresses it, and it serves the stated V1 goal directly: "as long
+ * as we are able to aggregate the artifacts ... some kind of an aggregation of
+ * artefact knowledge in one centralised way" (00:35).
+ *
+ * Note what is NOT here: no project directory. `remote.add` is declared
+ * `needsProjectDir: false` in `src/capabilities.ts`, and that is why this
+ * could be built now -- the project-root authority problem that gates every
+ * install tool simply does not apply to an operation that never touches a
+ * project.
+ */
+export interface DeliveryOsConfigPort {
+  /** Every registered remote, with its URL -- which `catalog_overview` cannot
+   * give, since that reports counts keyed by remote NAME. An agent running the
+   * onboarding interview needs to know what is already registered before it
+   * starts asking. */
+  listRemotes(): Array<{ name: string; url: string; addedAt: string }>;
+
+  /** Registers a git URL and clones it. Throws when the name is already in
+   * use -- checked before anything is cloned, so a refusal leaves no stray
+   * directory behind. `name` is derived from the URL when omitted. */
+  addRemote(input: { url: string; name?: string }): Promise<{
+    name: string;
+    url: string;
+    dest: string;
+  }>;
+}
