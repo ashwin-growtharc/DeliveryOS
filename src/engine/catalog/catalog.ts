@@ -50,14 +50,6 @@ export interface CatalogListResult {
   skipped: SkippedCatalogManifest[];
 }
 
-/** Manifests skipped by the most recent `buildCatalog()` call, if any.
- *
- * Deliberately a module-level record rather than a return value: `buildCatalog`
- * has many callers and returning a tuple from all of them would be a wide,
- * mechanical change for a signal that is purely advisory. Callers that want to
- * warn read this immediately after calling. */
-const lastSkippedManifests: Array<SkippedManifest & { remoteName: string }> = [];
-
 /**
  * Aggregates manifests across every registered remote's local cache.
  *
@@ -65,24 +57,24 @@ const lastSkippedManifests: Array<SkippedManifest & { remoteName: string }> = []
  * NOT an error here -- catalog aggregation is purely additive. Resolving
  * (and rejecting) that ambiguity is the responsibility of `pull`.
  */
-export function buildCatalog(): CatalogEntry[] {
+/** Builds the catalog AND returns the manifests it had to skip, together.
+ *
+ * The skipped list used to live in a module-level array that callers drained
+ * afterwards via `takeSkippedManifests()`. That was safe only by accident: the
+ * Tauri host spawns one sidecar PROCESS PER RPC (src-tauri/src/lib.rs), so no
+ * two builds ever overlapped. A long-lived process -- an MCP server, say --
+ * removes that mask, and `refreshCatalog` awaits before building, so two
+ * overlapping calls would have one drain the other's list and report a broken
+ * catalog as a clean one. Returning it removes the hazard rather than
+ * documenting it. */
+export function buildCatalogWithSkipped(): {
+  entries: CatalogEntry[];
+  skipped: SkippedCatalogManifest[];
+} {
   const remotes = listRemotes();
   const entries: CatalogEntry[] = [];
+  const lastSkippedManifests: SkippedCatalogManifest[] = [];
 
-  // Cleared HERE, at the start of the build, rather than by whoever happens to
-  // drain it. Without this the module-level record only ever grew: a single
-  // process calls buildCatalog more than once on several paths
-  // (`resolveArtifact`'s own default parameter, `pull`'s resolve-then-pull,
-  // `push`'s collision check), so a later drain returned the same skipped
-  // manifest once per call. This is what makes the "most recent
-  // `buildCatalog()` call" contract below actually true rather than
-  // aspirational.
-  //
-  // Safe against the sidecar's concurrent dispatch: buildCatalog is fully
-  // synchronous, and `catalogList` runs buildCatalog -> annotateCatalog ->
-  // takeSkippedManifests with no `await` between them, so two builds cannot
-  // interleave.
-  lastSkippedManifests.length = 0;
 
   for (const remote of remotes) {
     const { manifests, skipped } = discoverManifests(cachePath(remote.name));
@@ -99,12 +91,13 @@ export function buildCatalog(): CatalogEntry[] {
     }
   }
 
-  return entries;
+  return { entries, skipped: lastSkippedManifests };
 }
 
-/** Returns (and clears) the manifests skipped by the last `buildCatalog()`. */
-export function takeSkippedManifests(): Array<SkippedManifest & { remoteName: string }> {
-  return lastSkippedManifests.splice(0, lastSkippedManifests.length);
+/** The catalog alone, for the many callers that only need to resolve an id and
+ * have nothing to do with a manifest that failed to load. */
+export function buildCatalog(): CatalogEntry[] {
+  return buildCatalogWithSkipped().entries;
 }
 
 /**
@@ -126,7 +119,7 @@ export function takeSkippedManifests(): Array<SkippedManifest & { remoteName: st
  */
 export async function refreshCatalog(
   onProgress?: (stage: string, message: string) => void,
-): Promise<CatalogEntry[]> {
+): Promise<{ entries: CatalogEntry[]; skipped: SkippedCatalogManifest[] }> {
   for (const remote of listRemotes()) {
     onProgress?.('fetch', `Fetching latest from ${remote.name}...`);
     try {
@@ -137,7 +130,7 @@ export async function refreshCatalog(
     }
   }
 
-  return buildCatalog();
+  return buildCatalogWithSkipped();
 }
 
 /**

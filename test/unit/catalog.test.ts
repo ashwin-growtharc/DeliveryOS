@@ -5,7 +5,7 @@ import * as path from 'path';
 import {
   buildCatalog,
   annotateCatalog,
-  takeSkippedManifests,
+  buildCatalogWithSkipped,
   CatalogEntry,
 } from '../../src/engine/catalog/catalog';
 import { remotesRegistryPath, remoteCachePath } from '../../src/engine/paths';
@@ -153,7 +153,7 @@ describe('annotateCatalog', () => {
   });
 });
 
-describe('buildCatalog skipped-manifest record', () => {
+describe('buildCatalogWithSkipped', () => {
   function writeRegistry(names: string[]): void {
     fs.mkdirSync(deliveryOsHome, { recursive: true });
     fs.writeFileSync(
@@ -177,36 +177,36 @@ describe('buildCatalog skipped-manifest record', () => {
     fs.writeFileSync(path.join(artifactDir, 'manifest.yaml'), `id: ${id}\n`, 'utf-8');
   }
 
-  it('reports a bad manifest exactly once, and a second buildCatalog call does not duplicate it', () => {
+  it('returns the skipped manifests alongside the catalog, so no caller has to drain shared state', () => {
     writeRegistry(['test-remote']);
     const cacheDir = remoteCachePath('test-remote');
     writeArtifact(cacheDir, 'good-artifact', 'doc');
     writeBrokenArtifact(cacheDir, 'broken-artifact');
 
-    // Two builds in one process is not contrived: resolveArtifact's own
-    // default parameter calls buildCatalog, so `pull` alone does it twice.
-    // The record used to only ever grow, so the drain returned one copy per
-    // call and the doc comment's "most recent call" was simply false.
-    buildCatalog();
-    buildCatalog();
+    const built = buildCatalogWithSkipped();
 
-    const skipped = takeSkippedManifests();
-    expect(skipped).toHaveLength(1);
-    expect(skipped[0].remoteName).toBe('test-remote');
-    expect(skipped[0].path).toContain('broken-artifact');
+    expect(built.entries.map((e) => e.manifest.id)).toEqual(['good-artifact']);
+    expect(built.skipped).toHaveLength(1);
+    expect(built.skipped[0].remoteName).toBe('test-remote');
+    expect(built.skipped[0].path).toContain('broken-artifact');
   });
 
-  it('returns nothing after a clean build, even when an earlier build in the same process had a bad manifest', () => {
+  it('gives every build its OWN list, so two overlapping builds cannot steal from each other', () => {
+    // The whole reason the module-level record was removed. It was safe only
+    // because the Tauri host spawns one process per RPC; a long-lived process
+    // (an MCP server) removes that mask, and refreshCatalog awaits before
+    // building -- so one call could drain another's list and report a broken
+    // catalog as a clean one.
     writeRegistry(['test-remote']);
     const cacheDir = remoteCachePath('test-remote');
     writeBrokenArtifact(cacheDir, 'broken-artifact');
-    buildCatalog();
 
-    // The bad artifact is gone; the next build must not still be reporting it.
-    fs.rmSync(path.join(cacheDir, 'artifacts', 'broken-artifact'), { recursive: true, force: true });
-    writeArtifact(cacheDir, 'good-artifact', 'doc');
-    buildCatalog();
+    const first = buildCatalogWithSkipped();
+    const second = buildCatalogWithSkipped();
 
-    expect(takeSkippedManifests()).toEqual([]);
+    expect(first.skipped).toHaveLength(1);
+    // Reading the second build must not have emptied the first.
+    expect(second.skipped).toHaveLength(1);
+    expect(first.skipped).not.toBe(second.skipped);
   });
 });
