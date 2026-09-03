@@ -71,9 +71,31 @@ interface CatalogListEntry {
  * arrive before an earlier well-formed request's response finishes
  * resolving. Matching by id makes this session robust to that reordering.
  */
+/** One in-flight request. Carries enough context that a failure can say
+ * WHICH command was outstanding and for how long -- a bare
+ * "Test timed out in 30000ms" named neither, which is what made a real CI
+ * failure cost three log reads and still end without an answer. */
+interface PendingRequest {
+  resolve: (res: SidecarResponse) => void;
+  reject: (err: Error) => void;
+  command: string;
+  startedAt: number;
+  timer: NodeJS.Timeout;
+}
+
+/** Deliberately under vitest's 30s testTimeout (every test in this file uses
+ * that budget), so the harness always wins the race and reports a diagnosis
+ * instead of letting vitest report an anonymous timeout. */
+const REQUEST_TIMEOUT_MS = 24_000;
+
 class SidecarSession {
   private readonly child: ChildProcess;
-  private readonly pending = new Map<string, (res: SidecarResponse) => void>();
+  private readonly pending = new Map<string, PendingRequest>();
+  /** Stdout lines that were not valid JSON. Previously dropped on the floor,
+   * which is precisely why a protocol bug could only ever surface as a
+   * timeout with nothing attached. */
+  private readonly unparsedLines: string[] = [];
+  private exitInfo: { code: number | null; signal: NodeJS.Signals | null } | null = null;
   private readonly stderrChunks: string[] = [];
   // Progress lines don't resolve a pending request the way a final response
   // does (see the 'line' handler below), so they're accumulated here
@@ -98,10 +120,14 @@ class SidecarSession {
       try {
         parsed = JSON.parse(trimmed) as SidecarResponse | SidecarProgressLine;
       } catch {
-        // A response line that isn't valid JSON would itself be a sidecar
-        // protocol bug (never expected here) -- ignore rather than crash
-        // the test harness; the awaiting assertion will time out and fail
-        // loudly instead.
+        // A response line that isn't valid JSON is itself a sidecar protocol
+        // bug. This used to `return` silently, under a comment claiming the
+        // awaiting assertion would "fail loudly" -- it did not: it failed as
+        // an anonymous timeout. Keep the line so the eventual rejection can
+        // show what the sidecar actually said.
+        if (this.unparsedLines.length < 20) {
+          this.unparsedLines.push(trimmed.slice(0, 500));
+        }
         return;
       }
 
@@ -112,10 +138,11 @@ class SidecarSession {
 
       const response = parsed as SidecarResponse;
       const key = response.id === null ? '__null__' : response.id;
-      const resolver = this.pending.get(key);
-      if (resolver) {
+      const entry = this.pending.get(key);
+      if (entry) {
+        clearTimeout(entry.timer);
         this.pending.delete(key);
-        resolver(response);
+        entry.resolve(response);
       }
     });
 
@@ -124,16 +151,61 @@ class SidecarSession {
     });
 
     this.exited = new Promise((resolve) => {
-      this.child.on('exit', (code) => resolve(code));
+      this.child.on('exit', (code, signal) => {
+        this.exitInfo = { code, signal };
+        // A sidecar that dies mid-request used to leave its caller awaiting a
+        // promise nobody would ever settle, so a CRASH and a STALL were the
+        // same 30s timeout. Reject instead, naming the exit and attaching the
+        // stderr this class was already collecting and never showing anyone.
+        for (const [key, entry] of this.pending) {
+          clearTimeout(entry.timer);
+          this.pending.delete(key);
+          entry.reject(new Error(
+            `sidecar exited (code ${code}, signal ${signal}) while "${entry.command}" was still `
+            + `outstanding after ${Date.now() - entry.startedAt}ms\n${this.diagnostics()}`,
+          ));
+        }
+        resolve(code);
+      });
+    });
+  }
+
+  /** Everything a failure should have said in the first place: what the
+   * sidecar wrote to stderr, and any stdout line that wasn't valid JSON. */
+  private diagnostics(): string {
+    const stderr = this.stderrOutput().trim();
+    const parts = [stderr ? `--- sidecar stderr ---\n${stderr}` : '--- sidecar stderr --- (empty)'];
+    if (this.unparsedLines.length > 0) {
+      parts.push(`--- unparseable stdout ---\n${this.unparsedLines.join('\n')}`);
+    }
+    if (this.exitInfo) {
+      parts.push(`--- exit --- code=${this.exitInfo.code} signal=${this.exitInfo.signal}`);
+    }
+    return parts.join('\n');
+  }
+
+  /** Registers a pending entry with its own timeout, so an unanswered request
+   * fails with a diagnosis rather than quietly running out vitest's clock. */
+  private track(key: string, command: string): Promise<SidecarResponse> {
+    return new Promise<SidecarResponse>((resolve, reject) => {
+      const startedAt = Date.now();
+      const timer = setTimeout(() => {
+        this.pending.delete(key);
+        reject(new Error(
+          `sidecar did not answer "${command}" within ${REQUEST_TIMEOUT_MS}ms `
+          + `(process ${this.exitInfo ? 'has exited' : 'is still alive'})\n${this.diagnostics()}`,
+        ));
+      }, REQUEST_TIMEOUT_MS);
+      // Never let the harness's own timer be the reason the run stays alive.
+      timer.unref?.();
+      this.pending.set(key, { resolve, reject, command, startedAt, timer });
     });
   }
 
   /** Sends a well-formed request line and resolves with its response. */
   request(command: string, args: Record<string, unknown> = {}): Promise<SidecarResponse> {
     const id = String(this.nextId++);
-    const responsePromise = new Promise<SidecarResponse>((resolve) => {
-      this.pending.set(id, resolve);
-    });
+    const responsePromise = this.track(id, command);
     this.child.stdin!.write(JSON.stringify({ id, command, args }) + '\n');
     return responsePromise;
   }
@@ -142,9 +214,7 @@ class SidecarSession {
    * `id: null` response -- the resolver is registered before the line is
    * written, so there's no race with the async 'line' handler. */
   sendRawLine(rawLine: string): Promise<SidecarResponse> {
-    const responsePromise = new Promise<SidecarResponse>((resolve) => {
-      this.pending.set('__null__', resolve);
-    });
+    const responsePromise = this.track('__null__', '(raw line)');
     this.child.stdin!.write(rawLine + '\n');
     return responsePromise;
   }
@@ -162,6 +232,12 @@ class SidecarSession {
     const lines = this.progressLines.slice();
     this.progressLines.length = 0;
     return lines;
+  }
+
+  /** Test-only: kills the child abruptly, so the crash-diagnostics test can
+   * prove a dead sidecar reports as a dead sidecar rather than as a timeout. */
+  killForTest(): void {
+    this.child.kill();
   }
 
   /** Closes stdin (EOF, matching how a real host session ends) and waits
@@ -1359,4 +1435,28 @@ describe('sidecar e2e', () => {
     },
     30_000,
   );
+
+  // The harness's own contract. Before this, `pending` was never rejected on
+  // child exit and the captured stderr was never shown to anyone, so a
+  // sidecar that CRASHED and a sidecar that was merely SLOW produced the
+  // identical "Test timed out in 30000ms" -- which is exactly what a real red
+  // CI run produced, and why diagnosing it took three log reads and still
+  // ended without an answer.
+  it(
+    'a sidecar that dies mid-request fails naming the exit and the command, not as an anonymous timeout',
+    async () => {
+      const cwd = newScratchCwd('crash-diagnostic');
+      const session = new SidecarSession(cwd, deliveryOsHome);
+      const pending = session.request('catalog.list', { cwd });
+      session.killForTest();
+
+      await expect(pending).rejects.toThrow(/sidecar exited/);
+      // The three things the old bare timeout could not tell you: that it
+      // died, which command was outstanding, and what it said on the way out.
+      await expect(pending).rejects.toThrow(/catalog\.list/);
+      await expect(pending).rejects.toThrow(/sidecar stderr/);
+    },
+    30_000,
+  );
+
 });
