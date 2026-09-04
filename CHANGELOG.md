@@ -6,6 +6,54 @@ All notable changes to DeliveryOS are recorded here, newest first. See
 
 ---
 
+## "It does not exist" was not true (branch `fix/stale-cache-not-found`)
+
+The last open instance of the silent-coercion class, and the one this plan had
+already predicted would get worse:
+
+> *"a stale remote cache makes `list` report 'no such artifact' for one that
+> exists. **It gets worse under Phase 16, because an agent will relay it as
+> fact.**"* — PLAN.md, written before Stage 2 shipped.
+
+Stage 2 shipped. The catalog is read from a local clone, so when a colleague
+pushes an artifact upstream, every machine that has not refreshed since reported
+it as nonexistent — and over MCP that reached an agent, which relayed it to a
+person as fact. Same shape as the search-scorer bug fixed days earlier, where an
+empty result read as an answer.
+
+### Three states, not two
+
+`resolveArtifact` now distinguishes what it previously merged:
+
+- **fresh** — plain "not found", *unhedged*
+- **stale** — names the age and says to refresh before concluding anything
+- **unknowable** — says the age is unknown rather than assuming freshness
+
+The plain case is tested as deliberately as the hedged one. Caveating every miss
+with a staleness warning would trade a wrong answer for an unusable one: an agent
+that cannot trust a negative answer is worse off than one that occasionally gets
+a stale one. Six of the eight new tests fail on the old code; the two that pass
+are the "stay plain" guards, which is exactly right.
+
+### No schema change
+
+Last-fetch time is derived from the clone rather than recorded. `git fetch`
+rewrites `.git/FETCH_HEAD` every time, so its mtime *is* the answer — with the
+`.git` directory as the fallback, since a fresh `clone` does not always write
+that file and "when it was cloned" is the right answer for a never-refreshed
+remote. Adding a `lastFetched` field to `RemoteEntry` would have meant a
+migration for information git already keeps.
+
+### Also
+
+Three items moved from **Open** to **Blocked on a decision** in PLAN.md — the
+signature scope, self-attesting signatures, and live `post_install`/`post_remove`
+reads. All three are real security debt, and all three begin with a cross-repo
+conversation about re-signing every artifact. Left labelled "Open" they read as
+something someone could pick up, and nobody can.
+
+---
+
 ## Take the template (branch `tier0/multi-user-hardening`)
 
 The sponsor described a scenario on the 2 Sep call (00:36:24): the MCP asks three
