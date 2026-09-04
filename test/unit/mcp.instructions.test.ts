@@ -38,6 +38,9 @@ const readPort: DeliveryOsReadPort = {
   readPayloadFile: () => {
     throw new Error('unused');
   },
+  readSearchableText: () => {
+    throw new Error('unused');
+  },
 };
 
 const configPort: DeliveryOsConfigPort = {

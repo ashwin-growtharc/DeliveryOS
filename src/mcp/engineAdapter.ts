@@ -95,6 +95,22 @@ export function createEngineReadPort(): DeliveryOsReadPort {
       return { entry, doc, files } satisfies ArtifactDetail;
     },
 
+    readSearchableText({ remote, id }) {
+      // Size-capped by resolvePrimaryDoc, and deliberately not cached: today
+      // search only calls this for candidates that scored zero on metadata, so
+      // the common query reads nothing at all. A FETCH_HEAD-keyed cache is the
+      // next step if that bound ever stops holding.
+      try {
+        return resolvePrimaryDoc(remote, id)?.content;
+      } catch {
+        // A missing or unreadable body is not an error for SEARCH -- it just
+        // means this candidate cannot be matched on its text. Distinct from
+        // readPayloadFile, where the caller asked for a specific file and
+        // deserves to know it is not there.
+        return undefined;
+      }
+    },
+
     readPayloadFile({ remote, id, path, offset, limit }) {
       // No `cwd` and no `assertUsableProjectDir`: this reads the remote cache
       // under DELIVERYOS_HOME, never the caller's project. Containment against

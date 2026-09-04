@@ -65,6 +65,92 @@ passes unchanged.
 
 ---
 
+## The catalog's own documents were invisible to search (branch `search/index-bodies`)
+
+Found by using the MCP surface as its intended consumer -- an agent, doing a real
+task, reading only what the server sends. The task worked. The ranking did not:
+
+> *"catch stale comments that no longer match the code"*
+> -> **`email-code-auth` ranked 2nd** -- a passwordless-login plugin, above
+> `plankton-code-quality`, because it contains the token `code`.
+
+### The diagnosis, measured
+
+The scorer indexed id, description, tags and kind. **99 artifacts carry a primary
+document it never read.** The words that carry intent live only there:
+
+| term | df(description) | df(body) |
+|---|---|---|
+| `stale` | **0** | 9 |
+| `comments` | **0** | 2 |
+| `drift` | **0** | 10 |
+
+### Three plausible fixes, all wrong, all caught by measuring
+
+- **Shallow matching** -- the original diagnosis, and not the cause.
+- **IDF over metadata.** `code` is df 47, so weighting by rarity looked obvious.
+  But `documentation` is df **7** -- *rare* -- so IDF would have boosted exactly
+  the wrong results harder.
+- **IDF over bodies.** A different corpus, worth checking separately: df 17 of 99
+  for `documentation` against 9 for `stale`, a separation of **1.36x**. Nowhere
+  near enough to flip a legitimate metadata match.
+
+Neither IDF variant was built. The numbers are in the code so the next person
+does not retry them.
+
+### What shipped, and the property it buys
+
+Body **presence**, not term frequency. Metadata scores are untouched, so the
+relative order of everything that already matched is preserved -- only artifacts
+scoring zero can move, and the body total is capped below the smallest possible
+metadata score (38). That makes non-regression arithmetic rather than a hope.
+The bonus deliberately never feeds `matchedTerms`, whose x30 breadth multiplier
+would have made the guarantee nominal.
+
+Bodies are read **only for candidates that scored zero on metadata** -- the only
+ones that can move. The rejected alternative, "stop once metadata returns enough
+results", excluded its own motivating case: that query returned 15 against a
+limit of 8, so it would never have read a body.
+
+### The threshold moved twice, under measurement
+
+The synthetic fixture could not show this -- it has one body. Against the real
+catalog:
+
+| rule | total matched |
+|---|---|
+| metadata only (before) | 15 |
+| >= 1 body term | **182** -- destroys the signal |
+| >= 2 body terms | 125 |
+| >= a majority of terms | **37** -- shipped |
+
+A long document contains almost any common word. A majority asks whether the
+document is about *most* of what was asked. **Top-ranked results were identical
+at every setting** -- this bound governs what is findable, never what outranks
+what.
+
+### The ceiling, recorded rather than chased
+
+The query that *revealed* the defect is not the query that *validates* the fix.
+`ai-regression-testing` still ranks 5th for the motivating query, below three
+documentation-writing tools that match `documentation` legitimately.
+Presence-only cannot outrank a real metadata match without breaking the
+regression guards, and it should not try. Recorded in the eval with its numbers,
+not asserted as a failing test.
+
+And the honest limit: this matches "stale" to a document containing "stale". A
+query phrased entirely in synonyms the catalog never uses will still miss. This
+is not semantic search.
+
+### The eval is the durable artifact
+
+`test/unit/searchRanking.test.ts` -- two regression guards that passed before and
+must keep passing (the counterweight against flooding), one case that failed
+before and passes now, and one anti-vacuity case. Ranking cannot be verified by
+reading the scorer; three plausible fixes proved that.
+
+---
+
 ## Being the new user, and finding the first command lies (branch `onboarding/empty-state`)
 
 PLAN.md has carried *"get one engineer outside the build team to actually adopt
