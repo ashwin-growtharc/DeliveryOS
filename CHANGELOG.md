@@ -46,6 +46,16 @@ empty filter is indistinguishable from an empty result, so left to the engine
 silent-coercion shape `AGENTS.md` names, and worse on a surface an agent relays
 as fact. The CLI now checks the lockfile first and refuses by name, exit 1.
 
+**This is the one behaviour change here that could surprise something
+scripted.** `check-updates <id>` for an id this project has not installed
+used to exit **0**; it now exits **1**. That is the fix rather than a side
+effect -- the old exit 0 told every wrapper, script and agent that a check
+had succeeded when nothing had been checked -- but "the exit code changed"
+is the kind of thing people find out from a red CI job rather than from
+release notes, so it is stated here plainly. Nothing else in this change
+alters an exit code: `check-updates` with no id, with an installed id, or
+with `--apply` all exit exactly as before.
+
 The scoping test asserts the **negative**: after `check-updates lint-config
 --apply`, the other stale artifact is still on its old bytes and still reported
 as stale. A test that only checked the named artifact moved would have passed
