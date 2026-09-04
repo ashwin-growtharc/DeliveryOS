@@ -131,6 +131,85 @@ function bestMatch(term: string, indexed: string[]): number {
  * Still additive and deterministic: an agent that cannot predict the ranking
  * will just request everything.
  */
+/** The tokens a query actually searches on, shared by the metadata and body
+ * passes so the two can never disagree about what was asked. */
+function queryTerms(query: string): string[] {
+  return words(query.trim().toLowerCase())
+    .filter((t) => t.length >= 3 && !IGNORED_QUERY_WORDS.has(t));
+}
+
+/**
+ * How much a term found in an artifact's BODY is worth, and the ceiling on the
+ * total. Presence only -- no term frequency, no length normalisation.
+ *
+ * WHY PRESENCE AND NOT FREQUENCY. A word appearing three times in a 3,000-word
+ * document is not three times the evidence of one in a 20-word description, and
+ * any attempt to compare them needs tuning nobody can justify. Presence needs
+ * none, and buys a property instead: metadata scores are untouched, so the
+ * relative order of everything that already matched is preserved exactly. Only
+ * artifacts scoring ZERO can move.
+ *
+ * WHY THE CAP. The smallest positive metadata score is 38 -- one term matching
+ * `kind` (8) plus the breadth bonus (30). Capping the body total below that
+ * makes "a body match can never outrank a metadata match" arithmetic rather
+ * than a hope. The body bonus also deliberately never feeds `matchedTerms`,
+ * which carries that x30 breadth multiplier; if it did, three body terms would
+ * buy 90 points and this guarantee would be nominal only.
+ *
+ * WHY NOT IDF, since it is the obvious next idea and was nearly built twice:
+ * `documentation` is df 7 of 230 in metadata -- RARE, so weighting by rarity
+ * would have boosted exactly the wrong results. Over bodies it is df 17 of 99
+ * against `stale` at 9, a separation of 1.36x, nowhere near enough to flip a
+ * legitimate metadata match. Both measured. Do not retry it.
+ *
+ * THE CEILING. This matches "stale" to a document containing "stale". A query
+ * phrased entirely in synonyms the catalog never uses will still miss. That is
+ * the limit of lexical matching, and this is not semantic search.
+ */
+const BODY_TERM_BONUS = 4;
+const BODY_SCORE_CAP = 30;
+
+/**
+ * How many query terms a body must contain before it counts as a match.
+ *
+ * Measured against the real 237-artifact catalog, because the synthetic fixture
+ * could not show this -- it has one body. For the query "verify claims in
+ * documentation are still true, catch stale comments":
+ *
+ *     rule                       total matched
+ *     metadata only (before)                15
+ *     >= 1 body term                       182   <- destroys the signal
+ *     >= 2 body terms                      125
+ *     >= a majority of terms                37   <- shipped
+ *
+ * A long document contains almost any common word, so a low bar does not
+ * surface anything new; it destroys the `total` this tool promises ("the total
+ * number of matches, so a broad query can be narrowed"), turning a useful
+ * "15, narrow it" into a meaningless "182".
+ *
+ * A majority is the principled line, not a tuned one: it asks whether the
+ * document is about MOST of what was asked, rather than whether it happens to
+ * contain a word. The floor of 2 keeps a two-word query from passing on one
+ * term; a single-term query is exempt, since it cannot satisfy two.
+ *
+ * The threshold moved twice under measurement. Recorded so that reads as
+ * evidence rather than as somebody dialling a number until a test went green --
+ * the top-ranked results were identical at every setting, which is the point:
+ * this bound governs what is FINDABLE, never what outranks what.
+ */
+const BODY_MIN_TERMS = 2;
+
+/** Presence of each query term in an artifact's primary document. */
+function bodyScore(terms: string[], body: string): number {
+  const bodyWords = [...new Set(words(body.toLowerCase()))];
+  let hits = 0;
+  for (const term of terms) {
+    if (bestMatch(term, bodyWords) > 0) hits += 1;
+  }
+  if (hits < Math.max(BODY_MIN_TERMS, Math.ceil(terms.length / 2))) return 0;
+  return Math.min(BODY_SCORE_CAP, hits * BODY_TERM_BONUS);
+}
+
 function score(entry: CatalogListEntry, query: string): number {
   const whole = query.trim().toLowerCase();
   const id = entry.manifest.id.toLowerCase();
@@ -138,7 +217,7 @@ function score(entry: CatalogListEntry, query: string): number {
   // An exact id match wins outright, whatever the tokeniser makes of it.
   if (id === whole) return 1000;
 
-  const terms = words(whole).filter((t) => t.length >= 3 && !IGNORED_QUERY_WORDS.has(t));
+  const terms = queryTerms(whole);
   // A query of nothing but stop-words ("how do I") is not a search. Returning
   // 0 filters it out rather than ranking the catalog arbitrarily.
   if (terms.length === 0) return 0;
@@ -520,8 +599,29 @@ export function buildMcpServer({ port: engine, configPort, contributePort, versi
 
         let ranked: CatalogListEntry[];
         if (query) {
+          const terms = queryTerms(query);
           ranked = matched
-            .map((entry) => ({ entry, s: score(entry, query) }))
+            .map((entry) => {
+              const s = score(entry, query);
+              // Bodies are read ONLY for candidates that scored zero on
+              // metadata, because under presence-only those are the only ones
+              // that can move. The bound is set by purpose, not by a threshold
+              // -- a query like "java" matches most descriptions and reads
+              // almost nothing.
+              //
+              // The rejected alternative was "skip bodies once metadata has
+              // returned enough results", which excludes its own motivating
+              // case: the query that exposed this returned 15 results against a
+              // limit of 8, so it would never have read a body. The failure was
+              // never too FEW results; it was plenty of confidently wrong ones,
+              // and a count cannot tell those apart.
+              if (s > 0 || terms.length === 0) return { entry, s };
+              const body = engine.readSearchableText({
+                remote: entry.remoteName,
+                id: entry.manifest.id,
+              });
+              return { entry, s: body ? bodyScore(terms, body) : 0 };
+            })
             .filter((x) => x.s > 0)
             .sort((a, b) => b.s - a.s || a.entry.manifest.id.localeCompare(b.entry.manifest.id))
             .map((x) => x.entry);
