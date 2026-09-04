@@ -8,9 +8,13 @@
  * judgement, and its own consent posture. That is why they drift, and the drift
  * is invisible until someone reads two files side by side:
  *
- *  - `check-updates --apply` updates EVERY artifact on the CLI
- *    (`cli/commands/checkUpdates.ts:30`) and exactly ONE in the sidecar
- *    (`sidecar.ts:465`) -- same engine function, opposite blast radius.
+ *  - ~~`check-updates --apply` updates EVERY artifact on the CLI and exactly
+ *    ONE in the sidecar~~ -- FIXED. The CLI now takes an optional `[id]` and
+ *    threads it to the `onlyId` the engine has always accepted. Worth keeping
+ *    as the record of a drift class this manifest does NOT catch: both
+ *    surfaces declared the operation, and their risk flags agreed. They
+ *    differed in GRANULARITY -- same name, same engine function, one scopeable
+ *    and one not -- and nothing here compares argument shapes.
  *  - `artifact.applyBuildFix` takes `remote`/`id` as optional
  *    (`sidecar.ts:543`) while `readBuildFixLog` requires them to filter, so
  *    an unattributed audit entry is permanently unreadable. The engine says so
@@ -280,14 +284,17 @@ export const CAPABILITIES: Capability[] = [
     // Two disagreements worth seeing, both declared rather than discovered:
     //
     // 1. The CLI applies to ALL artifacts; the sidecar requires an id and
-    //    applies to one. Same engine function, opposite blast radius.
+    //    applies to one. The CLI can now scope too -- `check-updates [id]`
+    //    threads to the same `onlyId` -- but project-wide remains its default
+    //    when no id is given, which is still a wider blast radius than the
+    //    sidecar can express at all.
     // 2. On the CLI this is not its own command -- it is `--apply` on
     //    `check-updates`, so ONE command is both a safe read and a
     //    destructive write depending on a flag. That is the exact shape MCP's
     //    own directory rules reject ("a single tool that accepts both safe and
     //    unsafe methods is rejected"), and it is why this operation cannot be
     //    exposed as a tool by simply forwarding the CLI's shape.
-    cli: 'check-updates',
+    cli: 'check-updates [id]',
     sidecar: 'artifact.applyUpdate',
     mutates: true,
     destructive: true,
@@ -333,7 +340,7 @@ export const CAPABILITIES: Capability[] = [
     ...read,
     name: 'sync.checkForUpdates',
     summary: 'Report which installed artifacts have a newer version upstream',
-    cli: 'check-updates',
+    cli: 'check-updates [id]',
     sidecar: 'sync.checkForUpdates',
     network: true,
     emitsProgress: true,

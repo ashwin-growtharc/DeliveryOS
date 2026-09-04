@@ -6,6 +6,65 @@ All notable changes to DeliveryOS are recorded here, newest first. See
 
 ---
 
+## The drift the manifest could not see (branch `cli/scope-check-updates`)
+
+`src/capabilities.ts` exists to stop the three surfaces disagreeing about what
+an operation is and how dangerous it is. It has caught real drift. This one
+walked past it.
+
+`sync.applyUpdate` is declared on both surfaces. Both declare it destructive,
+network-touching, project-scoped. Every flag agrees. And the two surfaces did
+completely different things:
+
+- the sidecar's `artifact.applyUpdate` **requires** an id and updates exactly
+  one artifact
+- the CLI's `check-updates --apply` had no id **at all** and updated **every**
+  installed artifact
+
+Same engine function. `applyAvailableUpdates(cwd, onProgress?, onlyId?)` has
+accepted `onlyId` the whole time; the sidecar passed it and the CLI never did.
+So the capability existed, was implemented, was tested -- and was unreachable
+from the surface most people use.
+
+**The class is worth naming, because the manifest still cannot catch it.** The
+two declarations did not disagree about *whether* the operation exists or *how
+risky* it is. They disagreed about **granularity** -- one scopeable, one not --
+and nothing in the manifest compares argument shapes. The guard checks that both
+surfaces declare the same operation with the same risk. It cannot check that
+they can express the same requests.
+
+### What changed
+
+`check-updates` now takes an optional `[id]`, on both the reporting and the
+`--apply` path. With no id it is project-wide exactly as before -- that stays
+the default, but it is now a choice rather than the only mode.
+
+A typo'd id gets its own answer. The engine filters the lockfile by id, and an
+empty filter is indistinguishable from an empty result, so left to the engine
+`check-updates some-typo --apply` printed **"No updates available."** and exited
+0 -- reassurance about an artifact this project does not have, which is the
+silent-coercion shape `AGENTS.md` names, and worse on a surface an agent relays
+as fact. The CLI now checks the lockfile first and refuses by name, exit 1.
+
+**This is the one behaviour change here that could surprise something
+scripted.** `check-updates <id>` for an id this project has not installed
+used to exit **0**; it now exits **1**. That is the fix rather than a side
+effect -- the old exit 0 told every wrapper, script and agent that a check
+had succeeded when nothing had been checked -- but "the exit code changed"
+is the kind of thing people find out from a red CI job rather than from
+release notes, so it is stated here plainly. Nothing else in this change
+alters an exit code: `check-updates` with no id, with an installed id, or
+with `--apply` all exit exactly as before.
+
+The scoping test asserts the **negative**: after `check-updates lint-config
+--apply`, the other stale artifact is still on its old bytes and still reported
+as stale. A test that only checked the named artifact moved would have passed
+against the old project-wide behaviour just as happily. Both new tests were run
+against the pre-fix code and both fail there; the pre-existing project-wide test
+passes unchanged.
+
+---
+
 ## The catalog's own documents were invisible to search (branch `search/index-bodies`)
 
 Found by using the MCP surface as its intended consumer -- an agent, doing a real
