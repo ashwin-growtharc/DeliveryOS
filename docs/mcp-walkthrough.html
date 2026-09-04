@@ -82,6 +82,13 @@
          background: var(--accent-soft); color: var(--accent); padding: .1em .35em; border-radius: 3px; }
   .callout { background: var(--accent-soft); border-radius: 8px; padding: 1.1rem 1.3rem; margin: 1.5rem 0; max-width: 44rem; }
   .callout.warn { background: var(--red-soft); }
+  .cmp { display: grid; gap: 1rem; grid-template-columns: 1fr 1fr; margin: 1.2rem 0; max-width: 46rem; }
+  @media (max-width: 44rem) { .cmp { grid-template-columns: 1fr; } }
+  .cmp-h { font-size: .72rem; letter-spacing: .06em; text-transform: uppercase;
+           color: var(--muted); font-weight: 700; margin: 0 0 .35rem; }
+  td.yes { color: var(--accent); font-weight: 600; }
+  td.no { color: var(--red); font-weight: 600; }
+  .struck { text-decoration: line-through; opacity: .55; }
   .callout p { margin: .4rem 0; max-width: none; }
   .callout strong { color: var(--ink); }
   .kicker { font-size: .74rem; letter-spacing: .12em; text-transform: uppercase; color: var(--accent); font-weight: 700; margin-bottom: .5rem; }
@@ -364,6 +371,162 @@ Pulled "fastapi-security" -&gt; ~/your-project/.claude/skills/fastapi-security</
     Six read, two write, none installs. Whether a tool writes is declared once in
     the codebase and read from there — so what the server tells a client cannot
     drift from what the tool does.
+  </p>
+
+  <h2>Running it locally vs hosting it</h2>
+  <p>
+    Everything above ran on the developer's own machine: the client starts
+    <code>deliveryos mcp</code> as a subprocess and talks to it over stdio. The
+    obvious next question is whether this could instead be hosted once, centrally,
+    so nobody installs anything. Partly — and the part that does not work is the
+    part that matters.
+  </p>
+
+  <table>
+    <tr><th>Can it&hellip;</th><th>Local (what ran above)</th><th>Hosted</th></tr>
+    
+  <tr>
+    <td>Find and evaluate an artifact</td>
+    <td class="yes">yes</td>
+    <td class="yes">yes</td>
+  </tr>
+  <tr>
+    <td>See what it installs, and what it runs first</td>
+    <td class="yes">yes</td>
+    <td class="yes">yes</td>
+  </tr>
+  <tr>
+    <td>Know whether it is already in your project</td>
+    <td class="yes">yes</td>
+    <td class="no">no</td>
+  </tr>
+  <tr>
+    <td>Know whether you have edited it locally</td>
+    <td class="yes">yes</td>
+    <td class="no">no</td>
+  </tr>
+  <tr>
+    <td>Install it</td>
+    <td class="yes">yes</td>
+    <td class="no">no</td>
+  </tr>
+  <tr>
+    <td>Contribute your changes back</td>
+    <td class="yes">yes</td>
+    <td class="no">no</td>
+  </tr>
+  <tr>
+    <td>Reach it from claude.ai with nothing installed</td>
+    <td class="no">no</td>
+    <td class="yes">yes</td>
+  </tr>
+  <tr>
+    <td>Add a remote once, for everybody</td>
+    <td class="no">no</td>
+    <td class="yes">yes</td>
+  </tr>
+  <tr>
+    <td>See which artifacts people actually use</td>
+    <td class="no">no</td>
+    <td class="yes">yes</td>
+  </tr>
+  <tr>
+    <td>Works with the user's own GitHub identity</td>
+    <td class="yes">yes</td>
+    <td class="no">no</td>
+  </tr>
+  </table>
+
+  <p>
+    The dividing line is not the network, it is the filesystem. Seven of the eight
+    tools take <code>cwd</code> — the path to your project — because DeliveryOS
+    reads what you have installed and writes what you pull. A server somewhere else
+    has no access to that, and no amount of hosting changes it.
+  </p>
+
+  <h3>The same query, both ways</h3>
+  <p>
+    Below is the real first result from step 2. The right-hand pane is that same
+    captured response with the fields a hosted server could not have filled in
+    removed programmatically — not an invented example.
+  </p>
+
+  <div class="cmp">
+    <div>
+      <p class="cmp-h">Local — answers "is it in my project?"</p>
+      <pre class="out">{
+  "id": "email-code-auth",
+  "kind": "backend-plugin",
+  "remote": "ai-helpers",
+  "version": "1.0.0",
+  "description": "Passwordless email login -- a 6-digit code, no password, no database. Auth.js v5 with a stateless HMAC-verified code (Resend for sending) instead of a Credentials/Prisma password flow.",
+  "localStatus": "not_pulled",
+  "installTarget": "~/your-project/src/lib/auth",
+  "tags": [
+    "nextjs",
+    "typescript"
+  ]
+}</pre>
+    </div>
+    <div>
+      <p class="cmp-h">Hosted — same catalog, less context</p>
+      <pre class="out">{
+  "id": "email-code-auth",
+  "kind": "backend-plugin",
+  "remote": "ai-helpers",
+  "version": "1.0.0",
+  "description": "Passwordless email login -- a 6-digit code, no password, no database. Auth.js v5 with a stateless HMAC-verified code (Resend for sending) instead of a Credentials/Prisma password flow.",
+  "tags": [
+    "nextjs",
+    "typescript"
+  ]
+}</pre>
+    </div>
+  </div>
+
+  <p style="font-size:.9rem;color:var(--muted)">
+    Two fields disappear: <code>localStatus</code> and <code>installTarget</code>.
+    Both are computed from <code>cwd</code>. Losing them means a hosted server can
+    tell you an artifact exists, but not whether you already have it, whether you
+    have changed it, or where it would land — and the next step, step 4's
+    <span class="struck">deliveryos pull</span>, cannot happen at all.
+  </p>
+
+  <div class="callout">
+    <p><strong>What hosting genuinely buys.</strong> Browsing and evaluating the
+    library from anywhere with nothing installed, one place to curate which remotes
+    exist, and the one question nobody can answer today: which artifacts are
+    actually being used.</p>
+  </div>
+
+  <div class="callout warn">
+    <p><strong>What it costs.</strong> The transport here is stdio, so a hosted
+    build needs HTTP added first. Then identity stops being free: locally, "who are
+    you and what may you push to" is inherited from the user's own
+    <code>gh</code> login. Hosted, that becomes a system you own and operate —
+    per-user tokens, per-user remotes.</p>
+  </div>
+
+  <p>
+    So they are complements, not alternatives. A read-only hosted server for
+    discovery and a local server for anything that touches a project would share
+    the same engine — a second adapter, not a second product.
+  </p>
+
+  <h3>What running it locally actually takes</h3>
+  <p>This is the committed configuration, verbatim:</p>
+  <pre class="out">{
+  "mcpServers": {
+    "deliveryos": {
+      "command": "npx",
+      "args": ["tsx", "src/index.ts", "mcp"]
+    }
+  }
+}</pre>
+  <p style="font-size:.9rem;color:var(--muted)">
+    That form needs a checkout. For someone who is not a developer there is a
+    single standalone executable that carries the same <code>mcp</code> subcommand
+    with no Node and no clone — the config then points at that binary instead.
   </p>
 
   <h2>Honest limits</h2>

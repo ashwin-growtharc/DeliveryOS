@@ -5,7 +5,7 @@
 import { createRequire } from 'module';
 import { mkdirSync } from 'fs';
 
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { dirname, resolve } from 'path';
 
 // Repo-relative, so this runs from anywhere and on anyone's machine.
@@ -28,7 +28,9 @@ for (const channel of ['msedge', 'chrome']) {
 }
 if (!browser) throw new Error('no browser (tried msedge, chrome)');
 
-const url = `file:///${REPO}/docs/mcp-walkthrough.html`;
+// pathToFileURL rather than string concatenation: resolve() returns
+// backslashes on Windows, and a file:// URL wants forward slashes.
+const url = pathToFileURL(resolve(REPO, 'docs', 'mcp-walkthrough.html')).href;
 const shots = [];
 
 // Light only: the per-step images are for slides, and a deck is light.
@@ -54,6 +56,32 @@ for (const theme of ['light']) {
       await el.screenshot({ path: p });
       shots.push(p);
     }
+    // The local-vs-hosted comparison, as one deck-ready image. Captured by
+    // clipping between two headings rather than wrapping the section in a
+    // marker div, so the page's own markup stays about the content.
+    const box = await page.evaluate(() => {
+      const hs = [...document.querySelectorAll('h2')];
+      const start = hs.find((h) => h.textContent.includes('Running it locally'));
+      const end = hs.find((h) => h.textContent.includes('Honest limits'));
+      if (!start || !end) return null;
+      const a = start.getBoundingClientRect();
+      const z = end.getBoundingClientRect();
+      return {
+        x: 0,
+        y: a.top + window.scrollY - 20,
+        width: document.documentElement.scrollWidth,
+        height: z.top - a.top + 40,
+      };
+    });
+    if (box) {
+      const p = `${OUT}/section-hosting.png`;
+      await page.screenshot({ path: p, clip: box, fullPage: true });
+      shots.push(p);
+    } else {
+      // Loud rather than silently shipping a stale image from a previous run.
+      throw new Error('could not locate the hosting section -- did a heading get renamed?');
+    }
+
     // And the header, which carries the headline numbers.
     await page.locator('.meta').screenshot({ path: `${OUT}/summary.png` });
     shots.push(`${OUT}/summary.png`);
