@@ -765,6 +765,29 @@ team benefits, rather than build more on an unproven foundation.
 
 ---
 
+### Measure config-sensitive things with the config
+
+One question -- "how many type errors are in `test/`?" -- produced **four
+confidently wrong answers** before the right one:
+
+| Source | Said | Why it was wrong |
+|---|---|---|
+| PLAN.md, recorded earlier | 7 across 3 files | Stale; never re-measured |
+| First measurement | 58 | Ran `tsc` with flags but **without the project's `paths` mapping**, so 25 zod errors in `src/` were counted |
+| Restated twice as | ~50 | Same run, rounded, repeated without re-checking |
+| An independent check | 28 across 6 files | Same class of error: a standalone strict config, not the project's |
+| **Measured with a config that `extends` the base** | **33, all in `test/`** | |
+
+Every wrong figure came from the same habit: measuring something
+config-sensitive without the config. It is cheap to repeat, and **it looks like
+diligence while you are doing it** -- a number was produced, a command was run,
+the output was real. The 28 was even used to argue a sequencing change.
+
+The rule that would have caught all four: **if the project has a config for a
+tool, measure through it (`tsc -p`, not `tsc` plus flags).** A figure obtained
+any other way is indicative at best, and should be labelled as such before it is
+used to make a decision.
+
 ### A defect shape worth checking for deliberately
 
 One half of a feature hardened, the other half missed. It has now paid off
