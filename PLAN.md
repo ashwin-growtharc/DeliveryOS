@@ -621,16 +621,25 @@ team benefits, rather than build more on an unproven foundation.
   value callers cannot distinguish from success is a bug, not a guard… a dropped
   payload is not an empty one."* The sidecar dropping skipped manifests is fixed,
   as are the swallowed post-push cache reset and the unreported vanished
-  artifact. Still open: a stale remote cache makes `list` report "no such
-  artifact" for one that exists. It gets worse under Phase 16, because an agent
-  will relay it as fact.
-- **Open — the signature covers payload bytes only.** `computePayloadDigest`
+  artifact. **The last instance is now closed too**: a stale remote cache used to
+  make `list`/`get_artifact` report "no such artifact" for one that exists. This
+  entry predicted it "gets worse under Phase 16, because an agent will relay it
+  as fact" -- Phase 16 Stage 2 shipped, so it did. `resolveArtifact` now derives
+  the cache's last fetch from the clone itself (`FETCH_HEAD`'s mtime, no registry
+  schema change) and distinguishes three states: fresh (plain "not found",
+  unhedged), stale (names the age and says to refresh), and unknowable (says so).
+  The plain case is tested as deliberately as the hedged one -- caveating every
+  miss would trade a wrong answer for an unusable one.
+- **Blocked on a decision — the signature covers payload bytes only.**
+  *(These three are grouped deliberately: each first step is a conversation about
+  re-signing every artifact across repos, not work someone can pick up. Left
+  reading as "Open" they invite a start that cannot finish.)* `computePayloadDigest`
   (`src/engine/provenance/digest.ts:33-51`) never takes the manifest, so
   `post_install`, `install_target` and `wiring_actions` all sit outside it — a
   valid signature is compatible with an arbitrary `post_install`. Fixing it is a
   breaking cross-repo protocol change against `growtharc-ai-helpers`' signing
   workflow, and needs every signed artifact re-signed.
-- **Open — `post_remove`/`post_install` are read LIVE from the mutable remote**
+- **Blocked on a decision — `post_remove`/`post_install` are read LIVE from the mutable remote**
   at removal and update time, with nothing pinned. `removeArtifact` refuses to
   re-read `install_target` because it is "remote-controlled, MUTABLE"
   (`src/engine/pull/removeArtifact.ts:153`), then executes that same manifest's
@@ -704,7 +713,7 @@ team benefits, rather than build more on an unproven foundation.
   `if (manifest.kind !== 'backend-plugin') continue;`, so all 213 skills,
   agents, rules and commands are unsigned **by design**, not adoption lag. 3 of
   230 artifacts are signed.
-- **Open — signatures are self-attesting.** The artifact declares its own
+- **Blocked on a decision — signatures are self-attesting.** The artifact declares its own
   `certificate_identity`, which `src/engine/provenance/verify.ts:59` passes
   straight to sigstore — the party being verified chooses the verification
   parameters. A "require signatures" setting would need a pinned expected
