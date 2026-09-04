@@ -793,10 +793,40 @@ The first attempt at "being a new user" ran against the real
 `~/.deliveryos`, listed 237 artifacts, and looked like a clean pass. The finding
 existed only because the second attempt forced an empty home directory.
 
+**Tried since, and clean:** a project directory that is not a git repo -- the
+most likely first move there is, someone trying it in a scratch folder.
+`remote add`, `list` and a real `pull` all work; nothing assumes the *project*
+is a repo. Recorded because a negative result is worth as much here as a
+positive one, and it stops the next person re-running it.
+
 **Not yet tried, and each is one variable:** no `gh` installed at all (not just
 logged out), no git identity configured, a project directory with no
 `package.json`, a read-only home directory, a machine with no network. Each is a
 plausible newcomer state, and none has ever been exercised.
+
+### Assert the whole sentence when the wording is the product
+
+Two message defects shipped past full test suites this week: *"Your local catalog
+**is** last refreshed 1 day ago"*, and *"not found in any registered remote. No
+remotes are configured"* -- two true clauses that are absurd together. Every
+assertion passed, because every assertion was a substring. Only running the tool
+caught either.
+
+**Nothing can judge a sentence automatically.** But an exact-match assertion
+relocates the reading: the moment wording changes the test fails, the full new
+sentence lands in the diff, and somebody has to read it to make the suite green
+again. Verified by changing one word -- `may` to `might` -- which surfaced both
+sentences in full with the difference highlighted.
+
+The usual objection is brittleness, and here it is the point. The line worth
+holding: **for a string an agent or a user reads, the wording IS the product, so
+brittleness is correct. For an incidental log line it is not.** Exact assertions
+belong on the first kind only -- `test/unit/staleCatalogResolution.test.ts` is
+the reference.
+
+The sharper half is the negative assertion: pinning what must *not* appear is
+the only thing that stops a "no sources configured" message drifting back into
+being appended to a "not found" one.
 
 ### Measure config-sensitive things with the config
 
