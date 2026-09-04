@@ -232,7 +232,15 @@ describe('the interrogative MCP -- onboarding, not artifact movement', () => {
 });
 
 describe('MCP tool surface', () => {
-  it('advertises exactly the four read-only tools, and no mutating one', async () => {
+  // Named for the COMPOSITION, not the product. `connect()` supplies the read
+  // port only, so this pins what a server built from that port alone exposes.
+  // The shipped server has eight tools, because `src/cli/commands/mcp.ts` also
+  // supplies the config and contribute ports.
+  //
+  // Deliberately not called "the four read-only tools": `refresh_catalog` is
+  // declared `readOnlyHint: false` -- it fetches every remote into the caches
+  // under ~/.deliveryos -- so four tools here are not four read-only tools.
+  it('with the read port alone, advertises exactly those four tools and no mutating one', async () => {
     const { client, close } = await connect();
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual([

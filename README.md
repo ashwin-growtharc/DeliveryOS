@@ -113,7 +113,9 @@ project, the one most likely to benefit from knowing there is already a
 `code-reviewer` agent for the job, was the only party that could not ask.
 
 `deliveryos mcp` fixes that. Eight tools over the same engine the CLI and the
-desktop app use — six that read, two that write:
+desktop app use. Four are declared read-only to the client and four are not;
+the **Writes** column below says what each one actually touches, which is not
+the same question:
 
 | Tool | Answers | Writes |
 |---|---|---|

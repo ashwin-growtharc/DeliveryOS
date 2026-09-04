@@ -321,9 +321,13 @@ const html = `<title>DeliveryOS through an AI agent</title>
     ${toolRows}
   </table>
   <p style="font-size:.9rem;color:var(--muted)">
-    Six read, two write, none installs. Whether a tool writes is declared once in
-    the codebase and read from there — so what the server tells a client cannot
-    drift from what the tool does.
+    ${t.tools.filter((x) => x.readOnly).length} declared read-only,
+    ${t.tools.filter((x) => !x.readOnly).length} not, none installs. Whether a tool
+    writes is declared once in the codebase and read from there — so what the
+    server tells a client cannot drift from what the tool does. Note
+    <code>preview_contribution</code> counts as a write because it shares one
+    capability with <code>contribute_artifact</code>; the manifest classifies per
+    capability, not per tool, and errs toward prompting.
   </p>
 
   <h2>Running it locally vs hosting it</h2>

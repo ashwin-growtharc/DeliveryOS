@@ -209,7 +209,7 @@ used one, not that these three PRs merged.
 - **Definition of done, still open**: one real engagement used one of these
   and we know whether it helped — not "three PRs merged"
 
-## Phase 16 — One core, many surfaces — **Stage 2 read-only surface landed**
+## Phase 16 — One core, many surfaces — **Stage 2 landed; no longer read-only**
 
 Goal: make the engine reachable from a third consumer (an MCP server, so any AI
 harness can drive DeliveryOS) without tripling the CLI-vs-sidecar drift this
@@ -344,9 +344,13 @@ the same reason.
 
 ### Stage 2 — `deliveryos mcp` — **complete, and CI-verified**
 
-**What shipped:** `deliveryos mcp`, a stdio MCP server exposing four read-only
-tools (`search_artifacts`, `get_artifact`, `catalog_overview`,
-`refresh_catalog`). Architecture, client configuration and measured costs in
+**What shipped:** `deliveryos mcp`, a stdio MCP server. This said "four
+read-only tools" and described the surface as it first landed; it is now
+**eight tools, four declared read-only and four not** — the four reads
+(`search_artifacts`, `get_artifact`, `catalog_overview`, `list_remotes`) plus
+`refresh_catalog` and `add_remote`, which write only to `~/.deliveryos` caches,
+and `preview_contribution`/`contribute_artifact`, which reach a shared remote.
+Architecture, client configuration and measured costs in
 [docs/mcp-server.md](docs/mcp-server.md).
 
 It is the third driving adapter and the first with a **declared port**.
@@ -356,9 +360,15 @@ It is the third driving adapter and the first with a **declared port**.
 `test/unit/mcp.architecture.test.ts`, not by convention.
 
 **"Advertised must equal callable" is satisfied structurally rather than by
-stripping a registry:** there is no mutating method on the port at all, so
-there is nothing to strip. The architecture test fails the build if the port
-grows a `pull`/`push`/`remove`-shaped method.
+stripping a registry.** This originally read "there is no mutating method on the
+port at all" — true when the surface was read-only, and no longer. The property
+that survived is narrower and still load-bearing: `DeliveryOsReadPort` is locked
+by `mcp.architecture.test.ts` to **exactly three read operations**, so writes
+cannot arrive by quietly widening the read path. They arrive only through two
+separate, named ports — `DeliveryOsConfigPort` and `DeliveryOsContributePort` —
+and every mutating capability must additionally appear in
+`RISKY_CAPABILITIES_ALLOWED_ON_MCP` with a written justification, or the server
+refuses to construct.
 
 **One correction to what this section said.** The planned test —
 `await expect(client.callTool(...)).rejects.toThrow()` — does not work.
@@ -374,10 +384,20 @@ validating `cwd` itself nowhere — so an agent-supplied project path is a real
 escape." That reasoning is correct for a surface that **writes**: `pull` into
 an agent-chosen directory is a genuine escape.
 
-This surface writes nothing. `cwd` is used only to read the lockfile and to
-compare install targets against pristine snapshots; the tools return
-`localStatus` and `installTarget`, never file contents (those come from the
-remote cache). The residual exposure is an existence oracle over paths the
+When this was written the surface wrote nothing: `cwd` served only to read the
+lockfile and compare install targets against pristine snapshots, and the tools
+returned `localStatus` and `installTarget`, never file contents (those come from
+the remote cache). That is still true of the six read and cache-only tools —
+`refresh_catalog` and `add_remote` touch `~/.deliveryos` alone.
+
+**It is no longer true of `contribute_artifact`**, and the exception is exactly
+the kind this file exists to record. `push.ts:784` calls `upsertEntry(cwd, ...)`
+to record `pendingPr`, which writes the lockfile *inside the user's project* —
+and `pendingPr`'s presence then disables the stale-push guard for whoever pushes
+next. So the surface does resolve a path under `cwd` and write to it. The
+containment argument above therefore rests on `assertUsableProjectDir` rather
+than on "nothing writes", which is a weaker footing than the original text
+claimed and should be treated as such when Stage 3 revisits `pull`. The residual exposure is an existence oracle over paths the
 calling agent can almost always already `stat` itself. Against that, requiring
 out-of-band registration would make the server unusable in the one client that
 matters most — an editor whose whole job is the project it is open in.

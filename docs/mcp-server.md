@@ -4,10 +4,18 @@
 catalog to an MCP client (Claude Code, Claude Desktop, or anything else that
 speaks the protocol).
 
-**Eight tools: six that read, two that write.** It installs nothing — there is
-no `pull` tool and that is deliberate. The two writes are `add_remote`, which
-registers where artifacts come from, and `contribute_artifact`, which opens a
-pull request from local edits and is reachable only through a preview.
+**Eight tools: four declared read-only, four not.** It installs nothing — there
+is no `pull` tool and that is deliberate.
+
+The four non-read-only tools are worth separating, because "not read-only" spans
+three very different blast radii. `refresh_catalog` and `add_remote` write only
+to the caches under `~/.deliveryos` and never touch a project file.
+`contribute_artifact` is the one whose mistakes land on other people: it opens a
+pull request against a shared remote, and is reachable only through a preview.
+`preview_contribution` publishes nothing at all — it is declared non-read-only
+because it shares the `artifact.push` capability with `contribute_artifact`, and
+the manifest classifies per capability rather than per tool. That is deliberate:
+where the two disagree, the classification errs toward the client prompting.
 
 ---
 
