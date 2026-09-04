@@ -1,22 +1,55 @@
 import { Command } from 'commander';
 import { checkForUpdates } from '../../engine/sync/sync';
 import { applyAvailableUpdates } from '../../engine/sync/applyUpdate';
+import { readLockfile } from '../../engine/lockfile/lockfile';
 
 export function registerCheckUpdatesCommand(program: Command): void {
   program
-    .command('check-updates')
-    .description('Check registered remotes for newer versions of artifacts pulled into the current project')
+    // `[id]` is optional, and adding it closed a real asymmetry: the sidecar's
+    // `artifact.applyUpdate` has always taken an id and updated ONE artifact,
+    // while this command could only ever update EVERY one. Same engine
+    // function, and the engine has supported `onlyId` all along -- the CLI
+    // simply never exposed the parameter, so `--apply` had no scoped form at
+    // all. Without an id it still applies project-wide, which is now a choice
+    // rather than the only mode.
+    .command('check-updates [id]')
+    .description(
+      'Check registered remotes for newer versions of artifacts pulled into the current '
+        + 'project. Pass an id to check or update just that one.',
+    )
     .option(
       '--apply',
-      'Also apply every update that has no local edits in the way (re-copies the new payload, re-runs '
-        + 'post_install, updates the pristine snapshot and lockfile version). An artifact with local edits '
-        + 'is reported, never touched -- push the edit first, or resolve it by hand.',
+      'Also apply the update when nothing is in the way (re-copies the new payload, re-runs '
+        + 'post_install, updates the pristine snapshot and lockfile version). Applies to EVERY '
+        + 'artifact unless an id is given. An artifact with local edits is reported, never '
+        + 'touched -- push the edit first, or resolve it by hand.',
     )
-    .action(async (options: { apply?: boolean }) => {
+    .action(async (id: string | undefined, options: { apply?: boolean }) => {
+      const cwd = process.cwd();
+
+      // An id naming nothing installed is a different fact from "nothing to
+      // update", and the engine cannot tell them apart: it filters the lockfile
+      // by id, and an empty filter is indistinguishable from an empty result.
+      // Left to the engine, a typo'd id reports "No updates available." --
+      // which reads as reassurance about an artifact this project does not
+      // even have.
+      if (id) {
+        const installed = readLockfile(cwd).entries.some((entry) => entry.id === id);
+        if (!installed) {
+          console.error(
+            `"${id}" is not installed in this project, so there is nothing to check. `
+              + 'Run `deliveryos list` to see what is installed.',
+          );
+          process.exitCode = 1;
+          return;
+        }
+      }
+
       if (!options.apply) {
-        const updates = await checkForUpdates(process.cwd());
+        const all = await checkForUpdates(cwd);
+        const updates = id ? all.filter((u) => u.id === id) : all;
         if (updates.length === 0) {
-          console.log('No updates available.');
+          console.log(id ? `"${id}" is up to date.` : 'No updates available.');
           return;
         }
         for (const update of updates) {
@@ -27,9 +60,9 @@ export function registerCheckUpdatesCommand(program: Command): void {
         return;
       }
 
-      const results = await applyAvailableUpdates(process.cwd());
+      const results = await applyAvailableUpdates(cwd, undefined, id);
       if (results.length === 0) {
-        console.log('No updates available.');
+        console.log(id ? `"${id}" is up to date.` : 'No updates available.');
         return;
       }
       for (const result of results) {
