@@ -64,11 +64,19 @@ function actualMcpTools(): string[] {
 
 /** Every sidecar command name the DESKTOP APP actually calls.
  *
- * app.js is the one surface with no compiler and no linter behind it:
- * `eslint --print-config` reports `rules: 0` for it (its only rule-bearing
- * block is scoped to TypeScript files), and tsconfig's `include` never reaches
- * `src-tauri/`. So a renamed sidecar command passes every gate in CI and
- * surfaces as a runtime toast in front of a user.
+ * app.js is now linted (61 rules, as of the flat-config block added for
+ * `src-tauri/spike-ui/**\/*.js`), but it still has no COMPILER behind it:
+ * tsconfig's `include` never reaches `src-tauri/`, and no lint rule can know
+ * that `call('artifact.pulll')` names something that does not exist -- it is a
+ * string literal, and a valid one.
+ *
+ * So this guard is still the only thing standing between a renamed sidecar
+ * command and a runtime toast in front of a user. Linting narrowed the gap; it
+ * did not close it.
+ *
+ * (This comment said `rules: 0` until the lint block landed and made it false
+ * within a day. Noted because that is the failure mode this whole file exists
+ * to catch, and a comment is exactly where nothing catches it.)
  *
  * A comment that quotes a real call (`app.js:1330` mentions
  * `call('preview.compile', ...)`) is deliberately not filtered out: it names a
