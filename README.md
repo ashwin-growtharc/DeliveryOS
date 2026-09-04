@@ -17,12 +17,22 @@ deliveryos pull email-code-auth
 ## Setup
 
 ```
-npm install
+git clone https://github.com/ashwin-growtharc/DeliveryOS.git
+cd DeliveryOS
+npm install       # ~5 minutes on a cold cache
 npm run build
 npm link          # puts `deliveryos` on your PATH
 ```
 
 Node 22.12+ and the `gh` CLI (`gh auth login` once, for `push`).
+
+Then add a catalog to pull from — **a fresh install has no sources, so `list`
+returns nothing until you do**:
+
+```
+deliveryos remote add https://github.com/your-org/catalog.git
+deliveryos list
+```
 
 Without `npm link` there is no `deliveryos` command — run it as
 `node dist/index.js <command>` instead, or `npm run dev -- <command>` to run

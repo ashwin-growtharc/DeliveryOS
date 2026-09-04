@@ -612,7 +612,16 @@ team benefits, rather than build more on an unproven foundation.
   never become a secondary store of secrets."* `src/engine/audit/redact.ts` is
   applied at all four `.jsonl` append helpers. The gitignore half of that item
   is still open, below.
-- **Open**: get one engineer outside the build team to actually adopt it
+- **Open**: get one engineer outside the build team to actually adopt it.
+  *Partly de-risked:* the newcomer path was walked end to end -- fresh clone,
+  `npm install` (~5 min), `npm run build`, first command -- against an isolated
+  `DELIVERYOS_HOME`. Three things were wrong before anyone else would have hit
+  them: README's Setup never said to clone, `list` answered "No artifacts
+  found." on a fresh install (the same coercion this branch spent the week
+  closing, in the very first command anyone runs), and `pull` said an id was
+  "not found in any registered remote" when there were none. All three fixed.
+  What still needs a person: whether the tool is *useful* once configured, which
+  no amount of self-testing can answer.
 - **Open**: track real usage numbers — deferred until there's an adopter to
   design the tracking around
 - Done: **every known instance of the silent-coercion bug class is closed.**
@@ -764,6 +773,60 @@ team benefits, rather than build more on an unproven foundation.
   memoization, called ~2× per RPC.
 
 ---
+
+### Remove one thing your machine has that theirs does not
+
+The same move has produced the three most instructive defects of this stretch,
+and it is a technique rather than three lucky accidents:
+
+| What was removed | What it found |
+|---|---|
+| `gh` login (CI runner had none) | A push test that passed locally for the wrong reason |
+| `DELIVERYOS_HOME` (isolated to a temp dir) | Three onboarding defects, including `list` telling a new user the catalog was empty |
+| The `paths` mapping (accidentally) | That a measurement without the project's config is worthless -- see above |
+
+The pattern: **your environment masks precisely the failure a newcomer hits
+first**, because everything they lack is something you set up so long ago you no
+longer see it. Reading the code cannot find these; only removing the thing can.
+
+The first attempt at "being a new user" ran against the real
+`~/.deliveryos`, listed 237 artifacts, and looked like a clean pass. The finding
+existed only because the second attempt forced an empty home directory.
+
+**Tried since, and clean:** a project directory that is not a git repo -- the
+most likely first move there is, someone trying it in a scratch folder.
+`remote add`, `list` and a real `pull` all work; nothing assumes the *project*
+is a repo. Recorded because a negative result is worth as much here as a
+positive one, and it stops the next person re-running it.
+
+**Not yet tried, and each is one variable:** no `gh` installed at all (not just
+logged out), no git identity configured, a project directory with no
+`package.json`, a read-only home directory, a machine with no network. Each is a
+plausible newcomer state, and none has ever been exercised.
+
+### Assert the whole sentence when the wording is the product
+
+Two message defects shipped past full test suites this week: *"Your local catalog
+**is** last refreshed 1 day ago"*, and *"not found in any registered remote. No
+remotes are configured"* -- two true clauses that are absurd together. Every
+assertion passed, because every assertion was a substring. Only running the tool
+caught either.
+
+**Nothing can judge a sentence automatically.** But an exact-match assertion
+relocates the reading: the moment wording changes the test fails, the full new
+sentence lands in the diff, and somebody has to read it to make the suite green
+again. Verified by changing one word -- `may` to `might` -- which surfaced both
+sentences in full with the difference highlighted.
+
+The usual objection is brittleness, and here it is the point. The line worth
+holding: **for a string an agent or a user reads, the wording IS the product, so
+brittleness is correct. For an incidental log line it is not.** Exact assertions
+belong on the first kind only -- `test/unit/staleCatalogResolution.test.ts` is
+the reference.
+
+The sharper half is the negative assertion: pinning what must *not* appear is
+the only thing that stops a "no sources configured" message drifting back into
+being appended to a "not found" one.
 
 ### Measure config-sensitive things with the config
 

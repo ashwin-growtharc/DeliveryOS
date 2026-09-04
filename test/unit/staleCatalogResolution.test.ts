@@ -21,6 +21,23 @@ import { remotesRegistryPath, remoteCachePath } from '../../src/engine/paths';
  * Both directions matter. Hedging every miss with a staleness caveat would trade
  * a wrong answer for an unusable one, so a genuine miss against a fresh cache
  * must still be reported plainly.
+ *
+ * WHY THESE ASSERT THE WHOLE SENTENCE, NOT SUBSTRINGS
+ *
+ * A substring assertion passes silently when the wording changes, so nobody
+ * ever reads the new wording. That is exactly how "Your local catalog IS last
+ * refreshed 1 day ago" shipped past `/day/i` and `/refresh/i` -- every
+ * assertion passed and the sentence was ungrammatical. Only running the tool
+ * caught it.
+ *
+ * An exact assertion cannot judge a sentence either. What it does is relocate
+ * the reading: the moment wording changes the test fails, the full new sentence
+ * lands in the diff, and somebody has to read it to make the suite green again.
+ *
+ * The usual objection is brittleness. Here that is the point, and the line is
+ * worth stating: for a string an AGENT CONSUMES, the wording is the product, so
+ * brittleness is correct. For an incidental log line it would not be. Exact
+ * assertions belong on the first kind only.
  */
 
 let deliveryOsHome: string;
@@ -78,12 +95,13 @@ describe('resolving an id that is not in the local catalog', () => {
       message = (err as Error).message;
     }
 
-    expect(message).toContain('pushed-by-a-colleague');
-    expect(message).toMatch(/refresh/i);
-    expect(message, 'the age is what tells someone whether to act').toMatch(/day/i);
-    // The point of the whole fix: it must not leave the caller concluding
-    // nonexistence when the honest answer is "not in your copy".
-    expect(message).toMatch(/may exist upstream/i);
+    // The fixture pins the age at 26 hours, so this sentence is deterministic.
+    expect(message).toBe(
+      'No artifact with id "pushed-by-a-colleague" found in any registered remote.'
+      + ' Your local catalog was last refreshed 1 day ago, so this may exist upstream'
+      + ' already -- run `deliveryos refresh` and try again before concluding it does'
+      + ' not exist.',
+    );
   });
 
   it('reports a genuine miss plainly when the catalog was just refreshed', () => {
@@ -100,9 +118,9 @@ describe('resolving an id that is not in the local catalog', () => {
       message = (err as Error).message;
     }
 
-    expect(message).toContain('genuinely-absent');
-    expect(message, 'a fresh catalog must not be hedged').not.toMatch(/refresh/i);
-    expect(message).not.toMatch(/may exist upstream/i);
+    expect(message, 'a fresh catalog must not be hedged').toBe(
+      'No artifact with id "genuinely-absent" found in any registered remote.',
+    );
   });
 
   it('hedges when the cache age cannot be determined at all', () => {
@@ -148,9 +166,11 @@ describe('resolving an id that is not in the local catalog', () => {
     expect(message).toMatch(/refresh/i);
   });
 
-  it('stays plain when no remotes are registered, since staleness is not the problem', () => {
-    // Nothing to be stale about. Adding a "run refresh" hint here would send
-    // someone to refresh a catalog that has no sources.
+  it('says no remotes are configured, rather than implying the artifact is missing', () => {
+    // The state every new user starts in. "Not found in any registered remote"
+    // is technically true and practically misleading -- there are no registered
+    // remotes. Deliberately does NOT suggest `refresh`: refreshing a catalog
+    // with no sources does nothing.
     fs.writeFileSync(remotesRegistryPath(), JSON.stringify({ remotes: [] }), 'utf-8');
 
     let message = '';
@@ -161,7 +181,14 @@ describe('resolving an id that is not in the local catalog', () => {
       message = (err as Error).message;
     }
 
-    expect(message).not.toMatch(/refresh/i);
+    // One coherent sentence, not a staleness message with a contradiction
+    // stapled on. Asserting the whole thing is what stops "not found in any
+    // registered remote" drifting back in front of it.
+    expect(message).toBe(
+      'Cannot look up "some-id": no remotes are configured yet.'
+      + ' Add one with `deliveryos remote add <git-url>`.',
+    );
+    expect(message, 'refreshing a catalog with no sources does nothing').not.toMatch(/refresh/i);
   });
 });
 

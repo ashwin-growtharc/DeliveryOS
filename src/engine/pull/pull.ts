@@ -117,6 +117,8 @@ function describeAge(since: Date): string {
  * an unusable one.
  */
 function staleCatalogHint(remoteNames: string[]): string {
+  // Callers handle "no remotes at all" before reaching here: that needs its own
+  // message, not a suffix on one that already said "registered remote".
   if (remoteNames.length === 0) return '';
 
   const ages = remoteNames.map((name) => lastFetchedAt(name));
@@ -151,9 +153,20 @@ export function resolveArtifact(
   const matches = catalog.filter((entry) => entry.manifest.id === id);
 
   if (matches.length === 0) {
+    const remoteNames = listRemotes().map((r) => r.name);
+    // The state every new user starts in, and it needs its own sentence.
+    // "Not found in any registered remote" is technically true and practically
+    // misleading when there are none -- it reads as "this artifact does not
+    // exist" rather than "you have not added a catalog yet".
+    if (remoteNames.length === 0) {
+      throw new ArtifactResolutionError(
+        `Cannot look up "${id}": no remotes are configured yet. `
+        + 'Add one with `deliveryos remote add <git-url>`.',
+      );
+    }
     throw new ArtifactResolutionError(
       `No artifact with id "${id}" found in any registered remote.`
-      + staleCatalogHint(listRemotes().map((r) => r.name)),
+      + staleCatalogHint(remoteNames),
     );
   }
 

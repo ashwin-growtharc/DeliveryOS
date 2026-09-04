@@ -6,6 +6,49 @@ All notable changes to DeliveryOS are recorded here, newest first. See
 
 ---
 
+## Being the new user, and finding the first command lies (branch `onboarding/empty-state`)
+
+PLAN.md has carried *"get one engineer outside the build team to actually adopt
+it"* since Tier 0. That needs a person -- but the part blocking it does not, so
+the newcomer path was walked instead: fresh clone, `npm install`, `npm run
+build`, first command, against an isolated `DELIVERYOS_HOME` so none of this
+machine's existing configuration leaked in.
+
+Three things were wrong, all of which a second user would have hit in their
+first five minutes.
+
+### `list` said the catalog was empty when no catalog was configured
+
+`No artifacts found.` -- on a fresh install, with no remotes added. Technically
+true, and it reads as *"this tool has nothing in it"* rather than *"you have not
+added a source yet"*. The same coercion this branch series spent the week
+closing, in the very first command anyone runs.
+
+Now three distinguishable answers: no remotes configured (with the exact command
+to fix it), a `--remote` filter that matched nothing, and a genuinely empty
+catalog across N remotes.
+
+### `pull` said an id was "not found in any registered remote" when there were none
+
+Which reads as "that artifact does not exist". A confident wrong answer about
+the catalog, when the truth was about the setup.
+
+The first fix appended a hint and produced a message that contradicted itself
+inside two sentences -- *"not found in any registered remote. No remotes are
+configured"*. The no-sources case needs its own sentence rather than a suffix on
+one that already assumed sources existed, so it now has one, and the test
+asserts the old phrasing is absent.
+
+### README never said to clone the repo
+
+Setup began at `npm install`, with nothing above it. Added, along with the
+measured `~5 minutes` for a cold install and an explicit note that a fresh
+install has no sources until `remote add` runs.
+
+### What this does not cover
+
+Whether the tool is *useful* once configured. That still needs someone who did
+not build it.
 ## Typecheck the tests, and find that the newest code wrote most of the backlog (branch `typecheck/tests`)
 
 `tsconfig.json` scoped `include` to `src/**/*.ts` **and** explicitly excluded
