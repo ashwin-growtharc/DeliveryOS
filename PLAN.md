@@ -286,6 +286,14 @@ Against this list specifically:
 - Done: `audit/redact.ts` ported and applied — at **four** audit-log append
   sites, not the two this list assumed, and with three documented deviations
   from the source. Closes the plaintext half of the Tier 0 item below
+- Done, later and separately: the same redaction on the **update** path.
+  `pull.ts` redacted `post_install` output at four sites and
+  `src/engine/sync/applyUpdate.ts` at **none** — the same manifest command,
+  run on update instead of first install, leaking through
+  `check-updates --apply` and the app's Apply Update. The failure path was the
+  one that mattered: `execSync`'s message embeds `Command failed: <the whole
+  command line>`, so a credential passed as an *argument* leaked even when the
+  child printed nothing. Both new tests were confirmed to fail on the old code
 - Done: the sidecar no longer drops skipped manifests, together with
   `buildCatalog`'s unbounded `lastSkippedManifests` array — `catalog.list` and
   `catalog.refresh` now return `{ entries, skipped }`
@@ -678,6 +686,43 @@ team benefits, rather than build more on an unproven foundation.
 
 ---
 
+### A defect shape worth checking for deliberately
+
+One half of a feature hardened, the other half missed. It has now paid off
+five times, every time found by accident:
+
+- redaction applied to `pull` but not `applyUpdate`
+- the auto-run denylist applied to `wiring_actions.targetFile` but not
+  `install_target`
+- the capability manifest's push justification
+- the MCP server's `instructions` describing a read-only surface while
+  exposing writes
+- Phase 15's status
+
+The cheap check is mechanical, not vigilant: when hardening one call site, grep
+for the *other* callers of the same underlying operation before closing the
+item. Finding these by accident five times is evidence the accident is the
+process.
+
+### Retracted: the CI worker-count theory
+
+A red run was attributed to `vitest.config.ts`'s
+`WORKERS = Math.max(2, floor(cores/2))` defeating its own cap on a 2-core
+runner. **Wrong.** The repo is public, so GitHub allocates **4-core** Windows
+runners: `max(2, floor(4/2))` = 2 workers, 50% subscribed, exactly as intended.
+No config change was made.
+
+`.github/workflows/ci.yml`'s own comment already said "2 workers on a 4-core
+runner" — so this was a reading error, not a knowledge gap, and those are the
+ones that recur. What the logs do support: the red run was ~25% slower overall
+(555 s vs 444 s of summed test time) and the failing test is the most
+subprocess-heavy in its file, while a sibling hitting the same auth boundary
+passed in 1954 ms. Why it crossed 30 s that once is still unproven — which is
+why the response was to instrument (`SidecarSession` now rejects on child exit
+and surfaces stderr) rather than to raise the timeout.
+
+---
+
 ## What's next
 
 Ordered by what blocks value, not by phase number.
@@ -689,10 +734,15 @@ Ordered by what blocks value, not by phase number.
    full suite on every push, but ESLint still does not cover the 343KB desktop
    frontend at all and `test/` is still not typechecked, so what CI enforces is
    narrower than it looks. The frontend now has its first real *behavioural*
-   gate — `test/e2e/detailDisclosure.e2e.test.ts`, four browser tests against
+   gate — `test/e2e/detailDisclosure.e2e.test.ts`, five browser tests against
    the real `index.html` — which is what caught the last UI defect class, but
    it is coverage, not static analysis: the 7,464 lines still lint to
-   `rules: 0`.
+   `rules: 0`. It also has its first *static* gate, in
+   `test/unit/capabilities.test.ts`: every sidecar command `app.js` calls must
+   exist in the dispatch table and be declared. Names only — argument and
+   result shapes stay uncovered, because the browser tests stub the sidecar
+   with hand-written fixtures, so a changed result shape still passes
+   everything. Closing that needs a real-sidecar browser harness.
 3. **Split `app.js`** — 7,464 lines in one IIFE. Deferred until ESLint covers
    it, so the move happens with a linter watching.
 4. **A shared command surface** — the CLI exposes 15 commands and the sidecar

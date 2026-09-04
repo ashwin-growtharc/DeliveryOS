@@ -80,7 +80,21 @@ function actualAppRpcNames(): string[] {
     'utf-8',
   );
   const names = [...source.matchAll(/\bcall\(\s*'([a-zA-Z]+\.[a-zA-Z]+)'/g)].map((m) => m[1]);
-  expect(names.length, 'parsed zero app.js RPC calls -- this guard is checking nothing').toBeGreaterThan(30);
+  // Anti-vacuity, DERIVED rather than hardcoded. A literal threshold has two
+  // faults: it drifts as the app grows, and it lets a partial parse through
+  // while the message still claims "parsed zero" -- a guard whose assertion
+  // and whose explanation disagree, which is the very defect class this file
+  // exists to prevent, one level in.
+  //
+  // The app drives most of the engine, so finding fewer than half the
+  // dispatch table means the regex stopped matching, not that the app shrank.
+  const distinct = new Set(names).size;
+  const dispatchSize = actualSidecarKeys().length;
+  expect(
+    distinct,
+    `parsed only ${distinct} distinct app.js RPC names against a ${dispatchSize}-command `
+    + 'dispatch table -- the regex has stopped matching, so this guard is checking almost nothing',
+  ).toBeGreaterThanOrEqual(Math.floor(dispatchSize / 2));
   return names;
 }
 
