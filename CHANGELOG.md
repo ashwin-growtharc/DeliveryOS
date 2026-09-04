@@ -6,6 +6,60 @@ All notable changes to DeliveryOS are recorded here, newest first. See
 
 ---
 
+## Typecheck the tests, and find that the newest code wrote most of the backlog (branch `typecheck/tests`)
+
+`tsconfig.json` scoped `include` to `src/**/*.ts` **and** explicitly excluded
+`test`, and vitest transpiles without checking. So nothing had ever type-checked
+a test file.
+
+### The count was wrong three times before it was right
+
+PLAN.md recorded **7 errors across 3 files**. A first measurement said **58** --
+but 25 of those were in `src/`, and appeared only because the standalone run
+omitted the zod `paths` mapping the real config carries. Measured properly, with
+a config that `extends` the base: **33, all in `test/`, zero in `src/`**.
+
+Worth recording because the wrong number was quoted twice before being checked.
+A config that inherits is the only honest way to measure this.
+
+### All 33 fixed. No quarantine.
+
+The plan allowed for landing the gate with a suppressed backlog. It turned out
+not to be needed:
+
+- **5** were a module mismatch -- tests run through vitest as ESM, while the base
+  config is commonjs, so every top-level `await` failed. A config fix, not a code
+  fix.
+- **12** were properties added to `mcp.server.test.ts`'s `ToolJson` by the
+  `read_artifact_file` work days earlier. That type carries a comment saying it
+  is written out longhand "so the tests state what shape they expect and keep
+  working the day `test/` is finally typechecked" -- and the first tool written
+  after that comment forgot to extend it. Nothing caught it, because nothing was
+  checking.
+- **2** were fake read ports missing `readPayloadFile`, from that same change.
+- The rest: an incomplete Octokit double (`pulls.get` is required by
+  `GithubClient` and was never supplied), `doc` asserted non-null where it is
+  legitimately nullable, a `Capability` cast that needed routing through
+  `unknown`, and missing `@types/jsdom`.
+
+**Fourteen of the 33 came from work done days earlier in this same branch
+series.** The missing gate had not merely failed to catch an old backlog; it let
+the newest code add to it faster than anything else. That is the argument for
+the gate, not a footnote to it.
+
+### One real assumption made explicit
+
+`simpleGit(...).status().current` is `string | null` -- simple-git models a
+detached HEAD. Five call sites treated it as a string. Rather than `!`, a
+`currentBranch()` helper now throws with a sentence naming the fixture as broken,
+because the alternative surfaces later as an unrelated git error about a branch
+called "null".
+
+Verified the gate bites: a deliberate `const x: number = 'string'` in a test file
+fails `npm run typecheck`.
+
+---
+
 ## The linter was not ignoring app.js -- it was matching nothing (branch `lint/app-js`)
 
 7,464 lines of the desktop frontend had `rules: 0`. It was never in ESLint's

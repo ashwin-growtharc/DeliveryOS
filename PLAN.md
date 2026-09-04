@@ -651,9 +651,17 @@ team benefits, rather than build more on an unproven foundation.
   — defined as "no build command detected" — when it merely chose not to run
   one. Both need a widened `BuildVerificationResult`; three existing tests assert
   the wrong string today.
-- **Open — `test/` is not typechecked at all.** `tsconfig.json` excludes it
-  *and* scopes `include` to `src/**/*.ts`, and vitest transpiles without
-  checking. 7 real type errors hide there today, across 3 files.
+- Done: `test/` is typechecked. `tsconfig.test.json` extends the base config
+  (inheriting the zod `paths` mapping) and `npm run typecheck` now runs both.
+  The recorded "7 errors across 3 files" was stale -- the real figure was **33
+  across 10 files**, and a first measurement without the `paths` mapping said
+  58, which is how easy it is to mis-count this. **All 33 were fixed; no
+  quarantine was needed.** Five were a module mismatch (tests run through vitest
+  as ESM while the base config is commonjs), and the largest group -- 12 -- were
+  properties added to `mcp.server.test.ts`'s `ToolJson` grab-bag by the
+  `read_artifact_file` work days earlier, plus two fake ports missing the port
+  method that same work added. The newest code really had been growing the
+  backlog fastest, which is the argument for the gate rather than an aside.
 - Done: `src-tauri/spike-ui/**/*.js` is linted. It was never in ESLint's
   `ignores` -- it simply matched no config carrying rules, so `--print-config`
   reported `rules: 0` for all 7,464 lines, which looks identical from outside

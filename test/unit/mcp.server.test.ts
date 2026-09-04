@@ -126,6 +126,16 @@ interface ToolJson {
   pullCommand: string;
   doc: { path: string; content: string; truncated: boolean } | null;
   hasDoc: boolean;
+  // read_artifact_file. Added late, and the omission is the point: this type
+  // exists precisely so tests "keep working the day test/ is finally
+  // typechecked", and the first tool written after that comment forgot to
+  // extend it. Nothing caught that, because nothing was checking.
+  files: string[];
+  content: string;
+  offset: number;
+  limit: number;
+  totalChars: number;
+  hasMore: boolean;
 }
 
 /** Every tool returns JSON as its single text block. */
@@ -439,8 +449,9 @@ describe('MCP tool surface', () => {
   it('returns the primary document body, and omits it on request', async () => {
     const { client, close } = await connect();
     const withDoc = await call(client, 'get_artifact', { cwd: '/p', id: 'code-review' });
-    expect(withDoc.data.doc.content).toContain('# Code Review');
-    expect(withDoc.data.doc.path).toBe('SKILL.md');
+    expect(withDoc.data.doc, 'this fixture has a primary document').not.toBeNull();
+    expect(withDoc.data.doc?.content).toContain('# Code Review');
+    expect(withDoc.data.doc?.path).toBe('SKILL.md');
 
     const without = await call(client, 'get_artifact', { cwd: '/p', id: 'code-review', includeDoc: false });
     expect(without.data.doc).toBeNull();
@@ -541,8 +552,11 @@ describe('MCP tool surface', () => {
       } finally {
         for (const key of touched) {
           const [existed, value] = before.get(key)!;
-          if (existed) (capability as Record<string, unknown>)[key] = value;
-          else delete (capability as Record<string, unknown>)[key];
+          // Through `unknown` on purpose: Capability is a closed interface and
+          // this helper deliberately writes keys it does not declare, to test
+          // what happens when one is reclassified.
+          if (existed) (capability as unknown as Record<string, unknown>)[key] = value;
+          else delete (capability as unknown as Record<string, unknown>)[key];
         }
       }
     }

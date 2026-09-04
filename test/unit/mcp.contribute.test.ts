@@ -28,6 +28,9 @@ const readPort: DeliveryOsReadPort = {
   readArtifact: () => {
     throw new Error('not used by these tests');
   },
+  readPayloadFile: () => {
+    throw new Error('not used by these tests');
+  },
 };
 
 function fakeContributePort(opts: { pendingPr?: boolean; pushFails?: boolean } = {}) {
