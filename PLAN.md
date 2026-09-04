@@ -209,7 +209,18 @@ used one, not that these three PRs merged.
 - **Definition of done, still open**: one real engagement used one of these
   and we know whether it helped — not "three PRs merged"
 
-## Phase 16 — One core, many surfaces — **Stage 2 landed; no longer read-only**
+## Phase 16 — One core, many surfaces — **Stages 0 and 2 done; Stage 3 one-third; Stage 1 not started**
+
+| Stage | State |
+|---|---|
+| 0 — CI first, then the real bugs | **Done**, verified |
+| 1 — the command registry | **Not started** — the largest remaining piece |
+| 2 — `deliveryos mcp` | **Done**, CI-verified. Nine tools, five read-only |
+| 3 — decide `push` / `remove` / `config` separately | **`push` decided and shipped. `remove` and `config` still open** |
+
+The previous header said only "Stage 2 landed; no longer read-only", which
+undersold what had happened (Stage 0 and part of Stage 3 also landed) while
+leaving the one genuinely untouched stage — the registry — invisible.
 
 Goal: make the engine reachable from a third consumer (an MCP server, so any AI
 harness can drive DeliveryOS) without tripling the CLI-vs-sidecar drift this
@@ -494,15 +505,25 @@ registry the server sees, not merely hidden from `tools/list`.
 
 ### Stage 3 — decide `push`, `remove` and `config` separately, with evidence
 
-Each needs its own answer, not one policy: `push` needs a diff preview first (it
-is all-or-nothing over the whole folder today, with no confirmation); `remove`
-needs a confirmation story (the app confirm-gates it in `handleRemoveArtifact`,
-at the `window.confirm` guarding `artifact.remove` — anchor on that call rather
-than a line number; the CLI does not); `config --set` needs a by-reference
-form, because a literal secret in a tool call is in model context by
-construction (`agent-native` solved this with
-`${keys.NAME}` indirection plus keeping secret writes off agent actions
-entirely).
+One answer each, not one policy for all three. **One of the three is now
+answered**; this section used to read as though none were, which would have had
+someone re-open a question that shipped.
+
+- **`push` — decided and shipped.** The requirement here was "a diff preview
+  first", because push is all-or-nothing over the whole installed folder. That
+  is what `preview_contribution` is: it returns the exact file list, statuses and
+  version bump before anything leaves the machine, and mints a single-use token
+  that `contribute_artifact` will not act without. Declared against
+  `artifact.push` in `src/capabilities.ts`, with its justification recorded in
+  `RISKY_CAPABILITIES_ALLOWED_ON_MCP`.
+- **`remove` — still open.** Needs a confirmation story. The app confirm-gates
+  it in `handleRemoveArtifact`, at the `window.confirm` guarding
+  `artifact.remove` (anchor on that call, not a line number); the CLI does not,
+  and it is not on the MCP surface at all.
+- **`config --set` — still open.** Needs a by-reference form, because a literal
+  secret in a tool call is in model context by construction. `agent-native`
+  solved this with `${keys.NAME}` indirection plus keeping secret writes off
+  agent actions entirely. Not on the MCP surface.
 
 ### The safety rule this phase exists to protect
 
