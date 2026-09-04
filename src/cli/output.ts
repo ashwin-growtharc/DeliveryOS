@@ -16,7 +16,18 @@ import { ResolvedWiringAction } from '../engine/pull/wiring';
  * own Browse view has always shown over this same catalog data, a real
  * CLI/sidecar parity gap this closes.
  */
-export function printCatalog(entries: CatalogListEntry[], json: boolean): void {
+/**
+ * @param emptyMessage What to print when there is nothing to show. Supplied by
+ *   the caller because "empty" has several causes that look identical from
+ *   here, and a single "No artifacts found." reads as "the catalog is empty"
+ *   when the truth is usually "you have not configured a source yet". That is
+ *   the first thing a new user sees, and it tells them the tool is broken.
+ */
+export function printCatalog(
+  entries: CatalogListEntry[],
+  json: boolean,
+  emptyMessage = 'No artifacts found.',
+): void {
   if (json) {
     const plain = entries.map((entry) => ({
       id: entry.manifest.id,
@@ -48,7 +59,7 @@ export function printCatalog(entries: CatalogListEntry[], json: boolean): void {
   }
 
   if (entries.length === 0) {
-    console.log('No artifacts found.');
+    console.log(emptyMessage);
     return;
   }
 

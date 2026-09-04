@@ -612,7 +612,16 @@ team benefits, rather than build more on an unproven foundation.
   never become a secondary store of secrets."* `src/engine/audit/redact.ts` is
   applied at all four `.jsonl` append helpers. The gitignore half of that item
   is still open, below.
-- **Open**: get one engineer outside the build team to actually adopt it
+- **Open**: get one engineer outside the build team to actually adopt it.
+  *Partly de-risked:* the newcomer path was walked end to end -- fresh clone,
+  `npm install` (~5 min), `npm run build`, first command -- against an isolated
+  `DELIVERYOS_HOME`. Three things were wrong before anyone else would have hit
+  them: README's Setup never said to clone, `list` answered "No artifacts
+  found." on a fresh install (the same coercion this branch spent the week
+  closing, in the very first command anyone runs), and `pull` said an id was
+  "not found in any registered remote" when there were none. All three fixed.
+  What still needs a person: whether the tool is *useful* once configured, which
+  no amount of self-testing can answer.
 - **Open**: track real usage numbers — deferred until there's an adopter to
   design the tracking around
 - **Open — one live instance left of a silent-coercion bug class.**

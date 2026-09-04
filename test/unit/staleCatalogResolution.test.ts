@@ -148,9 +148,11 @@ describe('resolving an id that is not in the local catalog', () => {
     expect(message).toMatch(/refresh/i);
   });
 
-  it('stays plain when no remotes are registered, since staleness is not the problem', () => {
-    // Nothing to be stale about. Adding a "run refresh" hint here would send
-    // someone to refresh a catalog that has no sources.
+  it('says no remotes are configured, rather than implying the artifact is missing', () => {
+    // The state every new user starts in. "Not found in any registered remote"
+    // is technically true and practically misleading -- there are no registered
+    // remotes. Deliberately does NOT suggest `refresh`: refreshing a catalog
+    // with no sources does nothing.
     fs.writeFileSync(remotesRegistryPath(), JSON.stringify({ remotes: [] }), 'utf-8');
 
     let message = '';
@@ -161,7 +163,13 @@ describe('resolving an id that is not in the local catalog', () => {
       message = (err as Error).message;
     }
 
-    expect(message).not.toMatch(/refresh/i);
+    expect(message).toMatch(/no remotes are configured/i);
+    expect(message).toMatch(/remote add/i);
+    // One coherent sentence, not a staleness message with a contradiction
+    // stapled on: "not found in any registered remote" must not appear when
+    // there are no registered remotes.
+    expect(message).not.toMatch(/found in any registered remote/i);
+    expect(message, 'refreshing a catalog with no sources does nothing').not.toMatch(/refresh/i);
   });
 });
 
