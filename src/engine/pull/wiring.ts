@@ -43,9 +43,29 @@ export function resolveContainedTargetFile(cwd: string, targetFile: string): str
  * genuinely malicious/compromised manifest, not a judgment call about
  * "risky-looking" paths.
  */
-const SENSITIVE_TARGET_PREFIXES = ['.git/', '.github/workflows/', '.vscode/', '.husky/'];
+export const SENSITIVE_TARGET_PREFIXES = [
+  '.git/',
+  '.github/workflows/',
+  '.vscode/',
+  '.husky/',
+  // Added when this list was extended to cover `install_target` too (see
+  // pull.ts). DeliveryOS's own project-local state: lock.json, the pristine
+  // snapshots every status check, push and update diffs against, and the
+  // audit logs. An artifact installing here could rewrite the record of what
+  // is installed and of what a clean copy looks like. No legitimate artifact
+  // installs into it.
+  '.deliveryos/',
+];
 
-function isSensitiveTargetPath(root: string, resolvedPath: string): boolean {
+// Deliberately NOT `.claude/`. `deliveryos scan` itself GENERATES
+// install_target values of `.claude/agents/<file>`, `.claude/skills/<dir>` and
+// `.claude/<rel>` (scan.ts), and real agent artifacts install to
+// `.claude/agents/<id>.md` (push.ts). Denying it would make every scanned
+// agent and skill artifact in the catalog unpullable -- exactly the outage
+// class CHANGELOG records for the root-install_target guard, where a
+// schema-level tightening took all 234 artifacts down at once.
+
+export function isSensitiveTargetPath(root: string, resolvedPath: string): boolean {
   const relative = path.relative(root, resolvedPath).split(path.sep).join('/').toLowerCase();
   return SENSITIVE_TARGET_PREFIXES.some(
     (prefix) => relative === prefix.slice(0, -1) || relative.startsWith(prefix),

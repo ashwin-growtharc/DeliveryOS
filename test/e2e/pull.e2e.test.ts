@@ -12,6 +12,7 @@ import {
   INSTALL_PARAMS_ARTIFACT,
   SIGNED_ARTIFACT,
 } from '../fixtures/testRemote';
+import { rmDirWithRetry } from '../../src/engine/execHelpers';
 
 // This e2e test drives the CLI as a real subprocess (via `tsx src/index.ts`)
 // rather than in-process, since that's closer to how a real user invokes
@@ -68,8 +69,8 @@ describe('pull e2e', () => {
 
   afterAll(async () => {
     await teardownTestRemote(fixtureRemoteDir);
-    fs.rmSync(deliveryOsHome, { recursive: true, force: true });
-    fs.rmSync(scratchCwd, { recursive: true, force: true });
+    await rmDirWithRetry(deliveryOsHome);
+    await rmDirWithRetry(scratchCwd);
   });
 
   it('registers the test remote', () => {
@@ -246,6 +247,46 @@ describe('pull e2e', () => {
     expect(result.stderr).toContain('never-registered');
   });
 
+
+  // CHARACTERIZATION TEST -- this pins a KNOWN DEFECT, it is not a spec.
+  //
+  // `--no-wire` reads as "touch nothing else", and its help text used to say
+  // exactly that. It is not true: this branch calls pullArtifact, which runs
+  // the manifest's post_install unconditionally -- an arbitrary shell command
+  // with the project root in its environment. The flag only ever opted out of
+  // the wiring/build step.
+  //
+  // The help text is now correct (see the test below). This test exists so the
+  // BEHAVIOUR cannot change by accident: giving --no-wire a genuine no-execute
+  // mode, or adding a separate --no-post-install flag, is a reasonable future
+  // change -- but it must be a deliberate one, and it must flip this assertion.
+  it('CHARACTERIZATION (known defect): `pull --no-wire` still runs the artifact\'s post_install', async () => {
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'deliveryos-e2e-nowire-postinstall-'));
+    try {
+      const result = runCli(
+        ['pull', 'handbook-doc', '--remote', 'test-remote', '--no-wire'],
+        cwd,
+        deliveryOsHome,
+      );
+      expect(result.status).toBe(0);
+
+      // handbook-doc is the one TEST_ARTIFACTS entry with hasPostInstall: true.
+      // Its post_install writes this marker into the install target.
+      expect(fs.existsSync(path.join(cwd, 'handbook', '.post_install_ran'))).toBe(true);
+    } finally {
+      await rmDirWithRetry(cwd);
+    }
+  }, 30_000);
+
+  it('`pull --help` no longer claims --no-wire leaves the rest of the project untouched', () => {
+    const result = runCli(['pull', '--help'], scratchCwd, deliveryOsHome);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).not.toContain('nothing else in the project should be touched');
+    // States the real behaviour instead of implying the opposite.
+    expect(result.stdout).toContain('post_install');
+  });
+
   it('check-pending-pushes reports nothing to check for a project with no pushed edits -- a real CLI/sidecar parity gap this closes (the sidecar\'s own sync.resolvePendingPushes RPC has always had this; the underlying engine function is already covered end to end in test/e2e/sync.resolvePendingPushes.test.ts, so this only confirms the CLI wiring)', () => {
     const result = runCli(['check-pending-pushes'], scratchCwd, deliveryOsHome);
     expect(result.status).toBe(0);
@@ -303,8 +344,8 @@ describe('pull e2e', () => {
         ]);
       } finally {
         await teardownTestRemote(remoteDir);
-        fs.rmSync(isolatedHome, { recursive: true, force: true });
-        fs.rmSync(cwd, { recursive: true, force: true });
+        await rmDirWithRetry(isolatedHome);
+        await rmDirWithRetry(cwd);
       }
     }, 30_000);
 
@@ -324,7 +365,7 @@ describe('pull e2e', () => {
 
     afterAll(async () => {
       await teardownTestRemote(paramsRemoteDir);
-      fs.rmSync(paramsCwd, { recursive: true, force: true });
+      await rmDirWithRetry(paramsCwd);
     });
 
     it('--set (repeated) writes real values to .env.local, and reports nothing missing once every required param is covered', () => {
@@ -383,7 +424,7 @@ describe('pull e2e', () => {
       expect(fs.existsSync(path.join(installTargetDir, '.env.example'))).toBe(false);
     });
 
-    it('pulling with a required param genuinely unfilled (no --set, no default) still succeeds, and reports it as missing rather than failing the whole pull', () => {
+    it('pulling with a required param genuinely unfilled (no --set, no default) still succeeds, and reports it as missing rather than failing the whole pull', async () => {
       const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'deliveryos-e2e-install-params-missing-'));
       try {
         const addResult = runCli(
@@ -416,11 +457,11 @@ describe('pull e2e', () => {
         const envContent = fs.readFileSync(path.join(cwd, '.env.local'), 'utf-8');
         expect(envContent).toBe('AUTH_URL=http://localhost:3000\n');
       } finally {
-        fs.rmSync(cwd, { recursive: true, force: true });
+        await rmDirWithRetry(cwd);
       }
     });
 
-    it('--no-wire skips auto-wiring entirely, matching every DeliveryOS version before Phase 19 -- for scripted/CI use', () => {
+    it('--no-wire skips auto-wiring entirely, matching every DeliveryOS version before Phase 19 -- for scripted/CI use', async () => {
       const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'deliveryos-e2e-install-params-nowire-'));
       try {
         const addResult = runCli(
@@ -450,11 +491,11 @@ describe('pull e2e', () => {
         expect(fs.existsSync(path.join(cwd, 'auth.ts'))).toBe(false);
         expect(fs.existsSync(path.join(cwd, 'middleware.ts'))).toBe(false);
       } finally {
-        fs.rmSync(cwd, { recursive: true, force: true });
+        await rmDirWithRetry(cwd);
       }
     });
 
-    it('rejects a malformed --set value (no "=") with a clean error, not a crash', () => {
+    it('rejects a malformed --set value (no "=") with a clean error, not a crash', async () => {
       const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'deliveryos-e2e-install-params-badset-'));
       try {
         const addResult = runCli(
@@ -477,7 +518,7 @@ describe('pull e2e', () => {
         expect(result.status).not.toBe(0);
         expect(result.stderr).toContain('KEY=VALUE');
       } finally {
-        fs.rmSync(cwd, { recursive: true, force: true });
+        await rmDirWithRetry(cwd);
       }
     });
   });
@@ -507,8 +548,8 @@ describe('pull e2e', () => {
         expect(entry.signed).toBe(true);
       } finally {
         await teardownTestRemote(remoteDir);
-        fs.rmSync(isolatedHome, { recursive: true, force: true });
-        fs.rmSync(cwd, { recursive: true, force: true });
+        await rmDirWithRetry(isolatedHome);
+        await rmDirWithRetry(cwd);
       }
     }, 30_000);
 
@@ -537,7 +578,7 @@ describe('pull e2e', () => {
         expect(fs.existsSync(path.join(cwd, SIGNED_ARTIFACT.installTarget))).toBe(false);
       } finally {
         await teardownTestRemote(remoteDir);
-        fs.rmSync(cwd, { recursive: true, force: true });
+        await rmDirWithRetry(cwd);
       }
     }, 30_000);
 
@@ -566,7 +607,7 @@ describe('pull e2e', () => {
         expect(fs.existsSync(path.join(cwd, SIGNED_ARTIFACT.installTarget))).toBe(false);
       } finally {
         await teardownTestRemote(remoteDir);
-        fs.rmSync(cwd, { recursive: true, force: true });
+        await rmDirWithRetry(cwd);
       }
     }, 30_000);
   });

@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { pullArtifact, resolveArtifact } from '../../engine/pull/pull';
+import { pullArtifact, resolveArtifact, ProgressCallback } from '../../engine/pull/pull';
 import { pullAndAutoWire } from '../../engine/pull/pullAndAutoWire';
 import { buildPostInstallHealthSummary } from '../../engine/pull/postInstallHealthSummary';
 
@@ -32,13 +32,29 @@ export function registerPullCommand(program: Command): void {
       collectSetFlag,
       {},
     )
+    // The old text claimed this left the project untouched ("just copy the
+    // payload and write install_params ... where nothing else in the project
+    // should be touched"). That was wrong, and dangerously so: this branch
+    // calls pullArtifact, which runs the manifest's post_install
+    // unconditionally -- an arbitrary shell command, with the project root in
+    // its environment. The flag only ever opted out of the wiring/build step.
+    // See the characterization test in test/e2e/pull.e2e.test.ts, which pins
+    // the current behaviour so changing it stays a deliberate decision.
     .option(
       '--no-wire',
-      'Skip automatic wiring and the post-pull build check -- just copy the payload and '
-        + 'write install_params, the same as every DeliveryOS version before this default '
-        + 'changed. For scripted/CI use where nothing else in the project should be touched.',
+      'Skip automatic wiring and the post-pull build check, the same as every DeliveryOS '
+        + 'version before this default changed. The payload is still copied, install_params '
+        + 'are still written to .env.local, and the artifact\'s own post_install command is '
+        + 'still run -- this flag opts out of the wiring/build step only.',
     )
-    .action(async (id: string, options: { remote?: string; set: Record<string, string>; wire: boolean }) => {
+    .option(
+      '--force',
+      'Discard local edits to this artifact and take the current upstream version. Refused by '
+        + 'default: pulling copies the payload over your files wholesale, so on an artifact you '
+        + 'have edited that is silent data loss. Forcing also re-fetches the remote first, so you '
+        + 'are trading your edits for what is actually upstream, not for a stale local cache.',
+    )
+    .action(async (id: string, options: { remote?: string; set: Record<string, string>; wire: boolean; force?: boolean }) => {
       // Resolved once up front (cheap -- reads the already-cloned remote,
       // no network) purely to decide WHICH path to take: pullAndAutoWire
       // is worth its extra build-verify step only when there's actually
@@ -54,8 +70,27 @@ export function registerPullCommand(program: Command): void {
       const { manifest } = resolveArtifact(id, options.remote);
       const hasWiring = manifest.wiring_actions.length > 0;
 
+      // Named before it runs. `post_install` is an arbitrary shell command with
+      // the project root in its environment, and it was the one side effect
+      // shown nowhere -- the wiring snippets and install_params it sits beside
+      // have always been fully visible in both the CLI and the app. Printed
+      // rather than gated: this matches how `deliveryos wiring` shows snippets,
+      // and adding a prompt would change what every existing script does.
+      //
+      // Sourced from the ENGINE's progress hook rather than printed from the
+      // `manifest` resolved above, because those two can disagree: `--force`
+      // makes pullArtifact fetch and re-resolve, so a pre-announce from this
+      // (pre-fetch) read could name one command while a different one actually
+      // runs. The engine's line comes from the manifest it is about to execute,
+      // so it is right in both cases.
+      const announcePostInstall: ProgressCallback = (stage, message) => {
+        if (stage === 'post_install') {
+          console.log(`This artifact runs a command on your machine -- ${message}`);
+        }
+      };
+
       if (!options.wire || !hasWiring) {
-        const result = await pullArtifact(id, options.remote, process.cwd(), undefined, options.set);
+        const result = await pullArtifact(id, options.remote, process.cwd(), announcePostInstall, options.set, { force: options.force });
         if (result.postInstallOutput && result.postInstallOutput.trim().length > 0) {
           console.log(result.postInstallOutput.trimEnd());
         }
@@ -70,10 +105,13 @@ export function registerPullCommand(program: Command): void {
         if (result.gitignoreWarning) {
           console.log(result.gitignoreWarning);
         }
+        if (result.installParamWarning) {
+          console.log(result.installParamWarning);
+        }
         return;
       }
 
-      const result = await pullAndAutoWire(id, options.remote, process.cwd(), undefined, options.set);
+      const result = await pullAndAutoWire(id, options.remote, process.cwd(), announcePostInstall, options.set, options.force);
       const { pullResult } = result;
       if (pullResult.postInstallOutput && pullResult.postInstallOutput.trim().length > 0) {
         console.log(pullResult.postInstallOutput.trimEnd());
@@ -81,6 +119,9 @@ export function registerPullCommand(program: Command): void {
       console.log(`Pulled "${pullResult.manifest.id}" -> ${pullResult.installTarget}`);
       if (pullResult.gitignoreWarning) {
         console.log(pullResult.gitignoreWarning);
+      }
+      if (pullResult.installParamWarning) {
+        console.log(pullResult.installParamWarning);
       }
       // One coherent plain-language summary of wiring/build/missing-params,
       // same text the desktop app's own Pull toast shows -- covers

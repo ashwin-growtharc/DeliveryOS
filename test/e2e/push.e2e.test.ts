@@ -18,7 +18,8 @@ const NL = String.fromCharCode(10);
 import { fetchAndReset } from '../../src/engine/git/git';
 import { pullArtifact } from '../../src/engine/pull/pull';
 import { pushArtifact } from '../../src/engine/push/push';
-import { NoLocalChangesError, IdCollisionError } from '../../src/engine/errors';
+import { NoLocalChangesError, IdCollisionError, StalePushError } from '../../src/engine/errors';
+import { readLockfile } from '../../src/engine/lockfile/lockfile';
 import type { GithubClient } from '../../src/engine/github/github';
 
 // This e2e test never touches the network or a real GitHub account: the
@@ -927,6 +928,277 @@ describe('push e2e', () => {
         'utf-8',
       );
       expect(cachedReadme).not.toContain('unreviewed local edit');
+      // The happy path stays silent -- no warning on an ordinary push.
+      expect(result.cacheResetWarning).toBeUndefined();
+    },
+    120_000,
+  );
+
+  it(
+    'does not refuse a second push just because YOUR OWN first push merged -- one cwd, one person, no second party',
+    async () => {
+      // The false positive the two-cwd stale-push test below structurally
+      // cannot catch. `push` records pendingPr but never advances
+      // lockEntry.version -- only resolvePendingPushes does, and that is a
+      // manual command plus a 20-minute background tick. So after your own PR
+      // merges, your lockfile still says the old version while your working
+      // copy already contains the merged content, and the guard accused you of
+      // reverting your own work.
+      //
+      // Content comparison cannot rescue this: a second edit legitimately
+      // differs from upstream while still CONTAINING it, and bytes cannot tell
+      // "builds on" from "overwrites". `pendingPr` can, because push is the
+      // only thing that sets it.
+      //
+      // Uses its OWN artifact rather than a shared TEST_ARTIFACTS entry: the
+      // id-collision test asserts that NO `deliveryos/handbook-doc/` branch
+      // exists anywhere in the fixture remote, so any test that pushes a shared
+      // artifact breaks it.
+      const artifactId = 'self-merge-artifact';
+      const artifactDir = path.join(fixtureRemoteDir, 'artifacts', artifactId);
+      fs.mkdirSync(path.join(artifactDir, 'payload'), { recursive: true });
+      fs.writeFileSync(path.join(artifactDir, 'payload', 'README.md'), '# self-merge' + NL, 'utf-8');
+      fs.writeFileSync(
+        path.join(artifactDir, 'manifest.yaml'),
+        [
+          'id: ' + artifactId,
+          'kind: doc',
+          'description: Pushed twice by one person, with a merge in between',
+          'owner: team-x',
+          'version: 1.0.0',
+          'source_repo: https://example.invalid/repo',
+          'install_target: self-merge',
+          'review_required: false',
+          '',
+        ].join(NL),
+        'utf-8',
+      );
+      const seedGit = simpleGit(fixtureRemoteDir);
+      await seedGit.add(['artifacts/' + artifactId]);
+      await seedGit.commit('seed ' + artifactId);
+
+      const remoteName = 'test-remote-self-merge';
+      await registerAndClone(remoteName, fixtureRemoteDir);
+      const defaultBranch = (await seedGit.status()).current;
+
+      const cwd = newScratchCwd('self-merge');
+      await pullArtifact(artifactId, remoteName, cwd);
+      const readme = path.join(cwd, 'self-merge', 'README.md');
+
+      // First push, then merge it -- exactly what one person shipping twice does.
+      fs.writeFileSync(readme, '# self-merge' + NL + NL + 'my first change.' + NL, 'utf-8');
+      const first = await pushArtifact(artifactId, {}, cwd, makeFakeOctokit());
+      await seedGit.checkout(defaultBranch);
+      await seedGit.merge([first.branch]);
+
+      // Still on the pre-push version -- the condition that used to trigger it.
+      expect(readLockfile(cwd).entries.find((e) => e.id === artifactId)?.version).toBe('1.0.0');
+      expect(readLockfile(cwd).entries.find((e) => e.id === artifactId)?.pendingPr).toBeDefined();
+
+      fs.writeFileSync(
+        readme,
+        '# self-merge' + NL + NL + 'my first change.' + NL + 'and my second.' + NL,
+        'utf-8',
+      );
+
+      const second = await pushArtifact(artifactId, {}, cwd, makeFakeOctokit());
+      expect(second.number).toBeGreaterThan(0);
+      expect(await branchExistsInFixture(fixtureRemoteDir, second.branch)).toBe(true);
+    },
+    120_000,
+  );
+
+  it(
+    'refuses a push authored against a version someone else has already superseded, instead of silently reverting their merged change',
+    async () => {
+      // The multi-user failure this whole guard exists for, and it has never
+      // been possible to hit with one person: B's files are "the version B
+      // pulled, plus B's edits", and the staging loop copies them WHOLESALE
+      // over current upstream. The commit is made off the current tip, so A's
+      // merged change is reverted as an ordinary forward diff -- git has no
+      // reason to flag it and the PR body just says "modified: README.md".
+      const remoteName = 'test-remote-stale-push';
+      await registerAndClone(remoteName, fixtureRemoteDir);
+      const defaultBranch = (await simpleGit(fixtureRemoteDir).status()).current;
+
+      const artifact = TEST_ARTIFACTS.find((a) => a.id === 'welcome-template')!;
+
+      // B pulls FIRST, at v1.0.0. This ordering is the whole test: B's
+      // lockfile has to record the pre-merge version.
+      const cwdB = newScratchCwd('stale-b');
+      await pullArtifact(artifact.id, remoteName, cwdB);
+      expect(readLockfile(cwdB).entries.find((e) => e.id === artifact.id)?.version).toBe('1.0.0');
+
+      // A pulls, edits the same file, pushes, and A's change is merged.
+      const cwdA = newScratchCwd('stale-a');
+      await pullArtifact(artifact.id, remoteName, cwdA);
+      fs.writeFileSync(
+        path.join(cwdA, artifact.installTarget, 'README.md'),
+        '# welcome-template' + NL + NL + "A's merged change." + NL,
+        'utf-8',
+      );
+      const resultA = await pushArtifact(artifact.id, {}, cwdA, makeFakeOctokit());
+      const remoteGit = simpleGit(fixtureRemoteDir);
+      await remoteGit.checkout(defaultBranch);
+      await remoteGit.merge([resultA.branch]);
+
+      // B now edits the SAME file, still on v1.0.0, and pushes.
+      fs.writeFileSync(
+        path.join(cwdB, artifact.installTarget, 'README.md'),
+        '# welcome-template' + NL + NL + "B's edit, made before A merged." + NL,
+        'utf-8',
+      );
+
+      await expect(pushArtifact(artifact.id, {}, cwdB, makeFakeOctokit())).rejects.toThrow(
+        StalePushError,
+      );
+
+      // The refusal names the overlap -- that is what tells someone they are
+      // about to destroy work rather than just that a number moved.
+      await expect(pushArtifact(artifact.id, {}, cwdB, makeFakeOctokit())).rejects.toThrow(
+        /README\.md/,
+      );
+
+      // And A's merged content is still what the remote holds.
+      const upstreamReadme = fs.readFileSync(
+        path.join(fixtureRemoteDir, 'artifacts', artifact.id, 'payload', 'README.md'),
+        'utf-8',
+      );
+      expect(upstreamReadme).toContain("A's merged change");
+      expect(upstreamReadme).not.toContain("B's edit");
+    },
+    120_000,
+  );
+
+  it(
+    '--force pushes over a stale version anyway, but says so in the pull request body',
+    async () => {
+      // The escape hatch has to exist -- two people editing one artifact must
+      // not deadlock -- but a forced stale push can still revert a merged
+      // change, so the PR reviewer is the last safeguard and has to be told.
+      const remoteName = 'test-remote-stale-push-forced';
+      await registerAndClone(remoteName, fixtureRemoteDir);
+      const defaultBranch = (await simpleGit(fixtureRemoteDir).status()).current;
+
+      const artifact = TEST_ARTIFACTS.find((a) => a.id === 'lint-config')!;
+
+      const cwdB = newScratchCwd('forced-b');
+      await pullArtifact(artifact.id, remoteName, cwdB);
+
+      const cwdA = newScratchCwd('forced-a');
+      await pullArtifact(artifact.id, remoteName, cwdA);
+      fs.writeFileSync(
+        path.join(cwdA, artifact.installTarget, 'README.md'),
+        '# lint-config' + NL + NL + "A's change." + NL,
+        'utf-8',
+      );
+      const resultA = await pushArtifact(artifact.id, {}, cwdA, makeFakeOctokit());
+      const remoteGit = simpleGit(fixtureRemoteDir);
+      await remoteGit.checkout(defaultBranch);
+      await remoteGit.merge([resultA.branch]);
+
+      fs.writeFileSync(
+        path.join(cwdB, artifact.installTarget, 'README.md'),
+        '# lint-config' + NL + NL + "B's forced edit." + NL,
+        'utf-8',
+      );
+
+      const octokit = makeFakeOctokit();
+      const resultB = await pushArtifact(artifact.id, { force: true }, cwdB, octokit);
+
+      expect(resultB.number).toBeGreaterThan(0);
+      const prBody = octokit.rest.pulls.create.mock.calls.at(-1)![0].body as string;
+      expect(prBody).toContain('Forced push over a stale version');
+      expect(prBody).toContain('README.md');
+      // Names both versions, so a reviewer knows what to diff against.
+      expect(prBody).toMatch(/v1\.0\.0/);
+    },
+    120_000,
+  );
+
+  it(
+    'refuses to push when the recorded install location no longer exists, instead of proposing to delete the payload upstream',
+    async () => {
+      // `lockEntry.installTarget` is an ABSOLUTE path, and `.deliveryos/` is
+      // not gitignored -- so a lockfile written on one machine really does turn
+      // up in another clone, or survives the project folder being renamed.
+      //
+      // listFilesRecursive returns [] for a directory that does not exist
+      // (diff.ts), so diffing a stale target reports EVERY pristine file as
+      // `deleted` -- a changeset that sails past the `length === 0` guard and
+      // makes the staging loop rmSync the cache and open a PR removing the
+      // artifact's whole payload upstream. Exactly the incident the cache-reset
+      // guard elsewhere in this file exists to prevent, re-armed by a different
+      // trigger.
+      const remoteName = 'test-remote-stale-target';
+      await registerAndClone(remoteName, fixtureRemoteDir);
+
+      const artifact = TEST_ARTIFACTS.find((a) => a.id === 'welcome-template')!;
+      const cwd = newScratchCwd('stale-target');
+      await pullArtifact(artifact.id, remoteName, cwd);
+
+      // Simulate the clone/rename: the recorded absolute path is no longer
+      // where the files are.
+      const installed = path.join(cwd, artifact.installTarget);
+      fs.renameSync(installed, path.join(cwd, 'moved-elsewhere'));
+
+      await expect(pushArtifact(artifact.id, {}, cwd, makeFakeOctokit())).rejects.toThrow(
+        /not at|nothing there to push/i,
+      );
+
+      // The cache's payload is untouched -- nothing was staged for deletion.
+      const cachedPayload = path.join(cachePath(remoteName), 'artifacts', artifact.id, 'payload');
+      expect(fs.existsSync(path.join(cachedPayload, 'README.md'))).toBe(true);
+    },
+    120_000,
+  );
+
+  it(
+    'a push whose post-push cache reset fails reports it on PushResult instead of swallowing it',
+    async () => {
+      // The reset above guards a real incident (a pull straight after a push
+      // installed unreviewed PR content). It was wrapped in a bare `catch {}`,
+      // so when it failed the cache stayed parked on the unmerged push branch
+      // with nothing anywhere saying so. The stated mitigation -- "the next
+      // fetchAndReset would recover the cache anyway" -- is not a guarantee:
+      // pullArtifact never fetches.
+      const remoteName = 'test-remote-cache-reset-fails';
+      await registerAndClone(remoteName, fixtureRemoteDir);
+
+      const artifact = TEST_ARTIFACTS.find((a) => a.id === 'welcome-template')!;
+      const cwd = newScratchCwd('cache-reset-fails');
+      await pullArtifact(artifact.id, remoteName, cwd);
+
+      const editedPath = path.join(cwd, artifact.installTarget, 'README.md');
+      fs.writeFileSync(editedPath, '# welcome-template' + NL + NL + 'an edit.' + NL, 'utf-8');
+
+      // Break the cache's origin at the last possible moment: the initial
+      // fetchAndReset, the branch, the commit and the push have all already
+      // happened by the time pulls.create runs, so only the FINAL reset in the
+      // `finally` fails. That is exactly the window this warning is about.
+      const octokit = makeFakeOctokit();
+      octokit.rest.pulls.create.mockImplementation(async () => {
+        await simpleGit(cachePath(remoteName)).remote([
+          'set-url',
+          'origin',
+          path.join(scratchRoot, 'definitely-not-a-repo'),
+        ]);
+        return {
+          data: { html_url: 'https://github.com/test-owner/test-repo/pull/1', number: 1 },
+        };
+      });
+
+      const result = await pushArtifact(artifact.id, {}, cwd, octokit);
+
+      // The push itself still succeeded -- the PR really is open, and saying
+      // otherwise would be its own lie.
+      expect(result.number).toBe(1);
+      expect(await branchExistsInFixture(fixtureRemoteDir, result.branch)).toBe(true);
+
+      // ...but the caller is told the cache is now untrustworthy.
+      expect(result.cacheResetWarning).toBeDefined();
+      expect(result.cacheResetWarning).toContain(remoteName);
+      expect(result.cacheResetWarning).toContain('unmerged');
     },
     120_000,
   );

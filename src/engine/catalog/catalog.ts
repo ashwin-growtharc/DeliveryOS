@@ -1,10 +1,17 @@
+import * as fs from 'fs';
 import { listRemotes } from '../remote/remoteRegistry';
 import { cachePath, refreshRemoteCache } from '../remote/remoteCache';
 import { discoverManifests, SkippedManifest } from '../manifest/parser';
 import { Manifest } from '../manifest/schema';
 import { readLockfile } from '../lockfile/lockfile';
 import { computeChangedFiles } from '../push/diff';
-import { pristinePath, resolveContainedPath, isRootInstall, readPayloadFootprint } from '../paths';
+import {
+  pristinePath,
+  resolveContainedPath,
+  isRootInstall,
+  readPayloadFootprint,
+  adaptSrcDirPath,
+} from '../paths';
 
 export interface CatalogEntry {
   manifest: Manifest;
@@ -26,6 +33,23 @@ export interface CatalogListEntry {
   pendingPr?: { number: number; url: string };
 }
 
+export type SkippedCatalogManifest = SkippedManifest & { remoteName: string };
+
+/** What `catalog.list`/`catalog.refresh` hand back over the JSON-RPC boundary.
+ *
+ * An OBJECT, not the bare array this used to be. A manifest that could not be
+ * loaded has to travel WITH the catalog, in the same response, because the
+ * Tauri host spawns one sidecar PROCESS PER RPC (src-tauri/src/lib.rs) -- a
+ * follow-up `catalog.skipped` call would be a brand-new process whose
+ * module-level record is empty, and would always report nothing.
+ *
+ * The CLI's `list` has always reported these (src/cli/commands/list.ts); the
+ * app silently dropped them, so a broken artifact simply looked absent. */
+export interface CatalogListResult {
+  entries: CatalogListEntry[];
+  skipped: SkippedCatalogManifest[];
+}
+
 /**
  * Aggregates manifests across every registered remote's local cache.
  *
@@ -33,9 +57,24 @@ export interface CatalogListEntry {
  * NOT an error here -- catalog aggregation is purely additive. Resolving
  * (and rejecting) that ambiguity is the responsibility of `pull`.
  */
-export function buildCatalog(): CatalogEntry[] {
+/** Builds the catalog AND returns the manifests it had to skip, together.
+ *
+ * The skipped list used to live in a module-level array that callers drained
+ * afterwards via `takeSkippedManifests()`. That was safe only by accident: the
+ * Tauri host spawns one sidecar PROCESS PER RPC (src-tauri/src/lib.rs), so no
+ * two builds ever overlapped. A long-lived process -- an MCP server, say --
+ * removes that mask, and `refreshCatalog` awaits before building, so two
+ * overlapping calls would have one drain the other's list and report a broken
+ * catalog as a clean one. Returning it removes the hazard rather than
+ * documenting it. */
+export function buildCatalogWithSkipped(): {
+  entries: CatalogEntry[];
+  skipped: SkippedCatalogManifest[];
+} {
   const remotes = listRemotes();
   const entries: CatalogEntry[] = [];
+  const lastSkippedManifests: SkippedCatalogManifest[] = [];
+
 
   for (const remote of remotes) {
     const { manifests, skipped } = discoverManifests(cachePath(remote.name));
@@ -52,20 +91,13 @@ export function buildCatalog(): CatalogEntry[] {
     }
   }
 
-  return entries;
+  return { entries, skipped: lastSkippedManifests };
 }
 
-/** Manifests skipped by the most recent `buildCatalog()` call, if any.
- *
- * Deliberately a module-level record rather than a return value: `buildCatalog`
- * has many callers and returning a tuple from all of them would be a wide,
- * mechanical change for a signal that is purely advisory. Callers that want to
- * warn read this immediately after calling. */
-const lastSkippedManifests: Array<SkippedManifest & { remoteName: string }> = [];
-
-/** Returns (and clears) the manifests skipped by the last `buildCatalog()`. */
-export function takeSkippedManifests(): Array<SkippedManifest & { remoteName: string }> {
-  return lastSkippedManifests.splice(0, lastSkippedManifests.length);
+/** The catalog alone, for the many callers that only need to resolve an id and
+ * have nothing to do with a manifest that failed to load. */
+export function buildCatalog(): CatalogEntry[] {
+  return buildCatalogWithSkipped().entries;
 }
 
 /**
@@ -87,7 +119,7 @@ export function takeSkippedManifests(): Array<SkippedManifest & { remoteName: st
  */
 export async function refreshCatalog(
   onProgress?: (stage: string, message: string) => void,
-): Promise<CatalogEntry[]> {
+): Promise<{ entries: CatalogEntry[]; skipped: SkippedCatalogManifest[] }> {
   for (const remote of listRemotes()) {
     onProgress?.('fetch', `Fetching latest from ${remote.name}...`);
     try {
@@ -98,7 +130,7 @@ export async function refreshCatalog(
     }
   }
 
-  return buildCatalog();
+  return buildCatalogWithSkipped();
 }
 
 /**
@@ -144,8 +176,29 @@ export function annotateCatalog(
     // what made such an artifact read `not_pulled` forever no matter how many
     // times it was successfully pulled. Nothing on this path deletes anything;
     // the diff below is narrowed instead. See isRootInstall.
-    const installTarget = resolveContainedPath(cwd, manifest.install_target);
     const lockEntry = lockfile.entries.find((e) => e.id === manifest.id);
+    // The lockfile's recorded target wins whenever there is one, because it is
+    // where the payload ACTUALLY landed. Re-deriving it from the manifest here
+    // meant that in a project without a `src/` directory -- where pullArtifact's
+    // adaptSrcDirPath shortened `src/lib/x` to `lib/x` -- this diffed a
+    // directory that does not exist. listFilesRecursive returns [] for a
+    // missing root, so every pristine file read as `deleted` and the artifact
+    // was permanently `edited_locally` no matter how cleanly it was pulled.
+    // Re-validated against THIS cwd, never trusted blindly: the recorded value
+    // is an ABSOLUTE path. `.deliveryos/` now carries its own .gitignore
+    // (ensureProjectDeliveryOsDir), so a foreign lockfile should be rarer than
+    // it was -- but a project committed before that landed, or one whose folder
+    // was simply renamed, still lands here. A stale one that still happened to be contained would
+    // make computeChangedFiles below diff a directory that does not exist and
+    // report the artifact `edited_locally` forever -- which is what enables the
+    // Push button, and push is where that becomes destructive.
+    const recorded = lockEntry?.installTarget;
+    const recordedIsUsable = recorded !== undefined
+      && resolveContainedPath(cwd, recorded) === recorded
+      && fs.existsSync(recorded);
+    const installTarget = recordedIsUsable
+      ? recorded
+      : resolveContainedPath(cwd, adaptSrcDirPath(cwd, manifest.install_target) ?? manifest.install_target);
 
     let localStatus: LocalStatus;
     if (!installTarget) {
@@ -153,26 +206,32 @@ export function annotateCatalog(
     } else if (!lockEntry) {
       localStatus = 'not_pulled';
     } else {
-      const pristine = pristinePath(cwd, manifest.id);
-      // At the project root `installTarget` is the user's whole project, so the
-      // diff has to be narrowed to the entries this artifact actually owns --
-      // otherwise every unrelated file reads as a local edit and the artifact
-      // is permanently `edited_locally`.
-      const rootInstall = isRootInstall(cwd, installTarget);
-      const topLevelScope = rootInstall ? readPayloadFootprint(pristine) : undefined;
-      if (rootInstall && !topLevelScope) {
-        // Snapshot gone (a stale pull), so the footprint is unknowable. An
-        // unscoped walk of the project root is exactly what must not happen
-        // here -- degrade to `pulled`, the same way the catch below already
-        // does for a missing snapshot on the normal path.
-        localStatus = 'pulled';
-      } else {
-        try {
+      // ONE try around all three of pristinePath, readPayloadFootprint and
+      // computeChangedFiles. `pristinePath` asserts a usable id (paths.ts) and
+      // therefore throws, and this function annotates the WHOLE catalog -- so a
+      // single unusable entry must degrade to `pulled` for itself alone rather
+      // than take the listing for every other artifact down with it. This repo
+      // has blanked a catalog that way twice; see parser.ts's own comment.
+      try {
+        const pristine = pristinePath(cwd, manifest.id);
+        // At the project root `installTarget` is the user's whole project, so the
+        // diff has to be narrowed to the entries this artifact actually owns --
+        // otherwise every unrelated file reads as a local edit and the artifact
+        // is permanently `edited_locally`.
+        const rootInstall = isRootInstall(cwd, installTarget);
+        const topLevelScope = rootInstall ? readPayloadFootprint(pristine) : undefined;
+        if (rootInstall && !topLevelScope) {
+          // Snapshot gone (a stale pull), so the footprint is unknowable. An
+          // unscoped walk of the project root is exactly what must not happen
+          // here -- degrade to `pulled`, the same way the catch already does
+          // for a missing snapshot on the normal path.
+          localStatus = 'pulled';
+        } else {
           const changedFiles = computeChangedFiles(installTarget, pristine, { topLevelScope });
           localStatus = changedFiles.length === 0 ? 'pulled' : 'edited_locally';
-        } catch {
-          localStatus = 'pulled';
         }
+      } catch {
+        localStatus = 'pulled';
       }
     }
 

@@ -4,8 +4,9 @@ import { runClaudeSubprocess, DISALLOWED_TOOLS } from '../claude/runClaudeSubpro
 import { resolveContainedTargetFile } from '../pull/wiring';
 import { compileLocalPreview } from '../preview/resolveArtifactPreview';
 import { readPayloadSource } from './suggestMetadata';
-import { designFixLogPath } from '../paths';
+import { designFixLogPath, ensureProjectDeliveryOsDir } from '../paths';
 import { DesignFixError } from '../errors';
+import { redactTextToSummary, MAX_LOG_FIELD_CHARS } from '../audit/redact';
 
 export interface AntiPatternFixResult {
   file: string | null;
@@ -187,10 +188,35 @@ interface DesignFixLogEntry {
   rolledBack: boolean;
 }
 
+/**
+ * Redaction happens HERE, at the single write, exactly as
+ * `appendWiringMergeLog`/`appendBuildFixLog` do at theirs. This log's
+ * `before`/`after` are the verbatim contents of a file inside a scan
+ * candidate's own payload -- a directory that is very often a copy of a
+ * real, working project the user pointed `scan` at, not a sanitized
+ * fixture. `.deliveryos/design-fix-log.jsonl` is plaintext and nothing
+ * gitignores it.
+ *
+ * `?? ''` is load-bearing: `redactTextToSummary` returns `null` for empty
+ * input, and both fields must stay typed `string` for the Activity tab.
+ *
+ * This entry shape has no `buildError`/`rebuildOutput` -- verification here
+ * is an esbuild compile, whose error is a message about the payload's own
+ * syntax, not a spawned build's stderr. `verificationError` is left alone
+ * on purpose so the panel keeps showing esbuild's exact wording.
+ *
+ * None of this can corrupt a rollback: `applyAntiPatternFix` restores from
+ * its own in-memory `before` local, read before this is ever called.
+ */
 function appendDesignFixLog(cwd: string, entry: DesignFixLogEntry): void {
   const logPath = designFixLogPath(cwd);
-  fs.mkdirSync(path.dirname(logPath), { recursive: true });
-  fs.appendFileSync(logPath, `${JSON.stringify(entry)}\n`, 'utf-8');
+  const redacted: DesignFixLogEntry = {
+    ...entry,
+    before: redactTextToSummary(entry.before, MAX_LOG_FIELD_CHARS) ?? '',
+    after: redactTextToSummary(entry.after, MAX_LOG_FIELD_CHARS) ?? '',
+  };
+  ensureProjectDeliveryOsDir(cwd);
+  fs.appendFileSync(logPath, `${JSON.stringify(redacted)}\n`, 'utf-8');
 }
 
 /**

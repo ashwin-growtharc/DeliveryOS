@@ -8,9 +8,16 @@ import { resolveArtifact, ProgressCallback } from '../pull/pull';
 import { buildCatalog } from '../catalog/catalog';
 import { ManifestSchema, Manifest, InstallParam } from '../manifest/schema';
 import { bumpVersion, VersionBumpKind } from '../manifest/version';
+import { compareVersions } from '../sync/sync';
 import { renderPreviewImage } from '../preview/renderPreviewImage';
 import { findPreviewEntryFile } from '../preview/resolveArtifactPreview';
-import { pristinePath, resolveContainedPath, isRootInstall, readPayloadFootprint } from '../paths';
+import {
+  pristinePath,
+  resolveContainedPath,
+  isRootInstall,
+  readPayloadFootprint,
+  adaptSrcDirPath,
+} from '../paths';
 import { computeChangedFiles, listPayloadFiles } from './diff';
 import { buildBranchName } from './branchName';
 import {
@@ -37,6 +44,7 @@ import { getGithubToken } from '../github/githubAuth';
 import {
   PushModeConflictError,
   NoLocalChangesError,
+  StalePushError,
   IdCollisionError,
   RemoteRegistryError,
   ManifestValidationError,
@@ -87,12 +95,36 @@ export interface PushOptions {
   // for -- this field only lets someone choose a bigger bump than the
   // default, never opt out of bumping entirely.
   bump?: VersionBumpKind;
+  /** Push even though the artifact was edited against a version that is no
+   * longer the remote's current one. Off by default: see `StalePushError` for
+   * what it silently used to do. When set, the PR body says it was forced and
+   * names the overlapping files, so the escape hatch leaves a trace. */
+  force?: boolean;
+
+  /** Names the surface that opened this PR, when it was not a person at a
+   * terminal -- stamped into the PR body by `buildInitiatorSection`.
+   *
+   * Absent for the CLI, the sidecar and the app, all of which render exactly
+   * as before. Set by the MCP contribute tool, because a reviewer deciding how
+   * carefully to read a diff is entitled to know a model assembled it, and
+   * `**Pushed by:**` cannot tell them -- that is a git config identity, which
+   * says who the commit is attributed to rather than what drove the push. */
+  initiatedBy?: string;
 }
 
 export interface PushResult {
   url: string;
   number: number;
   branch: string;
+  /** Set only when the PR opened successfully but the local cache clone could
+   * NOT be reset back to the remote's tip afterwards. Until something else
+   * fetches, every read that doesn't fetch first -- `list`, `pull`, `config`,
+   * `wiring`, `catalog.list`, every preview compile -- sees this push's
+   * UNMERGED branch as if it were the remote's real state. That is the
+   * incident the reset exists to prevent: a `pull` immediately after a `push`
+   * installed the user's own unreviewed PR content. Absent on every ordinary
+   * push. */
+  cacheResetWarning?: string;
 }
 
 /** Copies a single file from `srcRoot/relPath` into `destRoot/relPath`,
@@ -222,6 +254,7 @@ export async function pushArtifact(
   // `git reset --hard` and silently discarded the staged edit -- a lost
   // update, not a crash. See withRemoteCacheLock's own doc comment.
   return withRemoteCacheLock(remoteName, async () => {
+    let result: PushResult | undefined;
     try {
     const client = octokit ?? (await createOctokit(getGithubToken()));
 
@@ -240,6 +273,9 @@ export async function pushArtifact(
     let filesToCommit: string[];
     let prTitle: string;
     let defaultBranch: string;
+    // Set only when --force pushed over a stale version, so the PR body can
+    // say so. Undefined on every ordinary push.
+    let stalePushWarning: { editedAgainst: string; upstreamVersion: string; overlap: string[] } | undefined;
     let prBody: string;
 
     if (options.isNew) {
@@ -472,11 +508,46 @@ export async function pushArtifact(
       // shape, and refusing it here meant such an artifact could be pulled but
       // never contributed back. Nothing here deletes -- this path only diffs --
       // so the fix is to narrow the diff, not to refuse. See isRootInstall.
-      const installTarget = resolveContainedPath(cwd, manifest.install_target);
+      // The lockfile's recorded target wins whenever there is one, because it
+      // is where the payload ACTUALLY landed. Re-deriving it from the manifest
+      // here was destructive, not merely wrong: in a project without a `src/`
+      // directory -- where pullArtifact's adaptSrcDirPath shortened
+      // `src/lib/x` to `lib/x` -- this pointed at a directory that does not
+      // exist. listFilesRecursive returns [] for a missing root, so
+      // computeChangedFiles below reported EVERY pristine file as `deleted`,
+      // the only guard (`changedFiles.length === 0`) passed, and the staging
+      // loop then rmSync'd every payload file in the cache and opened a PR
+      // DELETING the artifact's whole payload upstream, on a shared remote.
+      // `lockEntry.installTarget` is an ABSOLUTE path, so it is only meaningful
+      // for the machine and the directory it was written on. `.deliveryos/` now
+      // carries its own .gitignore (ensureProjectDeliveryOsDir), so a lockfile
+      // should no longer travel to other clones -- but it is still re-validated
+      // against THIS cwd before use, exactly as removeArtifact re-validates the
+      // same field. A project that was committed before that landed, or whose
+      // .gitignore someone removed, still exists.
+      const recorded = lockEntry?.installTarget;
+      const recordedIsUsable = recorded !== undefined && resolveContainedPath(cwd, recorded) === recorded;
+      const installTarget = recordedIsUsable
+        ? recorded
+        : resolveContainedPath(cwd, adaptSrcDirPath(cwd, manifest.install_target) ?? manifest.install_target);
       if (!installTarget) {
         throw new ManifestValidationError(
           `Artifact "${id}"'s install_target ("${manifest.install_target}") resolves outside the project -- `
             + `refusing to push.`,
+        );
+      }
+      // The whole bug class this function keeps re-learning: `listFilesRecursive`
+      // returns [] for a directory that does not exist (diff.ts), so diffing a
+      // missing install target reports EVERY pristine file as `deleted` -- a
+      // changeset that sails past the `length === 0` guard below and makes the
+      // staging loop rmSync the cache and open a PR deleting the artifact's whole
+      // payload upstream. Refusing here is the one check that closes it for good,
+      // whatever produced the wrong path.
+      if (!fs.existsSync(installTarget)) {
+        throw new ManifestValidationError(
+          `Artifact "${id}"'s files are not at "${installTarget}" -- nothing there to push. If this project `
+            + `moved or was cloned from somewhere else, re-pull it once so its recorded location matches `
+            + `where the files actually are.`,
         );
       }
       const pristine = pristinePath(cwd, id);
@@ -500,12 +571,6 @@ export async function pushArtifact(
           `No local changes detected for "${id}" -- its files are byte-for-byte identical to the pristine snapshot taken at pull time. Nothing to push.`,
         );
       }
-
-      // Only fetched now, after the no-local-changes check -- see this
-      // function's own comment above `client`'s construction for why.
-      const repoInfo = await fetchRepoInfo(client, ghOwner, ghRepo);
-      defaultBranch = repoInfo.defaultBranch;
-      const isPrivateRepo = repoInfo.isPrivate;
 
       // If the manifest this was pulled from set `payload_path`, the real
       // file/directory lives there in the remote's repo, not under
@@ -533,6 +598,102 @@ export async function pushArtifact(
         payloadDestDir = path.join(cacheDir, 'artifacts', id, 'payload');
       }
       const payloadDestGitRoot = manifest.payload_path ?? `artifacts/${id}/payload`;
+
+      // Did someone else merge a change to this artifact since you pulled it?
+      //
+      // `manifest` here is the remote's CURRENT default-branch state (the
+      // fetchAndReset above refreshed the cache), and `lockEntry.version` is
+      // what this project actually pulled and edited against. Nothing used to
+      // compare them, and the consequence was silent: the staging loop below
+      // does a whole-file copy of YOUR files -- which are the version you
+      // pulled, plus your edits -- over whatever is upstream now. The commit is
+      // made off the current tip, so for any file you both touched, your push
+      // REVERTS theirs as an ordinary forward diff. Git flags nothing, and the
+      // PR body just says "modified: foo.ts".
+      //
+      // The overlap is the part worth naming: files changed both upstream and
+      // locally are the ones that actually lose work. Computed against the same
+      // pristine snapshot both comparisons already use.
+      // A pending PR of your own is the one case this guard must NOT fire on.
+      //
+      // `push` records `pendingPr` and never advances `lockEntry.version` --
+      // only resolvePendingPushes does, and that is a manual command plus a
+      // 20-minute background tick. So the most ordinary flow there is (push,
+      // merge, push again) leaves your lockfile on the old version while your
+      // working copy already contains the merged change, and the guard accused
+      // you of reverting your own work.
+      //
+      // Content comparison cannot rescue this: your second edit legitimately
+      // differs from upstream while still CONTAINING it, and bytes cannot tell
+      // "builds on" from "overwrites" without a real three-way merge. But
+      // `pendingPr` is only ever set by push, so its presence means the change
+      // upstream is very likely yours. Skipping the refusal here trades a rare
+      // miss (someone else merged while your own PR was also open) for not
+      // blocking the single most common workflow -- and the miss is exactly
+      // what the PR review this opens is for.
+      const hasOwnPushInFlight = lockEntry?.pendingPr !== undefined;
+      if (lockEntry && !hasOwnPushInFlight && compareVersions(manifest.version, lockEntry.version) > 0) {
+        const upstreamChanged = computeChangedFiles(payloadDestDir, pristine, { topLevelScope });
+        // Overlap is CONTENT-aware, not just path-aware.
+        //
+        // A file that changed upstream and whose local copy is now byte-identical
+        // to upstream cannot be reverted by pushing it -- there is nothing to
+        // revert. The path-only version got this badly wrong in the single most
+        // common case there is: your OWN push merging. `push` records
+        // `pendingPr` but never advances `lockEntry.version` (only
+        // resolvePendingPushes does), so after your PR merges your lockfile
+        // still says the old version while your working copy already contains
+        // the merged content. Comparing paths alone then accused you of being
+        // about to revert your own merged change.
+        const localVsUpstream = new Set(
+          computeChangedFiles(installTarget, payloadDestDir, { topLevelScope }).map((c) => c.relPath),
+        );
+        const localPaths = new Set(changedFiles.map((c) => c.relPath));
+        const overlap = upstreamChanged
+          .map((c) => c.relPath)
+          .filter((p) => localPaths.has(p) && localVsUpstream.has(p));
+
+        if (!options.force) {
+          const overlapDetail = overlap.length > 0
+            ? `\n\n${overlap.length} file(s) you changed also changed upstream -- pushing would revert `
+              + `those changes:\n${overlap.slice(0, 10).map((p) => `  ${p}`).join('\n')}`
+              + (overlap.length > 10 ? `\n  ...and ${overlap.length - 10} more` : '')
+            : '\n\nNone of the files you changed would revert an upstream change, so a merge would '
+              + 'likely be clean -- but the version you edited against is no longer current.';
+          // Deliberately surface-neutral. This message reaches the desktop app
+          // too, where telling someone to "re-run with --force" names a flag
+          // they have no way to pass -- the app has no force affordance for
+          // push, and that is on purpose: a one-click force over a colleague's
+          // merged change is exactly the operation that should stay hard. The
+          // safe resolution the app CAN offer is the one described first.
+          throw new StalePushError(
+            `You edited "${id}" against v${lockEntry.version}, but remote "${remoteName}" is now at `
+              + `v${manifest.version}.`
+              + overlapDetail
+              + `\n\nTo resolve: commit your work somewhere safe, take the current version of the `
+              + `artifact (discarding your local copy), and re-apply your change on top of it. `
+              + `In the CLI that is \`deliveryos pull ${id} --force\`, then push again; in the app it `
+              + `is Detail's "discard local edit and re-sync".`
+              + `\n\nThe CLI can also push anyway with --force, which stamps the overlap into the `
+              + `pull request so a reviewer sees it.`,
+          );
+        }
+        // Forced: proceed, but make it visible to whoever reviews the PR.
+        // Unblocking someone is a fair reason for the flag; hiding what the
+        // push did is not.
+        stalePushWarning = {
+          editedAgainst: lockEntry.version,
+          upstreamVersion: manifest.version,
+          overlap,
+        };
+      }
+
+      // Only fetched now, after the no-local-changes check -- see this
+      // function's own comment above `client`'s construction for why.
+      const repoInfo = await fetchRepoInfo(client, ghOwner, ghRepo);
+      defaultBranch = repoInfo.defaultBranch;
+      const isPrivateRepo = repoInfo.isPrivate;
+
       onProgress?.('stage', `Staging ${changedFiles.length} changed file(s) for "${id}"...`);
       for (const change of changedFiles) {
         if (change.status === 'deleted') {
@@ -581,6 +742,10 @@ export async function pushArtifact(
         gitUserEmail: identity.email,
         changedFiles,
         payloadRoot: manifest.payload_path,
+        // Undefined on every ordinary push; set only when --force pushed over a
+        // version that had already moved upstream.
+        stalePush: stalePushWarning,
+        initiatedBy: options.initiatedBy,
         previewImageGitPath,
         previewImageUrl:
           previewImageGitPath && !isPrivateRepo
@@ -619,7 +784,11 @@ export async function pushArtifact(
       await upsertEntry(cwd, { ...lockEntry, pendingPr: { number: opened.number, url: opened.url } });
     }
 
-    return { url: opened.url, number: opened.number, branch: branchName };
+    // Captured rather than returned directly, so the `finally` below can
+    // still attach a warning to it: `finally` runs after the return value is
+    // evaluated, and this is the same object reference the caller receives.
+    result = { url: opened.url, number: opened.number, branch: branchName };
+    return result;
     } finally {
       // Leave the cache on the remote's real tip, never parked on the
       // branch this push just created.
@@ -632,13 +801,29 @@ export async function pushArtifact(
       // the remote's real state. A `pull` immediately after a `push`
       // installed the user's own unreviewed PR content.
       //
-      // Best-effort: a failure here must not mask the real outcome of the
-      // push (the PR is already open at this point), and the next
-      // fetchAndReset would recover the cache anyway.
+      // Best-effort in the sense that it must not mask the real outcome of
+      // the push (the PR is already open at this point) -- but NOT silent.
+      // Swallowing this left exactly the state described above with nothing
+      // anywhere saying so, and "the next fetchAndReset would recover it" is
+      // not a guarantee: pullArtifact never fetches. This is also the most
+      // likely reset to fail, since it runs straight after the push's own
+      // network I/O.
       try {
         await fetchAndReset(cachePath(remoteName));
-      } catch {
-        // Cache left as-is; the next refresh resets it.
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        const warning =
+          `The pull request was opened, but this machine's local cache of remote "${remoteName}" could not `
+          + `be reset back to its tip afterwards (${detail}). Until something fetches that remote again, a `
+          + `pull, list or preview from it may read THIS push's unmerged branch as if it were the remote's `
+          + `real state. Run "deliveryos list" (or the app's Refresh) against it before pulling.`;
+        // Reported through BOTH channels deliberately: onProgress is the only
+        // one available when the push itself threw, since no PushResult exists
+        // on that path at all.
+        onProgress?.('fetch', warning);
+        if (result) {
+          result.cacheResetWarning = warning;
+        }
       }
     }
   });

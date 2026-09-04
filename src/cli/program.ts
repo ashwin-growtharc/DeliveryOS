@@ -12,6 +12,7 @@ import { registerScanCommand } from './commands/scan';
 import { registerWiringCommand } from './commands/wiring';
 import { registerWireCommand } from './commands/wire';
 import { registerScaffoldBackendPluginCommand } from './commands/scaffoldBackendPlugin';
+import { registerMcpCommand } from './commands/mcp';
 
 export function buildProgram(): Command {
   const program = new Command();
@@ -41,6 +42,7 @@ export function buildProgram(): Command {
   registerWiringCommand(program);
   registerWireCommand(program);
   registerScaffoldBackendPluginCommand(program);
+  registerMcpCommand(program);
 
   return program;
 }

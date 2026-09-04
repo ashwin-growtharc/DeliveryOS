@@ -2,22 +2,27 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { execSync } from 'child_process';
 import { buildCatalog, CatalogEntry } from '../catalog/catalog';
-import { cachePath } from '../remote/remoteCache';
+import { cachePath, refreshRemoteCache } from '../remote/remoteCache';
 import { upsertEntry, readLockfile } from '../lockfile/lockfile';
-import { pristinePath, resolveContainedPath, adaptSrcDirPath, isRootInstall } from '../paths';
+import { pristinePath, resolveContainedPath, adaptSrcDirPath, isRootInstall, ensureProjectDeliveryOsDir, readPayloadFootprint } from '../paths';
+import { isSensitiveTargetPath } from './wiring';
+import { redactEmbeddedSecrets } from '../audit/redact';
 import {
   ArtifactResolutionError,
   ManifestValidationError,
   PostInstallError,
+  LocalEditsWouldBeLostError,
   SignatureBundleInvalidError,
 } from '../errors';
 import { Manifest } from '../manifest/schema';
 import {
   resolveInstallParamValues,
   applyInstallParams,
+  refusedInstallParamKeys,
   readExistingEnvValues,
   applyEnvExamplePlaceholders,
 } from './installParams';
+import { computeChangedFiles } from '../push/diff';
 import { verifyArtifactSignature } from '../provenance/verify';
 import { isExecError, isToolNotFoundError } from '../execHelpers';
 
@@ -39,6 +44,10 @@ export interface PullResult {
    * `.gitignore` -- see `checkEnvLocalGitignoreCoverage`. Absent for the
    * overwhelming majority of pulls (no install_params written at all). */
   gitignoreWarning?: string;
+  /** Set only when a declared install_param could not be written to
+   * `.env.local` at all (a key or value this file format cannot represent) --
+   * see `upsertEnvFile`. Absent for every ordinary artifact. */
+  installParamWarning?: string;
 }
 
 /**
@@ -116,10 +125,8 @@ export function resolveArtifact(
  * checklist), then upserts the cwd-scoped lockfile. The lockfile is only
  * updated once the copy and post_install both succeed.
  *
- * `postInstallTimeoutMs` defaults to `POST_INSTALL_TIMEOUT_MS` for every
- * real caller (none pass it) -- it exists purely so tests can exercise the
- * real timeout path with a real hung command in milliseconds instead of
- * actually waiting out the production constant.
+ * Refuses when the install target has local edits, unless `options.force` --
+ * see `PullOptions` for why forcing also fetches.
  */
 /**
  * Records the pristine (as-pulled) snapshot an artifact's later status checks,
@@ -146,6 +153,10 @@ export function writePristineSnapshot(
   payloadSrc: string,
   pristineTarget: string,
 ): void {
+  // The snapshot lives under `.deliveryos/`, and on a project's very first pull
+  // this runs BEFORE the lockfile write -- so without this the directory could
+  // be created by a plain recursive mkdir and miss its own .gitignore.
+  ensureProjectDeliveryOsDir(cwd);
   if (fs.existsSync(pristineTarget)) {
     fs.rmSync(pristineTarget, { recursive: true, force: true });
   }
@@ -162,16 +173,54 @@ export function writePristineSnapshot(
   fs.cpSync(installTarget, pristineTarget, { recursive: true });
 }
 
+export interface PullOptions {
+  /** Discard local edits to this artifact's install target instead of refusing.
+   *
+   * Off by default. `pullArtifact` copies the payload over `installTarget`
+   * wholesale, so on an artifact someone has edited that is silent data loss --
+   * and "re-pull to get the latest" is a common instinct once artifacts are
+   * shared between people. The desktop app has always confirm-gated this; the
+   * CLI had no guard at all.
+   *
+   * Setting this ALSO fetches the remote first. That is not a convenience:
+   * `pullArtifact` otherwise never fetches, so discarding real edits in favour
+   * of an arbitrarily stale cache would destroy work for nothing. */
+  force?: boolean;
+  /** Test-only seam: lets a test exercise the real timeout path with a real
+   * hung command in milliseconds instead of waiting out the production
+   * constant. No production caller passes it. */
+  postInstallTimeoutMs?: number;
+}
+
 export async function pullArtifact(
   id: string,
   remoteName: string | undefined,
   cwd: string,
   onProgress?: ProgressCallback,
   providedValues: Record<string, string> = {},
-  postInstallTimeoutMs: number = POST_INSTALL_TIMEOUT_MS,
+  options: PullOptions = {},
 ): Promise<PullResult> {
+  const { force = false, postInstallTimeoutMs = POST_INSTALL_TIMEOUT_MS } = options;
   onProgress?.('resolve', `Resolving artifact "${id}"...`);
-  const entry = resolveArtifact(id, remoteName);
+  let entry = resolveArtifact(id, remoteName);
+
+  // `--force` means "discard my edits and take the current upstream version",
+  // so it has to actually GO AND GET the current upstream version. Every other
+  // path through this function reads whatever is already sitting in the local
+  // cache -- pullArtifact is the one major operation that never fetches (push,
+  // applyUpdate, checkForUpdates, refreshCatalog and scan all do). Without
+  // this, forcing would trade someone's real edits for arbitrarily stale
+  // content, which is strictly worse than refusing.
+  //
+  // Resolved first, then re-resolved: the remote name may only be known after
+  // resolution (`remoteName` is optional and often omitted), and re-resolving
+  // is what makes `manifest` and the payload reflect what was just fetched.
+  if (force) {
+    onProgress?.('fetch', `Fetching latest from ${entry.remoteName} before discarding local changes...`);
+    await refreshRemoteCache(entry.remoteName);
+    entry = resolveArtifact(id, remoteName);
+  }
+
   const { manifest, remoteName: resolvedRemoteName } = entry;
 
   const remoteDir = cachePath(resolvedRemoteName);
@@ -229,6 +278,29 @@ export async function pullArtifact(
     );
   }
 
+  // A location whose contents run on their own. The denylist has existed since
+  // a security review, but was only ever applied to `wiring_actions.targetFile`
+  // (wiring.ts) -- an install_target of `.github/workflows` or `.git/hooks`
+  // walked straight past it into the fs.cpSync below, because the schema only
+  // checks install_target for `..` escapes and those paths ARE inside the
+  // project, so containment passed too. No post_install required.
+  //
+  // Refused HERE, at pull time, and deliberately NOT in the manifest schema: a
+  // schema rejection makes discoverManifests skip the manifest entirely
+  // (parser.ts), which vanishes the artifact from the catalog -- CHANGELOG
+  // records exactly that taking all 234 artifacts down. A refused pull is
+  // visible and specific; a vanished artifact is neither.
+  //
+  // Checked against the ADAPTED target, not the raw one: the raw value could
+  // be `src/.github/...` (harmless) and the adapted one `.github/...` (not).
+  if (isSensitiveTargetPath(path.resolve(cwd), installTarget)) {
+    throw new ManifestValidationError(
+      `Artifact "${manifest.id}"'s install_target ("${effectiveInstallTarget}") is inside a location whose `
+        + `contents can run on their own -- a git hook, CI workflow, editor auto-run task, or DeliveryOS's `
+        + `own project state. Refusing to install; nothing was written. Review this manifest by hand.`,
+    );
+  }
+
   // Verifies BEFORE any files are written -- a no-op for the overwhelming
   // majority of artifacts, which declare no `signature` at all. The
   // signature bundle (a real Sigstore bundle, if present) always lives
@@ -266,6 +338,59 @@ export async function pullArtifact(
   }
   await verifyArtifactSignature(manifest, payloadSrc, signatureBundle);
 
+  // Refuse to copy over someone's local edits.
+  //
+  // `fs.cpSync` below overwrites the install target wholesale, so on an edited
+  // artifact this was silent data loss -- and it is the CLI that was exposed:
+  // the desktop app has always confirm-gated this action, so it passes
+  // `force: true` after the person has already said yes.
+  //
+  // Same comparison `applyAvailableUpdates` already makes for the same reason,
+  // and the same posture: report what would be lost, never guess.
+  if (!force) {
+    const existingEntry = readLockfile(cwd).entries.find((e) => e.id === manifest.id);
+    // Compared against the target THIS pull is about to overwrite, not the raw
+    // absolute path off the lockfile.
+    //
+    // Every other consumer of `lockEntry.installTarget` re-validates it against
+    // cwd, and for good reason: it is an absolute path, so a renamed project
+    // folder or a lockfile from another machine makes it meaningless. Trusting
+    // it raw here would fail in the worse direction -- `existsSync` on a stale
+    // path is false, the whole guard would be skipped, and the pull would
+    // overwrite local edits exactly as it did before this fix. `installTarget`
+    // is already resolved above and is precisely what `fs.cpSync` will write to.
+    if (existingEntry && fs.existsSync(installTarget)) {
+      const pristineForCheck = pristinePath(cwd, manifest.id);
+      let localChanges: ReturnType<typeof computeChangedFiles> = [];
+      try {
+        const rootInstall = isRootInstall(cwd, installTarget);
+        const topLevelScope = rootInstall ? readPayloadFootprint(pristineForCheck) : undefined;
+        // A root install with no snapshot has no knowable footprint, so there
+        // is nothing to compare -- fall through rather than walk the whole
+        // project, exactly as annotateCatalog does.
+        if (!rootInstall || topLevelScope) {
+          localChanges = computeChangedFiles(installTarget, pristineForCheck, { topLevelScope });
+        }
+      } catch {
+        // No pristine snapshot (a pull from before snapshots existed, or a
+        // hand-deleted one) means the comparison is unknowable, not clean.
+        // Falling through is deliberate: refusing every such pull would make
+        // an old artifact permanently unpullable.
+        localChanges = [];
+      }
+      if (localChanges.length > 0) {
+        const names = localChanges.slice(0, 5).map((c) => c.relPath).join(', ');
+        const more = localChanges.length > 5 ? `, and ${localChanges.length - 5} more` : '';
+        throw new LocalEditsWouldBeLostError(
+          `"${manifest.id}" has ${localChanges.length} local change${localChanges.length === 1 ? '' : 's'} `
+            + `(${names}${more}) that pulling would overwrite.\n\n`
+            + `Push them first (\`deliveryos push ${manifest.id}\`), or commit them to your own git and `
+            + `re-run with --force to discard them and take the current upstream version.`,
+        );
+      }
+    }
+  }
+
   onProgress?.('copy', `Copying payload files to ${installTarget}...`);
   fs.cpSync(payloadSrc, installTarget, { recursive: true });
 
@@ -279,7 +404,7 @@ export async function pullArtifact(
     // that stream mid-line. Capturing it instead and returning it lets each
     // caller (CLI vs. sidecar) decide how to surface it.
     try {
-      postInstallOutput = execSync(manifest.post_install, {
+      const rawPostInstall = execSync(manifest.post_install, {
         cwd: installTarget,
         stdio: 'pipe',
         timeout: postInstallTimeoutMs,
@@ -304,11 +429,37 @@ export async function pullArtifact(
         env: { ...process.env, DELIVERYOS_PROJECT_ROOT: cwd },
         maxBuffer: POST_INSTALL_MAX_BUFFER_BYTES,
       }).toString('utf-8');
+      // Redacted before it leaves this function. `post_install` is almost
+      // always a package-manager invocation, and those routinely echo registry
+      // URLs with embedded tokens and connection strings. Every caller of this
+      // value shows it to somebody: the CLI prints it, the app renders it in
+      // Activity, and an MCP tool would put it straight into model context.
+      // Redacting at the source means no caller has to remember. Uses the
+      // non-truncating variant, so it stays readable as build output.
+      postInstallOutput = redactEmbeddedSecrets(rawPostInstall);
     } catch (err) {
       const stdout = isExecError(err) ? err.stdout?.toString('utf-8') ?? '' : '';
       const stderr = isExecError(err) ? err.stderr?.toString('utf-8') ?? '' : '';
-      const detail = err instanceof Error ? err.message : String(err);
-      const output = [stdout, stderr].filter((s) => s.trim().length > 0).join('\n');
+      // THREE things need redacting here, not one, and the two extra ones are
+      // easy to miss:
+      //
+      //  - `output`, the child's own stdout/stderr. Obvious.
+      //  - `detail`, which is `execSync`'s error message -- and that embeds the
+      //    COMMAND it ran ("Command failed: <the whole command line>"). So a
+      //    credential passed as an argument leaks through the error even when
+      //    the child printed nothing at all.
+      //  - `manifest.post_install` itself, interpolated verbatim into the
+      //    timeout and tool-not-found branches below. A manifest that hardcodes
+      //    `postgres://user:pw@host/db` in its command puts that password into
+      //    an error message the CLI prints and the app renders.
+      //
+      // Found by the failure-path test in `postInstallRedaction.test.ts`, which
+      // still leaked after the success path was fixed.
+      const detail = redactEmbeddedSecrets(err instanceof Error ? err.message : String(err));
+      const output = redactEmbeddedSecrets(
+        [stdout, stderr].filter((s) => s.trim().length > 0).join('\n'),
+      );
+      const safeCommand = redactEmbeddedSecrets(manifest.post_install);
 
       // Confirmed empirically: `execSync` killed for exceeding its
       // `timeout` throws with `code: 'ETIMEDOUT'` -- unlike the
@@ -317,14 +468,14 @@ export async function pullArtifact(
       // doc comment).
       if (isExecError(err) && err.code === 'ETIMEDOUT') {
         throw new PostInstallError(
-          `post_install command timed out after ${postInstallTimeoutMs}ms for artifact "${manifest.id}" (still running/hung, no result was produced): ${manifest.post_install}`
+          `post_install command timed out after ${postInstallTimeoutMs}ms for artifact "${manifest.id}" (still running/hung, no result was produced): ${safeCommand}`
             + (output ? `\n${output}` : ''),
         );
       }
 
       if (isToolNotFoundError([detail, output].join('\n'))) {
         throw new PostInstallError(
-          `post_install command's tool was not found on this machine's PATH for artifact "${manifest.id}": ${manifest.post_install}`
+          `post_install command's tool was not found on this machine's PATH for artifact "${manifest.id}": ${safeCommand}`
             + (output ? `\n${output}` : ''),
         );
       }
@@ -369,7 +520,18 @@ export async function pullArtifact(
     providedValues,
     readExistingEnvValues(cwd),
   );
-  const { gitignoreWarning } = applyInstallParams(cwd, values);
+  const { gitignoreWarning, installParamWarning } = applyInstallParams(cwd, values);
+  // `resolveInstallParamValues` ran BEFORE the write, so it counted a required
+  // param as satisfied even when its key turned out to be unwritable -- leaving
+  // the health summary reporting "fully configured" for a value that never
+  // reached disk, directly contradicting the warning shown beside it. Folded
+  // back in here so the two agree.
+  for (const key of refusedInstallParamKeys(values)) {
+    const param = manifest.install_params.find((p) => p.key === key);
+    if (param?.required && !missingRequired.includes(key)) {
+      missingRequired.push(key);
+    }
+  }
   // Tier 1 of the wiring agent (Phase 7 item 6) -- derived straight from
   // install_params, no separate declared action. Same no-op guarantee as
   // applyInstallParams for the overwhelming majority of artifacts that
@@ -402,5 +564,6 @@ export async function pullArtifact(
     postInstallOutput,
     missingRequiredParams: missingRequired,
     gitignoreWarning,
+    installParamWarning,
   };
 }

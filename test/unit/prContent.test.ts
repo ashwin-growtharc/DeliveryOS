@@ -1,6 +1,44 @@
 import { describe, it, expect } from 'vitest';
 import { buildEditPrContent, buildProposeNewPrContent } from '../../src/engine/push/prContent';
 
+describe('buildEditPrContent -- who opened it', () => {
+  const base = {
+    id: 'risk-register',
+    kind: 'doc',
+    owner: 'test-team',
+    version: '1.0.1',
+    previousVersion: '1.0.0',
+    gitUserName: 'Ashwin B',
+    gitUserEmail: 'ashwin@example.com',
+    changedFiles: [{ relPath: 'README.md', status: 'modified' as const }],
+  };
+
+  it('says so when an agent opened it, above everything else in the body', () => {
+    // The precedent is the forced-stale block: it exists because "the PR
+    // reviewer is the only remaining safeguard and has to be told explicitly".
+    // A reviewer deciding how carefully to read a diff is entitled to know a
+    // model assembled it -- `**Pushed by:**` is a git identity and says only
+    // who the commit is attributed to, not what drove the push.
+    const content = buildEditPrContent({ ...base, initiatedBy: 'the DeliveryOS MCP server' });
+
+    expect(content.body).toContain('[!NOTE]');
+    expect(content.body).toContain('the DeliveryOS MCP server');
+    expect(content.body).toContain('assembled');
+
+    // Above the metadata line, so it is not lost below a long diff.
+    expect(content.body.indexOf('[!NOTE]')).toBeLessThan(content.body.indexOf('**Kind:**'));
+  });
+
+  it('renders byte-identically to before when absent', () => {
+    // Every existing caller -- CLI, sidecar, app -- passes nothing, and their
+    // PR bodies must not change at all.
+    const withField = buildEditPrContent({ ...base, initiatedBy: undefined });
+    const without = buildEditPrContent({ ...base });
+    expect(withField.body).toBe(without.body);
+    expect(without.body).not.toContain('[!NOTE]');
+  });
+});
+
 describe('buildEditPrContent', () => {
   it('includes id, kind, owner, version, and one line per changed file', () => {
     const content = buildEditPrContent({

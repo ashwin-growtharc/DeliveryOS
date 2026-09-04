@@ -71,9 +71,31 @@ interface CatalogListEntry {
  * arrive before an earlier well-formed request's response finishes
  * resolving. Matching by id makes this session robust to that reordering.
  */
+/** One in-flight request. Carries enough context that a failure can say
+ * WHICH command was outstanding and for how long -- a bare
+ * "Test timed out in 30000ms" named neither, which is what made a real CI
+ * failure cost three log reads and still end without an answer. */
+interface PendingRequest {
+  resolve: (res: SidecarResponse) => void;
+  reject: (err: Error) => void;
+  command: string;
+  startedAt: number;
+  timer: NodeJS.Timeout;
+}
+
+/** Deliberately under vitest's 30s testTimeout (every test in this file uses
+ * that budget), so the harness always wins the race and reports a diagnosis
+ * instead of letting vitest report an anonymous timeout. */
+const REQUEST_TIMEOUT_MS = 24_000;
+
 class SidecarSession {
   private readonly child: ChildProcess;
-  private readonly pending = new Map<string, (res: SidecarResponse) => void>();
+  private readonly pending = new Map<string, PendingRequest>();
+  /** Stdout lines that were not valid JSON. Previously dropped on the floor,
+   * which is precisely why a protocol bug could only ever surface as a
+   * timeout with nothing attached. */
+  private readonly unparsedLines: string[] = [];
+  private exitInfo: { code: number | null; signal: NodeJS.Signals | null } | null = null;
   private readonly stderrChunks: string[] = [];
   // Progress lines don't resolve a pending request the way a final response
   // does (see the 'line' handler below), so they're accumulated here
@@ -98,10 +120,14 @@ class SidecarSession {
       try {
         parsed = JSON.parse(trimmed) as SidecarResponse | SidecarProgressLine;
       } catch {
-        // A response line that isn't valid JSON would itself be a sidecar
-        // protocol bug (never expected here) -- ignore rather than crash
-        // the test harness; the awaiting assertion will time out and fail
-        // loudly instead.
+        // A response line that isn't valid JSON is itself a sidecar protocol
+        // bug. This used to `return` silently, under a comment claiming the
+        // awaiting assertion would "fail loudly" -- it did not: it failed as
+        // an anonymous timeout. Keep the line so the eventual rejection can
+        // show what the sidecar actually said.
+        if (this.unparsedLines.length < 20) {
+          this.unparsedLines.push(trimmed.slice(0, 500));
+        }
         return;
       }
 
@@ -112,10 +138,11 @@ class SidecarSession {
 
       const response = parsed as SidecarResponse;
       const key = response.id === null ? '__null__' : response.id;
-      const resolver = this.pending.get(key);
-      if (resolver) {
+      const entry = this.pending.get(key);
+      if (entry) {
+        clearTimeout(entry.timer);
         this.pending.delete(key);
-        resolver(response);
+        entry.resolve(response);
       }
     });
 
@@ -124,16 +151,61 @@ class SidecarSession {
     });
 
     this.exited = new Promise((resolve) => {
-      this.child.on('exit', (code) => resolve(code));
+      this.child.on('exit', (code, signal) => {
+        this.exitInfo = { code, signal };
+        // A sidecar that dies mid-request used to leave its caller awaiting a
+        // promise nobody would ever settle, so a CRASH and a STALL were the
+        // same 30s timeout. Reject instead, naming the exit and attaching the
+        // stderr this class was already collecting and never showing anyone.
+        for (const [key, entry] of this.pending) {
+          clearTimeout(entry.timer);
+          this.pending.delete(key);
+          entry.reject(new Error(
+            `sidecar exited (code ${code}, signal ${signal}) while "${entry.command}" was still `
+            + `outstanding after ${Date.now() - entry.startedAt}ms\n${this.diagnostics()}`,
+          ));
+        }
+        resolve(code);
+      });
+    });
+  }
+
+  /** Everything a failure should have said in the first place: what the
+   * sidecar wrote to stderr, and any stdout line that wasn't valid JSON. */
+  private diagnostics(): string {
+    const stderr = this.stderrOutput().trim();
+    const parts = [stderr ? `--- sidecar stderr ---\n${stderr}` : '--- sidecar stderr --- (empty)'];
+    if (this.unparsedLines.length > 0) {
+      parts.push(`--- unparseable stdout ---\n${this.unparsedLines.join('\n')}`);
+    }
+    if (this.exitInfo) {
+      parts.push(`--- exit --- code=${this.exitInfo.code} signal=${this.exitInfo.signal}`);
+    }
+    return parts.join('\n');
+  }
+
+  /** Registers a pending entry with its own timeout, so an unanswered request
+   * fails with a diagnosis rather than quietly running out vitest's clock. */
+  private track(key: string, command: string): Promise<SidecarResponse> {
+    return new Promise<SidecarResponse>((resolve, reject) => {
+      const startedAt = Date.now();
+      const timer = setTimeout(() => {
+        this.pending.delete(key);
+        reject(new Error(
+          `sidecar did not answer "${command}" within ${REQUEST_TIMEOUT_MS}ms `
+          + `(process ${this.exitInfo ? 'has exited' : 'is still alive'})\n${this.diagnostics()}`,
+        ));
+      }, REQUEST_TIMEOUT_MS);
+      // Never let the harness's own timer be the reason the run stays alive.
+      timer.unref?.();
+      this.pending.set(key, { resolve, reject, command, startedAt, timer });
     });
   }
 
   /** Sends a well-formed request line and resolves with its response. */
   request(command: string, args: Record<string, unknown> = {}): Promise<SidecarResponse> {
     const id = String(this.nextId++);
-    const responsePromise = new Promise<SidecarResponse>((resolve) => {
-      this.pending.set(id, resolve);
-    });
+    const responsePromise = this.track(id, command);
     this.child.stdin!.write(JSON.stringify({ id, command, args }) + '\n');
     return responsePromise;
   }
@@ -142,9 +214,7 @@ class SidecarSession {
    * `id: null` response -- the resolver is registered before the line is
    * written, so there's no race with the async 'line' handler. */
   sendRawLine(rawLine: string): Promise<SidecarResponse> {
-    const responsePromise = new Promise<SidecarResponse>((resolve) => {
-      this.pending.set('__null__', resolve);
-    });
+    const responsePromise = this.track('__null__', '(raw line)');
     this.child.stdin!.write(rawLine + '\n');
     return responsePromise;
   }
@@ -162,6 +232,12 @@ class SidecarSession {
     const lines = this.progressLines.slice();
     this.progressLines.length = 0;
     return lines;
+  }
+
+  /** Test-only: kills the child abruptly, so the crash-diagnostics test can
+   * prove a dead sidecar reports as a dead sidecar rather than as a timeout. */
+  killForTest(): void {
+    this.child.kill();
   }
 
   /** Closes stdin (EOF, matching how a real host session ends) and waits
@@ -212,6 +288,56 @@ describe('sidecar e2e', () => {
   // reported success. `{"command":"toString"}` returned
   // {"ok":true,"result":"[object Undefined]"}. The map now has a null
   // prototype and dispatch checks own-property + callability.
+  it(
+    'refuses a project directory that is relative or absent -- on a MUTATING command, not just a read',
+    async () => {
+      // `cwd` arrives over JSON-RPC from the Tauri host, and for months the
+      // only check was `requireString` -- "a non-empty string". A relative
+      // path resolves against the SIDECAR PROCESS, not the project. Combined
+      // with `install_target: "."` (a supported shape, see `isRootInstall`),
+      // `installTarget === cwd`, so the payload copy and then `post_install`
+      // land in whatever directory the caller named.
+      //
+      // Asserted on `artifact.pull` specifically: the read-only MCP surface
+      // validated this while the writing surface did not, which is backwards,
+      // and a test that only covered `catalog.list` would have missed it.
+      const cwd = newScratchCwd('cwd-validation');
+      const session = new SidecarSession(cwd, deliveryOsHome);
+      try {
+        const relative = await session.request('artifact.pull', {
+          cwd: 'some/relative/path',
+          id: 'anything',
+        });
+        expect(relative.ok, 'a relative cwd must be refused on a mutating command').toBe(false);
+        expect(JSON.stringify(relative.error)).toContain('absolute');
+
+        const missing = await session.request('artifact.pull', {
+          cwd: path.join(cwd, 'definitely-not-here'),
+          id: 'anything',
+        });
+        expect(missing.ok).toBe(false);
+        expect(JSON.stringify(missing.error)).toContain('does not exist');
+
+        // The empty string was already refused by `requireString`; keep it
+        // covered so the two checks can't be collapsed into one by mistake.
+        const empty = await session.request('artifact.pull', { cwd: '', id: 'anything' });
+        expect(empty.ok).toBe(false);
+
+        // Reads are held to the same rule -- a bad cwd there reports install
+        // status for a project nobody named, which is the same defect quieter.
+        const read = await session.request('catalog.list', { cwd: 'relative/again' });
+        expect(read.ok, 'reads must validate cwd too').toBe(false);
+
+        // And the session survives all of it.
+        const healthy = await session.request('remote.list', {});
+        expect(healthy.ok).toBe(true);
+      } finally {
+        expect(await session.close()).toBe(0);
+      }
+    },
+    30_000,
+  );
+
   it(
     'refuses Object.prototype members as commands instead of dispatching them',
     async () => {
@@ -355,7 +481,7 @@ describe('sidecar e2e', () => {
   );
 
   it(
-    'catalog.list with zero registered remotes returns an empty array, not a crash',
+    'catalog.list with zero registered remotes returns an empty catalog and no skipped manifests, not a crash',
     async () => {
       // Fresh cwd AND fresh DELIVERYOS_HOME so this scenario really sees
       // zero remotes, regardless of what earlier tests registered.
@@ -365,10 +491,57 @@ describe('sidecar e2e', () => {
       try {
         const resp = await session.request('catalog.list', { cwd });
         expect(resp.ok).toBe(true);
-        expect(resp.result).toEqual([]);
+        expect(resp.result).toEqual({ entries: [], skipped: [] });
       } finally {
         await session.close();
         fs.rmSync(freshHome, { recursive: true, force: true });
+      }
+    },
+    30_000,
+  );
+
+  it(
+    'catalog.list reports a manifest it could not load alongside the catalog, instead of silently dropping it',
+    async () => {
+      // The CLI's `list` has always reported skipped manifests
+      // (src/cli/commands/list.ts); the sidecar never called
+      // takeSkippedManifests at all, so the app showed a broken artifact as
+      // simply absent -- a parse failure coerced into a clean empty result.
+      // Rides in the SAME response because the Tauri host spawns one sidecar
+      // process per RPC, so a follow-up `catalog.skipped` call would always
+      // find an empty record.
+      const cwd = newScratchCwd('catalog-skipped');
+      const session = new SidecarSession(cwd, deliveryOsHome);
+      try {
+        const addResp = await session.request('remote.add', {
+          url: fixtureRemoteDir,
+          name: 'sidecar-remote-skipped',
+        });
+        expect(addResp.ok).toBe(true);
+
+        // Break one artifact's manifest directly in the clone: valid YAML,
+        // but missing every required field, so schema validation rejects it.
+        const brokenDir = path.join(cachePath('sidecar-remote-skipped'), 'artifacts', 'broken-artifact');
+        fs.mkdirSync(brokenDir, { recursive: true });
+        fs.writeFileSync(path.join(brokenDir, 'manifest.yaml'), 'id: broken-artifact\n', 'utf-8');
+
+        const listResp = await session.request('catalog.list', { cwd });
+        expect(listResp.ok).toBe(true);
+        const result = listResp.result as {
+          entries: CatalogListEntry[];
+          skipped: Array<{ remoteName: string; path: string; reason: string }>;
+        };
+
+        // The good artifacts are still listed -- reported alongside, never instead.
+        const ownEntries = result.entries.filter((e) => e.remoteName === 'sidecar-remote-skipped');
+        expect(ownEntries).toHaveLength(3);
+
+        const ownSkipped = result.skipped.filter((sk) => sk.remoteName === 'sidecar-remote-skipped');
+        expect(ownSkipped).toHaveLength(1);
+        expect(ownSkipped[0].path).toContain('broken-artifact');
+        expect(ownSkipped[0].reason.length).toBeGreaterThan(0);
+      } finally {
+        await session.close();
       }
     },
     30_000,
@@ -388,7 +561,7 @@ describe('sidecar e2e', () => {
 
         const listResp = await session.request('catalog.list', { cwd });
         expect(listResp.ok).toBe(true);
-        const entries = listResp.result as CatalogListEntry[];
+        const entries = (listResp.result as { entries: CatalogListEntry[] }).entries;
         // Filter to this test's own remote, since deliveryOsHome (and thus
         // the registry) is shared across scenarios in this file.
         const ownEntries = entries.filter((e) => e.remoteName === 'sidecar-remote-catalog');
@@ -435,7 +608,7 @@ describe('sidecar e2e', () => {
         );
 
         const listResp = await session.request('catalog.list', { cwd });
-        const entries = listResp.result as CatalogListEntry[];
+        const entries = (listResp.result as { entries: CatalogListEntry[] }).entries;
         const entry = entries.find(
           (e) => e.manifest.id === artifact.id && e.remoteName === 'sidecar-remote-pull',
         );
@@ -475,7 +648,7 @@ describe('sidecar e2e', () => {
         expect(fs.existsSync(path.join(installTarget, '.post_install_ran'))).toBe(true);
 
         const listResp = await session.request('catalog.list', { cwd });
-        const entries = listResp.result as CatalogListEntry[];
+        const entries = (listResp.result as { entries: CatalogListEntry[] }).entries;
         const entry = entries.find(
           (e) => e.manifest.id === artifact.id && e.remoteName === 'sidecar-remote-postinstall',
         );
@@ -515,7 +688,7 @@ describe('sidecar e2e', () => {
         );
 
         const listResp = await session.request('catalog.list', { cwd });
-        const entries = listResp.result as CatalogListEntry[];
+        const entries = (listResp.result as { entries: CatalogListEntry[] }).entries;
         const entry = entries.find(
           (e) => e.manifest.id === artifact.id && e.remoteName === 'sidecar-remote-edit',
         );
@@ -728,8 +901,8 @@ describe('sidecar e2e', () => {
   );
 
   it(
-    'artifact.push emits early progress stages (fetch, diff, ...) before hitting the real '
-      + 'GitHub-auth wall',
+    'artifact.push reports progress as far as GitHub lets it get -- which is nowhere at all '
+      + 'when there is no token, since auth is checked first',
     async () => {
       // Same split as the existing "artifact.push (edit mode)" coverage-gap
       // test above: a fake github.com-shaped URL registered directly (so
@@ -769,15 +942,44 @@ describe('sidecar e2e', () => {
         expect(['GithubAuthError', 'GithubApiError']).toContain(pushResp.error?.type);
 
         const stages = session.takeProgressLines().map((p) => p.stage);
-        // How far push gets before hitting the real GitHub-auth wall could
-        // vary slightly machine-to-machine (gh CLI installed/logged in or
-        // not) -- assert a reasonable early prefix rather than the exact
-        // full stage list, to avoid flakiness.
-        expect(stages.length).toBeGreaterThan(0);
-        expect(stages.slice(0, 2)).toEqual(['fetch', 'diff']);
-        for (const stage of stages) {
-          expect(typeof stage).toBe('string');
-          expect(stage.length).toBeGreaterThan(0);
+
+        // Keyed off the ERROR TYPE, because that determines how far push got
+        // and nothing else does.
+        //
+        // This test previously asserted `stages.length > 0` unconditionally,
+        // with a comment acknowledging that "how far push gets ... could vary
+        // slightly machine-to-machine (gh CLI installed/logged in or not)".
+        // The variance is real but the floor was wrong: it is ZERO, not one.
+        //
+        // `pushArtifact` calls `getGithubToken()` at push.ts:249 and emits its
+        // first applicable progress line at push.ts:253. (The `render-preview`
+        // line at :159 only fires for ui-component artifacts; this fixture is
+        // a template.) So with no `gh` auth at all, push throws BEFORE any
+        // progress -- which makes the original test title, "emits early
+        // progress stages ... before hitting the real GitHub-auth wall",
+        // false for this artifact kind.
+        //
+        // Both outcomes are correct behaviour, and failing fast on auth before
+        // doing filesystem work is the better of the two. So assert each:
+        //
+        //   GithubAuthError -> no token, threw at :249, zero stages.
+        //   GithubApiError  -> got a token, so :253 ran and the fake repo
+        //                      failed later at `fetchRepoInfo` (:293).
+        //
+        // Found by the first CI run this repo has ever had. It passed on the
+        // developer machine for one reason: `gh` was logged in there.
+        if (pushResp.error?.type === 'GithubAuthError') {
+          expect(
+            stages,
+            'without a GitHub token, push must fail at getGithubToken before emitting progress',
+          ).toEqual([]);
+        } else {
+          expect(stages.length).toBeGreaterThan(0);
+          expect(stages.slice(0, 2)).toEqual(['fetch', 'diff']);
+          for (const stage of stages) {
+            expect(typeof stage).toBe('string');
+            expect(stage.length).toBeGreaterThan(0);
+          }
         }
       } finally {
         await session.close();
@@ -1233,4 +1435,28 @@ describe('sidecar e2e', () => {
     },
     30_000,
   );
+
+  // The harness's own contract. Before this, `pending` was never rejected on
+  // child exit and the captured stderr was never shown to anyone, so a
+  // sidecar that CRASHED and a sidecar that was merely SLOW produced the
+  // identical "Test timed out in 30000ms" -- which is exactly what a real red
+  // CI run produced, and why diagnosing it took three log reads and still
+  // ended without an answer.
+  it(
+    'a sidecar that dies mid-request fails naming the exit and the command, not as an anonymous timeout',
+    async () => {
+      const cwd = newScratchCwd('crash-diagnostic');
+      const session = new SidecarSession(cwd, deliveryOsHome);
+      const pending = session.request('catalog.list', { cwd });
+      session.killForTest();
+
+      await expect(pending).rejects.toThrow(/sidecar exited/);
+      // The three things the old bare timeout could not tell you: that it
+      // died, which command was outstanding, and what it said on the way out.
+      await expect(pending).rejects.toThrow(/catalog\.list/);
+      await expect(pending).rejects.toThrow(/sidecar stderr/);
+    },
+    30_000,
+  );
+
 });

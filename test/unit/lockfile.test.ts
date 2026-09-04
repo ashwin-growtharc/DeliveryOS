@@ -135,6 +135,48 @@ describe('lockfile', () => {
     });
   });
 
+  // The real vector: removeArtifact looks its entry up ONLY in the lockfile
+  // (not the catalog), then feeds that same id to pristinePath, which feeds
+  // fs.rmSync(recursive, force). lock.json is a plain project-local JSON file
+  // anyone can hand-edit. Dropped rather than thrown, because every
+  // lockfile-touching command reads through readLockfile and throwing over one
+  // bad line would blank a whole catalog listing.
+  it('drops a lockfile entry whose id is not usable as a single path segment, keeping the good ones', () => {
+    fs.mkdirSync(projectDeliveryOsDir(cwd), { recursive: true });
+    fs.writeFileSync(
+      lockfilePath(cwd),
+      JSON.stringify({
+        version: 1,
+        entries: [
+          { id: 'good', version: '1.0.0', remote: 'test-remote' },
+          { id: '../../../evil', version: '1.0.0', remote: 'test-remote' },
+          { id: 'a/b', version: '1.0.0', remote: 'test-remote' },
+          { id: 'a\\b', version: '1.0.0', remote: 'test-remote' },
+          { id: '..', version: '1.0.0', remote: 'test-remote' },
+          { id: '.', version: '1.0.0', remote: 'test-remote' },
+          { id: '', version: '1.0.0', remote: 'test-remote' },
+        ],
+      }),
+      'utf-8',
+    );
+
+    const lockfile = readLockfile(cwd);
+
+    expect(lockfile.entries).toEqual([{ id: 'good', version: '1.0.0', remote: 'test-remote' }]);
+  });
+
+  it('drops an unusable entry rather than throwing -- LockfileCorruptError stays reserved for JSON that will not parse at all', () => {
+    fs.mkdirSync(projectDeliveryOsDir(cwd), { recursive: true });
+    fs.writeFileSync(
+      lockfilePath(cwd),
+      JSON.stringify({ version: 1, entries: [{ id: '../../..', version: '1.0.0', remote: 'r' }] }),
+      'utf-8',
+    );
+
+    expect(() => readLockfile(cwd)).not.toThrow();
+    expect(readLockfile(cwd).entries).toEqual([]);
+  });
+
   it('readLockfile throws a clear LockfileCorruptError (not a raw SyntaxError) when lock.json is not valid JSON', () => {
     fs.mkdirSync(projectDeliveryOsDir(cwd), { recursive: true });
     fs.writeFileSync(lockfilePath(cwd), '{ not valid json !!', 'utf-8');

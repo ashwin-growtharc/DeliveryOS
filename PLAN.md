@@ -163,7 +163,7 @@ Goal: make the hardest kind authorable, and the catalog navigable.
   pulling one into a fresh project
 - Starter Kits and Backend Plugins as their own sidebar destinations
 
-## Phase 15 — Delivery tooling — **v1 proposed, awaiting PR review**
+## Phase 15 — Delivery tooling — **v1 merged; "done" still needs a real engagement**
 
 Goal: carry a delivery methodology — a scoping calculator, a risk register, a
 friction log — the same way the catalog already carries code, without client
@@ -178,7 +178,10 @@ used one, not that these three PRs merged.
 
 - Three artifacts, each a real, working payload plus a required `README.md`
   stating the rule (fill in your own copy, never push it back) and the
-  named owner: `scoping-calculator` (`dataset` — a real `.xlsx` with working
+  named owner — and that rule is now enforced beyond the README, since these are
+  exactly the artifacts `contribute_artifact` was designed around: pushing a
+  filled-in copy is the harm case `preview_contribution` exists to catch (see
+  Phase 16 Stage 2): `scoping-calculator` (`dataset` — a real `.xlsx` with working
   formulas: day rate × complexity multiplier × days per phase, phases
   matching the delivery playbook order), `risk-register` (`doc` — a
   pre-listed risk library by engagement type: data platform / web app /
@@ -190,8 +193,10 @@ used one, not that these three PRs merged.
 - Proposed as real PRs against `growtharc-ai-helpers`: [#70](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/70)
   (risk-register), [#71](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/71)
   (friction-log), [#72](https://github.com/ashwin-growtharc/growtharc-ai-helpers/pull/72)
-  (scoping-calculator) — none merged yet, pending the same human review every
-  other artifact goes through
+  (scoping-calculator). **All three have since merged** and are live in the
+  `ai-helpers` remote at v1.0.0 — verified against the running catalog, not
+  from the PR pages. This line previously read "none merged yet", which had
+  gone stale
 - The shared blank and the filled-in copy are **never the same file** — blank
   inside `install_target`, filled copy outside it, so `push` structurally
   cannot see client data. Same split `.env.example`/`.env.local` already uses
@@ -204,6 +209,373 @@ used one, not that these three PRs merged.
 - **Definition of done, still open**: one real engagement used one of these
   and we know whether it helped — not "three PRs merged"
 
+## Phase 16 — One core, many surfaces — **Stage 2 landed; no longer read-only**
+
+Goal: make the engine reachable from a third consumer (an MCP server, so any AI
+harness can drive DeliveryOS) without tripling the CLI-vs-sidecar drift this
+file already tracks under "What's next".
+
+Full research and design in
+[docs/agent-surface-plan.md](docs/agent-surface-plan.md) — grounded in an audit
+of both existing surfaces, hexagonal-architecture research, and a systematic read
+of BuilderIO's `agent-native` framework as real prior art (its MCP subsystem,
+approval path across all six of its surfaces, guards, audit, secrets, and stated
+design intent).
+
+**The one design rule everything else follows from.** `agent-native` documents
+its own bug in a source comment: `authorize` is honoured on all six of its
+surfaces because it's baked *inside* `run`, while `needsApproval` is *"honoured
+only inside the agent loop"* because it took the flag route — verified absent
+from its CLI and its normal HTTP route. So: **every gate here — exposure,
+approval, effect — must be enforced by wrapping the handler, never by a flag an
+adapter is trusted to read.**
+
+**The finding that reframes it:** MCP is not a new feature. It's the third
+consumer that makes an already-known problem worth fixing. The engine is
+*already* a clean core — no `console.*` in hand-written engine code, no
+`process.cwd()`, no `commander` imports, `GithubClient` already a real port with
+two implementations. What's missing is one shared layer above it.
+
+**In-process, not shelling out, and not HTTP.** MCP calls the same engine
+functions the CLI and sidecar already call, over stdio. The sidecar is proof the
+shape works — it is an MCP server in all but protocol. Shelling out to the
+`deliveryos` binary with agent-supplied arguments would reintroduce the exact
+Windows shell-injection class this project already hit twice (Phase 7's
+command-injection finding, Phase 11's argv-splitting bug). An HTTP API is also
+wrong here: DeliveryOS operates on the local project, the local lockfile and
+local git — the agent runs on the same machine as the files.
+
+### Stage 0 — CI first, then the real bugs (do this regardless of MCP) — **Landed and verified**
+
+**CI was the precondition for everything else in this phase, and it has now
+run green on an independent machine** (draft PR #27, run `33742110681`).
+Every step passed: install, codegen drift, lint, typecheck, design tokens, the
+theme matrix and font-resolution browser audits, and the full 842-test suite. `.github/workflows/ci.yml` runs lint, typecheck, a
+generated-file drift check, two browser audits and the full suite on
+`windows-latest`; the runner choice and step ordering are in
+[CHANGELOG.md](CHANGELOG.md). Until it landed, nothing ran any of the gates but
+a human who remembered to — and a static guard without CI is a script someone
+remembers to run, which is the exact failure the guard was meant to replace (the
+reference implementation even gates its strictness on `Boolean(process.env.CI)`,
+so ported as-is it would silently no-op here).
+
+> **It has now run, and it worked.** Draft PR #27 executed it for the first
+> time. Both runs report `event: pull_request` against the branch head, which
+> settles the assumption the plan rested on: `pull_request:` resolves the
+> workflow from the merge commit, not from the base branch. Had it resolved
+> from base, the `.github`-less `main` would have produced **zero runs** —
+> which presents as *nothing happening* rather than as a failure.
+>
+> It found a real defect on the first attempt, and not either of the two
+> predicted as environmental (both of those passed). `artifact.push`'s progress
+> assertion passed locally only because `gh` was authenticated on the developer
+> machine; on a clean runner push throws at `getGithubToken()` before emitting
+> anything. See [CHANGELOG.md](CHANGELOG.md) for the full account and the
+> reason that assertion must not be loosened back to a bare `> 0`.
+>
+> So "all gates pass" no longer carries a silent "on one machine" caveat — for
+> anything verified on or after `3b336c8`. Earlier claims in this file and in
+> [CHANGELOG.md](CHANGELOG.md) predate the first run and should be read with
+> that in mind.
+
+The confirmed defects triaged in
+[docs/hardening-ledger.md](docs/hardening-ledger.md) landed with it, on
+branch `tier0/hardening-and-ci`; they are listed in the Tier 0 track below.
+Against this list specifically:
+
+- Done: `audit/redact.ts` ported and applied — at **four** audit-log append
+  sites, not the two this list assumed, and with three documented deviations
+  from the source. Closes the plaintext half of the Tier 0 item below
+- Done, later and separately: the same redaction on the **update** path.
+  `pull.ts` redacted `post_install` output at four sites and
+  `src/engine/sync/applyUpdate.ts` at **none** — the same manifest command,
+  run on update instead of first install, leaking through
+  `check-updates --apply` and the app's Apply Update. The failure path was the
+  one that mattered: `execSync`'s message embeds `Command failed: <the whole
+  command line>`, so a credential passed as an *argument* leaked even when the
+  child printed nothing. Both new tests were confirmed to fail on the old code
+- Done: the sidecar no longer drops skipped manifests, together with
+  `buildCatalog`'s unbounded `lastSkippedManifests` array — `catalog.list` and
+  `catalog.refresh` now return `{ entries, skipped }`
+- **Wrong when written**: the two "missing" CLI tests are not missing. `remote
+  add`'s success path and `remote remove`'s cache-directory deletion both
+  already exist, in `test/e2e/pull.e2e.test.ts`
+- Done: `addRemote`/`removeRemote` extracted to
+  `src/engine/remote/manageRemotes.ts`. The orchestration existed twice — the
+  sidecar's copy admitted in its own comment that it "mirrors `runRemoteAdd`'s
+  order exactly" — and now has one home that all **three** adapters call
+  (`src/cli/commands/remoteAdd.ts`, `src/sidecar.ts`, `src/mcp/engineAdapter.ts`).
+  The MCP surface is why it stopped being cosmetic: a third copy would have been
+  written otherwise
+- **Open**: collapse the `hasWiring` dispatch gate. This said "three copies";
+  it is **four** — `src/cli/commands/pull.ts`, and `app.js` computes the same
+  `const hasWiring` twice in the same file (`runArtifactAction` for Pull,
+  `actionButtonFor` for Update) — plus the sidecar splitting it across two keys
+  (`artifact.pull` vs `artifact.pullAndAutoWire`) so its callers must choose.
+  The engine holds the same predicate twice more, in `pullAndAutoWire.ts` and
+  `applyUpdate.ts`. Deliberately no line numbers: the ones here were stale, and
+  so was `applyUpdate.ts:339` in `docs/agent-surface-plan.md`
+
+### Evidence for Stage 1, from the repo the sponsor named
+
+Explored 4 Sep 2026. `agent-native`'s **`defineAction`**
+(`packages/core/src/action.ts`) is a working implementation of what he described
+on the call — *"any kind of a function, you expose it in such a way that it is
+understandable by LLMs … wrapping it up with the schema definition to have the
+security layer"*. One wrapper per operation, auto-discovered from a folder with
+no manual registry, fanning out to **agent tool, HTTP route, MCP tool, A2A tool
+and CLI command**. JSON Schema is derived from Zod via Standard Schema, and
+`packages/core/src/mcp/build-server.ts` generates the MCP server from that same
+registry — with **stdio and Streamable HTTP calling one shared builder**, plus
+OAuth 2.1, per-request identity and `mcp:read`/`mcp:write` scopes.
+
+That is the strongest argument this stage will get: the pattern is not
+speculative, it is running in a repo the sponsor pointed at, and it answers the
+hosted-MCP question at the same time.
+
+**Two places it is behind us, recorded so the reference is not assumed superior
+everywhere:** it has no generic dry-run/preview (only ad-hoc `dryRun` arguments
+inside one domain's own handler), and **no guard fails its build when an action
+omits a risk declaration** — TypeScript merely requires `description` and `run`
+to exist. Our `capabilities.test.ts` refuses server construction for an
+undeclared tool, which is stricter.
+
+### Stage 1 — the command registry
+
+One typed definition per operation (name, input schema, `mutates`,
+`emitsProgress`, `costsRealMoney`, an explicit `surfaces` allowlist, approval
+posture, handler). Both existing surfaces migrate onto it. Schema-derived
+validation replaces `requireString`/`optionalString`/`optionalStringRecord`
+(`src/sidecar.ts:118-135`) and commander's ad-hoc reducers — which is what makes
+today's **invisible drift** visible: `--remote` optional in CLI `wiring` but
+required in sidecar `checkSourceDrift`; 91 lines of `toPushOptions` that exist
+only on the CLI; no CLI equivalent of `catalog.refresh` at all. The
+skipped-manifest example this list used to lead with is now fixed under Tier 0
+— which is the point: it took a person noticing, because nothing made the two
+surfaces disagree visibly.
+
+Deliberately stays per-surface: progress sinks, stdout formatting, flag
+ergonomics, and confirmation gating.
+
+Paired with a **static guard** (`agent-native`'s `guards/` + `doctor` pattern, ten
+source scanners in one place): fail the build if a registry entry reaches the MCP
+allowlist without a declared `effect`, or if an `effect: 'writes-shared'` entry
+reaches it at all. That is how the flag-drift bug class gets prevented
+mechanically rather than by discipline. Copy their **three-outcome** convention
+too — passed / failed / **could not run** — where a guard that inspected nothing
+refuses to report success. `deliveryos-status` should gain that third state for
+the same reason.
+
+### Stage 2 — `deliveryos mcp` — **complete, and CI-verified**
+
+**What shipped:** `deliveryos mcp`, a stdio MCP server. This said "four
+read-only tools" and described the surface as it first landed; it is now
+**nine tools, five declared read-only and four not** — the five reads
+(`search_artifacts`, `get_artifact`, `catalog_overview`, `list_remotes`,
+`read_artifact_file`) plus `refresh_catalog` and `add_remote`, which write only
+to `~/.deliveryos` caches, and `preview_contribution`/`contribute_artifact`,
+which reach a shared remote.
+Architecture, client configuration and measured costs in
+[docs/mcp-server.md](docs/mcp-server.md).
+
+It is the third driving adapter and the first with a **declared port**.
+`src/mcp/server.ts` depends on `DeliveryOsReadPort` and nothing under
+`src/engine/**`; `engineAdapter.ts` is the single binding;
+`src/cli/commands/mcp.ts` is the composition root. Enforced by
+`test/unit/mcp.architecture.test.ts`, not by convention.
+
+**"Advertised must equal callable" is satisfied structurally rather than by
+stripping a registry.** This originally read "there is no mutating method on the
+port at all" — true when the surface was read-only, and no longer. The property
+that survived is narrower and still load-bearing: `DeliveryOsReadPort` is locked
+by `mcp.architecture.test.ts` to **exactly three read operations**, so writes
+cannot arrive by quietly widening the read path. They arrive only through two
+separate, named ports — `DeliveryOsConfigPort` and `DeliveryOsContributePort` —
+and every mutating capability must additionally appear in
+`RISKY_CAPABILITIES_ALLOWED_ON_MCP` with a written justification, or the server
+refuses to construct.
+
+**One correction to what this section said.** The planned test —
+`await expect(client.callTool(...)).rejects.toThrow()` — does not work.
+`McpServer` converts an unknown-tool `-32602` into a **resolved** result
+`{ isError: true, ... }`. The rejection form passes for the wrong reason and
+would keep passing the day someone actually exposes `artifact_pull`. Assert on
+`res.isError`.
+
+**One deliberate deviation, and why.** This section required
+*session-configured project scope, never a tool argument*, on the grounds that
+"every containment check in the engine validates paths within `cwd` while
+validating `cwd` itself nowhere — so an agent-supplied project path is a real
+escape." That reasoning is correct for a surface that **writes**: `pull` into
+an agent-chosen directory is a genuine escape.
+
+When this was written the surface wrote nothing: `cwd` served only to read the
+lockfile and compare install targets against pristine snapshots, and the tools
+returned `localStatus` and `installTarget`, never file contents (those come from
+the remote cache). That is still true of the six read and cache-only tools —
+`refresh_catalog` and `add_remote` touch `~/.deliveryos` alone.
+
+**It is no longer true of `contribute_artifact`**, and the exception is exactly
+the kind this file exists to record. `push.ts:784` calls `upsertEntry(cwd, ...)`
+to record `pendingPr`, which writes the lockfile *inside the user's project* —
+and `pendingPr`'s presence then disables the stale-push guard for whoever pushes
+next. So the surface does resolve a path under `cwd` and write to it. The
+containment argument above therefore rests on `assertUsableProjectDir` rather
+than on "nothing writes", which is a weaker footing than the original text
+claimed and should be treated as such when Stage 3 revisits `pull`. The residual exposure is an existence oracle over paths the
+calling agent can almost always already `stat` itself. Against that, requiring
+out-of-band registration would make the server unusable in the one client that
+matters most — an editor whose whole job is the project it is open in.
+
+So `cwd` stays a tool argument, and the part of the rule that still bites is
+enforced: it must be an absolute path to a directory that exists
+(`assertUsableProjectDir`, with e2e coverage). **When `pull` is reconsidered
+under Stage 3, the session-scope rule applies to it in full** — this deviation
+does not carry forward to a mutating tool.
+
+**And the argument is pinned to the transport it depends on.** "The calling
+agent can already `stat` that path itself" is true for a *local stdio* client
+and false for a remote one — over streamable HTTP or SSE, an agent-supplied
+`cwd` probes the **server's** filesystem, which the caller could not otherwise
+reach, and the safety argument silently stops holding while the code still reads
+as safe. That is the same shape as the `needsApproval` bug this phase is built
+around: a gate that holds on one surface and is *assumed* to hold on all of
+them. So `mcp.architecture.test.ts` has a fourth structural gate asserting the
+server is stdio-only. Adding a second transport means deleting that test, and
+deleting it is where this decision gets re-examined instead of inherited.
+
+**Still open from this section:** dry-run-by-default is not needed by a
+read-only surface, so it stays open — but it is **much cheaper than this
+document claimed**, and the claim is corrected below rather than repeated. The
+`--no-wire` warning stands unchanged.
+
+#### The original design, for reference
+
+
+
+Stdio, in-process. Two things decide whether it is safe at all:
+
+- **Session-configured project scope, never a tool argument.** An MCP server has
+  no meaningful `cwd`, and every containment check in the engine validates paths
+  *within* `cwd` while validating `cwd` itself nowhere — so an agent-supplied
+  project path is a real escape. The project is registered once by the human,
+  out-of-band, and **every tool refuses when no project is configured** rather
+  than falling back to `process.cwd()`.
+- **Dry-run by default** — the right destination, but Stage-1-dependent, not an
+  afternoon. The reference gates one call at the end of a path that always plans
+  and always reports, because its CLI takes an injectable `io`/`spawn`.
+  ~~DeliveryOS writes through `console.*` inside commander closures at 56 sites
+  across 11 files, so planning and reporting aren't separable yet.~~
+  **Corrected — this was wrong, and it was never right.** Counted against the
+  real source: `src/engine/**` has **zero** `console.*` in hand-written code
+  (the 44 apparent hits are string literals inside `*.generated.ts` vendored
+  bundles). Every site is CLI-layer — 74 across 12 files in
+  `src/cli/commands/`, 88 across 13 including `src/cli/output.ts`. The site
+  count matched nothing then or now.
+  The *inference* was the real error: **CLI print sites cannot block plan/apply
+  separation, because the engine never prints.** It already returns structured
+  data to every caller, `src/cli/output.ts` is already a presentation module,
+  and `deliveryos check-updates` vs `--apply` is a working plan/apply split
+  over a mutating operation. Most decisively, `applyUpdate.ts:262` already
+  computes `computeChangedFiles(payloadSrc, pristineTarget)` — the plan —
+  *before* the `rmSync` at `:275`, then discards it on every refusal path.
+  A real `planPull()` is ~60–80 lines composing already-pure functions, not a
+  phase of work. This contradicted `PLAN.md`'s own line above, which was right.
+  **And note:** `--no-wire` is *not* a safe substitute — it still runs
+  `execSync(manifest.post_install)` (`src/cli/commands/pull.ts:93` → `src/engine/pull/pull.ts:407`). The help
+  text that claimed otherwise was corrected under Tier 0; the behaviour is
+  unchanged and pinned by a characterization test, so this remains true of any
+  MCP surface that reaches for `--no-wire` as a safety measure.
+
+Exposes six task-shaped tools, not 43 operations — `agent-native`'s own code
+comment records that dumping ~105 schemas (~100k tokens) was a recurring footgun.
+And **advertised must equal callable**: excluded operations are stripped from the
+registry the server sees, not merely hidden from `tools/list`.
+
+### Stage 3 — decide `push`, `remove` and `config` separately, with evidence
+
+Each needs its own answer, not one policy: `push` needs a diff preview first (it
+is all-or-nothing over the whole folder today, with no confirmation); `remove`
+needs a confirmation story (the app confirm-gates it in `handleRemoveArtifact`,
+at the `window.confirm` guarding `artifact.remove` — anchor on that call rather
+than a line number; the CLI does not); `config --set` needs a by-reference
+form, because a literal secret in a tool call is in model context by
+construction (`agent-native` solved this with
+`${keys.NAME}` indirection plus keeping secret writes off agent actions
+entirely).
+
+### The safety rule this phase exists to protect
+
+Every `apply*` handler in the sidecar today **assumes a human already clicked
+something** (`src/sidecar.ts:536-546`, `:569-579` -- the APPLY halves; `:524`/`:554` are the read halves, which write nothing) — that confirmation lives in
+the desktop UI, not the handler. So: exposure is **default-closed** (opt in per
+operation, never inherited), every gate wraps the handler rather than sitting
+beside it, and the six AI `request*`/`apply*` pairs (build-fix, wiring-merge,
+wiring-placement, anti-pattern-fix) stay off MCP entirely — each spends real
+money and writes real files on a human's prior say-so.
+
+**`remote add`/`remove` are excluded outright, not gated.** Register a remote,
+pull from it, and the manifest's `post_install` runs arbitrary shell — code
+execution from two tool calls. Two things make it worse than "most artifacts are
+unsigned": `install_target: .git/hooks` **used to** write an executable hook via
+`cpSync` with no `post_install` needed at all, because the auto-run denylist at
+`src/engine/pull/wiring.ts:46` was applied only to `wiring_actions.targetFile`.
+That half is closed — Tier 0 now checks `install_target` against the same list
+at pull and update time. What still stands: **a valid signature doesn't gate any
+of it**,
+because `computePayloadDigest` never takes the manifest as an input
+(`src/engine/provenance/digest.ts:33-51`), leaving `post_install`,
+`install_target` and `wiring_actions` outside the signature entirely. Remote
+registration stays a human trust decision made out-of-band.
+
+`wire-with-claude` also stays CLI-only: it spawns a TTY-inheriting interactive
+session, which structurally cannot be a one-request/one-response tool call.
+
+### Deliberately not doing
+
+- **A full hexagonal refactor.** Ports for `fs`, clock and subprocess would each
+  have exactly one implementation; Cockburn's own guidance is that apps have
+  "two, three or four ports." `GithubClient` became a port only when a real
+  second consumer (tests) appeared.
+- **Adopting `@agent-native/core`** — one package, 77 runtime + 31 peer
+  dependencies (Drizzle, Nitro, React, yjs), no split. Steal the pattern, not the
+  framework. Its registry is also *not* a competitor to the catalog: shadcn-schema
+  doc distribution, no manifests or versioning.
+- **Fixing the known engine leaks** — `paths.ts:17` reading `DELIVERYOS_HOME`
+  from env, `githubAuth.ts:15` hardcoding `execFileSync('gh', …)`, three direct
+  `execSync` calls, `spawn('claude')`. All real, none blocking.
+- **An HTTP surface.** Nearly free once the registry exists; nobody has asked,
+  and it doesn't fit a local-filesystem tool.
+- **Persistent "always allow" approval.** `agent-native` has it, but scoped
+  per-tool-name and unbounded in time — approving one `push` would approve every
+  future one. Their single-use, argument-hash-bound grant is the half worth
+  copying; the persistent half is not.
+
+**Found along the way, and it settles a question parked earlier:** the
+SharePoint/S3 remote-backend idea from the discussion has a known shape now.
+`agent-native`'s `PlatformAdapter` and `FileUploadProvider` both use **explicit
+capability negotiation** instead of assumed uniformity — a backend declares what
+it can do, and call sites `assert` the capability. Ported here, that's a
+`RemoteBackend` port where GitHub declares `opensPullRequests: true`, SharePoint
+declares `false`, and `push` asserts it — so a SharePoint remote fails with a
+real message instead of half-working. Still its own future phase; no longer an
+open question about shape.
+
+**Answered.** The first consumer is Claude Code in this repo, and it is wired:
+`.mcp.json` is committed, running `npx tsx src/index.ts mcp` so a fresh clone
+needs only `npm install`. Verified through the SDK's own `StdioClientTransport`
+— the one Claude Code uses — with every tool, the error paths, and a real
+`refresh_catalog` against the live remotes. Note this does change every
+teammate's Claude Code session: they will be prompted to approve the server on
+opening the repo. The remaining question is the useful one: **does an agent
+reading this catalog actually change what gets built** — which only shows up in
+use, not in a test.
+`deliveryos-check-first` already gives Claude Code catalog access by shelling out
+to the CLI, so the real gain is *other* harnesses. Stages 0 and 1 don't depend on
+that answer; Stage 2 does. Second open question: does `pull` via MCP genuinely
+help anyone once it's dry-run-first and wiring-free — because if not, Stage 2
+shrinks to catalog discovery and the case for MCP weakens.
+
 ## Tier 0 hardening — **In progress**
 
 A cross-cutting track: fix what's broken and prove someone outside the build
@@ -212,9 +584,197 @@ team benefits, rather than build more on an unproven foundation.
 - Done: the lockfile race between auto-sync and a manual pull/push; PR
   merge/close status polled on the same tick as version drift; the
   security/provenance model
+- Done: CI at `.github/workflows/ci.yml` — lint, typecheck, a generated-file
+  drift check, two browser audits and the full suite, on `windows-latest` for
+  its preinstalled Edge; `ui:screenshots` as `workflow_dispatch`, `ui:contrast`
+  excluded as a report that cannot fail
+- Done: 16 e2e teardowns moved onto `rmDirWithRetry` — the Windows EPERM/EBUSY
+  race that fails a whole file with every test in it passing
+- Done: `pristinePath` segment assertion, and `readLockfile` dropping entries
+  whose `id` is not usable as a single path segment — a hand-edited `lock.json`
+  could `rmSync` outside the project
+- Done: `install_target` checked against `SENSITIVE_TARGET_PREFIXES` at pull and
+  update time, with `.deliveryos/` added; `.claude/` deliberately excluded and
+  pinned by tests
+- Done: `install_params` newline injection into `.env.local` refused and
+  reported, at the write site rather than in the schema
+- Done: `install_target` read from the lockfile in `applyUpdate`, `catalog` and
+  `push` — the `push` path had been opening PRs deleting payloads upstream
+- Done: a vanished artifact reported by `check-updates --apply`, not a silent
+  no-op
+- Done: a failed post-push cache reset reported on `PushResult` and through
+  `onProgress`; `--no-wire`'s help text corrected, its behaviour left unchanged
+  and pinned as a characterization test
+- Done: 70 test files / 759 tests, from 69 / 710; lint and typecheck clean.
+  Full narrative in [CHANGELOG.md](CHANGELOG.md)
+- Done — the audit logs no longer store secrets in plaintext. Found while
+  checking this repo against `agent-native`'s rule that *"the audit log must
+  never become a secondary store of secrets."* `src/engine/audit/redact.ts` is
+  applied at all four `.jsonl` append helpers. The gitignore half of that item
+  is still open, below.
 - **Open**: get one engineer outside the build team to actually adopt it
 - **Open**: track real usage numbers — deferred until there's an adopter to
   design the tracking around
+- **Open — one live instance left of a silent-coercion bug class.**
+  `agent-native`'s `AGENTS.md` names this as the single most repeated cause of
+  user reports in that repo: *"a `catch`, default, or coercion that returns a
+  value callers cannot distinguish from success is a bug, not a guard… a dropped
+  payload is not an empty one."* The sidecar dropping skipped manifests is fixed,
+  as are the swallowed post-push cache reset and the unreported vanished
+  artifact. Still open: a stale remote cache makes `list` report "no such
+  artifact" for one that exists. It gets worse under Phase 16, because an agent
+  will relay it as fact.
+- **Open — the signature covers payload bytes only.** `computePayloadDigest`
+  (`src/engine/provenance/digest.ts:33-51`) never takes the manifest, so
+  `post_install`, `install_target` and `wiring_actions` all sit outside it — a
+  valid signature is compatible with an arbitrary `post_install`. Fixing it is a
+  breaking cross-repo protocol change against `growtharc-ai-helpers`' signing
+  workflow, and needs every signed artifact re-signed.
+- **Open — `post_remove`/`post_install` are read LIVE from the mutable remote**
+  at removal and update time, with nothing pinned. `removeArtifact` refuses to
+  re-read `install_target` because it is "remote-controlled, MUTABLE"
+  (`src/engine/pull/removeArtifact.ts:153`), then executes that same manifest's
+  *current* `post_remove` forty lines later. `LockEntry` records nothing to pin
+  to, and six existing tests depend on the live read.
+- **Open — two false status messages on the build path.** `verifyBuild`
+  (`src/engine/pull/verifyBuild.ts`) reports an unparseable `package.json`
+  identically to "no build script", and `pullAndAutoWire` returns `{ran: false}`
+  — defined as "no build command detected" — when it merely chose not to run
+  one. Both need a widened `BuildVerificationResult`; three existing tests assert
+  the wrong string today.
+- **Open — `test/` is not typechecked at all.** `tsconfig.json` excludes it
+  *and* scopes `include` to `src/**/*.ts`, and vitest transpiles without
+  checking. 7 real type errors hide there today, across 3 files.
+- **Open — `src-tauri/spike-ui/app.js` has zero lint coverage.** It is not in
+  ESLint's `ignores`; the only config object carrying rules is scoped to
+  `files: ['**/*.ts']`, so `--print-config` reports `rules: 0` for all 7,464
+  lines. ~15 browser globals would leave a 2-warning backlog. Blocks "Split
+  `app.js`" under What's next.
+- Done: `.deliveryos/` now carries its own `.gitignore` in every project it
+  lands in — written by `ensureProjectDeliveryOsDir`, which is the single way
+  that directory gets created. Inside the directory rather than appended to the
+  project's own `.gitignore`, which belongs to whoever owns the repo. This is
+  also what makes the stale-absolute-path bug unreachable: a committed
+  `lock.json` was the delivery mechanism.
+- Done: `push` refuses a stale-version push, naming the files that changed both
+  upstream and locally — the second pusher's edits reverted a merged change as
+  an ordinary forward diff git had no reason to flag, and two concurrent pushes
+  bumping to the same version left the loser's change never offered as an update
+  to anyone; `--force` stamps the overlap into the PR body
+- Done: `pull` refuses to overwrite local edits on the CLI (the app had always
+  confirm-gated it), and `--force` fetches first — `pullArtifact` was the one
+  major operation that never fetched
+- Done: `post_install` surfaced before a pull, verbatim and ungated, in Detail,
+  `list --json` and the CLI; the Configuration tab no longer hides itself for an
+  artifact whose only side effect is a command
+- Done: `check-updates --apply` prints the changed-file set `applyUpdate` had
+  already computed, used to delete files, and thrown away
+- Done: commit identity passed with `git -c` instead of baked into the shared
+  cache clone, and existing baked-in config cleared with `--unset-all` — the
+  first pusher on a shared box had won forever
+- Done: four defects an independent review found in those guards, one of which
+  broke a single user's ordinary push → merge → push; the stale-push guard now
+  skips while your own `pendingPr` is in flight, since content comparison cannot
+  tell "builds on" from "overwrites"
+- Done: first real browser coverage of the desktop UI —
+  `test/e2e/detailDisclosure.e2e.test.ts`, four tests against the real
+  `index.html` with a stubbed engine; one UI defect had already shipped because
+  nothing in the repo could catch it
+- Done: 775 tests, from 766; lint and typecheck clean. Full narrative in
+  [CHANGELOG.md](CHANGELOG.md)
+- **Open — the audit logs still hold full file bodies.** Redaction reduces
+  credential exposure and the directory is no longer committed by accident, but
+  a private project's source is still copied verbatim into a local file. Worth
+  deciding whether `before`/`after` need to be full bodies at all, or whether a
+  bounded diff would serve the Activity panel just as well.
+- **Open — `redactEmbeddedSecrets` is a heuristic, not a parser.** camelCase
+  (`authSecret`) and SCREAMING_SNAKE are both covered now, but a secret reaching
+  a log in any other shape — assigned through an intermediate variable, say —
+  still passes.
+- **Open — `compareVersions` is asymmetric on prerelease versions.**
+  `1.0.0-beta.1` vs `1.0.0` and the reverse **both** return 1:
+  `Number('0-beta')` is `NaN`, `NaN !== NaN` is true, and the comparator then
+  takes the "greater" branch in both directions
+  (`src/engine/sync/sync.ts:28`). Unreachable from `manifest.version` — the
+  schema enforces `/^\d+\.\d+\.\d+$/` — and reachable only from a hand-edited
+  lockfile. Shared by `checkForUpdates`, `applyUpdate` and now the push
+  staleness check.
+- **Open — the signing pipeline structurally excludes 92% of the catalog.**
+  `sign-artifacts.mjs:98` in the artifact repo is
+  `if (manifest.kind !== 'backend-plugin') continue;`, so all 213 skills,
+  agents, rules and commands are unsigned **by design**, not adoption lag. 3 of
+  230 artifacts are signed.
+- **Open — signatures are self-attesting.** The artifact declares its own
+  `certificate_identity`, which `src/engine/provenance/verify.ts:59` passes
+  straight to sigstore — the party being verified chooses the verification
+  parameters. A "require signatures" setting would need a pinned expected
+  identity **per remote**, and `RemoteEntry`
+  (`src/engine/remote/remoteRegistry.ts:7`) is `{ name, url, addedAt }` with
+  nowhere to put one.
+- **Open — `review_required` is read by nothing.** Declared and required in the
+  manifest schema (`src/engine/manifest/schema.ts:159`), written only on
+  `push --new`, unsettable from the desktop wizard, and `false` in 229 of 230
+  manifests.
+- **Open — `owner` is unverified free text.** Never compared to the pushing
+  identity; already `ai-helpers-import` on 210 of 230.
+- **Open — an in-flight change is invisible to everyone else.** `pendingPr` is
+  per-project-per-machine and `GithubClient` has no `pulls.list`, so nobody can
+  see that a colleague already has a PR open on the artifact they are about to
+  edit.
+- Decided, not open: **the app has no force affordance for `push`, and should
+  not get one.** A one-click force over a colleague's merged change is exactly
+  the operation that should stay hard, and the app already has the safe
+  resolution — discard the local edit, take the current version, re-apply.
+  Recorded here so it is not later filed as a gap.
+- **Open — performance, measured against the real 230-artifact catalog.** Not
+  in scope for this track, but the numbers contradict the assumption that
+  artifact *count* is what hurts. The Tauri host spawns a fresh 118 MB sidecar
+  **per RPC** with a measured ~1.1 s floor, and opening one Detail card fires
+  10–13 of them unqueued, four being literal duplicates. `computeChangedFiles`
+  (`src/engine/push/diff.ts:142`) costs ~5 ms per pulled file pair and runs on
+  every Browse navigation — 811 ms measured for one 153-file design kit.
+  `refreshCatalog` (`src/engine/catalog/catalog.ts:127`) fetches every remote
+  sequentially with no timeout, ~6–8 s each. The preview cache is unbounded and
+  never evicts stale compiler generations — 70.9 MB for 9 artifacts, 33.8 MB of
+  it already dead. And `buildCatalog` is 141 ms for 237 entries with no
+  memoization, called ~2× per RPC.
+
+---
+
+### A defect shape worth checking for deliberately
+
+One half of a feature hardened, the other half missed. It has now paid off
+five times, every time found by accident:
+
+- redaction applied to `pull` but not `applyUpdate`
+- the auto-run denylist applied to `wiring_actions.targetFile` but not
+  `install_target`
+- the capability manifest's push justification
+- the MCP server's `instructions` describing a read-only surface while
+  exposing writes
+- Phase 15's status
+
+The cheap check is mechanical, not vigilant: when hardening one call site, grep
+for the *other* callers of the same underlying operation before closing the
+item. Finding these by accident five times is evidence the accident is the
+process.
+
+### Retracted: the CI worker-count theory
+
+A red run was attributed to `vitest.config.ts`'s
+`WORKERS = Math.max(2, floor(cores/2))` defeating its own cap on a 2-core
+runner. **Wrong.** The repo is public, so GitHub allocates **4-core** Windows
+runners: `max(2, floor(4/2))` = 2 workers, 50% subscribed, exactly as intended.
+No config change was made.
+
+`.github/workflows/ci.yml`'s own comment already said "2 workers on a 4-core
+runner" — so this was a reading error, not a knowledge gap, and those are the
+ones that recur. What the logs do support: the red run was ~25% slower overall
+(555 s vs 444 s of summed test time) and the failing test is the most
+subprocess-heavy in its file, while a sibling hitting the same auth boundary
+passed in 1954 ms. Why it crossed 30 s that once is still unproven — which is
+why the response was to instrument (`SidecarSession` now rejects on child exit
+and surfaces stderr) rather than to raise the timeout.
 
 ---
 
@@ -225,14 +785,41 @@ Ordered by what blocks value, not by phase number.
 1. **Finish Phase 12** — responsive breakpoints (there are none today), error
    states on the remaining views, keyboard reachability, toast dismissal, and
    consolidating 10 chip classes and 5 card classes into one of each.
-2. **Make the gates real** — ESLint does not cover the 343KB desktop frontend
-   at all, `test/` is not typechecked, and there is no CI. Nothing enforces
-   any of it on a push.
-3. **Split `app.js`** — 7,464 lines in one IIFE. Deferred until ESLint covers
+2. **Make the gates real** — CI now exists and runs lint, typecheck and the
+   full suite on every push, but ESLint still does not cover the 343KB desktop
+   frontend at all and `test/` is still not typechecked, so what CI enforces is
+   narrower than it looks. The frontend now has its first real *behavioural*
+   gate — `test/e2e/detailDisclosure.e2e.test.ts`, five browser tests against
+   the real `index.html` — which is what caught the last UI defect class, but
+   it is coverage, not static analysis: the 7,464 lines still lint to
+   `rules: 0`. It also has its first *static* gate, in
+   `test/unit/capabilities.test.ts`: every sidecar command `app.js` calls must
+   exist in the dispatch table and be declared. Names only — argument and
+   result shapes stay uncovered, because the browser tests stub the sidecar
+   with hand-written fixtures, so a changed result shape still passes
+   everything. Closing that needs a real-sidecar browser harness.
+3. **Multi-client artifact install — sized, not a nice-to-have.** Measured
+   against the live catalog: **212 of 237 artifacts (89%) install under
+   `.claude/`** — 80 `skills`, 67 `agents`, 35 `rules`, 30 `commands`. That, and
+   not any missing tool, is what makes the catalog single-vendor; the MCP server
+   itself is client-agnostic. `agent-native` solves this concretely:
+   `packages/skills/src/index.ts`'s `installSkills` resolves a per-client install
+   root (Claude → `.claude/skills`, Codex → `~/.codex/skills`, others →
+   `.agents/skills`), and `app-skill.ts`'s `buildAppSkillPack()` emits Codex,
+   Claude-marketplace, generic-MCP and ChatGPT-connector formats from one
+   manifest. The transcript raises reach twice; this is what answering it costs.
+4. **Split `app.js`** — 7,464 lines in one IIFE. Deferred until ESLint covers
    it, so the move happens with a linter watching.
-4. **A shared command surface** — the CLI exposes 15 commands and the sidecar
-   40, with nothing shared between them, so they drift. `remote add`/`remove`
-   exist twice and only the sidecar copy has tests.
+5. **A shared command surface** — the CLI exposes 15 commands and the sidecar
+   40, with nothing shared between them, so they drift. Now scoped properly as
+   **Phase 16** (see above), which found this is worse than described: the
+   `hasWiring` gate exists in three places, and the surfaces silently disagree on
+   things like whether `--remote` is required. The "only the sidecar copy has
+   tests" line was imprecise — sidecar `remote.add`/`remove` are genuinely
+   asserted, and so — contrary to what this line originally said — are the CLI
+   equivalents: `remote add`'s success path and `remote remove`'s
+   cache-directory deletion are both really asserted in
+   `test/e2e/pull.e2e.test.ts`.
 
 Deliberately unranked: **Phase 15 (delivery tooling)**'s v1 is proposed
 (3 PRs, awaiting review), but "done" is a real engagement using one of them —

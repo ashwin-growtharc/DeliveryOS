@@ -42,7 +42,7 @@ export function registerConfigCommand(program: Command): void {
         options.set,
         readExistingEnvValues(cwd),
       );
-      const { gitignoreWarning } = applyInstallParams(cwd, resolved.values);
+      const { gitignoreWarning, installParamWarning } = applyInstallParams(cwd, resolved.values);
 
       // Reports based on what was actually ASKED for this call (setKeys),
       // not whether .env.local's bytes technically changed --
@@ -66,6 +66,9 @@ export function registerConfigCommand(program: Command): void {
       }
       if (gitignoreWarning) {
         console.log(gitignoreWarning);
+      }
+      if (installParamWarning) {
+        console.log(installParamWarning);
       }
 
       // Real scope boundary, not silently omitted: this only rotates the

@@ -62,8 +62,8 @@ Three findings materially constrain the design.
 ### 3.1 A pulled component can compute, but can never save
 
 The preview iframe is `sandbox="allow-scripts"` with **no
-`allow-same-origin`** (`src-tauri/spike-ui/app.js:1230`, and five other
-call sites), which gives it an opaque origin — `localStorage`,
+`allow-same-origin`** (`iframe.sandbox = 'allow-scripts'` in
+`src-tauri/spike-ui/app.js`, six call sites), which gives it an opaque origin — `localStorage`,
 `sessionStorage`, and `IndexedDB` all throw. A strict CSP
 (`default-src 'none'`, `src/engine/preview/compile.ts:768`) additionally
 blocks `fetch`, XHR, and WebSockets.
@@ -76,7 +76,7 @@ message handler).
 
 **Consequence: a scoping calculator rendered in DeliveryOS's preview could
 compute a number and would then lose it.** Every preview surface is also a
-height-clamped card (max 640px, `app.js:1071-1073`) — there is no full-page
+height-clamped card (max 640px, `clampPreviewHeight` in `app.js`) — there is no full-page
 host a real tool UI could occupy.
 
 *This is a deliberate security boundary, not a bug. It should not be widened
@@ -191,7 +191,8 @@ library**, so the next project starts already knowing to check for it.
   history shows how the risks actually evolved week to week.
 - **Known limitation:** markdown task-list checkboxes render as
   `disabled` and are non-interactive; there is no persistence for them
-  (`src-tauri/spike-ui/app.js:2081-2114`). A register is therefore a table
+  (`renderMarkdownToSandboxedIframe` in `src-tauri/spike-ui/app.js`, which parses
+  with `gfm: true` into an opaque-origin iframe). A register is therefore a table
   someone edits in their editor, not a clickable UI. **Accepted for v1** —
   making it interactive would require §3.1 and §3.2 to change.
 

@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { buildCatalog, annotateCatalog, takeSkippedManifests } from '../../engine/catalog/catalog';
+import { buildCatalogWithSkipped, annotateCatalog } from '../../engine/catalog/catalog';
 import { printCatalog } from '../output';
 
 export function registerListCommand(program: Command): void {
@@ -15,14 +15,15 @@ export function registerListCommand(program: Command): void {
       // parity gap this closes: the app's Browse view has always shown
       // this over the exact same catalog data, but `deliveryos list`
       // never had it at all.
-      const entries = annotateCatalog(buildCatalog(), process.cwd(), options.remote);
+      const built = buildCatalogWithSkipped();
+      const entries = annotateCatalog(built.entries, process.cwd(), options.remote);
       printCatalog(entries, Boolean(options.json));
 
       // A manifest that could not be loaded is reported AFTER the catalog,
       // never instead of it. One bad artifact used to throw and leave the
       // user with nothing but a validation error -- the whole catalog gone
       // because of a single file they very likely did not write.
-      const skipped = takeSkippedManifests();
+      const skipped = built.skipped;
       if (skipped.length > 0 && !options.json) {
         process.stderr.write(
           `

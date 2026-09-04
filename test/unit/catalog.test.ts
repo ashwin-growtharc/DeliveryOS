@@ -2,7 +2,12 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { buildCatalog, annotateCatalog, CatalogEntry } from '../../src/engine/catalog/catalog';
+import {
+  buildCatalog,
+  annotateCatalog,
+  buildCatalogWithSkipped,
+  CatalogEntry,
+} from '../../src/engine/catalog/catalog';
 import { remotesRegistryPath, remoteCachePath } from '../../src/engine/paths';
 
 let deliveryOsHome: string;
@@ -145,5 +150,63 @@ describe('annotateCatalog', () => {
     } finally {
       fs.rmSync(cwd, { recursive: true, force: true });
     }
+  });
+});
+
+describe('buildCatalogWithSkipped', () => {
+  function writeRegistry(names: string[]): void {
+    fs.mkdirSync(deliveryOsHome, { recursive: true });
+    fs.writeFileSync(
+      remotesRegistryPath(),
+      JSON.stringify({
+        remotes: names.map((name) => ({
+          name,
+          url: `https://example.invalid/${name}`,
+          addedAt: new Date().toISOString(),
+        })),
+      }),
+      'utf-8',
+    );
+  }
+
+  function writeBrokenArtifact(remoteCacheDir: string, id: string): void {
+    const artifactDir = path.join(remoteCacheDir, 'artifacts', id);
+    fs.mkdirSync(path.join(artifactDir, 'payload'), { recursive: true });
+    // Valid YAML, invalid manifest -- `kind` and every other required field
+    // missing, so schema validation rejects it and parser.ts skips it.
+    fs.writeFileSync(path.join(artifactDir, 'manifest.yaml'), `id: ${id}\n`, 'utf-8');
+  }
+
+  it('returns the skipped manifests alongside the catalog, so no caller has to drain shared state', () => {
+    writeRegistry(['test-remote']);
+    const cacheDir = remoteCachePath('test-remote');
+    writeArtifact(cacheDir, 'good-artifact', 'doc');
+    writeBrokenArtifact(cacheDir, 'broken-artifact');
+
+    const built = buildCatalogWithSkipped();
+
+    expect(built.entries.map((e) => e.manifest.id)).toEqual(['good-artifact']);
+    expect(built.skipped).toHaveLength(1);
+    expect(built.skipped[0].remoteName).toBe('test-remote');
+    expect(built.skipped[0].path).toContain('broken-artifact');
+  });
+
+  it('gives every build its OWN list, so two overlapping builds cannot steal from each other', () => {
+    // The whole reason the module-level record was removed. It was safe only
+    // because the Tauri host spawns one process per RPC; a long-lived process
+    // (an MCP server) removes that mask, and refreshCatalog awaits before
+    // building -- so one call could drain another's list and report a broken
+    // catalog as a clean one.
+    writeRegistry(['test-remote']);
+    const cacheDir = remoteCachePath('test-remote');
+    writeBrokenArtifact(cacheDir, 'broken-artifact');
+
+    const first = buildCatalogWithSkipped();
+    const second = buildCatalogWithSkipped();
+
+    expect(first.skipped).toHaveLength(1);
+    // Reading the second build must not have emptied the first.
+    expect(second.skipped).toHaveLength(1);
+    expect(first.skipped).not.toBe(second.skipped);
   });
 });

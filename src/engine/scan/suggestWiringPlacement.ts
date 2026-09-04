@@ -3,7 +3,8 @@ import * as path from 'path';
 import { runClaudeSubprocess, DISALLOWED_TOOLS } from '../claude/runClaudeSubprocess';
 import { resolveContainedTargetFile } from '../pull/wiring';
 import { runProjectBuild, BuildVerificationResult } from '../pull/verifyBuild';
-import { wiringPlacementLogPath } from '../paths';
+import { wiringPlacementLogPath, ensureProjectDeliveryOsDir } from '../paths';
+import { redactEmbeddedSecrets } from '../audit/redact';
 import { WiringPlacementError } from '../errors';
 
 const MAX_LISTED_FILES = 400;
@@ -226,10 +227,25 @@ interface WiringPlacementLogEntry {
   rolledBack: boolean;
 }
 
+/** The ONE place `.deliveryos/wiring-placement-log.jsonl` is written, so
+ * redaction lives here at the write boundary like the other three audit logs.
+ *
+ * This entry stores no file bodies, so it never carried the `before`/`after`
+ * exposure the other logs did -- but `rebuildOutput` is a real project build's
+ * captured output, which can print an environment dump on failure, and it was
+ * the one such field still appended raw. `redactEmbeddedSecrets` rather than
+ * the truncating form, so the Activity panel shows exactly what it showed
+ * before for every ordinary build. */
 function appendWiringPlacementLog(cwd: string, entry: WiringPlacementLogEntry): void {
   const logPath = wiringPlacementLogPath(cwd);
-  fs.mkdirSync(path.dirname(logPath), { recursive: true });
-  fs.appendFileSync(logPath, `${JSON.stringify(entry)}\n`, 'utf-8');
+  ensureProjectDeliveryOsDir(cwd);
+  const redacted: WiringPlacementLogEntry = {
+    ...entry,
+    rebuildOutput: entry.rebuildOutput === undefined
+      ? undefined
+      : redactEmbeddedSecrets(entry.rebuildOutput),
+  };
+  fs.appendFileSync(logPath, `${JSON.stringify(redacted)}\n`, 'utf-8');
 }
 
 /**

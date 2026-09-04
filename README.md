@@ -101,6 +101,68 @@ It needs Rust and, on Windows, MSVC Build Tools — see
 | `check-pending-pushes` | Ask GitHub what actually happened to your open PRs |
 | `check-drift <id> -r <remote> -s <path>` | Has the artifact's original external source changed? |
 
+### For AI agents
+
+| Command | What it does |
+|---|---|
+| `mcp` | Run an MCP server over stdio, so an agent can search, read and contribute to the catalog |
+
+The catalog is 237 artifacts across three remotes. Until now the only ways to
+look at it were this CLI and the desktop app — so the agent working in your
+project, the one most likely to benefit from knowing there is already a
+`code-reviewer` agent for the job, was the only party that could not ask.
+
+`deliveryos mcp` fixes that. Nine tools over the same engine the CLI and the
+desktop app use. Five are declared read-only to the client and four are not;
+the **Writes** column below says what each one actually touches, which is not
+the same question:
+
+| Tool | Answers | Writes |
+|---|---|---|
+| `search_artifacts` | "what is there for X?" — by query, kind, remote or install status | — |
+| `get_artifact` | "what does this actually do?" — full manifest, its SKILL.md, every payload file name, and the shell command it would run | — |
+| `read_artifact_file` | "give me the template itself" — one payload file by name, so an agent can fill it in | — |
+| `catalog_overview` | "what kinds of thing exist here?" — counts, plus any manifest that failed to load | — |
+| `list_remotes` | "where does any of this come from?" — and says plainly when nothing is configured | — |
+| `refresh_catalog` | the above, after fetching every remote from git | caches |
+| `add_remote` | registers a repository as a source of artifacts | caches |
+| `preview_contribution` | "what would sharing my edits publish?" — every file, before anything is published | — |
+| `contribute_artifact` | opens a pull request from your edits | **a shared remote** |
+
+**It installs nothing, and that is deliberate.** DeliveryOS is a CLI and Claude
+Code has a terminal, so an agent installs the way you do — `get_artifact` hands
+back the exact command. What that changes is *where you approve*: you see
+`deliveryos pull email-code-auth --remote ai-helpers` and decide on that, rather
+than approving a tool once and having it act on your behalf afterwards. And
+because the agent reads the artifact first, it can tell you that this particular
+one runs `cd ../../.. && npm install next-auth@beta` on your machine — which was
+invisible until it had already happened.
+
+**Contributing back is two tools, not one.** Push is all-or-nothing over the
+whole installed folder, so an artifact you filled in with real client details
+would publish those to a shared repository. `preview_contribution` shows you the
+exact file list first; `contribute_artifact` then requires the token it returned,
+which authorises that diff and only that diff, once. It cannot force over a
+colleague's merged change, and it refuses while an earlier PR of yours is still
+open. The PR body records that an agent assembled it.
+
+**Already wired up.** [`.mcp.json`](.mcp.json) is committed, so Claude Code will
+offer to enable the server the next time you open this repo — approve it once
+and the tools are available. It runs `npx tsx src/index.ts mcp`, so a fresh
+clone needs nothing beyond `npm install`.
+
+**Not Claude-only.** The server is the official MCP SDK over stdio with no
+client-specific logic, so Cursor, VS Code's agent mode, Windsurf, Zed and
+anything else that speaks MCP work too — `.mcp.json` is simply Claude Code's
+config format. That portability was deliberate: the setup interview avoids MCP
+elicitation precisely because it would have worked in one client only.
+
+Client configuration for other setups (including the Windows `.cmd` caveat and
+the packaged `.exe`), the architecture, and the reasoning behind every refusal
+are in [docs/mcp-server.md](docs/mcp-server.md). The folder structure and which
+rules are enforced by a test rather than by convention are in
+[ARCHITECTURE.md](ARCHITECTURE.md#35-where-the-code-lives).
+
 ## Claude Code skills
 
 DeliveryOS ships six skills, in two groups.
@@ -270,6 +332,7 @@ changes by hand.
 | [docs/backend-plugin-lifecycle.md](docs/backend-plugin-lifecycle.md) | Every backend-plugin stage: install, wire, merge, uninstall, secrets, updates |
 | [docs/skills.md](docs/skills.md) | The six Claude Code skills: what each does, and how to get them |
 | [docs/release-process.md](docs/release-process.md) | Runbook for cutting a signed release with working auto-update |
+| [docs/manual-smoke-test-update-and-refusals.md](docs/manual-smoke-test-update-and-refusals.md) | By-hand runbook: the `src/`-project update path, the `install_target` denylist, and audit-log redaction |
 
 ---
 

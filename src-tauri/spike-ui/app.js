@@ -158,6 +158,7 @@
     // (from sync.checkForUpdates) as entries: { manifest, remoteName,
     // localStatus, installTarget, availableVersion? }[]
     catalog: [],
+    catalogSkipped: [],
     search: '',
     // Multi-select kind filter -- empty set means "All". A Set (not a
     // single string) so e.g. "agent" + "skill" can be viewed together; this
@@ -608,10 +609,36 @@
 
   // ---------- browse ----------
 
+  /** True for the three `assertUsableProjectDir` refusals -- not absolute,
+   * does not exist, not a directory. They are the only failures where the
+   * right response is to forget the stored folder and ask for another one;
+   * every other error is about an artifact or a remote, not the project.
+   *
+   * Matched on the message because these cross the sidecar's JSON-RPC
+   * boundary as plain Errors carrying no distinguishing type. src/engine/paths.ts
+   * owns the wording, and test/e2e/detailDisclosure.e2e.test.ts pins the two
+   * sides together so a reword there cannot silently disable this. */
+  function isUnusableProjectDirError(err) {
+    return /^The project directory /.test(errorText(err) || '');
+  }
+
+  /** Forgets the stored project folder and returns to "No folder selected" --
+   * the recovery init() already performs on a stale stored path, lifted out so
+   * the in-session paths can share it instead of getting stuck. */
+  function forgetUnusableProjectDir() {
+    state.projectDir = null;
+    localStorage.removeItem(PROJECT_DIR_KEY);
+    state.catalog = [];
+    state.catalogSkipped = [];
+    state.catalogError = null;
+    renderFolderDisplay();
+  }
+
   async function loadCatalog() {
     renderFolderDisplay();
     if (!state.projectDir) {
       state.catalog = [];
+      state.catalogSkipped = [];
       renderChips();
       renderCards();
       refreshTagPickerSuggestions();
@@ -620,21 +647,45 @@
     const refreshBtn = $('refresh-btn');
     await withBusy(refreshBtn, 'Working...', async () => {
       try {
-        state.catalog = await call('catalog.list', { cwd: state.projectDir });
+        const listed = normalizeCatalogResult(await call('catalog.list', { cwd: state.projectDir }));
+        state.catalog = listed.entries;
+        state.catalogSkipped = listed.skipped;
         // Cleared on success, so a recovered load stops showing the old error.
         state.catalogError = null;
       } catch (err) {
         toastError(err);
-        // Recorded, not just toasted. Setting the catalog to [] and relying on
-        // a 5-second toast to explain why is how a failed load ended up
-        // looking exactly like an empty catalog.
-        state.catalogError = errorText(err);
-        state.catalog = [];
+        if (isUnusableProjectDirError(err)) {
+          // Retrying cannot fix a folder that is gone, and the error state
+          // below offers a Retry bound to refreshCatalogFromRemotes() that
+          // would re-throw this exact error every time -- leaving the only
+          // real escape hatch buried in Settings. Recover the way init()
+          // already does instead.
+          forgetUnusableProjectDir();
+        } else {
+          // Recorded, not just toasted. Setting the catalog to [] and relying on
+          // a 5-second toast to explain why is how a failed load ended up
+          // looking exactly like an empty catalog.
+          state.catalogError = errorText(err);
+          state.catalog = [];
+          state.catalogSkipped = [];
+        }
       }
       renderChips();
       renderCards();
       refreshTagPickerSuggestions();
     });
+  }
+
+  /** `catalog.list`/`catalog.refresh` used to return a bare array and now
+   * return `{ entries, skipped }`. Tolerating BOTH shapes is deliberate, not
+   * politeness: test/e2e/uiOperationStore.e2e.test.ts drives this file against
+   * a stubbed engine that returns an array, and that test has no reason to
+   * know about a wire-format change on the engine side. */
+  function normalizeCatalogResult(result) {
+    if (Array.isArray(result)) {
+      return { entries: result, skipped: [] };
+    }
+    return { entries: result?.entries ?? [], skipped: result?.skipped ?? [] };
   }
 
   /** Bound only to the Refresh button's click -- unlike the plain
@@ -654,11 +705,23 @@
     const refreshBtn = $('refresh-btn');
     await withBusy(refreshBtn, 'Refreshing...', async () => {
       try {
-        state.catalog = await call('catalog.refresh', { cwd: state.projectDir });
+        const refreshed = normalizeCatalogResult(await call('catalog.refresh', { cwd: state.projectDir }));
+        state.catalog = refreshed.entries;
+        state.catalogSkipped = refreshed.skipped;
         state.catalogError = null;
       } catch (err) {
         toastError(err);
-        state.catalogError = errorText(err);
+        if (isUnusableProjectDirError(err)) {
+          forgetUnusableProjectDir();
+        } else {
+          state.catalogError = errorText(err);
+          // Cleared here too, matching loadCatalog's own catch. Leaving the
+          // previous entries in state behind the error banner is invisible
+          // today only because renderCards early-returns on catalogError --
+          // exactly the asymmetry that bites the moment that return moves.
+          state.catalog = [];
+          state.catalogSkipped = [];
+        }
       }
       renderChips();
       renderCards();
@@ -1676,6 +1739,22 @@
         goTo: hasInstallParams ? jump('configuration', 'detail-install-params-fields') : null,
       },
       {
+        // The one side effect that was shown nowhere before a pull, in either
+        // UI -- while the wiring snippets beside it have always been fully
+        // visible. Deliberately quotes the command verbatim rather than
+        // describing it: "runs a setup command" tells you nothing you can
+        // actually judge.
+        show: !!manifest.post_install,
+        title: 'It runs a command on your machine',
+        description:
+          'After the files are copied in, this artifact runs the following command inside its own '
+          + 'install folder:\n\n'
+          + (manifest.post_install || '')
+          + '\n\nMost of these just install packages the artifact needs. It has your project root '
+          + 'available to it, so read it before pulling something you do not recognise.',
+        goTo: null,
+      },
+      {
         show: hasWiringActions,
         title: 'New files get added for you',
         description: 'Any new file this needs gets created automatically. If it changes how your project builds, that gets checked right away.',
@@ -2652,6 +2731,9 @@ ${bodyHtml}
       // A real secrets-exposure risk -- this is specifically the "you just
       // typed in a secret" moment, so it gets its own distinct toast, never
       // folded quietly into the message above where it could be missed.
+      if (result.installParamWarning) {
+        toastError(new Error(result.installParamWarning));
+      }
       if (result.gitignoreWarning) {
         toastError(new Error(result.gitignoreWarning));
       }
@@ -4254,6 +4336,7 @@ ${bodyHtml}
       const opKey = await beginProgress();
       let succeeded = 0;
       const failures = [];
+      const paramWarnings = [];
       // Every artifact pulled here shares the same `cwd`/`.gitignore`, so a
       // warning from one is the exact same warning every other would also
       // produce -- a single aggregated toast at the end is the right call,
@@ -4286,6 +4369,14 @@ ${bodyHtml}
             });
             succeeded += 1;
             gitignoreWarning = gitignoreWarning || result.gitignoreWarning;
+            // Per-artifact, unlike gitignoreWarning: it names WHICH keys were
+            // refused, so collapsing several into one toast would lose the only
+            // useful part. Kept OUT of `failures` -- the pull itself succeeded,
+            // and `endProgress(failures.length === 0)` would otherwise report
+            // the whole batch as failed over a refused param.
+            if (result.installParamWarning) {
+              paramWarnings.push(`${entry.manifest.id}: ${result.installParamWarning}`);
+            }
           }
         } catch (err) {
           failures.push(`${entry.manifest.id}: ${err instanceof Error ? err.message : String(err)}`);
@@ -4301,6 +4392,9 @@ ${bodyHtml}
       }
       if (gitignoreWarning) {
         toastError(new Error(gitignoreWarning));
+      }
+      for (const warning of paramWarnings) {
+        toastError(new Error(warning));
       }
       for (const failure of failures) {
         toastError(new Error(failure));
@@ -4506,6 +4600,31 @@ ${bodyHtml}
     errorHost.hidden = true;
     errorHost.innerHTML = '';
 
+    // Reported AFTER the catalog, never instead of it -- the same rule
+    // src/cli/commands/list.ts already documents for its own copy of this
+    // message. `grid` is cleared on every render, so this self-cleans.
+    if (state.catalogSkipped.length > 0) {
+      const notice = document.createElement('div');
+      notice.className = 'meta';
+      // Full width. `#card-grid` is a repeat(auto-fit, minmax(230px, 1fr))
+      // grid, so without this the notice renders as a single narrow cell in
+      // the top-left rather than a banner across the top.
+      notice.style.gridColumn = '1 / -1';
+      // `path` is what identifies WHICH artifact -- `reason` alone never
+      // names one (parser.ts produces "not valid YAML: ..." / "failed
+      // validation: ..."), so on a 234-artifact remote the message was
+      // unactionable without it. src/cli/commands/list.ts prints the path for
+      // exactly this reason.
+      const shown = state.catalogSkipped
+        .slice(0, 3)
+        .map((s) => `${s.remoteName}: ${s.path} (${s.reason})`)
+        .join('; ');
+      const more =
+        state.catalogSkipped.length > 3 ? ` (+${state.catalogSkipped.length - 3} more)` : '';
+      notice.textContent = `${state.catalogSkipped.length} artifact(s) could not be loaded and were skipped: ${shown}${more}`;
+      grid.appendChild(notice);
+    }
+
     $('browse-empty').hidden = entries.length !== 0;
     $('browse-empty').textContent =
       state.search.trim() || state.activeKinds.size > 0
@@ -4522,7 +4641,11 @@ ${bodyHtml}
    * the call. The single call site for all three actions everywhere they
    * can be triggered one-at-a-time: Detail's action button, and a row's
    * own inline button inside a Tag Folder view. */
-  async function runArtifactAction(entry, action, button) {
+  /** `force` is passed ONLY by Detail's "discard local edit and re-sync"
+   * button, which has already shown its own confirm dialog. Every other caller
+   * leaves it false, so an ordinary Pull now refuses rather than silently
+   * overwriting someone's edits -- see PullOptions.force in the engine. */
+  async function runArtifactAction(entry, action, button, force = false) {
     await withBusy(button, 'Working...', async () => {
       await beginProgress(entry);
       try {
@@ -4557,6 +4680,7 @@ ${bodyHtml}
               id: entry.manifest.id,
               remote: entry.remoteName,
               cwd: state.projectDir,
+              force,
             });
             // Phase 12: one coherent plain-language read of everything
             // that happened (wiring applied/needsReview, build outcome,
@@ -4570,6 +4694,9 @@ ${bodyHtml}
             // to the calm health summary above -- never folded into it,
             // where it could easily get missed among routine wiring/build
             // news.
+            if (pullResult.installParamWarning) {
+              toastError(new Error(pullResult.installParamWarning));
+            }
             if (pullResult.gitignoreWarning) {
               toastError(new Error(pullResult.gitignoreWarning));
             }
@@ -4595,8 +4722,12 @@ ${bodyHtml}
               id: entry.manifest.id,
               remote: entry.remoteName,
               cwd: state.projectDir,
+              force,
             });
             toastSuccess(`Pulled ${result.manifest.id}`);
+            if (result.installParamWarning) {
+              toastError(new Error(result.installParamWarning));
+            }
             if (result.gitignoreWarning) {
               toastError(new Error(result.gitignoreWarning));
             }
@@ -4608,6 +4739,7 @@ ${bodyHtml}
             options: {},
           });
           toastSuccess(`Pushed ${entry.manifest.id}: opened PR #${result.number}`, result.url);
+          if (result.cacheResetWarning) toastError(new Error(result.cacheResetWarning));
         }
         endProgress(true, entry);
         await loadCatalog();
@@ -4835,6 +4967,7 @@ ${bodyHtml}
         });
         endProgress(true, entry);
         toastSuccess(`Updated ${entry.manifest.id} metadata: opened PR #${result.number} (${result.url})`);
+        if (result.cacheResetWarning) toastError(new Error(result.cacheResetWarning));
         $('detail-edit-form').hidden = true;
         await loadCatalog();
         refreshDetailIfShown(entry);
@@ -5427,7 +5560,7 @@ ${bodyHtml}
     // each independently no-op on their own empty list).
     const hasInstallParams = manifest.install_params && manifest.install_params.length > 0;
     const hasWiringActions = manifest.wiring_actions && manifest.wiring_actions.length > 0;
-    detailTabState.configuration = hasInstallParams || hasWiringActions;
+    detailTabState.configuration = hasInstallParams || hasWiringActions || !!manifest.post_install;
     if (detailTabState.configuration) {
       renderPostInstallHealthBanner(entry);
       void renderInstallParamsSection(entry);
@@ -5575,7 +5708,9 @@ ${bodyHtml}
               ' and replace them with the current upstream version. Continue?',
           )
         ) {
-          void runArtifactAction(entry, 'pull', overwriteBtn).then(() => refreshDetailIfShown(entry));
+          // force: the confirm above IS the gate -- without it the engine now
+          // refuses, and this button would silently stop working.
+          void runArtifactAction(entry, 'pull', overwriteBtn, true).then(() => refreshDetailIfShown(entry));
         }
       };
     } else {
@@ -6770,6 +6905,7 @@ ${bodyHtml}
           },
         });
         toastSuccess(`Proposed ${id}: opened PR #${result.number}`, result.url);
+        if (result.cacheResetWarning) toastError(new Error(result.cacheResetWarning));
         resetAddNewForm();
         // Return to wherever this proposal actually came from -- Scan
         // (when reviewing a discovered candidate) or Browse (direct entry)
@@ -7178,6 +7314,16 @@ ${bodyHtml}
         toastSuccess(`${after - before} new update(s) available.`);
       }
     } catch (err) {
+      // A background timer must not nag, and must not throw away a setting for
+      // a condition that may well be transient (an unmounted network drive
+      // comes back). Before this, a stale project folder toasted the same
+      // "does not exist" error every 20 minutes for the life of the session,
+      // with no way to stop it short of restarting the app. Stay quiet here
+      // and let the foreground paths -- where someone is actually present to
+      // answer the prompt -- do the recovering.
+      if (isUnusableProjectDirError(err)) {
+        return;
+      }
       toastError(err);
     } finally {
       autoSyncInFlight = false;
@@ -7435,7 +7581,9 @@ ${bodyHtml}
     if (stored) {
       state.projectDir = stored;
       try {
-        state.catalog = await call('catalog.list', { cwd: stored });
+        const restored = normalizeCatalogResult(await call('catalog.list', { cwd: stored }));
+        state.catalog = restored.entries;
+        state.catalogSkipped = restored.skipped;
       } catch (err) {
         // Stored path is no longer usable (removed, renamed, or otherwise
         // invalid) -- clear it and fall back to prompting for a folder
@@ -7445,6 +7593,7 @@ ${bodyHtml}
         state.projectDir = null;
         localStorage.removeItem(PROJECT_DIR_KEY);
         state.catalog = [];
+        state.catalogSkipped = [];
       }
     }
 

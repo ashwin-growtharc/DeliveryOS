@@ -29,11 +29,13 @@
  */
 import * as readline from 'readline';
 import {
-  buildCatalog,
   refreshCatalog,
   annotateCatalog,
-  CatalogListEntry,
+  buildCatalogWithSkipped,
+  CatalogListResult,
 } from './engine/catalog/catalog';
+import { assertUsableProjectDir } from './engine/paths';
+import { addRemote, removeRemote } from './engine/remote/manageRemotes';
 import { pullArtifact, resolveArtifact, ProgressCallback } from './engine/pull/pull';
 import { removeArtifact } from './engine/pull/removeArtifact';
 import { resolveInstallParamValues, applyInstallParams, readExistingEnvValues } from './engine/pull/installParams';
@@ -54,16 +56,8 @@ import { detectArtifactMetadata } from './engine/scan/detectArtifactMetadata';
 import { suggestMetadata } from './engine/scan/suggestMetadata';
 import { suggestAntiPatterns } from './engine/scan/suggestAntiPatterns';
 import { getCommitIdentity } from './engine/git/git';
-import {
-  listRemotes,
-  addRemoteEntry,
-  removeRemoteEntry,
-  findRemote,
-  deriveNameFromUrl,
-} from './engine/remote/remoteRegistry';
-import { cloneRemote, cachePath } from './engine/remote/remoteCache';
-import * as fs from 'fs';
-import { RemoteRegistryError, UnknownCommandError } from './engine/errors';
+import { listRemotes } from './engine/remote/remoteRegistry';
+import { UnknownCommandError } from './engine/errors';
 import {
   compileArtifactPreview,
   compileLocalPreview,
@@ -123,6 +117,25 @@ function requireString(args: Record<string, unknown>, key: string): string {
   return value;
 }
 
+/**
+ * The project directory, validated -- not merely "a non-empty string".
+ *
+ * `requireString(args, 'cwd')` was the only check for months, and it is not
+ * one: `cwd` arrives here over JSON-RPC from the Tauri host, so a relative or
+ * nonexistent path resolves against *this process* rather than the project.
+ * Combined with `install_target: "."` (a supported shape) that puts the
+ * payload copy and `post_install` in a directory nobody named.
+ *
+ * Applied to reads as well as writes on purpose: a bad `cwd` on `catalog.list`
+ * does not destroy anything, but it does report install status for the wrong
+ * project, which is the same defect wearing a quieter coat.
+ */
+function requireProjectDir(args: Record<string, unknown>): string {
+  const cwd = requireString(args, 'cwd');
+  assertUsableProjectDir(cwd);
+  return cwd;
+}
+
 function optionalString(args: Record<string, unknown>, key: string): string | undefined {
   const value = args[key];
   return typeof value === 'string' && value.length > 0 ? value : undefined;
@@ -146,10 +159,16 @@ function optionalStringRecord(args: Record<string, unknown>, key: string): Recor
   return result;
 }
 
-function catalogList(args: Record<string, unknown>): CatalogListEntry[] {
-  const cwd = requireString(args, 'cwd');
+function catalogList(args: Record<string, unknown>): CatalogListResult {
+  const cwd = requireProjectDir(args);
   const remote = optionalString(args, 'remote');
-  return annotateCatalog(buildCatalog(), cwd, remote);
+  // Drained in the SAME call that built the catalog, and returned in the same
+  // response -- see CatalogListResult for why a separate `catalog.skipped`
+  // command could never work here. The CLI's `list` has always reported these;
+  // the app used to drop them, so a manifest that failed to parse looked
+  // simply absent rather than broken.
+  const built = buildCatalogWithSkipped();
+  return { entries: annotateCatalog(built.entries, cwd, remote), skipped: built.skipped };
 }
 
 /** Like `catalog.list`, but re-fetches every registered remote's local cache
@@ -159,31 +178,21 @@ function catalogList(args: Record<string, unknown>): CatalogListEntry[] {
 async function catalogRefresh(
   args: Record<string, unknown>,
   onProgress?: ProgressCallback,
-): Promise<CatalogListEntry[]> {
-  const cwd = requireString(args, 'cwd');
+): Promise<CatalogListResult> {
+  const cwd = requireProjectDir(args);
   const remote = optionalString(args, 'remote');
-  const entries = await refreshCatalog(onProgress);
-  return annotateCatalog(entries, cwd, remote);
+  const refreshed = await refreshCatalog(onProgress);
+  return { entries: annotateCatalog(refreshed.entries, cwd, remote), skipped: refreshed.skipped };
 }
 
 async function remoteAdd(
   args: Record<string, unknown>,
 ): Promise<{ name: string; url: string; dest: string }> {
-  const url = requireString(args, 'url');
-  const name = optionalString(args, 'name') ?? deriveNameFromUrl(url);
-
-  // Check for an existing registration before cloning anything, so a
-  // duplicate name fails fast without corrupting the existing entry or
-  // leaving behind a stray clone -- mirrors `runRemoteAdd`'s order exactly
-  // (src/cli/commands/remoteAdd.ts).
-  if (findRemote(name)) {
-    throw new RemoteRegistryError(`A remote named "${name}" is already registered`);
-  }
-
-  const dest = await cloneRemote(name, url);
-  await addRemoteEntry({ name, url, addedAt: new Date().toISOString() });
-
-  return { name, url, dest };
+  // Orchestration lives in `engine/remote/manageRemotes.ts`. This used to
+  // reimplement it, and the comment here said so -- "mirrors `runRemoteAdd`'s
+  // order exactly". Two copies of an order that matters (check before clone,
+  // so a duplicate name leaves no stray directory) is one copy too many.
+  return addRemote(requireString(args, 'url'), optionalString(args, 'name'));
 }
 
 /** Unregisters a remote and deletes its local cache clone -- mirrors
@@ -191,12 +200,7 @@ async function remoteAdd(
  * Doesn't touch any project's lockfile/pulled files, only this remote's
  * own registration + cache. */
 async function remoteRemove(args: Record<string, unknown>): Promise<{ name: string }> {
-  const name = requireString(args, 'name');
-  await removeRemoteEntry(name); // throws RemoteRegistryError if not registered
-  const dest = cachePath(name);
-  if (fs.existsSync(dest)) {
-    fs.rmSync(dest, { recursive: true, force: true });
-  }
+  const { name } = await removeRemote(requireString(args, 'name'));
   return { name };
 }
 
@@ -215,10 +219,14 @@ const commandTable: Record<string, CommandHandler> = {
 
   'artifact.pull': (args, { onProgress }) => {
     const id = requireString(args, 'id');
-    const cwd = requireString(args, 'cwd');
+    const cwd = requireProjectDir(args);
     const remote = optionalString(args, 'remote');
     const values = optionalStringRecord(args, 'values');
-    return pullArtifact(id, remote, cwd, onProgress, values);
+    // The app confirm-gates an overwrite of local edits itself (its own
+    // "This will discard your local edits" dialog), so it passes force AFTER
+    // the person has said yes -- otherwise that button would now refuse.
+    const force = args.force === true;
+    return pullArtifact(id, remote, cwd, onProgress, values, { force });
   },
 
   // Phase 10 item 1: "deterministic apply-and-test on Pull, no agent
@@ -231,10 +239,10 @@ const commandTable: Record<string, CommandHandler> = {
   // CLI's own `--no-wire` opt-out.
   'artifact.pullAndAutoWire': async (args, { onProgress }) => {
     const id = requireString(args, 'id');
-    const cwd = requireString(args, 'cwd');
+    const cwd = requireProjectDir(args);
     const remote = optionalString(args, 'remote');
     const values = optionalStringRecord(args, 'values');
-    const result = await pullAndAutoWire(id, remote, cwd, onProgress, values);
+    const result = await pullAndAutoWire(id, remote, cwd, onProgress, values, args.force === true);
     // Phase 12: the app's own persistent Detail banner and the Pull
     // toast both need this plain-language read, not just the raw
     // applied/needsReview/build/missingRequiredParams fields -- computed
@@ -250,7 +258,7 @@ const commandTable: Record<string, CommandHandler> = {
   // identical in both places, not two subtly different implementations.
   'artifact.applyInstallParams': (args) => {
     const id = requireString(args, 'id');
-    const cwd = requireString(args, 'cwd');
+    const cwd = requireProjectDir(args);
     const remote = optionalString(args, 'remote');
     const values = optionalStringRecord(args, 'values');
     const entry = resolveArtifact(id, remote);
@@ -259,10 +267,11 @@ const commandTable: Record<string, CommandHandler> = {
       values,
       readExistingEnvValues(cwd),
     );
-    const { gitignoreWarning } = applyInstallParams(cwd, resolved.values);
+    const { gitignoreWarning, installParamWarning } = applyInstallParams(cwd, resolved.values);
     return {
       missingRequiredParams: resolved.missingRequired,
       gitignoreWarning,
+      installParamWarning,
       // Same real scope boundary the CLI's own `config` command has always
       // printed on every call (src/cli/commands/config.ts) -- this only
       // rotates the value sitting in .env.local, never re-running
@@ -284,7 +293,7 @@ const commandTable: Record<string, CommandHandler> = {
   // artifacts never leaks one artifact's values into another's form.
   'artifact.readInstallParamValues': (args) => {
     const id = requireString(args, 'id');
-    const cwd = requireString(args, 'cwd');
+    const cwd = requireProjectDir(args);
     const remote = optionalString(args, 'remote');
     const entry = resolveArtifact(id, remote);
     const existing = readExistingEnvValues(cwd);
@@ -386,7 +395,7 @@ const commandTable: Record<string, CommandHandler> = {
   // copy-paste instructions.
   'artifact.resolveWiringActions': (args) => {
     const id = requireString(args, 'id');
-    const cwd = requireString(args, 'cwd');
+    const cwd = requireProjectDir(args);
     const remote = optionalString(args, 'remote');
     const entry = resolveArtifact(id, remote);
     return resolveWiringActions(entry.manifest.wiring_actions, cwd);
@@ -400,13 +409,13 @@ const commandTable: Record<string, CommandHandler> = {
   // when they actually want the answer. Same runProjectBuild every other
   // build-verify step already uses -- no new detection/timeout logic.
   'artifact.verifyBuild': (args) => {
-    const cwd = requireString(args, 'cwd');
+    const cwd = requireProjectDir(args);
     return runProjectBuild(cwd);
   },
 
   'artifact.push': async (args, { onProgress }) => {
     const id = requireString(args, 'id');
-    const cwd = requireString(args, 'cwd');
+    const cwd = requireProjectDir(args);
     const options = (args.options ?? {}) as PushOptions;
     // Unlike every other field on `options` (already narrow, engine-typed
     // shapes coming from the app's own UI, not free-text), `bump` arrives
@@ -426,7 +435,7 @@ const commandTable: Record<string, CommandHandler> = {
   // from, same as every other lockfile-driven command in this file.
   'artifact.remove': async (args) => {
     const id = requireString(args, 'id');
-    const cwd = requireString(args, 'cwd');
+    const cwd = requireProjectDir(args);
     return await removeArtifact(cwd, id);
   },
 
@@ -437,12 +446,12 @@ const commandTable: Record<string, CommandHandler> = {
   'remote.remove': (args) => remoteRemove(args),
 
   'sync.checkForUpdates': (args, { onProgress }) => {
-    const cwd = requireString(args, 'cwd');
+    const cwd = requireProjectDir(args);
     return checkForUpdates(cwd, onProgress);
   },
 
   'sync.resolvePendingPushes': (args, { onProgress }) => {
-    const cwd = requireString(args, 'cwd');
+    const cwd = requireProjectDir(args);
     return resolvePendingPushes(cwd, onProgress);
   },
 
@@ -452,13 +461,13 @@ const commandTable: Record<string, CommandHandler> = {
   // "Update" action) -- refuses (reports, never guesses) when local edits
   // are in the way; see applyAvailableUpdates's own doc comment.
   'artifact.applyUpdate': (args, { onProgress }) => {
-    const cwd = requireString(args, 'cwd');
+    const cwd = requireProjectDir(args);
     const id = requireString(args, 'id');
     return applyAvailableUpdates(cwd, onProgress, id);
   },
 
   'scan.run': (args, { onProgress }) => {
-    const cwd = requireString(args, 'cwd');
+    const cwd = requireProjectDir(args);
     const remote = requireString(args, 'remote');
     return scanForNewArtifacts(cwd, remote, onProgress);
   },
@@ -481,7 +490,7 @@ const commandTable: Record<string, CommandHandler> = {
   // Still freely editable before submit, same as every other autofilled
   // field here.
   'git.identity': (args) => {
-    const cwd = requireString(args, 'cwd');
+    const cwd = requireProjectDir(args);
     return getCommitIdentity(cwd);
   },
 
@@ -511,7 +520,7 @@ const commandTable: Record<string, CommandHandler> = {
   // from build-error text. No write, no audit-log entry -- see
   // fixBuildFailure.ts's own doc comments for why.
   'artifact.requestBuildFix': (args) => {
-    const cwd = requireString(args, 'cwd');
+    const cwd = requireProjectDir(args);
     const filePath = requireString(args, 'filePath');
     const buildError = requireString(args, 'buildError');
     return requestBuildFix(cwd, filePath, buildError);
@@ -523,7 +532,7 @@ const commandTable: Record<string, CommandHandler> = {
   // entry either way. Only reached after an explicit human confirmation
   // click in the UI; never automatic.
   'artifact.applyBuildFix': (args) => {
-    const cwd = requireString(args, 'cwd');
+    const cwd = requireProjectDir(args);
     const filePath = requireString(args, 'filePath');
     const fixedFile = requireString(args, 'fixedFile');
     const buildError = requireString(args, 'buildError');
@@ -541,7 +550,7 @@ const commandTable: Record<string, CommandHandler> = {
   // mechanism at all. No write, no audit-log entry -- see
   // requestWiringMerge.ts's own doc comments for why.
   'artifact.requestWiringMerge': (args) => {
-    const cwd = requireString(args, 'cwd');
+    const cwd = requireProjectDir(args);
     const targetFile = requireString(args, 'targetFile');
     const description = requireString(args, 'description');
     const instructions = requireString(args, 'instructions');
@@ -556,7 +565,7 @@ const commandTable: Record<string, CommandHandler> = {
   // appends exactly one audit-log entry either way. Only reached after
   // an explicit human confirmation click; never automatic.
   'artifact.applyWiringMerge': (args) => {
-    const cwd = requireString(args, 'cwd');
+    const cwd = requireProjectDir(args);
     const targetFile = requireString(args, 'targetFile');
     const mergedFile = requireString(args, 'mergedFile');
     const description = requireString(args, 'description');
@@ -575,7 +584,7 @@ const commandTable: Record<string, CommandHandler> = {
   // against). No write, no audit-log entry -- same "ask, then a human
   // confirms" shape as artifact.requestWiringMerge above.
   'artifact.requestWiringPlacement': (args) => {
-    const cwd = requireString(args, 'cwd');
+    const cwd = requireProjectDir(args);
     const declaredPath = requireString(args, 'declaredPath');
     const description = requireString(args, 'description');
     return suggestWiringPlacement(cwd, declaredPath, description);
@@ -588,7 +597,7 @@ const commandTable: Record<string, CommandHandler> = {
   // entry either way. Only reached after an explicit human confirmation
   // click; never automatic.
   'artifact.applyWiringPlacement': (args) => {
-    const cwd = requireString(args, 'cwd');
+    const cwd = requireProjectDir(args);
     const declaredPath = requireString(args, 'declaredPath');
     const suggestedPath = requireString(args, 'suggestedPath');
     const snippet = requireString(args, 'snippet');
@@ -610,7 +619,7 @@ const commandTable: Record<string, CommandHandler> = {
   // per-project, not per-artifact, so filtering matters the moment a
   // project has pulled more than one backend-plugin artifact.
   'artifact.readWiringMergeLog': (args) => {
-    const cwd = requireString(args, 'cwd');
+    const cwd = requireProjectDir(args);
     const remote = requireString(args, 'remote');
     const id = requireString(args, 'id');
     return { entries: readWiringMergeLog(cwd, remote, id) };
@@ -620,7 +629,7 @@ const commandTable: Record<string, CommandHandler> = {
   // read separately (own log file, own record shape) and merged
   // client-side into one chronological feed -- see renderActivitySection.
   'artifact.readBuildFixLog': (args) => {
-    const cwd = requireString(args, 'cwd');
+    const cwd = requireProjectDir(args);
     const remote = requireString(args, 'remote');
     const id = requireString(args, 'id');
     return { entries: readBuildFixLog(cwd, remote, id) };
@@ -641,7 +650,7 @@ const commandTable: Record<string, CommandHandler> = {
   // one audit-log entry either way. Only reached after an explicit
   // human confirmation click; never automatic.
   'artifact.applyAntiPatternFix': (args) => {
-    const cwd = requireString(args, 'cwd');
+    const cwd = requireProjectDir(args);
     const payloadPath = requireString(args, 'payloadPath');
     const file = requireString(args, 'file');
     const fixedFile = requireString(args, 'fixedFile');

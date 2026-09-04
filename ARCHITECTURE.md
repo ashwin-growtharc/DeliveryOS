@@ -90,6 +90,73 @@ were already comfortable with git, DeliveryOS would mostly be unnecessary. The
 entire reason it exists is that most of the intended audience (sales, HR,
 PMs) isn't, and shouldn't need to be.
 
+## 3.5 Where the code lives
+
+The repository is a **hexagon**: one engine, and several driving adapters over
+it. That is not aspiration — `test/unit/mcp.architecture.test.ts` fails the
+build if the newest adapter reaches past its port.
+
+```
+src/
+├─ engine/                    THE CORE — 72 files, 21 domains
+│  │                          Zero `console.*`, zero `process.cwd()`, zero
+│  │                          `commander` imports. Returns structured data to
+│  │                          every caller; never prints, never assumes a
+│  │                          surface.
+│  ├─ pull/                   install, remove, wiring, install_params
+│  ├─ push/                   contribute back: diff, PR content, planPush
+│  ├─ catalog/                aggregate manifests across remotes
+│  ├─ remote/                 registry + cache clones (manageRemotes)
+│  ├─ manifest/              schema, parser, version
+│  ├─ lockfile/               per-project record of what is installed
+│  ├─ sync/                   updates, pending-PR resolution
+│  ├─ scan/                   find reusable content, AI suggestions
+│  ├─ preview/                sandboxed component rendering (esbuild)
+│  ├─ github/                 GithubClient — a DRIVEN port, two impls
+│  ├─ git/, payload/, provenance/, audit/, drift/,
+│  │  guidelines/, routes/, claude/
+│  └─ paths.ts                every ~/.deliveryos and ./.deliveryos path
+│
+├─ capabilities.ts            THE DECLARATION — all 43 operations, with
+│                             mutates / destructive / executesShell /
+│                             costsRealMoney / network / needsProjectDir.
+│                             One source for risk, consumed by the adapters.
+│
+├─ cli/                       DRIVING ADAPTER 1 — 15 commands (+ `mcp`)
+│  └─ commands/               printing lives here; decisions should not
+│
+├─ sidecar.ts                 DRIVING ADAPTER 2 — 40 NDJSON RPCs for Tauri
+│
+└─ mcp/                       DRIVING ADAPTER 3 — the only one with a
+   │                          DECLARED PORT, and the pattern to copy
+   ├─ ports.ts                DeliveryOsReadPort / ConfigPort / ContributePort
+   ├─ engineAdapter.ts        the ONLY file here that reaches the engine
+   ├─ contributionToken.ts    single-use grant binding a push to its preview
+   └─ server.ts               tools, validation, formatting — no engine imports
+```
+
+**Why the third adapter looks different.** The CLI and the sidecar each wired
+themselves straight into engine functions, with no declared interface between
+them — which is why testing the sidecar needs a 1,283-line subprocess harness,
+while the MCP tool surface tests against a fake port in 87 ms. The engine was
+always clean; what was missing was a declaration above it.
+
+**What is enforced mechanically**, not by convention:
+
+| Rule | Guard |
+|---|---|
+| `server.ts` imports no engine *behaviour*, only types | `mcp.architecture.test.ts` |
+| Exactly one file in `src/mcp/` reaches the core | same |
+| The read port has exactly three methods | same (an allowlist, not a denylist) |
+| The server stays stdio-only | same — the `cwd`-as-argument decision depends on it |
+| No `console.*` in `src/engine/**` or `src/mcp/**` | ESLint + `mcp.architecture.test.ts` |
+| Every command, RPC and tool is declared in `capabilities.ts` exactly once | `capabilities.test.ts` |
+| No writing capability reaches MCP without a named, reasoned exemption | `annotationsFor`, at server-construction time |
+| The server's own `instructions` match the ports it was built with | `mcp.instructions.test.ts` |
+
+Every one of those exists because the property it protects was once asserted in
+a comment and turned out to be false.
+
 ## 4. Full architecture — five layers
 
 ```
@@ -227,10 +294,47 @@ Four everyday processes, each drawn out step by step.
   Engine checks the manifest + your local lockfile
      |
      v
+  install_target resolved, and adapted to this project's
+  own layout (a `src/`-prefixed target shortens for a
+  project that has app/ or pages/ but no src/)
+     |
+     v
+  REFUSED if that target is somewhere whose contents run
+  on their own -- a git hook, a CI workflow, an editor
+  auto-run task, or DeliveryOS's own .deliveryos/ state.
+  Nothing is written.
+     |
+     v
+  Signature verified, if the artifact declares one
+     |
+     v
   Engine fetches the files from the owning Remote
      |
      v
-  Files land on your machine, lockfile updated
+  Files land on your machine, lockfile updated with the
+  target they ACTUALLY landed in -- every later read
+  (status, update, push) trusts that record rather than
+  re-deriving it from the manifest
+```
+
+Two later steps write to `.deliveryos/*.jsonl` audit logs — the AI-assisted
+wiring merge, build fix, wiring placement and design fix flows. Every one of
+them redacts at its own append helper, so a credential in a touched file is
+never written verbatim:
+
+```
+  AI flow proposes a change
+     |
+     v
+  Human confirms -> file written, real build re-run
+     |
+     v
+  Rolled back from the IN-MEMORY original if the build broke
+  (the log is never replayed to a file, so redacting it
+   cannot corrupt a restore)
+     |
+     v
+  Entry appended, redacted at the append helper
 ```
 
 ### 5.2 Push flow — "Suggest a change"
@@ -319,6 +423,10 @@ that noise automatically, with no extra action from the person.
 | Storage backend | Git (no custom database/server) | Free version history, free review via PRs, no new infrastructure to run. Same call ArcOS already made successfully. |
 | How "contribute back" works | `push` = branch + commit + PR against the owning repo, never a direct write to main | Preserves whatever review bar each resource's owning repo already has (e.g., ArcOS's "core changes need 2 reviewers" rule keeps applying). |
 | Artifact typing | Open/extensible `kind` vocabulary, not a closed enum | DeliveryOS's whole point is not knowing every future resource type in advance — unlike ArcOS, which deliberately locks its enum down. |
+| Where an unsafe `install_target` is refused | At pull time, never in the manifest schema | A schema rejection makes `discoverManifests` skip the whole manifest, which removes the artifact from the catalog entirely — a guard added at the schema level once took all 234 artifacts down at once. A refused pull is visible and specific; a vanished artifact is neither. The same reasoning is why `.claude/` is deliberately NOT on the denylist: `deliveryos scan` itself generates `.claude/agents/` and `.claude/skills/` targets, so denying it would make every scanned agent and skill artifact unpullable. |
+| Which `install_target` a later read trusts | The one recorded in the lockfile at pull time, not the manifest's | `adaptSrcDirPath` shortens a `src/`-prefixed target for a project that doesn't use that convention, so the manifest value and the real location genuinely differ. Three readers re-derived it instead and disagreed: updates were refused forever, status read `edited_locally` forever, and `push` diffed a directory that did not exist — producing an all-deleted changeset that opened a PR removing the artifact's payload upstream. |
+| `--no-wire`'s meaning | Skips wiring and the build check only; `post_install` still runs | Its help text used to claim it left the project untouched, which was false — `pullArtifact` runs `post_install` unconditionally. The text was corrected rather than the behaviour changed, because changing it would silently break any script that relies on `post_install` running. A characterization test pins the current behaviour so a real no-execute mode stays a deliberate decision. |
+| Where audit-log redaction happens | At each log's append helper, not at display | `.deliveryos/` is not gitignored, so plaintext on disk is the exposure — masking only on display would leave the credential in a committable file. Redacting at the single write boundary also means no future caller can forget. Rollback is unaffected: the apply flows restore from an in-memory original, never from the log. |
 | Data discipline | No customer data in any DeliveryOS-shared remote, ever | Same hard rule ArcOS enforces (docs/ARCHITECTURE.md (ArcOS `docs/ARCHITECTURE.md`, a sibling repo)), carried over explicitly rather than assumed — matters more for DeliveryOS than for ArcOS since `doc`/`dataset` kinds make it much easier to tempt someone into uploading a real client deliverable. Protects future productization the same way it protects ArcOS's H3 option. |
 
 ## 7. Resource manifest (draft shape)

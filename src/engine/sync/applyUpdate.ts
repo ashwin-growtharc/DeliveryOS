@@ -6,9 +6,11 @@ import { findRemote } from '../remote/remoteRegistry';
 import { cachePath, refreshRemoteCache } from '../remote/remoteCache';
 import { buildCatalog } from '../catalog/catalog';
 import { computeChangedFiles, listFilesRecursive } from '../push/diff';
-import { pristinePath, resolveContainedPath, isRootInstall, readPayloadFootprint } from '../paths';
+import { pristinePath, resolveContainedPath, isRootInstall, readPayloadFootprint, adaptSrcDirPath } from '../paths';
 import { ProgressCallback, POST_INSTALL_TIMEOUT_MS, POST_INSTALL_MAX_BUFFER_BYTES, writePristineSnapshot } from '../pull/pull';
+import { isSensitiveTargetPath } from '../pull/wiring';
 import { isExecError, isToolNotFoundError } from '../execHelpers';
+import { redactEmbeddedSecrets } from '../audit/redact';
 import { compareVersions } from './sync';
 
 /** One artifact's real update-apply outcome -- either it was actually
@@ -17,12 +19,23 @@ export interface ApplyUpdateResult {
   id: string;
   remote: string;
   previousVersion: string;
-  availableVersion: string;
+  /** The version found upstream. ABSENT only when the artifact could not be
+   * found in the catalog at all (removed upstream, its remote unregistered,
+   * or its manifest now failing validation) -- there is no upstream version
+   * to name in that case, and echoing `previousVersion` would read as
+   * "1.0.0 -> 1.0.0 available". Always set when `applied` is true. */
+  availableVersion?: string;
   applied: boolean;
   /** Always set when `applied` is false -- a person should never see a
    * silent no-op. Never set when `applied` is true. */
   reason?: string;
   postInstallOutput?: string;
+  /** What the new version changed, relative to the copy this project had.
+   * Populated only when `applied` is true -- on a refusal nothing was touched,
+   * so there is nothing to report. Empty when the diff could not be computed
+   * (a missing pristine snapshot), which is deliberately not the same as "no
+   * changes". */
+  changedFiles?: Array<{ relPath: string; status: string }>;
   /** Set only when applied is true AND the new version declares
    * wiring_actions -- a version bump can add a NEW integration step this
    * function deliberately does not attempt to auto-apply (that's a
@@ -80,27 +93,48 @@ export async function applyAvailableUpdates(
   const results: ApplyUpdateResult[] = [];
 
   for (const entry of relevantEntries) {
+    const previousVersion = entry.version;
+    // Declared before `report` and assigned only once a catalog match exists,
+    // so the !match branch below can report through the SAME single reporting
+    // path as every other degradation in this loop.
+    let availableVersion: string | undefined;
+    // `changedFiles` is assigned only on the success path below, so a refusal
+    // never claims to know what upstream changed.
+    let upstreamChangesForReport: Array<{ relPath: string; status: string }> | undefined;
+    const report = (applied: boolean, reason?: string, postInstallOutput?: string, note?: string): void => {
+      results.push({
+        id: entry.id, remote: entry.remote, previousVersion, availableVersion, applied, reason,
+        postInstallOutput, note, changedFiles: upstreamChangesForReport,
+      });
+    };
+
     const match = catalog.find(
       (candidate) => candidate.manifest.id === entry.id && candidate.remoteName === entry.remote,
     );
-    // Vanished upstream entirely, or its remote was since unregistered --
-    // out of scope here, same as checkForUpdates's own skip.
     if (!match) {
+      // Was a bare `continue`, contradicting this function's own documented
+      // contract ("Always set when applied is false -- a person should never
+      // see a silent no-op"): the CLI printed "No updates available." and the
+      // app's Update button reported nothing at all for an artifact that had
+      // actually vanished from its remote.
+      report(
+        false,
+        `"${entry.id}" is no longer in remote "${entry.remote}"'s catalog -- it may have been removed `
+          + `upstream, its remote unregistered, or its manifest may now be failing validation (run `
+          + `\`deliveryos list\`, which reports manifests it could not load). Nothing was changed.`,
+      );
       continue;
     }
 
-    const previousVersion = entry.version;
-    const availableVersion = match.manifest.version;
+    availableVersion = match.manifest.version;
     if (compareVersions(availableVersion, previousVersion) <= 0) {
       // Not actually outdated -- omitted, not reported, so a bulk
       // "apply everything outdated" call's output stays focused on real
       // updates instead of restating every already-current artifact.
+      // INTENTIONAL, and different from the !match branch above: this
+      // artifact is present and fine. Do not "fix" this one too.
       continue;
     }
-
-    const report = (applied: boolean, reason?: string, postInstallOutput?: string, note?: string): void => {
-      results.push({ id: entry.id, remote: entry.remote, previousVersion, availableVersion, applied, reason, postInstallOutput, note });
-    };
 
     if (!entry.installTarget) {
       report(false, 'This artifact was pulled before its install location was tracked -- re-pull it once, then updates can be applied.');
@@ -160,12 +194,29 @@ export async function applyAvailableUpdates(
     // could never be updated. The two genuinely dangerous operations at the
     // project root -- the stale-file sweep and the snapshot below -- are both
     // already footprint-scoped rather than whole-directory.
-    const installTarget = resolveContainedPath(cwd, manifest.install_target);
+    //
+    // Adapted the SAME way pullArtifact adapts it (pull.ts) before recording
+    // entry.installTarget. Resolving the manifest's RAW value here meant that
+    // in any project without a `src/` directory -- where adaptSrcDirPath
+    // shortens `src/lib/x` to `lib/x` at pull time -- the lockfile's shortened
+    // path never equalled this one, so the relocation guard below refused
+    // EVERY update for EVERY artifact whose install_target starts with `src/`.
+    // Permanently, and with a message blaming the new version for a move that
+    // never happened.
+    const effectiveInstallTarget = adaptSrcDirPath(cwd, manifest.install_target) ?? manifest.install_target;
+    const installTarget = resolveContainedPath(cwd, effectiveInstallTarget);
     if (!installTarget) {
       report(false, `The new version's install_target resolves outside the project -- refusing to update.`);
       continue;
     }
-    if (installTarget !== entry.installTarget) {
+    // Accept EITHER spelling of the same manifest string. adaptSrcDirPath is
+    // filesystem-dependent, so a project that gained a root `app/` after the
+    // pull would otherwise produce a fresh false "this version moved
+    // install_target". Both candidates derive from the same manifest value, so
+    // a genuine relocation (a different string) still fails both and is still
+    // refused -- see this file's own e2e control case.
+    const rawInstallTarget = resolveContainedPath(cwd, manifest.install_target);
+    if (installTarget !== entry.installTarget && rawInstallTarget !== entry.installTarget) {
       // A version that relocates install_target is a real but rare edge
       // case -- refusing rather than guessing which of the two locations
       // is "right" keeps this safe; remove + re-pull handles it manually.
@@ -173,6 +224,19 @@ export async function applyAvailableUpdates(
         false,
         `This version moved install_target from "${entry.installTarget}" to "${installTarget}" -- refusing to `
           + `auto-update across a location change. Remove and re-pull it instead.`,
+      );
+      continue;
+    }
+
+    // The relocation guard above only catches a NEW version moving into a
+    // sensitive location. An artifact pulled before pull.ts gained this check
+    // is already installed in one, and would otherwise keep updating into it
+    // forever.
+    if (isSensitiveTargetPath(path.resolve(cwd), installTarget)) {
+      report(
+        false,
+        `This artifact installs into a location whose contents can run on their own `
+          + `("${manifest.install_target}") -- refusing to update. Remove it and review the manifest by hand.`,
       );
       continue;
     }
@@ -186,6 +250,23 @@ export async function applyAvailableUpdates(
     // payload (not the current install against the new payload -- they're
     // identical at this point, since changedFiles was already confirmed
     // empty above) finds exactly those removed files.
+    // What the new version actually changes, computed against the same two
+    // trees the stale-file sweep below already walks.
+    //
+    // This comparison existed and was thrown away: files were DELETED based on
+    // it and the person was never told which. Meanwhile the refusal path a
+    // hundred lines up will name five of *their* changed files -- so the one
+    // thing reported in detail was your own edit, and the thing that actually
+    // overwrote your files was reported as a version number.
+    let upstreamChanges: ReturnType<typeof computeChangedFiles> = [];
+    try {
+      upstreamChanges = computeChangedFiles(payloadSrc, pristineTarget, { topLevelScope: entryTopLevelScope });
+    } catch {
+      // A missing pristine snapshot is already handled above for the paths that
+      // need it; here an unknowable diff must not block a legitimate update.
+      upstreamChanges = [];
+    }
+
     const oldFiles = new Set(listFilesRecursive(pristineTarget));
     const newFiles = new Set(listFilesRecursive(payloadSrc));
     for (const relPath of oldFiles) {
@@ -201,7 +282,7 @@ export async function applyAvailableUpdates(
     let postInstallOutput: string | undefined;
     if (manifest.post_install) {
       try {
-        postInstallOutput = execSync(manifest.post_install, {
+        const rawPostInstall = execSync(manifest.post_install, {
           cwd: installTarget,
           stdio: 'pipe',
           timeout: POST_INSTALL_TIMEOUT_MS,
@@ -222,11 +303,22 @@ export async function applyAvailableUpdates(
           // failure rather than anything that names the real cause.
           maxBuffer: POST_INSTALL_MAX_BUFFER_BYTES,
         }).toString('utf-8');
+        // Redacted before it leaves this function, for exactly the reasons
+        // pull.ts's own post_install call documents -- this is the SAME
+        // manifest command, just on the update path. Missed when the pull
+        // side was fixed, so `check-updates --apply` still surfaced raw
+        // registry URLs and connection strings to the CLI and to the app.
+        postInstallOutput = redactEmbeddedSecrets(rawPostInstall);
       } catch (err) {
         const stdout = isExecError(err) ? err.stdout?.toString('utf-8') ?? '' : '';
         const stderr = isExecError(err) ? err.stderr?.toString('utf-8') ?? '' : '';
-        const detail = err instanceof Error ? err.message : String(err);
-        const output = [stdout, stderr].filter((s) => s.trim().length > 0).join('\n');
+        // Both need redacting, and `detail` is the one easy to miss: it is
+        // `execSync`'s message, which embeds the COMMAND it ran ("Command
+        // failed: <the whole command line>"), so a credential passed as an
+        // argument leaks even when the child printed nothing at all. See
+        // pull.ts's failure path for the full reasoning.
+        const detail = redactEmbeddedSecrets(err instanceof Error ? err.message : String(err));
+        const output = redactEmbeddedSecrets([stdout, stderr].filter((s) => s.trim().length > 0).join('\n'));
         // Files are already updated on disk at this point -- there's no
         // coherent "old version" left to roll back to (the same accepted
         // gap pullArtifact's own post_install failure has, see its doc
@@ -259,6 +351,7 @@ export async function applyAvailableUpdates(
     const note = manifest.wiring_actions.length > 0
       ? 'This version declares wiring suggestions -- worth checking the Wiring section again in case this update added a new one.'
       : undefined;
+    upstreamChangesForReport = upstreamChanges.map((c) => ({ relPath: c.relPath, status: c.status }));
     report(true, undefined, postInstallOutput, note);
   }
 

@@ -1,10 +1,10 @@
 import * as fs from 'fs';
-import * as path from 'path';
 import { runClaudeSubprocess, DISALLOWED_TOOLS } from '../claude/runClaudeSubprocess';
 import { resolveContainedTargetFile } from './wiring';
 import { runProjectBuild, BuildVerificationResult } from './verifyBuild';
-import { wiringMergeLogPath } from '../paths';
+import { wiringMergeLogPath, ensureProjectDeliveryOsDir } from '../paths';
 import { WiringMergeError } from '../errors';
+import { redactEmbeddedSecrets, redactTextToSummary, MAX_LOG_FIELD_CHARS } from '../audit/redact';
 
 const MAX_FILE_CHARS = 8000;
 
@@ -231,10 +231,45 @@ interface WiringMergeLogEntry {
   rolledBack: boolean;
 }
 
+/**
+ * Redaction happens HERE, at the single write, rather than at
+ * `applyWiringMerge`'s call site -- deliberately. `before`/`after` are the
+ * verbatim contents of a real project file, and `auth.ts` is the file this
+ * flow touches more than any other, so an un-redacted append writes live
+ * credentials into a plaintext JSONL that nothing gitignores. Putting the
+ * redaction at the call site would mean a future second caller (or a moved
+ * append) silently reintroduces the leak with no test failing. There is
+ * exactly one write; guard exactly one write.
+ *
+ * `?? ''` is load-bearing, not defensive noise: `redactTextToSummary`
+ * returns `null` for empty input, and an empty `before` is the completely
+ * ordinary "this wiring action created the file" case. Coalescing keeps
+ * both fields typed `string` end to end, so `renderActivityDiffDisclosure`
+ * in spike-ui's app.js can keep assigning them straight to
+ * `pre.textContent` with no null handling of its own.
+ *
+ * `rebuildOutput` gets the NON-truncating `redactEmbeddedSecrets` instead:
+ * a failing build routinely prints an env dump, so it needs redacting, but
+ * clipping it would change what the Activity panel shows today for every
+ * ordinary failure. Redact, don't shorten.
+ *
+ * None of this can corrupt a rollback: `applyWiringMerge` restores from its
+ * own in-memory `before` local, read off disk before this is ever called,
+ * and the log is never replayed back onto a file. The redacted copy built
+ * here is local to this function and never handed back.
+ */
 function appendWiringMergeLog(cwd: string, entry: WiringMergeLogEntry): void {
   const logPath = wiringMergeLogPath(cwd);
-  fs.mkdirSync(path.dirname(logPath), { recursive: true });
-  fs.appendFileSync(logPath, `${JSON.stringify(entry)}\n`, 'utf-8');
+  const redacted: WiringMergeLogEntry = {
+    ...entry,
+    before: redactTextToSummary(entry.before, MAX_LOG_FIELD_CHARS) ?? '',
+    after: redactTextToSummary(entry.after, MAX_LOG_FIELD_CHARS) ?? '',
+    rebuildOutput: entry.rebuildOutput === undefined
+      ? undefined
+      : redactEmbeddedSecrets(entry.rebuildOutput),
+  };
+  ensureProjectDeliveryOsDir(cwd);
+  fs.appendFileSync(logPath, `${JSON.stringify(redacted)}\n`, 'utf-8');
 }
 
 /**

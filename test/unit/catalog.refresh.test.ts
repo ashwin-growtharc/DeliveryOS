@@ -67,7 +67,7 @@ describe('refreshCatalog', () => {
     writeArtifact(remoteCachePath('remote-b'), 'artifact-two');
 
     const progressMessages: string[] = [];
-    const entries = await refreshCatalog((_stage, message) => progressMessages.push(message));
+    const { entries } = await refreshCatalog((_stage, message) => progressMessages.push(message));
 
     expect(entries.map((e) => e.manifest.id).sort()).toEqual(['artifact-one', 'artifact-two']);
     expect(progressMessages.some((m) => m.includes('remote-a'))).toBe(true);
@@ -76,7 +76,8 @@ describe('refreshCatalog', () => {
 
   it('returns an empty array when there are no registered remotes', async () => {
     writeRegistry([]);
-    const entries = await refreshCatalog();
+    const { entries, skipped } = await refreshCatalog();
     expect(entries).toEqual([]);
+    expect(skipped).toEqual([]);
   });
 });

@@ -1,10 +1,10 @@
 import * as fs from 'fs';
-import * as path from 'path';
 import { runClaudeSubprocess, DISALLOWED_TOOLS } from '../claude/runClaudeSubprocess';
 import { resolveContainedTargetFile } from './wiring';
 import { runProjectBuild, BuildVerificationResult } from './verifyBuild';
-import { buildFixLogPath } from '../paths';
+import { buildFixLogPath, ensureProjectDeliveryOsDir } from '../paths';
 import { BuildFixError } from '../errors';
+import { redactEmbeddedSecrets, redactTextToSummary, MAX_LOG_FIELD_CHARS } from '../audit/redact';
 
 const MAX_FILE_CHARS = 8000;
 const MAX_BUILD_ERROR_CHARS = 4000;
@@ -217,10 +217,41 @@ interface BuildFixLogEntry {
   rolledBack: boolean;
 }
 
+/**
+ * Redaction happens HERE, at the single write, for the same reason
+ * `appendWiringMergeLog` does it at its own: `before`/`after` are the
+ * verbatim contents of a real project file, and this log is a plaintext
+ * JSONL under `.deliveryos/` that nothing gitignores. Guarding the one
+ * write means no future caller can forget; guarding the call site would
+ * mean the next one silently reintroduces the leak.
+ *
+ * `?? ''` is load-bearing: `redactTextToSummary` returns `null` for empty
+ * input, and both fields must stay typed `string` so the Activity tab's
+ * `renderActivityDiffDisclosure` keeps working unchanged.
+ *
+ * `buildError` and `rebuildOutput` get the NON-truncating
+ * `redactEmbeddedSecrets`. A failing build is exactly the thing that prints
+ * an env dump into its own stderr, so it genuinely needs redacting -- but
+ * clipping it would change what every existing ordinary failure shows in
+ * the Activity panel. Redact, don't shorten.
+ *
+ * None of this can corrupt a rollback: `applyBuildFix` restores from its
+ * own in-memory `before` local, read off disk before this is ever called,
+ * and the log is never replayed back onto a file.
+ */
 function appendBuildFixLog(cwd: string, entry: BuildFixLogEntry): void {
   const logPath = buildFixLogPath(cwd);
-  fs.mkdirSync(path.dirname(logPath), { recursive: true });
-  fs.appendFileSync(logPath, `${JSON.stringify(entry)}\n`, 'utf-8');
+  const redacted: BuildFixLogEntry = {
+    ...entry,
+    buildError: redactEmbeddedSecrets(entry.buildError),
+    before: redactTextToSummary(entry.before, MAX_LOG_FIELD_CHARS) ?? '',
+    after: redactTextToSummary(entry.after, MAX_LOG_FIELD_CHARS) ?? '',
+    rebuildOutput: entry.rebuildOutput === undefined
+      ? undefined
+      : redactEmbeddedSecrets(entry.rebuildOutput),
+  };
+  ensureProjectDeliveryOsDir(cwd);
+  fs.appendFileSync(logPath, `${JSON.stringify(redacted)}\n`, 'utf-8');
 }
 
 /**

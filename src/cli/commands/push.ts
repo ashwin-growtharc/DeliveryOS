@@ -26,6 +26,7 @@ export interface PushCommandFlags {
   installTarget?: string;
   artifactVersion?: string;
   reviewRequired?: boolean;
+  force?: boolean;
   roles?: string;
   teams?: string;
   stacks?: string;
@@ -90,6 +91,7 @@ export function toPushOptions(flags: PushCommandFlags): PushOptions {
       ? { description: flags.description, roles, teams, stacks, componentTypes }
       : undefined,
     bump: parseBumpKind(flags.bump),
+    force: Boolean(flags.force),
   };
 }
 
@@ -148,9 +150,21 @@ export function registerPushCommand(program: Command): void {
         + 'this entirely). Defaults to "patch" -- a real payload change always bumps the '
         + 'version, this only lets you choose a bigger bump than the default.',
     )
+    .option(
+      '--force',
+      'Push even though someone else\'s change to this artifact merged after you pulled it. '
+        + 'Refused by default, because your files are the version you pulled plus your edits, and '
+        + 'copying them over current upstream reverts their change as an ordinary diff git will not '
+        + 'flag. The pull request will say it was forced and name the overlapping files.',
+    )
     .action(async (id: string, flags: PushCommandFlags) => {
       const options = toPushOptions(flags);
       const result = await pushArtifact(id, options, process.cwd());
       console.log(`Opened PR #${result.number}: ${result.url} (branch ${result.branch})`);
+      // Printed after the success line, never instead of it -- the PR really
+      // did open. Same posture as pull's own gitignoreWarning.
+      if (result.cacheResetWarning) {
+        console.log(result.cacheResetWarning);
+      }
     });
 }

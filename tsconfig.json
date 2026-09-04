@@ -3,6 +3,10 @@
     "target": "ES2022",
     "module": "commonjs",
     "moduleResolution": "node10",
+    "paths": {
+      "zod/v3": ["./node_modules/zod/v3/index.d.cts"],
+      "zod/v4/core": ["./node_modules/zod/v4/core/index.d.cts"]
+    },
     "strict": true,
     "outDir": "dist",
     "rootDir": "src",

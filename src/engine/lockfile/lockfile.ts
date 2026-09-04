@@ -1,13 +1,47 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as properLockfile from 'proper-lockfile';
-import { lockfilePath, projectDeliveryOsDir } from '../paths';
+import { lockfilePath, ensureProjectDeliveryOsDir } from '../paths';
 import { LockFile, LockEntry } from './types';
 import { LockfileCorruptError } from '../errors';
 
 const EMPTY_LOCKFILE: LockFile = { version: 1, entries: [] };
 
-/** Reads the cwd-scoped lockfile, returning an empty lockfile if none exists. */
+/** True when an entry's `id` is usable as a single path segment.
+ *
+ * An artifact id is joined into real filesystem paths -- `pristinePath`
+ * feeds one straight into `fs.rmSync(..., { recursive: true, force: true })`
+ * inside `removeArtifact`, which looks its entry up ONLY here and not in the
+ * catalog. lock.json is a plain project-local JSON file anyone can hand-edit,
+ * so an `id` of "../../.." was a real path out of the project.
+ *
+ * Deliberately checks `id` and nothing else. Every real entry also has
+ * `version` and `remote`, but widening this widens the set of entries a real
+ * user could silently lose -- and `remote` is already asserted downstream by
+ * `remoteCachePath`. */
+function isUsableEntry(entry: unknown): entry is LockEntry {
+  if (typeof entry !== 'object' || entry === null) {
+    return false;
+  }
+  const id = (entry as { id?: unknown }).id;
+  return typeof id === 'string'
+    && id.length > 0
+    && !id.includes('/')
+    && !id.includes('\\')
+    && id !== '.'
+    && id !== '..';
+}
+
+/** Reads the cwd-scoped lockfile, returning an empty lockfile if none exists.
+ *
+ * `LockfileCorruptError` is raised for a file that is not JSON at all, and
+ * for nothing else -- do not extend it to cover a bad entry. Every
+ * lockfile-touching command (`list`, `catalog.list`, `pull`, `push`,
+ * `remove`, every status check) reads through this one function, so throwing
+ * over a single hand-edited line would blank a whole catalog listing. An
+ * unusable entry is dropped instead, the same "reported/skipped, never
+ * fatal" posture `discoverManifests` already took after one bad manifest
+ * took 234 artifacts down with it. */
 export function readLockfile(cwd: string): LockFile {
   const filePath = lockfilePath(cwd);
   if (!fs.existsSync(filePath)) {
@@ -24,7 +58,7 @@ export function readLockfile(cwd: string): LockFile {
   if (!parsed.entries || !Array.isArray(parsed.entries)) {
     return { ...EMPTY_LOCKFILE };
   }
-  return parsed;
+  return { ...parsed, entries: parsed.entries.filter(isUsableEntry) };
 }
 
 /**
@@ -33,10 +67,7 @@ export function readLockfile(cwd: string): LockFile {
  * half-written lock.json if the process is interrupted mid-write.
  */
 export function writeLockfile(cwd: string, lockfile: LockFile): void {
-  const dir = projectDeliveryOsDir(cwd);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
+  const dir = ensureProjectDeliveryOsDir(cwd);
   const filePath = lockfilePath(cwd);
   const tmpPath = path.join(dir, `.lock.json.${process.pid}.${Date.now()}.tmp`);
   fs.writeFileSync(tmpPath, JSON.stringify(lockfile, null, 2) + '\n', 'utf-8');
@@ -66,10 +97,7 @@ export function writeLockfile(cwd: string, lockfile: LockFile): void {
  * existing before the very first lock in a fresh project.
  */
 export async function upsertEntry(cwd: string, entry: LockEntry): Promise<void> {
-  const dir = projectDeliveryOsDir(cwd);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
+  ensureProjectDeliveryOsDir(cwd);
   const filePath = lockfilePath(cwd);
 
   const release = await properLockfile.lock(filePath, {
@@ -102,10 +130,7 @@ export async function upsertEntry(cwd: string, entry: LockEntry): Promise<void> 
  * doesn't need to handle a surprise failure here too.
  */
 export async function removeEntry(cwd: string, id: string): Promise<void> {
-  const dir = projectDeliveryOsDir(cwd);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
+  ensureProjectDeliveryOsDir(cwd);
   const filePath = lockfilePath(cwd);
 
   const release = await properLockfile.lock(filePath, {

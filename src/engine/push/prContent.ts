@@ -64,12 +64,76 @@ export interface EditPrContentParams extends PreviewImageParams {
   gitUserName: string;
   gitUserEmail: string;
   changedFiles: ChangedFile[];
+  /** The surface that opened this PR, when it was not a person at a terminal
+   * -- e.g. "the DeliveryOS MCP server". Absent for the CLI and the app, which
+   * render exactly as before. */
+  initiatedBy?: string;
   // Git-relative root the changed files are reported under: `'payload'`
   // (the historical abbreviated form, dropping the `artifacts/<id>/`
   // prefix) by default, or the artifact's `payload_path` when set, so the
   // PR body names the real file/directory instead of a shadow path that
   // was never actually written to.
   payloadRoot?: string;
+  /** Set only when this push was FORCED past `StalePushError` -- authored
+   * against a version the remote had already moved on from. A forced stale
+   * push can revert an already-merged change as an ordinary forward diff that
+   * git has no reason to flag, so the PR reviewer is the only remaining
+   * safeguard and has to be told explicitly. */
+  stalePush?: { editedAgainst: string; upstreamVersion: string; overlap: string[] };
+}
+
+/** Renders the forced-stale-push warning, or `''` for an ordinary push.
+ *
+ * Deliberately the first thing in the body, above even the metadata line: this
+ * is the one case where the diff a reviewer is about to read can silently undo
+ * something already merged, and the diff itself shows no sign of it. */
+function buildStalePushSection(stale: EditPrContentParams['stalePush']): string {
+  if (!stale) {
+    return '';
+  }
+
+  const overlapBlock = stale.overlap.length > 0
+    ? '\n>\n> **These files changed both upstream and in this push** -- merging it will revert the '
+      + 'upstream version of them:\n'
+      + stale.overlap.slice(0, 20).map((p) => `> - \`${p}\``).join('\n')
+      + (stale.overlap.length > 20 ? `\n> - ...and ${stale.overlap.length - 20} more` : '')
+    : '\n>\n> No files overlap, so this should merge cleanly -- but it was still authored against an '
+      + 'older version.';
+
+  return [
+    '',
+    '> [!WARNING]',
+    `> **Forced push over a stale version.** This was edited against v${stale.editedAgainst}, but the`,
+    `> remote had already moved to v${stale.upstreamVersion}.${overlapBlock}`,
+    '>',
+    `> Review this against the current default branch, not against v${stale.editedAgainst}.`,
+    '',
+  ].join('\n');
+}
+
+/**
+ * Names the surface that opened this PR, when it was not a person at a
+ * terminal.
+ *
+ * `prContent` had no concept of an initiating actor: the trailer says
+ * `deliveryos push` whether the CLI, the desktop app or the sidecar produced
+ * it, and `**Pushed by:**` is a *git config identity*, not an actor -- it says
+ * who the commit is attributed to, not what drove the push.
+ *
+ * That gap stops mattering the moment an agent can open one. The precedent is
+ * the forced-stale block above: it exists because "the PR reviewer is the only
+ * remaining safeguard and has to be told explicitly". A reviewer deciding how
+ * carefully to read a diff is entitled to know a model assembled it.
+ *
+ * Empty string when absent, so every existing caller renders byte-identically.
+ */
+function buildInitiatorSection(initiatedBy?: string): string {
+  if (!initiatedBy) return '';
+  return `
+> [!NOTE]
+> Opened via ${initiatedBy}. A person approved it, but the diff was assembled
+> by an agent -- read it on that basis.
+`;
 }
 
 /** Builds the PR title/body for an edit-mode push (a diff against an
@@ -87,9 +151,11 @@ export function buildEditPrContent(params: EditPrContentParams): PrContent {
     .join('\n');
 
   const previewSection = buildPreviewSection(params);
+  const staleSection = buildStalePushSection(params.stalePush);
+  const initiatorSection = buildInitiatorSection(params.initiatedBy);
 
   const body = `## DeliveryOS push: update \`${id}\`
-
+${initiatorSection}${staleSection}
 **Kind:** ${kind}   **Owner:** ${owner}   **Version:** ${versionDisplay}
 **Pushed by:** ${gitUserName} <${gitUserEmail}>
 ${previewSection}

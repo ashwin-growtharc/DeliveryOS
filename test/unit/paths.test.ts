@@ -7,6 +7,9 @@ import {
   remoteCachePath,
   remotesCacheRoot,
   adaptSrcDirPath,
+  ensureProjectDeliveryOsDir,
+  pristinePath,
+  pristineDir,
 } from '../../src/engine/paths';
 
 describe('resolveContainedPath', () => {
@@ -92,6 +95,32 @@ describe('remoteCachePath', () => {
   });
 });
 
+describe('pristinePath', () => {
+  it('joins an ordinary id under pristineDir as before', () => {
+    const cwd = path.join(os.tmpdir(), 'deliveryos-pristine-path-test');
+    expect(pristinePath(cwd, 'my-artifact')).toBe(path.join(pristineDir(cwd), 'my-artifact'));
+  });
+
+  // `id` here originates from a lockfile entry -- a plain project-local JSON
+  // file anyone can hand-edit -- and removeArtifact feeds the result straight
+  // into fs.rmSync(recursive, force). Sanitized the same way remoteCachePath,
+  // wireContextPath and previewCachePath already sanitize their own segments;
+  // this function was the one sibling that did not.
+  it('rejects a traversing or separator-bearing id, refusing to resolve outside pristineDir', () => {
+    const cwd = path.join(os.tmpdir(), 'deliveryos-pristine-path-test');
+    expect(() => pristinePath(cwd, '../../../SomeFolder')).toThrow(/Invalid artifact id/);
+    expect(() => pristinePath(cwd, 'a/b')).toThrow(/Invalid artifact id/);
+    expect(() => pristinePath(cwd, 'a\\b')).toThrow(/Invalid artifact id/);
+  });
+
+  it('rejects "." and ".." outright, and an empty id', () => {
+    const cwd = path.join(os.tmpdir(), 'deliveryos-pristine-path-test');
+    expect(() => pristinePath(cwd, '.')).toThrow(/Invalid artifact id/);
+    expect(() => pristinePath(cwd, '..')).toThrow(/Invalid artifact id/);
+    expect(() => pristinePath(cwd, '')).toThrow(/Invalid artifact id/);
+  });
+});
+
 describe('adaptSrcDirPath', () => {
   let cwd: string;
 
@@ -144,5 +173,55 @@ describe('adaptSrcDirPath', () => {
   it('returns undefined when neither convention is detectable yet', () => {
     expect(adaptSrcDirPath(cwd, 'src/lib/auth')).toBeUndefined();
     expect(adaptSrcDirPath(cwd, 'src/app/api/auth/[...nextauth]/route.ts')).toBeUndefined();
+  });
+});
+
+describe('ensureProjectDeliveryOsDir', () => {
+  let cwd: string;
+
+  beforeEach(() => {
+    cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'deliveryos-ensure-dir-test-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  });
+
+  // `.deliveryos/` holds lock.json (which records ABSOLUTE installTarget and
+  // wiredFiles paths), a second full copy of every pulled payload under
+  // pristine/, and audit logs containing the full text of real project files.
+  // None of it is portable and none of it should be committed -- acting on a
+  // lockfile from another clone is what made `push` diff a directory that does
+  // not exist and propose deleting an artifact's payload upstream.
+  it('creates the directory with a .gitignore that ignores the whole directory', () => {
+    const dir = ensureProjectDeliveryOsDir(cwd);
+
+    expect(dir).toBe(path.join(cwd, '.deliveryos'));
+    expect(fs.existsSync(dir)).toBe(true);
+    const ignore = fs.readFileSync(path.join(dir, '.gitignore'), 'utf-8');
+    expect(ignore.split('\n').filter((l) => l.trim() && !l.startsWith('#'))).toEqual(['*']);
+  });
+
+  it('is idempotent, and never overwrites a .gitignore someone deliberately changed', () => {
+    ensureProjectDeliveryOsDir(cwd);
+    const ignorePath = path.join(cwd, '.deliveryos', '.gitignore');
+    fs.writeFileSync(ignorePath, '# I know what I am doing\n', 'utf-8');
+
+    ensureProjectDeliveryOsDir(cwd);
+
+    // Re-imposing it on every write would be the tool arguing with a choice
+    // the user already made.
+    expect(fs.readFileSync(ignorePath, 'utf-8')).toBe('# I know what I am doing\n');
+  });
+
+  it('works when the project has no .gitignore of its own at all', () => {
+    expect(fs.existsSync(path.join(cwd, '.gitignore'))).toBe(false);
+
+    ensureProjectDeliveryOsDir(cwd);
+
+    // Deliberately does NOT create or edit the project's own .gitignore --
+    // that file belongs to whoever owns the repo.
+    expect(fs.existsSync(path.join(cwd, '.gitignore'))).toBe(false);
+    expect(fs.existsSync(path.join(cwd, '.deliveryos', '.gitignore'))).toBe(true);
   });
 });

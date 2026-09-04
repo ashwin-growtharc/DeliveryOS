@@ -15,3 +15,7 @@ sea-config*.json
 # from package.json's pinned react/react-dom versions, regenerated via the
 # "prepare" npm lifecycle script (runs automatically on `npm install`).
 src/engine/preview/vendoredReactRuntime.generated.ts
+
+# Intermediate capture for `npm run walkthrough` -- carries the throwaway
+# project path, and the rendered doc is the deliverable.
+docs/walkthrough/transcript.json
