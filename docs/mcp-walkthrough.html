@@ -106,10 +106,10 @@
 
   <div class="meta">
     <span><b>6</b> steps</span>
-    <span><b>8</b> tools</span>
+    <span><b>9</b> tools</span>
     <span><b>65</b> matches for the search below</span>
-    <span>connect <b>2.5s</b></span>
-    <span>captured <b>2026-09-03 12:24</b></span>
+    <span>connect <b>2.8s</b></span>
+    <span>captured <b>2026-09-04 06:13</b></span>
   </div>
 
   <h2>The problem it solves</h2>
@@ -166,7 +166,7 @@
       <span class="num">2</span>
       <span class="badge b-blue">tool call</span>
       <code class="tool">search_artifacts</code>
-      <span class="ms">191 ms</span>
+      <span class="ms">286 ms</span>
     </div>
     <p class="narrative">The developer asks for passwordless email login. The agent searches the way a person actually phrases it -- a sentence, not a keyword.</p>
     <pre class="req">search_artifacts({
@@ -209,7 +209,7 @@
       <span class="num">3</span>
       <span class="badge b-blue">tool call</span>
       <code class="tool">get_artifact</code>
-      <span class="ms">103 ms</span>
+      <span class="ms">221 ms</span>
     </div>
     <p class="narrative">One candidate looks right. Before recommending it, the agent reads what it would actually do.</p>
     <pre class="req">get_artifact({
@@ -251,7 +251,7 @@ Pulled "fastapi-security" -&gt; ~/your-project/.claude/skills/fastapi-security</
       <span class="num">5</span>
       <span class="badge b-blue">tool call</span>
       <code class="tool">preview_contribution</code>
-      <span class="ms">101 ms</span>
+      <span class="ms">128 ms</span>
     </div>
     <p class="narrative">Weeks later the developer has improved that skill and wants to share it back. The agent previews what contributing would publish -- BEFORE anything leaves the machine.</p>
     <pre class="req">preview_contribution({
@@ -271,7 +271,7 @@ Pulled "fastapi-security" -&gt; ~/your-project/.claude/skills/fastapi-security</
   ],
   "stale": false,
   "pendingPr": null,
-  "confirmationToken": "8fb06e8498c39406ce76c06f88da62a5",
+  "confirmationToken": "66a53ac9f2bd1b5a44bff9eb27335d81",
   "nextStep": "Show the user this file list before going further. If they approve, call contribute_artifact with this confirmationToken. The token authorises exactly this diff, once."
 }</pre>
     <p class="note">Push is all-or-nothing over the whole installed folder. This is the control that makes that safe.</p>
@@ -282,7 +282,7 @@ Pulled "fastapi-security" -&gt; ~/your-project/.claude/skills/fastapi-security</
       <span class="num">6</span>
       <span class="badge b-red">refused</span>
       <code class="tool">contribute_artifact</code>
-      <span class="ms">98 ms</span>
+      <span class="ms">101 ms</span>
     </div>
     <p class="narrative">The agent tries to contribute without the token the preview returned.</p>
     <pre class="req">contribute_artifact({
@@ -337,6 +337,11 @@ Pulled "fastapi-security" -&gt; ~/your-project/.claude/skills/fastapi-security</
     <td class="ro">reads</td>
   </tr>
   <tr>
+    <td><code>read_artifact_file</code></td>
+    <td>Read one file from an artifact</td>
+    <td class="ro">reads</td>
+  </tr>
+  <tr>
     <td><code>catalog_overview</code></td>
     <td>Summarise the catalog</td>
     <td class="ro">reads</td>
@@ -368,7 +373,7 @@ Pulled "fastapi-security" -&gt; ~/your-project/.claude/skills/fastapi-security</
   </tr>
   </table>
   <p style="font-size:.9rem;color:var(--muted)">
-    4 declared read-only,
+    5 declared read-only,
     4 not, none installs. Whether a tool
     writes is declared once in the codebase and read from there — so what the
     server tells a client cannot drift from what the tool does. Note
@@ -543,7 +548,7 @@ Pulled "fastapi-security" -&gt; ~/your-project/.claude/skills/fastapi-security</
 
   <footer>
     Generated from a captured session against the live catalog.
-    Server version 8 tools · DeliveryOS
+    Server version 9 tools · DeliveryOS
     <code>tier0/multi-user-hardening</code>.
   </footer>
 </div>

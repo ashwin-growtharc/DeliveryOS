@@ -42,7 +42,41 @@ export interface ArtifactDetail {
    * empty payload, or a binary file. Distinct from "the artifact does not
    * exist", which throws. */
   doc: PrimaryDoc | null;
+  /** Every file in the payload, forward-slashed and sorted.
+   *
+   * `doc` answers "what should someone read FIRST" and is usually `README.md`,
+   * the file that DESCRIBES the artifact. That is the wrong file for an agent
+   * asked to fill a template in -- `friction-log`'s actual format lives in
+   * `friction-log.md`, which without this list the agent cannot even name in a
+   * follow-up call. */
+  files: string[];
 }
+
+/**
+ * One page of a payload file, or a typed reason there is no content.
+ *
+ * Three outcomes, deliberately not two. An empty string would collapse "this
+ * file is empty", "there is no such file" and "this file is not text" into one
+ * value a caller reads as success -- the coercion habit this codebase keeps
+ * finding. `kind` makes them distinguishable at the type level.
+ *
+ * Paginated by CHARACTERS of the decoded string, never by bytes: slicing a
+ * decoded string at byte offsets lets a UTF-8 multi-byte character straddle the
+ * boundary, so two pages would not rejoin. Our own docs are full of em dashes,
+ * so that bug would pass an ASCII fixture and ship for every real template.
+ */
+export type PayloadFileResult =
+  | {
+      kind: 'text';
+      content: string;
+      offset: number;
+      limit: number;
+      /** Characters in the WHOLE file, not in this page. */
+      totalChars: number;
+      hasMore: boolean;
+    }
+  | { kind: 'not-found'; message: string }
+  | { kind: 'not-text'; message: string };
 
 /**
  * Read-only by construction. There is no `pull`, `push` or `remove` here, and
@@ -65,6 +99,20 @@ export interface DeliveryOsReadPort {
   /** Throws when `id` names no artifact, or is ambiguous across remotes with
    * no `remote` given -- both are real errors an agent must see, not empty
    * results it will paper over. */
+  /** One page of one file from an artifact's payload, read out of the remote
+   * cache under `DELIVERYOS_HOME` and never from the user's project -- which is
+   * why this method takes no `cwd`.
+   *
+   * THROWS when `path` escapes the payload directory. That containment is the
+   * engine's own (`resolveWithinPayloadDir`) and is not re-implemented here. */
+  readPayloadFile(input: {
+    remote: string;
+    id: string;
+    path: string;
+    offset?: number;
+    limit?: number;
+  }): PayloadFileResult;
+
   readArtifact(input: {
     cwd: string;
     id: string;

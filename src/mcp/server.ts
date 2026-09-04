@@ -572,7 +572,7 @@ export function buildMcpServer({ port: engine, configPort, contributePort, versi
     },
     async ({ cwd, id, remote, includeDoc }) => {
       try {
-        const { entry, doc } = engine.readArtifact({ cwd, id, remote });
+        const { entry, doc, files } = engine.readArtifact({ cwd, id, remote });
         const m = entry.manifest;
         return json({
           id: m.id,
@@ -607,6 +607,13 @@ export function buildMcpServer({ port: engine, configPort, contributePort, versi
               ? null
               : { path: doc.relPath, truncated: doc.truncated, content: doc.content },
           hasDoc: doc !== null,
+          // Every file in the payload, so a follow-up `read_artifact_file` can
+          // name one. `doc` above answers "what should a person read FIRST" and
+          // is usually the README -- the file that DESCRIBES the artifact. An
+          // agent asked to fill a template in needs the template, and for
+          // `friction-log` that is `friction-log.md`, sitting beside the README
+          // and unnameable without this list.
+          files,
           // The exact command, ready to run, rather than leaving the agent to
           // assemble it. These tools are read-only on purpose, so installing is
           // always a handoff -- and a handoff that hands over a half-specified
@@ -617,6 +624,64 @@ export function buildMcpServer({ port: engine, configPort, contributePort, versi
           pullCommand: `deliveryos pull ${m.id} --remote ${entry.remoteName}`,
         });
       } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    'read_artifact_file',
+    {
+      title: 'Read one file from an artifact',
+      description:
+        'Returns the contents of a single file from an artifact\'s payload, by the relative path '
+        + '`get_artifact` listed in `files`. Use this to read a TEMPLATE an artifact ships -- '
+        + 'get_artifact returns the README, which describes the artifact rather than being the '
+        + 'thing you fill in. Reads the catalog cache only; it never touches the project, and '
+        + 'writing the finished document is yours to do.',
+      inputSchema: {
+        id: z.string().min(1).describe('The artifact id, exactly as search_artifacts reported it'),
+        remote: z.string().min(1).describe('The remote the artifact came from, as get_artifact reported it'),
+        path: z
+          .string()
+          .min(1)
+          .describe('Relative path inside the payload, exactly as get_artifact listed it in `files`'),
+        offset: z
+          .number()
+          .int()
+          .min(0)
+          .optional()
+          .describe('Character offset to start from (default 0). Use with `totalChars` to page a long file.'),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .optional()
+          .describe('Maximum characters to return (default 40000).'),
+      },
+      annotations: annotationsFor('read_artifact_file'),
+    },
+    async ({ id, remote, path, offset, limit }) => {
+      try {
+        const result = engine.readPayloadFile({ remote, id, path, offset, limit });
+        // Three outcomes reported as three shapes, never as an empty string:
+        // a caller receiving '' could not tell an empty template from a missing
+        // one from a PNG, and would call all three a success.
+        if (result.kind !== 'text') {
+          return failure(new Error(result.message));
+        }
+        return json({
+          id,
+          remote,
+          path,
+          content: result.content,
+          offset: result.offset,
+          limit: result.limit,
+          totalChars: result.totalChars,
+          hasMore: result.hasMore,
+        });
+      } catch (error) {
+        // The containment refusal from `resolveWithinPayloadDir` arrives here.
         return failure(error);
       }
     },

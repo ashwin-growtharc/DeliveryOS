@@ -112,15 +112,16 @@ look at it were this CLI and the desktop app — so the agent working in your
 project, the one most likely to benefit from knowing there is already a
 `code-reviewer` agent for the job, was the only party that could not ask.
 
-`deliveryos mcp` fixes that. Eight tools over the same engine the CLI and the
-desktop app use. Four are declared read-only to the client and four are not;
+`deliveryos mcp` fixes that. Nine tools over the same engine the CLI and the
+desktop app use. Five are declared read-only to the client and four are not;
 the **Writes** column below says what each one actually touches, which is not
 the same question:
 
 | Tool | Answers | Writes |
 |---|---|---|
 | `search_artifacts` | "what is there for X?" — by query, kind, remote or install status | — |
-| `get_artifact` | "what does this actually do?" — full manifest, its SKILL.md, and the shell command it would run | — |
+| `get_artifact` | "what does this actually do?" — full manifest, its SKILL.md, every payload file name, and the shell command it would run | — |
+| `read_artifact_file` | "give me the template itself" — one payload file by name, so an agent can fill it in | — |
 | `catalog_overview` | "what kinds of thing exist here?" — counts, plus any manifest that failed to load | — |
 | `list_remotes` | "where does any of this come from?" — and says plainly when nothing is configured | — |
 | `refresh_catalog` | the above, after fetching every remote from git | caches |

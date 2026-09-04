@@ -95,7 +95,7 @@ describe('MCP adapter boundary', () => {
     return names;
   }
 
-  it('exposes exactly the three read operations on the port, and nothing else', () => {
+  it('exposes exactly the allowlisted read operations on the port, and nothing else', () => {
     // An ALLOWLIST, not a denylist of suspicious-looking names.
     //
     // The previous version of this test matched seven substrings
@@ -109,7 +109,40 @@ describe('MCP adapter boundary', () => {
     // Naming the permitted set instead means ANY new method fails this test,
     // including one nobody thought to forbid. Widening the port then requires
     // editing this list, which is exactly where the consent question belongs.
-    expect(declaredPortMethods().sort()).toEqual(['listCatalog', 'readArtifact', 'refreshCatalog']);
+    // The COUNT is deliberately not the assertion. A test named "exactly three"
+    // invites the next person to make it four, then five, and it degrades into a
+    // counter that records growth instead of gating it. The list is the rule;
+    // its length is a consequence.
+    //
+    // `readPayloadFile` was added deliberately: `get_artifact` returns the
+    // primary doc, which for most artifacts is the README describing them, and
+    // an agent asked to fill in a template needs the template -- a different
+    // file in the same payload. Read-only, reads the catalog cache, never the
+    // project, and takes no `cwd`.
+    expect(declaredPortMethods().sort()).toEqual([
+      'listCatalog',
+      'readArtifact',
+      'readPayloadFile',
+      'refreshCatalog',
+    ]);
+  });
+
+  it('keeps every port method read-shaped, which is the property the list is protecting', () => {
+    // The allowlist above and this are two different assertions on purpose.
+    // The list says WHICH methods exist; this says what may never be true of
+    // one, and it keeps holding through a deliberate widening -- someone
+    // editing the list to add a legitimate read still cannot slip a write past
+    // this. Without it, the list alone would happily accept `pushArtifact` the
+    // day somebody typed it in.
+    const WRITE_SHAPED = /^(pull|push|remove|delete|write|apply|install|create|update|set|run|exec)/i;
+    for (const method of declaredPortMethods()) {
+      expect(
+        WRITE_SHAPED.test(method),
+        `"${method}" is write-shaped. Mutation reaches MCP only through a `
+        + 'separate, named port with its own justification in '
+        + 'RISKY_CAPABILITIES_ALLOWED_ON_MCP -- never by widening the read port.',
+      ).toBe(false);
+    }
   });
 
   it('keeps the port free of anything that returns secrets', () => {

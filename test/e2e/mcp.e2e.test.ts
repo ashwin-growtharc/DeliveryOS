@@ -187,6 +187,7 @@ describe('deliveryos mcp, as a real subprocess', () => {
       'get_artifact',
       'list_remotes',
       'preview_contribution',
+      'read_artifact_file',
       'refresh_catalog',
       'search_artifacts',
     ]);
@@ -221,6 +222,47 @@ describe('deliveryos mcp, as a real subprocess', () => {
     expect(data.postInstall.length).toBeGreaterThan(0);
   }, 60_000);
 
+  // The scenario end to end, through the real subprocess: an agent is asked to
+  // write a document from an artifact's template. `get_artifact` returns the
+  // primary doc -- for most artifacts the README, which DESCRIBES the artifact
+  // rather than being the thing you fill in -- so without `files` plus
+  // `read_artifact_file` the agent has the wrong file and no way to name the
+  // right one. This is the gap that made the whole scenario dead-end one call
+  // short of working.
+  it('hands an agent a template it can fill in, not just the README that describes it', async () => {
+    const artifact = TEST_ARTIFACTS[0];
+
+    const detail = await mcp.callTool('get_artifact', { cwd: projectDir, id: artifact.id });
+    const data = JSON.parse(detail.text);
+    expect(Array.isArray(data.files), 'get_artifact must name the payload files').toBe(true);
+    expect(data.files.length, 'a fixture with no payload files would prove nothing').toBeGreaterThan(0);
+
+    // Whatever the fixture ships, the agent reads it BY THE NAME get_artifact
+    // gave -- which is the contract that matters, not any particular filename.
+    const target = data.files[0];
+    const file = await mcp.callTool('read_artifact_file', {
+      id: artifact.id,
+      remote: data.remote,
+      path: target,
+    });
+    expect(file.isError, `reading "${target}" should succeed`).toBe(false);
+    const page = JSON.parse(file.text);
+    expect(page.path).toBe(target);
+    expect(typeof page.content).toBe('string');
+    expect(page.totalChars).toBeGreaterThan(0);
+    expect(page.content.length).toBeGreaterThan(0);
+  }, 60_000);
+
+  it('refuses a payload path that escapes the artifact, through the real transport', async () => {
+    const artifact = TEST_ARTIFACTS[0];
+    const res = await mcp.callTool('read_artifact_file', {
+      id: artifact.id,
+      remote: 'test-remote',
+      path: '../manifest.yaml',
+    });
+    expect(res.isError, 'a path escaping the payload must not be readable').toBe(true);
+  }, 60_000);
+
   it('returns an error result for an unknown id rather than crashing the process', async () => {
     const res = await mcp.callTool('get_artifact', { cwd: projectDir, id: 'no-such-artifact' });
     expect(res.isError).toBe(true);
@@ -229,7 +271,12 @@ describe('deliveryos mcp, as a real subprocess', () => {
     // The process must still be serving afterwards -- an agent's bad guess
     // should not take the server down.
     const after = await mcp.request<ToolsListResult>('tools/list');
-    expect(after.result!.tools).toHaveLength(8);
+    // Asserting "still serving", not a tool count. The exact number is
+    // incidental here and pinning it made this test fail every time the surface
+    // legitimately grew -- a count that drifts is noise, and the test above
+    // already owns the real tool list.
+    expect(after.result!.tools.length).toBeGreaterThan(0);
+    expect(after.result!.tools.map((t) => t.name)).toContain('get_artifact');
   }, 60_000);
 
   it('refuses a cwd that is relative or absent, rather than silently answering about the wrong project', async () => {

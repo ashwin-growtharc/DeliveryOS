@@ -6,6 +6,76 @@ All notable changes to DeliveryOS are recorded here, newest first. See
 
 ---
 
+## Take the template (branch `tier0/multi-user-hardening`)
+
+The sponsor described a scenario on the 2 Sep call (00:36:24): the MCP asks three
+or four questions, configuration is done, and then — *"I need to create a new RCA
+document … you have the artefact already. **Take the template. This is the
+content that I have. You get it done.**"*
+
+Driven against the real 237-artifact catalog, four of the five steps already
+worked. The last one dead-ended one call short.
+
+### The gap: two questions sharing one call
+
+`get_artifact('friction-log')` returned `doc.path = README.md` — the file that
+*describes* the artifact. The template is a **different file in the same
+payload**, `friction-log.md`, and an agent could neither read it nor discover its
+name. `artifact.readPayloadFile` existed but was declared `sidecar`-only.
+
+`resolvePrimaryDoc` was not buggy. It answers *"what should a person read
+first"*, which is right for browsing and wrong for *"fill this in"* — which is
+exactly why no test caught it.
+
+`get_artifact` now also returns `files`, naming every payload file, and
+`read_artifact_file` returns one of them.
+
+### Three outcomes, never an empty string
+
+Real content, a typed *not-found*, and a typed *not-text* are three answers.
+Collapsed to `''` a caller cannot tell an empty template from a missing one from
+a PNG and calls all three a success. `listArtifactPayloadFiles` likewise **throws**
+for an unknown artifact rather than returning `[]`, because "no such artifact"
+and "ships no files" are different facts.
+
+### Characters, not bytes — a decision, not a synonym
+
+Paginating a decoded string at *byte* offsets lets a UTF-8 multi-byte character
+straddle the page boundary, so the halves never rejoin. This repo's own templates
+are full of em dashes, so that bug passes an ASCII fixture and corrupts every
+real document. The pagination fixtures are deliberately non-ASCII for that
+reason.
+
+### The architecture guard fired, and was reshaped rather than incremented
+
+`mcp.architecture.test.ts` asserted the read port exposed *exactly three*
+operations, and adding a fourth failed it — the guard working as designed. It was
+not simply changed to four: a test named for a count invites the next person to
+make it five, and it degrades into a counter that records growth instead of
+gating it. The allowlist is now the rule and its length a consequence, with a
+**separate** assertion that no port method is write-shaped — the property that
+survives a deliberate widening.
+
+### Deliberately not done
+
+`read_artifact_file` hands over the template. **The agent writes the finished
+document with its own tools**; no project-writing tool joined the MCP surface,
+which is the same line that keeps `pull` off it.
+
+### Verified against `agent-native`
+
+Three parallel explorations of the reference repo the sponsor pointed at. Its
+`defineAction` (`packages/core/src/action.ts`) is a working instance of what he
+described — one wrapper fanning out to agent tool, HTTP, MCP, A2A and CLI, with
+JSON Schema derived from Zod and an MCP server generated from the registry
+(`createMCPServerForRequest`). Its `read-attachment` tool is the shape adopted
+here: paginated content with a typed not-found. Two things it does **not** have,
+recorded so we do not assume the reference is ahead everywhere: no generic
+dry-run, and no guard failing a build when an action omits a risk declaration —
+our `capabilities.test.ts` is stricter on that point.
+
+---
+
 ## Half a feature hardened is not a hardened feature (branch `tier0/multi-user-hardening`)
 
 Five fixes, a walkthrough, and one retraction. The theme, visible only in

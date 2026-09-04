@@ -316,6 +316,30 @@ Against this list specifically:
   `applyUpdate.ts`. Deliberately no line numbers: the ones here were stale, and
   so was `applyUpdate.ts:339` in `docs/agent-surface-plan.md`
 
+### Evidence for Stage 1, from the repo the sponsor named
+
+Explored 4 Sep 2026. `agent-native`'s **`defineAction`**
+(`packages/core/src/action.ts`) is a working implementation of what he described
+on the call — *"any kind of a function, you expose it in such a way that it is
+understandable by LLMs … wrapping it up with the schema definition to have the
+security layer"*. One wrapper per operation, auto-discovered from a folder with
+no manual registry, fanning out to **agent tool, HTTP route, MCP tool, A2A tool
+and CLI command**. JSON Schema is derived from Zod via Standard Schema, and
+`packages/core/src/mcp/build-server.ts` generates the MCP server from that same
+registry — with **stdio and Streamable HTTP calling one shared builder**, plus
+OAuth 2.1, per-request identity and `mcp:read`/`mcp:write` scopes.
+
+That is the strongest argument this stage will get: the pattern is not
+speculative, it is running in a repo the sponsor pointed at, and it answers the
+hosted-MCP question at the same time.
+
+**Two places it is behind us, recorded so the reference is not assumed superior
+everywhere:** it has no generic dry-run/preview (only ad-hoc `dryRun` arguments
+inside one domain's own handler), and **no guard fails its build when an action
+omits a risk declaration** — TypeScript merely requires `description` and `run`
+to exist. Our `capabilities.test.ts` refuses server construction for an
+undeclared tool, which is stricter.
+
 ### Stage 1 — the command registry
 
 One typed definition per operation (name, input schema, `mutates`,
@@ -346,10 +370,11 @@ the same reason.
 
 **What shipped:** `deliveryos mcp`, a stdio MCP server. This said "four
 read-only tools" and described the surface as it first landed; it is now
-**eight tools, four declared read-only and four not** — the four reads
-(`search_artifacts`, `get_artifact`, `catalog_overview`, `list_remotes`) plus
-`refresh_catalog` and `add_remote`, which write only to `~/.deliveryos` caches,
-and `preview_contribution`/`contribute_artifact`, which reach a shared remote.
+**nine tools, five declared read-only and four not** — the five reads
+(`search_artifacts`, `get_artifact`, `catalog_overview`, `list_remotes`,
+`read_artifact_file`) plus `refresh_catalog` and `add_remote`, which write only
+to `~/.deliveryos` caches, and `preview_contribution`/`contribute_artifact`,
+which reach a shared remote.
 Architecture, client configuration and measured costs in
 [docs/mcp-server.md](docs/mcp-server.md).
 
@@ -773,9 +798,19 @@ Ordered by what blocks value, not by phase number.
    result shapes stay uncovered, because the browser tests stub the sidecar
    with hand-written fixtures, so a changed result shape still passes
    everything. Closing that needs a real-sidecar browser harness.
-3. **Split `app.js`** — 7,464 lines in one IIFE. Deferred until ESLint covers
+3. **Multi-client artifact install — sized, not a nice-to-have.** Measured
+   against the live catalog: **212 of 237 artifacts (89%) install under
+   `.claude/`** — 80 `skills`, 67 `agents`, 35 `rules`, 30 `commands`. That, and
+   not any missing tool, is what makes the catalog single-vendor; the MCP server
+   itself is client-agnostic. `agent-native` solves this concretely:
+   `packages/skills/src/index.ts`'s `installSkills` resolves a per-client install
+   root (Claude → `.claude/skills`, Codex → `~/.codex/skills`, others →
+   `.agents/skills`), and `app-skill.ts`'s `buildAppSkillPack()` emits Codex,
+   Claude-marketplace, generic-MCP and ChatGPT-connector formats from one
+   manifest. The transcript raises reach twice; this is what answering it costs.
+4. **Split `app.js`** — 7,464 lines in one IIFE. Deferred until ESLint covers
    it, so the move happens with a linter watching.
-4. **A shared command surface** — the CLI exposes 15 commands and the sidecar
+5. **A shared command surface** — the CLI exposes 15 commands and the sidecar
    40, with nothing shared between them, so they drift. Now scoped properly as
    **Phase 16** (see above), which found this is worse than described: the
    `hasWiring` gate exists in three places, and the surfaces silently disagree on

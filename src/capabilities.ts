@@ -177,6 +177,12 @@ export const CAPABILITIES: Capability[] = [
     name: 'artifact.readPayloadFile',
     summary: "Read one file out of an artifact's payload",
     sidecar: 'artifact.readPayloadFile',
+    // On MCP because `get_artifact` answers "what should a person read first"
+    // and returns the README -- the file that DESCRIBES an artifact. An agent
+    // asked to fill in a template needs the template, which is a different file
+    // in the same payload. Read-only, reads the catalog cache and never the
+    // project, so it needs no `cwd` and adds no new risk class.
+    mcp: ['read_artifact_file'],
   },
   {
     ...read,

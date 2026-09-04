@@ -5,6 +5,7 @@ import {
 } from '../engine/catalog/catalog';
 import { resolveArtifact } from '../engine/pull/pull';
 import { resolvePrimaryDoc } from '../engine/payload/primaryDoc';
+import { listArtifactPayloadFiles, readArtifactPayloadPage } from '../engine/payload/readPayloadFile';
 import { assertUsableProjectDir } from '../engine/paths';
 import { listRemotes } from '../engine/remote/remoteRegistry';
 import { addRemote } from '../engine/remote/manageRemotes';
@@ -90,7 +91,29 @@ export function createEngineReadPort(): DeliveryOsReadPort {
         maxBytes: maxDocBytes,
         catalog: entries,
       });
-      return { entry, doc } satisfies ArtifactDetail;
+      const files = listArtifactPayloadFiles(found.remoteName, found.manifest.id);
+      return { entry, doc, files } satisfies ArtifactDetail;
+    },
+
+    readPayloadFile({ remote, id, path, offset, limit }) {
+      // No `cwd` and no `assertUsableProjectDir`: this reads the remote cache
+      // under DELIVERYOS_HOME, never the caller's project. Containment against
+      // `../` is the engine's, in `resolveWithinPayloadDir`, and it throws.
+      const page = readArtifactPayloadPage(remote, id, path, { offset, limit });
+      if (page.kind === 'not-found') {
+        return {
+          kind: 'not-found',
+          message: `"${path}" is not a file in ${id}'s payload. `
+            + "Call get_artifact and read its `files` list for the real names.",
+        };
+      }
+      if (page.kind === 'not-text') {
+        return {
+          kind: 'not-text',
+          message: `"${path}" is not a text file, so its contents are not useful here.`,
+        };
+      }
+      return page;
     },
   };
 }

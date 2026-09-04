@@ -4,7 +4,7 @@
 catalog to an MCP client (Claude Code, Claude Desktop, or anything else that
 speaks the protocol).
 
-**Eight tools: four declared read-only, four not.** It installs nothing — there
+**Nine tools: five declared read-only, four not.** It installs nothing — there
 is no `pull` tool and that is deliberate.
 
 The four non-read-only tools are worth separating, because "not read-only" spans
@@ -119,7 +119,8 @@ project, not of the machine. The two remote tools need no project at all.
 | Tool | Does | Writes | Network |
 |---|---|---|---|
 | `search_artifacts` | Finds by query, kind, remote, install status. Ranked, capped, reports the total. | — | No |
-| `get_artifact` | Full manifest plus the primary document, `postInstall` quoted verbatim, and the exact `pullCommand`. | — | No |
+| `get_artifact` | Full manifest, the primary document, every payload file name in `files`, `postInstall` quoted verbatim, and the exact `pullCommand`. | — | No |
+| `read_artifact_file` | One file from a payload, by a name `get_artifact` listed. Paginated by characters. | — | No |
 | `catalog_overview` | Counts by kind/remote/status; names any manifest that failed to load. | — | No |
 | `list_remotes` | Where artifacts come from, with URLs. Says plainly when nothing is configured. | — | No |
 | `refresh_catalog` | Fetches every remote from git, then summarises. | `~/.deliveryos` | **Yes** |
@@ -136,6 +137,37 @@ registered without a capability entry throws rather than taking SDK defaults.
 Note `preview_contribution` is annotated as a write despite publishing nothing.
 It is declared against `artifact.push`, which mutates; annotating it read-only
 would be convenient and would misstate which capability it belongs to.
+
+### Why `read_artifact_file` exists, when `get_artifact` already returns a document
+
+Because they answer different questions, and one call was serving both.
+
+`get_artifact` returns the *primary* document — what a person should read first.
+For most artifacts that is the `README.md`, which **describes** the artifact. That
+is the right answer for browsing and the wrong one for *"take the template, here
+is my content, you get it done"*: `friction-log`'s actual format lives in
+`friction-log.md`, sitting beside that README, and an agent could neither read it
+nor even discover its name.
+
+So `get_artifact` now also returns `files`, naming every file in the payload, and
+`read_artifact_file` returns one of them. Three properties are worth knowing:
+
+- **Three outcomes, never an empty string.** Real content, a typed *not found*,
+  and a typed *not text* are three different answers. Collapsed to `''`, a caller
+  cannot tell an empty template from a missing one from a PNG, and reports
+  success for all three.
+- **Paginated by characters, not bytes.** Slicing a decoded string at byte
+  offsets lets a UTF-8 multi-byte character straddle a page boundary so the
+  halves never rejoin. This repo's own templates are full of em dashes, so a
+  byte-based implementation would pass an ASCII test and corrupt every real
+  document.
+- **It reads the catalog cache, never the project.** No `cwd`, and
+  `resolveWithinPayloadDir` throws on any path escaping the payload directory.
+
+**What it deliberately does not do:** write the finished document. DeliveryOS
+hands over the template; the agent writes the filled-in file with its own tools.
+That keeps the install-nothing boundary exactly where the absence of a `pull`
+tool already puts it.
 
 **The server's own `instructions` are composed from the ports it was built
 with.** A server with no config or contribute port says it is read-only; one

@@ -49,6 +49,12 @@ const CATALOG: CatalogListEntry[] = [
 
 let refreshCalls = 0;
 
+/** Deliberately NOT ASCII. Paginating a decoded string by byte offsets lets a
+ * multi-byte character straddle the page boundary, so the halves never rejoin --
+ * a bug that passes an ASCII fixture and ships for every real template, since
+ * this repo's own docs are full of em dashes and curly quotes. */
+const PAGED_FIXTURE = 'Root cause — the "why" — spans pages. Unicode: — “ ” é ü. '.repeat(4);
+
 function fakePort(overrides: Partial<DeliveryOsReadPort> = {}): DeliveryOsReadPort {
   const snapshot = (remote?: string): CatalogSnapshot => ({
     entries: remote ? CATALOG.filter((e) => e.remoteName === remote) : CATALOG,
@@ -63,7 +69,26 @@ function fakePort(overrides: Partial<DeliveryOsReadPort> = {}): DeliveryOsReadPo
     readArtifact: ({ id }) => {
       const found = CATALOG.find((e) => e.manifest.id === id);
       if (!found) throw new Error(`No artifact with id "${id}" found in any registered remote`);
-      return { entry: found, doc: { relPath: 'SKILL.md', content: '# Code Review\n\nDo the thing.', truncated: false } };
+      return {
+        entry: found,
+        doc: { relPath: 'SKILL.md', content: '# Code Review\n\nDo the thing.', truncated: false },
+        files: ['README.md', 'SKILL.md', 'template.md'],
+      };
+    },
+    readPayloadFile: ({ path, offset, limit }) => {
+      if (path === 'logo.png') return { kind: 'not-text', message: 'not a text file' };
+      if (path !== 'template.md') return { kind: 'not-found', message: 'no such file' };
+      const offsetChars = offset ?? 0;
+      const limitChars = limit ?? 40_000;
+      const content = PAGED_FIXTURE.slice(offsetChars, offsetChars + limitChars);
+      return {
+        kind: 'text',
+        content,
+        offset: offsetChars,
+        limit: limitChars,
+        totalChars: PAGED_FIXTURE.length,
+        hasMore: offsetChars + content.length < PAGED_FIXTURE.length,
+      };
     },
     ...overrides,
   };
@@ -240,12 +265,13 @@ describe('MCP tool surface', () => {
   // Deliberately not called "the four read-only tools": `refresh_catalog` is
   // declared `readOnlyHint: false` -- it fetches every remote into the caches
   // under ~/.deliveryos -- so four tools here are not four read-only tools.
-  it('with the read port alone, advertises exactly those four tools and no mutating one', async () => {
+  it('with the read port alone, advertises exactly those five tools and no mutating one', async () => {
     const { client, close } = await connect();
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual([
       'catalog_overview',
       'get_artifact',
+      'read_artifact_file',
       'refresh_catalog',
       'search_artifacts',
     ]);
@@ -584,4 +610,81 @@ describe('MCP tool surface', () => {
     expect(seen).toEqual([{ cwd: 'C:/work/app', remote: 'internal' }]);
     await close();
   });
+
+  // ---------------------------------------------------------------- templates
+  // The scenario these exist for: an agent is asked to write an RCA from an
+  // artifact's template. `get_artifact` returns the primary doc, which for most
+  // artifacts is the README that DESCRIBES it -- so without a way to name and
+  // read the other payload files, the agent has the wrong file and cannot even
+  // discover the right one.
+
+  it('get_artifact lists the payload files, so a follow-up can name the template', async () => {
+    const { client, close } = await connect();
+    const res = await call(client, 'get_artifact', { cwd: 'C:/work/app', id: 'code-review' });
+    expect(res.isError).toBe(false);
+    expect(res.data.files).toEqual(['README.md', 'SKILL.md', 'template.md']);
+    await close();
+  });
+
+  it('read_artifact_file returns a payload file the agent can actually fill in', async () => {
+    const { client, close } = await connect();
+    const res = await call(client, 'read_artifact_file', {
+      id: 'code-review', remote: 'arcos', path: 'template.md',
+    });
+    expect(res.isError).toBe(false);
+    expect(res.data.content).toContain('Root cause');
+    expect(res.data.totalChars).toBeGreaterThan(0);
+    await close();
+  });
+
+  it('distinguishes missing, non-text and empty rather than returning one empty string', async () => {
+    // The whole point of the three-outcome shape. A caller handed '' for all
+    // three would report success for a missing template, a PNG, and a genuinely
+    // empty file alike -- the coercion habit this codebase keeps finding.
+    const { client, close } = await connect();
+
+    const missing = await call(client, 'read_artifact_file', {
+      id: 'code-review', remote: 'arcos', path: 'nope.md',
+    });
+    const binary = await call(client, 'read_artifact_file', {
+      id: 'code-review', remote: 'arcos', path: 'logo.png',
+    });
+    const empty = await call(client, 'read_artifact_file', {
+      id: 'code-review', remote: 'arcos', path: 'template.md', offset: 0, limit: 1,
+    });
+
+    expect(missing.isError, 'a missing file must not read as success').toBe(true);
+    expect(binary.isError, 'a binary file must not read as success').toBe(true);
+    expect(empty.isError, 'a real file must succeed even when a page is tiny').toBe(false);
+    // And the two failures must not be the same failure.
+    expect(missing.text).not.toEqual(binary.text);
+    await close();
+  });
+
+  it('pages a long file without losing characters at the boundary', async () => {
+    // PAGED_FIXTURE is deliberately non-ASCII. Slicing a decoded string by BYTE
+    // offsets would split a multi-byte character across the page boundary and
+    // the halves would not rejoin -- a bug an ASCII fixture cannot catch, in a
+    // repo whose docs are full of em dashes.
+    const { client, close } = await connect();
+    const args = { id: 'code-review', remote: 'arcos', path: 'template.md' };
+
+    const first = await call(client, 'read_artifact_file', { ...args, offset: 0, limit: 31 });
+    expect(first.data.hasMore, 'a fixture shorter than one page would prove nothing').toBe(true);
+
+    let assembled = String(first.data.content);
+    let offset = Number(first.data.offset) + assembled.length;
+    for (let guard = 0; guard < 50 && assembled.length < Number(first.data.totalChars); guard += 1) {
+      const next = await call(client, 'read_artifact_file', { ...args, offset, limit: 31 });
+      assembled += String(next.data.content);
+      offset += String(next.data.content).length;
+      if (!next.data.hasMore) break;
+    }
+
+    const whole = await call(client, 'read_artifact_file', { ...args, offset: 0, limit: 100_000 });
+    expect(assembled).toEqual(whole.data.content);
+    expect(assembled.length).toEqual(Number(first.data.totalChars));
+    await close();
+  });
+
 });
