@@ -615,7 +615,7 @@ team benefits, rather than build more on an unproven foundation.
 - **Open**: get one engineer outside the build team to actually adopt it
 - **Open**: track real usage numbers — deferred until there's an adopter to
   design the tracking around
-- **Open — one live instance left of a silent-coercion bug class.**
+- Done: **every known instance of the silent-coercion bug class is closed.**
   `agent-native`'s `AGENTS.md` names this as the single most repeated cause of
   user reports in that repo: *"a `catch`, default, or coercion that returns a
   value callers cannot distinguish from success is a bug, not a guard… a dropped
@@ -651,9 +651,17 @@ team benefits, rather than build more on an unproven foundation.
   — defined as "no build command detected" — when it merely chose not to run
   one. Both need a widened `BuildVerificationResult`; three existing tests assert
   the wrong string today.
-- **Open — `test/` is not typechecked at all.** `tsconfig.json` excludes it
-  *and* scopes `include` to `src/**/*.ts`, and vitest transpiles without
-  checking. 7 real type errors hide there today, across 3 files.
+- Done: `test/` is typechecked. `tsconfig.test.json` extends the base config
+  (inheriting the zod `paths` mapping) and `npm run typecheck` now runs both.
+  The recorded "7 errors across 3 files" was stale -- the real figure was **33
+  across 10 files**, and a first measurement without the `paths` mapping said
+  58, which is how easy it is to mis-count this. **All 33 were fixed; no
+  quarantine was needed.** Five were a module mismatch (tests run through vitest
+  as ESM while the base config is commonjs), and the largest group -- 12 -- were
+  properties added to `mcp.server.test.ts`'s `ToolJson` grab-bag by the
+  `read_artifact_file` work days earlier, plus two fake ports missing the port
+  method that same work added. The newest code really had been growing the
+  backlog fastest, which is the argument for the gate rather than an aside.
 - Done: `src-tauri/spike-ui/**/*.js` is linted. It was never in ESLint's
   `ignores` -- it simply matched no config carrying rules, so `--print-config`
   reported `rules: 0` for all 7,464 lines, which looks identical from outside
@@ -756,6 +764,29 @@ team benefits, rather than build more on an unproven foundation.
   memoization, called ~2× per RPC.
 
 ---
+
+### Measure config-sensitive things with the config
+
+One question -- "how many type errors are in `test/`?" -- produced **four
+confidently wrong answers** before the right one:
+
+| Source | Said | Why it was wrong |
+|---|---|---|
+| PLAN.md, recorded earlier | 7 across 3 files | Stale; never re-measured |
+| First measurement | 58 | Ran `tsc` with flags but **without the project's `paths` mapping**, so 25 zod errors in `src/` were counted |
+| Restated twice as | ~50 | Same run, rounded, repeated without re-checking |
+| An independent check | 28 across 6 files | Same class of error: a standalone strict config, not the project's |
+| **Measured with a config that `extends` the base** | **33, all in `test/`** | |
+
+Every wrong figure came from the same habit: measuring something
+config-sensitive without the config. It is cheap to repeat, and **it looks like
+diligence while you are doing it** -- a number was produced, a command was run,
+the output was real. The 28 was even used to argue a sequencing change.
+
+The rule that would have caught all four: **if the project has a config for a
+tool, measure through it (`tsc -p`, not `tsc` plus flags).** A figure obtained
+any other way is indicative at best, and should be labelled as such before it is
+used to make a decision.
 
 ### A defect shape worth checking for deliberately
 

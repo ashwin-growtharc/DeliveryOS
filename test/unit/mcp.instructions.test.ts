@@ -35,6 +35,9 @@ const readPort: DeliveryOsReadPort = {
   readArtifact: () => {
     throw new Error('unused');
   },
+  readPayloadFile: () => {
+    throw new Error('unused');
+  },
 };
 
 const configPort: DeliveryOsConfigPort = {
