@@ -6,6 +6,49 @@ All notable changes to DeliveryOS are recorded here, newest first. See
 
 ---
 
+## The linter was not ignoring app.js -- it was matching nothing (branch `lint/app-js`)
+
+7,464 lines of the desktop frontend had `rules: 0`. It was never in ESLint's
+`ignores`; it simply matched no config object that carried any rules. That looks
+identical from the outside and is much easier to miss than an explicit exclusion
+-- an ignore is a decision someone wrote down; this was an absence.
+
+### What it cost to turn on: two things
+
+Measured before starting, because the previous estimate in this plan was ~7x
+off. This one was accurate: **247 `no-undef` occurrences but only 15 distinct
+identifiers** -- twelve browser globals, plus `marked`, `Terminal` and
+`FitAddon`, which real `<script>` tags attach to `window`. Declaring them cleared
+all 247. The rule backlog was **exactly 2**, with zero across nine other
+recommended rules.
+
+Both were fixed rather than quarantined, because both were real:
+
+- **`progressUnlisten` was dead code**, assigned `null` and never read since the
+  refactor that introduced `progressUnlistenGlobal`. Above it sat a five-line
+  comment explaining teardown behaviour that now lives elsewhere -- worse than
+  the variable, because it was documentation pointing at nothing.
+- **An unused `catch (err)` binding**, now `catch {}`. Not `_err`: the body is
+  comment-only and already explains why nothing happens, so an underscore
+  binding would imply something might want the error later.
+
+### A dependency that would have broken quietly
+
+`globals` was resolving **only through `@eslint/eslintrc`** -- the legacy
+`.eslintrc` compatibility layer, which is exactly the package a flat-config
+project stops pulling in. A routine ESLint upgrade would have removed it. It
+resolved at 14.0.0 while 17.12.0 is current, so declaring it without a version
+would have swapped the version underneath a config written against the old one,
+and `globals.browser`'s key set changes across majors.
+
+Both `globals` and `@eslint/js` are now declared, and the twelve required names
+were verified present in the installed version rather than assumed.
+
+`vendor/**` is now ignored explicitly -- linting someone else's minified bundle
+reports their style, not ours.
+
+---
+
 ## Take the template (branch `tier0/multi-user-hardening`)
 
 The sponsor described a scenario on the 2 Sep call (00:36:24): the MCP asks three

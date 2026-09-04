@@ -645,11 +645,18 @@ team benefits, rather than build more on an unproven foundation.
 - **Open — `test/` is not typechecked at all.** `tsconfig.json` excludes it
   *and* scopes `include` to `src/**/*.ts`, and vitest transpiles without
   checking. 7 real type errors hide there today, across 3 files.
-- **Open — `src-tauri/spike-ui/app.js` has zero lint coverage.** It is not in
-  ESLint's `ignores`; the only config object carrying rules is scoped to
-  `files: ['**/*.ts']`, so `--print-config` reports `rules: 0` for all 7,464
-  lines. ~15 browser globals would leave a 2-warning backlog. Blocks "Split
-  `app.js`" under What's next.
+- Done: `src-tauri/spike-ui/**/*.js` is linted. It was never in ESLint's
+  `ignores` -- it simply matched no config carrying rules, so `--print-config`
+  reported `rules: 0` for all 7,464 lines, which looks identical from outside
+  and is far easier to miss than an explicit exclusion. The estimate here was
+  right: 15 distinct globals (12 browser + `marked`/`Terminal`/`FitAddon`,
+  vendored via `<script>`) cleared all 247 `no-undef`, and the backlog was
+  exactly 2. Both were fixed rather than quarantined -- one was dead code
+  carrying a five-line comment describing teardown that had moved to
+  `progressUnlistenGlobal`. `globals` and `@eslint/js` are now declared
+  dependencies: `globals` had been resolving only through
+  `@eslint/eslintrc`, the legacy-config layer a flat-config project is
+  supposed to stop pulling in. No longer blocks "Split `app.js`".
 - Done: `.deliveryos/` now carries its own `.gitignore` in every project it
   lands in — written by `ensureProjectDeliveryOsDir`, which is the single way
   that directory gets created. Inside the directory rather than appended to the
@@ -791,8 +798,10 @@ Ordered by what blocks value, not by phase number.
    narrower than it looks. The frontend now has its first real *behavioural*
    gate — `test/e2e/detailDisclosure.e2e.test.ts`, five browser tests against
    the real `index.html` — which is what caught the last UI defect class, but
-   it is coverage, not static analysis: the 7,464 lines still lint to
-   `rules: 0`. It also has its first *static* gate, in
+   it is coverage, not static analysis. The 7,464 lines **are** now linted
+   (that gap is closed), but with the recommended JS rule set only -- there is
+   no type information behind it, so it catches undefined names and dead code,
+   not wrong shapes. It also has its first *static* gate, in
    `test/unit/capabilities.test.ts`: every sidecar command `app.js` calls must
    exist in the dispatch table and be declared. Names only — argument and
    result shapes stay uncovered, because the browser tests stub the sidecar
