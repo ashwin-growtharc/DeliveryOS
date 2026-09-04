@@ -336,6 +336,38 @@ error paths refuse correctly, and `npx` resolves fine on Windows because
 plus `tsx` compiling, paid once per session, not per call). Pointing at
 `node dist/index.js mcp` after `npm run build` is faster if that ever matters.
 
+### Which clients
+
+**Any client that speaks MCP**, not just Claude. The server is built on the
+official `@modelcontextprotocol/sdk` over stdio and contains no client-specific
+logic — Claude Code and Claude Desktop, but equally Cursor, VS Code's agent
+mode, Windsurf, Zed, Cline, Continue, a Gemini or OpenAI agent, or anything you
+write yourself against the SDK.
+
+That portability was paid for, not assumed. The setup interview in
+`list_remotes`/`add_remote` would have been a natural fit for MCP
+**elicitation**, which lets the server ask the user directly. It was rejected:
+elicitation is supported in Claude Code but returns `-32601 Method not found`
+in Claude Desktop, so it would have worked in exactly one client. The interview
+lives in the server `instructions` and the tool descriptions instead, and the
+agent drives it — a shape that works everywhere. See the note at
+`src/mcp/server.ts:679`.
+
+What differs between clients is only **where the config lives and what shape it
+takes** — Claude Code reads `.mcp.json`, Cursor and VS Code each have their own
+file and their own schema. The parts that matter are the same everywhere: a
+command, its arguments, and stdio. Check your client's own documentation for
+the exact key names rather than assuming the block below transfers verbatim.
+
+One honest caveat, and it is about the catalog rather than the protocol: `skill`
+and `agent` artifacts install into `.claude/skills/` and `.claude/agents/`,
+which mean something to Claude Code specifically. Other kinds do not —
+backend plugins, UI components and templates install to ordinary project paths.
+So any client gets full discovery and working code for most kinds; a Claude
+skill pulled from Cursor lands in a directory Cursor does not read. `kind` is
+deliberately an open string (`schema.ts:105`), so nothing in the design blocks
+adding a client-specific kind later.
+
 **Claude Code** (`.mcp.json` in the project, or `claude mcp add`):
 
 ```json

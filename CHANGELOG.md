@@ -6,6 +6,132 @@ All notable changes to DeliveryOS are recorded here, newest first. See
 
 ---
 
+## Half a feature hardened is not a hardened feature (branch `tier0/multi-user-hardening`)
+
+Five fixes, a walkthrough, and one retraction. The theme, visible only in
+hindsight: every defect here was one half of something already done.
+
+### A credential leak survived in the other half of the feature it was fixed in
+
+`pull.ts` redacts `post_install` output at four sites. `applyUpdate.ts` redacted
+at **none** — the same manifest command, run on the update path instead of the
+first install. So `check-updates --apply` and the desktop app's Apply Update
+still surfaced raw registry URLs and connection strings.
+
+The failure path mattered most, and it is the easy one to miss: `execSync`'s
+message embeds `Command failed: <the whole command line>`, so a credential
+passed as an *argument* leaked even when the child printed nothing at all. Both
+new tests were confirmed to fail on the old code with the password visible.
+
+### A red CI run that could not be diagnosed
+
+One run failed as `Test timed out in 30000ms` and nothing else. Three log reads
+later there was still no answer, because `SidecarSession` could not tell a slow
+sidecar from a dead one: pending resolvers were never rejected on child exit,
+the captured stderr was shown to nobody, and an unparseable stdout line was
+dropped under a comment claiming the awaiting assertion would "fail loudly" — it
+did not, it failed anonymously. All three now surface, and requests carry their
+own 24 s budget, deliberately under vitest's 30 s, so the harness wins the race.
+
+**The timeout was deliberately not raised.** This suite's history is that
+raising one hides starvation, and raising it here would have destroyed the
+signal the instrumentation exists to capture. Nothing in this batch claims to
+fix the intermittent failure; it makes the next occurrence say which it was.
+
+### The desktop app's RPC names were unguarded
+
+`app.js` calls 40 distinct sidecar commands across 53 sites, with no compiler
+and no linter behind it — `eslint --print-config` reports `rules: 0`, and
+`tsconfig` never reaches `src-tauri/`. A rename applied consistently across
+`sidecar.ts` and `capabilities.ts`, which is what a careful person would do,
+passed every gate and surfaced as a runtime toast in front of a user. Verified
+by doing exactly that: ten guards stayed green and only the new one caught it.
+
+Names only. Argument and result shapes stay uncovered, because the browser tests
+stub the sidecar with hand-written fixtures.
+
+### Two regressions from tightening `cwd`
+
+`assertUsableProjectDir` turned a stale project folder from "a catalog where
+everything reads `not_pulled`" into a hard error — the right trade, since the
+old behaviour was the wrong-project defect. But only `init()` recovered. The
+catalog error state offered a **Retry bound to a call that re-throws the same
+error every press**, and the 20-minute auto-sync tick toasted
+`The project directory ... does not exist.` every 20 minutes for the life of the
+session.
+
+Foreground paths now forget the folder and re-prompt. The background tick stays
+quiet instead: a timer must not nag, and must not discard a setting for a
+condition that may be transient — an unmounted network drive comes back.
+
+### A guard whose message contradicted its own assertion
+
+The new `app.js` guard's anti-vacuity check was `> 30` against a measured 40,
+with the message "parsed zero". A regex change dropping 25 of the 40 would have
+passed while claiming to have caught a zero-parse. Now derived from the dispatch
+table read from source, with a message that prints the real numbers.
+
+### Retracted: the CI worker-count theory
+
+A red run was attributed to `vitest.config.ts`'s
+`WORKERS = Math.max(2, floor(cores/2))` defeating its own cap on a 2-core
+runner. **Wrong.** The repo is public, so GitHub allocates 4-core Windows
+runners: `max(2, floor(4/2))` = 2 workers, 50% subscribed, as intended. No
+config change was made. `ci.yml`'s own comment already said "2 workers on a
+4-core runner" — a reading error rather than a knowledge gap, and those recur.
+
+### Documentation
+
+`docs/hardening-ledger.html` became `docs/hardening-ledger.md`, converted by
+walking the rendered DOM rather than regexing the source and verified lossless
+word-for-word (1635 both ways). `docs/mcp-walkthrough.html` gained a local vs
+hosted section whose example is *derived, not written* — the "hosted" pane is
+the same captured response with the two `cwd`-derived fields removed by code,
+so the document's promise that nothing on it was typed by hand still holds.
+`docs/mcp-server.md` and `README.md` now state that the server works with any
+MCP client, a property the code had already paid for by rejecting elicitation,
+and which no document mentioned.
+
+---
+
+## Search returned nothing for a question asked the way anyone would ask it (branch `tier0/multi-user-hardening`)
+
+Found by *using* the tool rather than testing it. Everything on the branch was
+CI-verified; none of it had been used. The first real question broke it.
+
+`search_artifacts` matched the whole query as one substring, so
+`"reviewing a pull request"` returned **0 matches** against a catalog holding
+`code-reviewer`, `pr-review-reality-checker` and `java-api-review`. Single words
+worked — `"review"` found 34 — because that is the only shape the scorer
+handled. Every existing search test used a single-word query, so the tests
+agreed with the code and both were wrong: the same shape as the `gh`-auth test
+CI caught, where the code and its checks shared an assumption.
+
+The failure mode is the worst available: an empty result reads as an *answer*,
+so an agent concludes nothing is available and moves on.
+
+**The first fix was wrong too.** Splitting into terms produced results but
+ranked them badly — `"setting up authentication"` returned three documentation
+artifacts, because "up" is a substring of "lookup" and "updater". Substring
+matching failed in both directions: false positives from a short term hiding
+inside a longer word, and false negatives because
+`'code-reviewer'.includes('reviewing')` is false — substring matching only works
+when the query term is *shorter* than the indexed word, which is not a property
+natural questions have.
+
+Now word-level, with a prefix rule for the morphology this catalog actually
+contains (review/reviewer/reviewing, test/testing, auth/authentication) and a
+four-character floor, below which prefixes stop discriminating — "api" and "app"
+would collide at three. Breadth beats depth: matching two terms outranks
+mentioning one term three times.
+
+Five tests, with all three failure modes proven against the old scorer,
+including that a fragment must *not* match ("utt" cannot find `react-button`)
+and that a query of only filler words returns nothing rather than ranking the
+catalog arbitrarily.
+
+---
+
 ## Contributing back over MCP, behind a preview (PR #27)
 
 `deliveryos mcp` gained two tools: `preview_contribution` and

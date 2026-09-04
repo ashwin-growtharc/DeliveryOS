@@ -148,6 +148,12 @@ offer to enable the server the next time you open this repo — approve it once
 and the tools are available. It runs `npx tsx src/index.ts mcp`, so a fresh
 clone needs nothing beyond `npm install`.
 
+**Not Claude-only.** The server is the official MCP SDK over stdio with no
+client-specific logic, so Cursor, VS Code's agent mode, Windsurf, Zed and
+anything else that speaks MCP work too — `.mcp.json` is simply Claude Code's
+config format. That portability was deliberate: the setup interview avoids MCP
+elicitation precisely because it would have worked in one client only.
+
 Client configuration for other setups (including the Windows `.cmd` caveat and
 the packaged `.exe`), the architecture, and the reasoning behind every refusal
 are in [docs/mcp-server.md](docs/mcp-server.md). The folder structure and which
