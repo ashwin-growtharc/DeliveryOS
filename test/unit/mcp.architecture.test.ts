@@ -119,10 +119,18 @@ describe('MCP adapter boundary', () => {
     // an agent asked to fill in a template needs the template -- a different
     // file in the same payload. Read-only, reads the catalog cache, never the
     // project, and takes no `cwd`.
+    // `readSearchableText` was added deliberately. Search indexed id,
+    // description, tags and kind and never the artifact's own document, so the
+    // catalog's real content was invisible to the tool whose job is finding it
+    // -- `stale` appears in 0 descriptions and 9 bodies. The server cannot
+    // reach `resolvePrimaryDoc` itself (see the dependency gate above), so the
+    // text has to arrive through the port. Read-only, no `cwd`, and called only
+    // for candidates that already scored zero on metadata.
     expect(declaredPortMethods().sort()).toEqual([
       'listCatalog',
       'readArtifact',
       'readPayloadFile',
+      'readSearchableText',
       'refreshCatalog',
     ]);
   });

@@ -113,6 +113,21 @@ export interface DeliveryOsReadPort {
     limit?: number;
   }): PayloadFileResult;
 
+  /**
+   * The artifact's primary document as plain text, for SEARCH ONLY, or
+   * `undefined` when it has none.
+   *
+   * Separate from `readArtifact` because search calls it per candidate and must
+   * not pay for a full manifest resolution, and separate from `readPayloadFile`
+   * because search does not know a path -- that is the whole point: 131 of 230
+   * artifacts ship a single file whose name search has no way to guess.
+   *
+   * Exists because the catalog's real content was invisible to the tool whose
+   * job is finding it. Measured: `stale` appears in 0 artifact descriptions and
+   * 9 bodies; `drift` in 0 and 10.
+   */
+  readSearchableText(input: { remote: string; id: string }): string | undefined;
+
   readArtifact(input: {
     cwd: string;
     id: string;

@@ -31,6 +31,9 @@ const readPort: DeliveryOsReadPort = {
   readPayloadFile: () => {
     throw new Error('not used by these tests');
   },
+  readSearchableText: () => {
+    throw new Error('not used by these tests');
+  },
 };
 
 function fakeContributePort(opts: { pendingPr?: boolean; pushFails?: boolean } = {}) {
