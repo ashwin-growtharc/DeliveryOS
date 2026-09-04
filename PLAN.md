@@ -615,7 +615,7 @@ team benefits, rather than build more on an unproven foundation.
 - **Open**: get one engineer outside the build team to actually adopt it
 - **Open**: track real usage numbers — deferred until there's an adopter to
   design the tracking around
-- **Open — one live instance left of a silent-coercion bug class.**
+- Done: **every known instance of the silent-coercion bug class is closed.**
   `agent-native`'s `AGENTS.md` names this as the single most repeated cause of
   user reports in that repo: *"a `catch`, default, or coercion that returns a
   value callers cannot distinguish from success is a bug, not a guard… a dropped
