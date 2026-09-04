@@ -36,6 +36,42 @@ import type { CatalogListEntry } from '../../src/engine/catalog/catalog';
  * DESCRIPTIONS carry a mid-frequency term, and one whose description does not
  * but whose BODY does. Hermetic on purpose -- an eval that depends on the live
  * catalog changes meaning every time someone pushes an artifact.
+ *
+ * WHAT THIS FILE CANNOT CATCH, AND WHY YOU MUST ALSO RUN THE REAL CATALOG
+ *
+ * The fixture has ONE body. That is enough to prove an artifact becomes
+ * findable, and structurally incapable of showing what happens when 99 do.
+ *
+ * The first working version of this fix passed every case here AND held its
+ * non-regression guarantee exactly -- top-ranked results identical -- while
+ * matching **182 of 237** real artifacts, because a long document contains
+ * almost any common word. The tool promises "the total number of matches, so a
+ * broad query can be narrowed"; a useful "15, narrow it" had become a
+ * meaningless "182". Nothing in this file went red.
+ *
+ * That is a different failure from a stale comment or a wrong assertion. It is
+ * a proof that was TRUE and INSUFFICIENT: the arithmetic bounded RANKING and
+ * said nothing about RECALL, and recall was where the damage was. A guarantee
+ * makes you confident about the axis it covers, and that confidence leaks onto
+ * the axes it does not.
+ *
+ * So: **a guarantee bounds one dimension; run the real corpus to find the ones
+ * it does not bound.** After any change here, re-run a live query and look at
+ * `total`, not just at the order.
+ *
+ * FOUR REFUTED FIXES, so nobody spends the afternoon again
+ *
+ *   1. Whole-query substring matching  -- returned ZERO for natural questions.
+ *   2. Deeper/shallower term matching  -- the original diagnosis; not the cause.
+ *   3. IDF over metadata               -- `documentation` is df 7 of 230, RARE,
+ *                                         so rarity-weighting boosts exactly
+ *                                         the wrong results.
+ *   4. IDF over bodies                 -- df 17 of 99 vs `stale` at 9. A 1.36x
+ *                                         separation, nowhere near enough to
+ *                                         flip a legitimate metadata match.
+ *
+ * Every one of those looked right until it was measured. That is what ranking
+ * work is like without an eval, and it is why this file exists.
  */
 
 function entry(
