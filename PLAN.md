@@ -307,12 +307,14 @@ Against this list specifically:
   (`src/cli/commands/remoteAdd.ts`, `src/sidecar.ts`, `src/mcp/engineAdapter.ts`).
   The MCP surface is why it stopped being cosmetic: a third copy would have been
   written otherwise
-- **Open**: collapse the `hasWiring` dispatch gate from three copies to one.
-  Both surfaces compute the same `const hasWiring` independently
-  (`src/cli/commands/pull.ts:71`, `src-tauri/spike-ui/app.js:4677`), and the
-  sidecar splits it across two keys (`artifact.pull` vs
-  `artifact.pullAndAutoWire`) so its callers choose. Line numbers here were
-  already stale once — anchor on the `hasWiring` identifier, not the number
+- **Open**: collapse the `hasWiring` dispatch gate. This said "three copies";
+  it is **four** — `src/cli/commands/pull.ts`, and `app.js` computes the same
+  `const hasWiring` twice in the same file (`runArtifactAction` for Pull,
+  `actionButtonFor` for Update) — plus the sidecar splitting it across two keys
+  (`artifact.pull` vs `artifact.pullAndAutoWire`) so its callers must choose.
+  The engine holds the same predicate twice more, in `pullAndAutoWire.ts` and
+  `applyUpdate.ts`. Deliberately no line numbers: the ones here were stale, and
+  so was `applyUpdate.ts:339` in `docs/agent-surface-plan.md`
 
 ### Stage 1 — the command registry
 

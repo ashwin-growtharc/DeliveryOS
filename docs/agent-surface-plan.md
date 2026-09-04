@@ -41,8 +41,8 @@ drift is invisible:
 | 91 lines of `toPushOptions` exist **only** on the CLI; sidecar casts raw | `src/cli/commands/push.ts:65` vs `src/sidecar.ts:410` |
 | CLI `check-updates --apply` hits **all** artifacts; sidecar requires an `id` | `src/sidecar.ts:457` |
 | **No CLI equivalent of `catalog.refresh`** | the cache-staleness gap `README.md` already documents |
-| `hasWiring` dispatch gate written **four times** (was "three") | `src/cli/commands/pull.ts:71`, `app.js:4633` (Pull), `app.js:4236` (Update — a second copy in the same file), and encoded as two sidecar keys (`artifact.pull` / `artifact.pullAndAutoWire`). The engine holds the same predicate twice more (`pullAndAutoWire.ts:44`, `applyUpdate.ts:339`) |
-| `remote add`/`remove` orchestration written twice | `remoteAdd.ts:13-27` vs `sidecar.ts:169-187` — the sidecar comment admits it *"mirrors `runRemoteAdd`'s order exactly"* |
+| `hasWiring` dispatch gate written **four times** (was "three") | `src/cli/commands/pull.ts` (`hasWiring` in the pull action), `app.js` `runArtifactAction` (Pull) and `actionButtonFor` (Update — a second copy in the same file), and encoded as two sidecar keys (`artifact.pull` / `artifact.pullAndAutoWire`). The engine holds the same predicate twice more, in `pullAndAutoWire.ts` and `applyUpdate.ts` |
+| ~~`remote add`/`remove` orchestration written twice~~ — **fixed** | Extracted to `src/engine/remote/manageRemotes.ts`; the CLI, sidecar and MCP adapters all call it. The sidecar's copy had admitted it *"mirrors `runRemoteAdd`'s order exactly"* |
 
 **Scale:** **43** distinct operations after dedup (this said 42; counted against the real surfaces while building `src/capabilities.ts`, which declares 43 and is the source of truth). Roughly 25 sidecar-only, 2 CLI-only,
 15↔13 overlapping). Coverage through the real surface: sidecar 12/40 (30%), CLI
@@ -374,7 +374,7 @@ Two operations need a call I initially got wrong:
 - **`remove`** — I called it "reversible." It isn't, quite: it deletes
   `installTarget` and every `wiredFiles` entry. If the user edited those, the work
   is gone. Note the existing inconsistency: the **app confirm-gates Remove**
-  (`app.js:4780`) but the **CLI doesn't**. Since MCP can't rely on a client
+  (the `window.confirm` in `handleRemoveArtifact`) but the **CLI doesn't**. Since MCP can't rely on a client
   prompting, `remove` sits with `push` as a Stage 3 decision, not Stage 2.
 - **`push`** — the specific reason isn't general caution. Push is all-or-nothing
   over the whole pulled folder with **no diff preview and no confirmation**
