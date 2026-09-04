@@ -6,6 +6,232 @@ All notable changes to DeliveryOS are recorded here, newest first. See
 
 ---
 
+## `files: []` for 57% of the catalog (branch `payload/single-file-addressable`)
+
+`payload_path` "may name a single file or a directory" (`schema.ts:150-158`).
+Measured against the live catalog: **131 of 230 artifacts, 57%, are the single
+file kind.** Every one of them answered `get_artifact` with `files: []`.
+
+In the same response as `hasDoc: true`. And `read_artifact_file`'s own
+description told the agent to read by a path `get_artifact` listed in `files`.
+So for most of the catalog the surface said, simultaneously, *there is a
+document here* and *there is nothing you can name to read*.
+
+This is the comforting half of the silent-coercion class, which is the worse
+half. A wrong error gets investigated; a wrong all-clear gets believed. An agent
+reading `files: []` concludes the artifact ships nothing worth opening and moves
+on -- while holding the entire document in `doc.content` of that same response.
+
+### What was actually broken, and what was not
+
+Worth separating, because the first framing was wrong and the measurements are
+what corrected it.
+
+**Nothing was unreachable.** `doc.content` carried the whole document for all
+131. The largest single-file payload is 35,093 chars against a 65,536-byte doc
+cap and a 40,000-char page limit, so nothing was truncated and nothing needed
+paging either. The defect was a false contract, not a missing capability -- and
+an early estimate that 45% of these needed pagination came from comparing file
+sizes against `BINARY_SNIFF_BYTES` (8,000) as though it were the page size.
+
+**The address was the broken part.** `resolvePrimaryDoc` reported `relPath: '.'`
+for a file payload -- a deliberate sentinel, documented as letting a caller tell
+the two payload shapes apart without re-statting. It bought that at the cost of
+the one thing `relPath` is for: `'.'` is not a name, so it could not be handed
+to `read_artifact_file`, and on the MCP surface it reached agents as a literal
+dot beside an empty list.
+
+And `resolveWithinPayloadDir` is pure path arithmetic, so against a file root
+`resolve(<file>, <anything>)` yields a path *under* the file -- which passes
+containment and then fails to exist. Every name resolved to nothing, including
+the file's own.
+
+### One contract, three invariants
+
+- `files` is never empty for a payload that is on disk; a single-file payload
+  reports that file's basename.
+- `doc.path` is always a member of `files`.
+- every member of `files` reads back.
+
+A file root now answers to an allowlist of exactly three spellings of itself --
+its basename, `'.'`, and `''`. An allowlist rather than a path join is the
+point: there is no arithmetic to get wrong and no input that can address
+anything else. `'.'` keeps working, so callers written against the old sentinel
+are not broken.
+
+### The containment near-miss
+
+The first version routed a file root *around* `resolveWithinPayloadDir` and
+returned `not-found` for `../not-yours.md`. That is this repo's own coercion
+habit applied to its containment check -- a traversal attempt is a refusal, not
+an absence.
+
+It was caught by the anti-vacuity run: the containment tests failed against the
+**pre-fix** code, and a test guarding a widening should pass before *and* after.
+One that flips is reporting a behaviour change nobody asked for. Traversal now
+throws exactly as it always did; only the three self-spellings were added.
+
+### Verification
+
+Run against the real 230-artifact catalog, every artifact, every listed file:
+
+```
+checked=230   singleFile=131   directory=99
+files-empty        0   (was 131)
+doc-not-in-files   0
+listed-but-unreadable  0
+```
+
+912 tests / 84 files, lint and typecheck green. Anti-vacuity: 4 contract tests
+fail against pre-fix code, 5 containment tests pass on both sides.
+
+---
+
+## The drift the manifest could not see (branch `cli/scope-check-updates`)
+
+`src/capabilities.ts` exists to stop the three surfaces disagreeing about what
+an operation is and how dangerous it is. It has caught real drift. This one
+walked past it.
+
+`sync.applyUpdate` is declared on both surfaces. Both declare it destructive,
+network-touching, project-scoped. Every flag agrees. And the two surfaces did
+completely different things:
+
+- the sidecar's `artifact.applyUpdate` **requires** an id and updates exactly
+  one artifact
+- the CLI's `check-updates --apply` had no id **at all** and updated **every**
+  installed artifact
+
+Same engine function. `applyAvailableUpdates(cwd, onProgress?, onlyId?)` has
+accepted `onlyId` the whole time; the sidecar passed it and the CLI never did.
+So the capability existed, was implemented, was tested -- and was unreachable
+from the surface most people use.
+
+**The class is worth naming, because the manifest still cannot catch it.** The
+two declarations did not disagree about *whether* the operation exists or *how
+risky* it is. They disagreed about **granularity** -- one scopeable, one not --
+and nothing in the manifest compares argument shapes. The guard checks that both
+surfaces declare the same operation with the same risk. It cannot check that
+they can express the same requests.
+
+### What changed
+
+`check-updates` now takes an optional `[id]`, on both the reporting and the
+`--apply` path. With no id it is project-wide exactly as before -- that stays
+the default, but it is now a choice rather than the only mode.
+
+A typo'd id gets its own answer. The engine filters the lockfile by id, and an
+empty filter is indistinguishable from an empty result, so left to the engine
+`check-updates some-typo --apply` printed **"No updates available."** and exited
+0 -- reassurance about an artifact this project does not have, which is the
+silent-coercion shape `AGENTS.md` names, and worse on a surface an agent relays
+as fact. The CLI now checks the lockfile first and refuses by name, exit 1.
+
+**This is the one behaviour change here that could surprise something
+scripted.** `check-updates <id>` for an id this project has not installed
+used to exit **0**; it now exits **1**. That is the fix rather than a side
+effect -- the old exit 0 told every wrapper, script and agent that a check
+had succeeded when nothing had been checked -- but "the exit code changed"
+is the kind of thing people find out from a red CI job rather than from
+release notes, so it is stated here plainly. Nothing else in this change
+alters an exit code: `check-updates` with no id, with an installed id, or
+with `--apply` all exit exactly as before.
+
+The scoping test asserts the **negative**: after `check-updates lint-config
+--apply`, the other stale artifact is still on its old bytes and still reported
+as stale. A test that only checked the named artifact moved would have passed
+against the old project-wide behaviour just as happily. Both new tests were run
+against the pre-fix code and both fail there; the pre-existing project-wide test
+passes unchanged.
+
+---
+
+## The catalog's own documents were invisible to search (branch `search/index-bodies`)
+
+Found by using the MCP surface as its intended consumer -- an agent, doing a real
+task, reading only what the server sends. The task worked. The ranking did not:
+
+> *"catch stale comments that no longer match the code"*
+> -> **`email-code-auth` ranked 2nd** -- a passwordless-login plugin, above
+> `plankton-code-quality`, because it contains the token `code`.
+
+### The diagnosis, measured
+
+The scorer indexed id, description, tags and kind. **99 artifacts carry a primary
+document it never read.** The words that carry intent live only there:
+
+| term | df(description) | df(body) |
+|---|---|---|
+| `stale` | **0** | 9 |
+| `comments` | **0** | 2 |
+| `drift` | **0** | 10 |
+
+### Three plausible fixes, all wrong, all caught by measuring
+
+- **Shallow matching** -- the original diagnosis, and not the cause.
+- **IDF over metadata.** `code` is df 47, so weighting by rarity looked obvious.
+  But `documentation` is df **7** -- *rare* -- so IDF would have boosted exactly
+  the wrong results harder.
+- **IDF over bodies.** A different corpus, worth checking separately: df 17 of 99
+  for `documentation` against 9 for `stale`, a separation of **1.36x**. Nowhere
+  near enough to flip a legitimate metadata match.
+
+Neither IDF variant was built. The numbers are in the code so the next person
+does not retry them.
+
+### What shipped, and the property it buys
+
+Body **presence**, not term frequency. Metadata scores are untouched, so the
+relative order of everything that already matched is preserved -- only artifacts
+scoring zero can move, and the body total is capped below the smallest possible
+metadata score (38). That makes non-regression arithmetic rather than a hope.
+The bonus deliberately never feeds `matchedTerms`, whose x30 breadth multiplier
+would have made the guarantee nominal.
+
+Bodies are read **only for candidates that scored zero on metadata** -- the only
+ones that can move. The rejected alternative, "stop once metadata returns enough
+results", excluded its own motivating case: that query returned 15 against a
+limit of 8, so it would never have read a body.
+
+### The threshold moved twice, under measurement
+
+The synthetic fixture could not show this -- it has one body. Against the real
+catalog:
+
+| rule | total matched |
+|---|---|
+| metadata only (before) | 15 |
+| >= 1 body term | **182** -- destroys the signal |
+| >= 2 body terms | 125 |
+| >= a majority of terms | **37** -- shipped |
+
+A long document contains almost any common word. A majority asks whether the
+document is about *most* of what was asked. **Top-ranked results were identical
+at every setting** -- this bound governs what is findable, never what outranks
+what.
+
+### The ceiling, recorded rather than chased
+
+The query that *revealed* the defect is not the query that *validates* the fix.
+`ai-regression-testing` still ranks 5th for the motivating query, below three
+documentation-writing tools that match `documentation` legitimately.
+Presence-only cannot outrank a real metadata match without breaking the
+regression guards, and it should not try. Recorded in the eval with its numbers,
+not asserted as a failing test.
+
+And the honest limit: this matches "stale" to a document containing "stale". A
+query phrased entirely in synonyms the catalog never uses will still miss. This
+is not semantic search.
+
+### The eval is the durable artifact
+
+`test/unit/searchRanking.test.ts` -- two regression guards that passed before and
+must keep passing (the counterweight against flooding), one case that failed
+before and passes now, and one anti-vacuity case. Ranking cannot be verified by
+reading the scorer; three plausible fixes proved that.
+
+---
+
 ## Being the new user, and finding the first command lies (branch `onboarding/empty-state`)
 
 PLAN.md has carried *"get one engineer outside the build team to actually adopt

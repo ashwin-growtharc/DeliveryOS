@@ -90,6 +90,9 @@ function fakePort(overrides: Partial<DeliveryOsReadPort> = {}): DeliveryOsReadPo
         hasMore: offsetChars + content.length < PAGED_FIXTURE.length,
       };
     },
+    // Search never reads bodies in these tests -- the ranking eval that does
+    // lives in searchRanking.test.ts, with a fixture shaped for it.
+    readSearchableText: () => undefined,
     ...overrides,
   };
 }

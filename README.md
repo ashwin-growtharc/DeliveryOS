@@ -81,7 +81,7 @@ It needs Rust and, on Windows, MSVC Build Tools — see
 | `pull <id> [--set KEY=VALUE] [--no-wire]` | Pull an artifact into the current project |
 | `remove <id>` | Remove a previously-pulled artifact |
 | `config <id> --set KEY=VALUE` | Change an install param without re-pulling |
-| `check-updates [--apply]` | Check for newer versions; `--apply` updates eligible ones |
+| `check-updates [id] [--apply]` | Check for newer versions; `--apply` updates eligible ones. Give an id to check or update just that one |
 
 ### Contributing back
 

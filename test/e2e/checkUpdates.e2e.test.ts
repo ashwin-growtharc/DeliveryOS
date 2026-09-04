@@ -79,4 +79,84 @@ describe('check-updates --apply e2e (CLI)', () => {
     expect(secondApply.status).toBe(0);
     expect(secondApply.stdout).toContain('No updates available.');
   }, 30_000);
+
+  // The scoping half. `applyAvailableUpdates` has always accepted an `onlyId`;
+  // the CLI simply never passed one, so `--apply` was project-wide and nothing
+  // else. The sidecar's `artifact.applyUpdate` REQUIRES an id and updates
+  // exactly one -- same engine function, opposite blast radius, and the
+  // capability manifest could not see it because both surfaces declared the
+  // operation with matching risk flags. They differed in granularity.
+  //
+  // The assertion that matters is the NEGATIVE one: scoping is only real if the
+  // artifact you did not name is still sitting there un-updated afterwards. A
+  // test that only checks the named artifact moved would pass just as happily
+  // against the old project-wide behaviour.
+  it('updates only the artifact you name, and leaves the other one alone', async () => {
+    const other = TEST_ARTIFACTS.find((a) => a.id === 'lint-config')!;
+    expect(runCli(['pull', other.id], scratchCwd, deliveryOsHome).status).toBe(0);
+
+    // Bump BOTH upstream, so a project-wide apply and a scoped one produce
+    // visibly different end states.
+    const git = simpleGit(fixtureRemoteDir);
+    for (const [id, version, body] of [
+      ['welcome-template', '4.0.0', 'Should NOT be applied by a scoped run.'],
+      ['lint-config', '4.0.0', 'Should be applied by the scoped run.'],
+    ]) {
+      const dir = path.join(fixtureRemoteDir, 'artifacts', id);
+      const manifestPath = path.join(dir, 'manifest.yaml');
+      fs.writeFileSync(
+        manifestPath,
+        fs.readFileSync(manifestPath, 'utf-8').replace(/^version: .*$/m, `version: ${version}`),
+        'utf-8',
+      );
+      fs.writeFileSync(path.join(dir, 'payload', 'README.md'), `# ${id}
+
+${body}
+`, 'utf-8');
+      await git.add([`artifacts/${id}`]);
+    }
+    await git.commit('bump both for the scoped-apply test');
+
+    // Both are genuinely stale before the scoped run -- otherwise the negative
+    // assertion below would pass for the wrong reason.
+    const before = runCli(['check-updates'], scratchCwd, deliveryOsHome);
+    expect(before.stdout).toContain('welcome-template');
+    expect(before.stdout).toContain('lint-config');
+
+    const scoped = runCli(['check-updates', other.id, '--apply'], scratchCwd, deliveryOsHome);
+    expect(scoped.status).toBe(0);
+    expect(scoped.stdout).toContain('updated 1.0.0 -> 4.0.0');
+    expect(scoped.stdout, 'a scoped apply must not touch the artifact it was not given')
+      .not.toContain('welcome-template');
+
+    expect(
+      fs.readFileSync(path.join(scratchCwd, other.installTarget, 'README.md'), 'utf-8'),
+    ).toContain('Should be applied by the scoped run.');
+
+    const untouched = path.join(scratchCwd, TEST_ARTIFACTS.find((a) => a.id === 'welcome-template')!.installTarget);
+    expect(
+      fs.readFileSync(path.join(untouched, 'README.md'), 'utf-8'),
+      'the unnamed artifact must still be on its old content',
+    ).not.toContain('Should NOT be applied by a scoped run.');
+
+    // And it is still reported as stale, so the scoped run did not quietly
+    // consume the update it declined to apply.
+    const after = runCli(['check-updates'], scratchCwd, deliveryOsHome);
+    expect(after.stdout).toContain('welcome-template');
+    expect(after.stdout).not.toContain('lint-config');
+  }, 60_000);
+
+  // Before the id existed there was nothing to typo. Now there is, and the
+  // wrong answer here is the dangerous one: reporting "No updates available."
+  // for an artifact that is not installed is reassurance about something that
+  // was never checked -- the silent-coercion shape AGENTS.md names, and worse
+  // on an agent surface where it gets relayed as fact.
+  it('refuses a name it has not installed, rather than reporting it up to date', () => {
+    const result = runCli(['check-updates', 'never-installed-here'], scratchCwd, deliveryOsHome);
+    expect(result.status, 'a name that resolves to nothing is not a success').toBe(1);
+    const output = result.stdout + result.stderr;
+    expect(output).toContain('"never-installed-here" is not installed in this project');
+    expect(output, 'must not read as a clean bill of health').not.toContain('up to date');
+    expect(output, 'must not read as a clean bill of health').not.toContain('No updates available.');
+  }, 30_000);
 });

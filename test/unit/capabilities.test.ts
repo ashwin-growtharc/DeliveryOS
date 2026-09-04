@@ -115,7 +115,7 @@ const CLI_COMMANDS_BACKING_TWO_CAPABILITIES = new Set([
   'pull <id>',
   // `check-updates` is a safe read; `check-updates --apply` is a destructive
   // write. One command, two operations, distinguished only by a flag.
-  'check-updates',
+  'check-updates [id]',
 ]);
 
 /** Not an operation: the composition root that boots the MCP server. */
