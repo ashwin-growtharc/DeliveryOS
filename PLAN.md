@@ -300,13 +300,19 @@ Against this list specifically:
 - **Wrong when written**: the two "missing" CLI tests are not missing. `remote
   add`'s success path and `remote remove`'s cache-directory deletion both
   already exist, in `test/e2e/pull.e2e.test.ts`
-- **Open**: extract `addRemote`/`removeRemote` into `src/engine/remote/`. The
-  orchestration exists twice today (`src/cli/commands/remoteAdd.ts:13-27` vs
-  `src/sidecar.ts:169-187`, whose own comment admits it "mirrors `runRemoteAdd`'s
-  order exactly")
-- **Open**: collapse the `hasWiring` dispatch gate from three copies to one
-  (`src/cli/commands/pull.ts:54-57`, `src-tauri/spike-ui/app.js:4554`, and split
-  across two sidecar keys)
+- Done: `addRemote`/`removeRemote` extracted to
+  `src/engine/remote/manageRemotes.ts`. The orchestration existed twice — the
+  sidecar's copy admitted in its own comment that it "mirrors `runRemoteAdd`'s
+  order exactly" — and now has one home that all **three** adapters call
+  (`src/cli/commands/remoteAdd.ts`, `src/sidecar.ts`, `src/mcp/engineAdapter.ts`).
+  The MCP surface is why it stopped being cosmetic: a third copy would have been
+  written otherwise
+- **Open**: collapse the `hasWiring` dispatch gate from three copies to one.
+  Both surfaces compute the same `const hasWiring` independently
+  (`src/cli/commands/pull.ts:71`, `src-tauri/spike-ui/app.js:4677`), and the
+  sidecar splits it across two keys (`artifact.pull` vs
+  `artifact.pullAndAutoWire`) so its callers choose. Line numbers here were
+  already stale once — anchor on the `hasWiring` identifier, not the number
 
 ### Stage 1 — the command registry
 
@@ -443,9 +449,11 @@ registry the server sees, not merely hidden from `tools/list`.
 
 Each needs its own answer, not one policy: `push` needs a diff preview first (it
 is all-or-nothing over the whole folder today, with no confirmation); `remove`
-needs a confirmation story (the app confirm-gates it at `app.js:4867-4871`, the CLI
-does not); `config --set` needs a by-reference form, because a literal secret in
-a tool call is in model context by construction (`agent-native` solved this with
+needs a confirmation story (the app confirm-gates it in `handleRemoveArtifact`,
+at the `window.confirm` guarding `artifact.remove` — anchor on that call rather
+than a line number; the CLI does not); `config --set` needs a by-reference
+form, because a literal secret in a tool call is in model context by
+construction (`agent-native` solved this with
 `${keys.NAME}` indirection plus keeping secret writes off agent actions
 entirely).
 
