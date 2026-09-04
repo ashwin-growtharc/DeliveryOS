@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import simpleGit from 'simple-git';
+import simpleGit, { type SimpleGit } from 'simple-git';
 import { parse as parseYaml } from 'yaml';
 import {
   createTestRemoteWithUiComponentArtifact,
@@ -37,13 +37,30 @@ import type { GithubClient } from '../../src/engine/github/github';
 // simple-git. Only the GitHub API surface (`repos.get` / `pulls.create`) is
 // a vi.fn() double injected into `pushArtifact`.
 
+/**
+ * The checked-out branch, asserted rather than assumed.
+ *
+ * simple-git types `status().current` as `string | null` because a detached
+ * HEAD genuinely has no branch. A fixture repo from `createTestRemote()` always
+ * has one, so `null` here means the fixture is broken -- and saying that plainly
+ * beats a `!`, which would surface later as an unrelated git error about a
+ * branch named "null".
+ */
+async function currentBranch(git: SimpleGit): Promise<string> {
+  const { current } = await git.status();
+  if (!current) {
+    throw new Error('fixture repo has no branch checked out (detached HEAD?)');
+  }
+  return current;
+}
+
 const FAKE_GITHUB_URL = 'https://github.com/test-owner/test-repo.git';
 const FAKE_DEFAULT_BRANCH = 'main';
 
 type FakeOctokit = GithubClient & {
   rest: {
     repos: { get: ReturnType<typeof vi.fn> };
-    pulls: { create: ReturnType<typeof vi.fn> };
+    pulls: { create: ReturnType<typeof vi.fn>; get: ReturnType<typeof vi.fn> };
   };
 };
 
@@ -56,6 +73,16 @@ function makeFakeOctokit(isPrivate = false): FakeOctokit {
       pulls: {
         create: vi.fn().mockResolvedValue({
           data: { html_url: 'https://github.com/test-owner/test-repo/pull/1', number: 1 },
+        }),
+        // Required by GithubClient even though these tests never reach the
+        // pending-push resolver. Shaped like a real open PR so a test that
+        // does reach it gets a plausible answer rather than undefined.
+        get: vi.fn().mockResolvedValue({
+          data: {
+            html_url: 'https://github.com/test-owner/test-repo/pull/1',
+            state: 'open',
+            merged: false,
+          },
         }),
       },
     },
@@ -904,7 +931,7 @@ describe('push e2e', () => {
       // user's own unreviewed PR content.
       const remoteName = 'test-remote-cache-hygiene';
       await registerAndClone(remoteName, fixtureRemoteDir);
-      const defaultBranch = (await simpleGit(fixtureRemoteDir).status()).current;
+      const defaultBranch = await currentBranch(simpleGit(fixtureRemoteDir));
 
       const artifact = TEST_ARTIFACTS.find((a) => a.id === 'welcome-template')!;
       const cwd = newScratchCwd('cache-hygiene');
@@ -979,7 +1006,7 @@ describe('push e2e', () => {
 
       const remoteName = 'test-remote-self-merge';
       await registerAndClone(remoteName, fixtureRemoteDir);
-      const defaultBranch = (await seedGit.status()).current;
+      const defaultBranch = await currentBranch(seedGit);
 
       const cwd = newScratchCwd('self-merge');
       await pullArtifact(artifactId, remoteName, cwd);
@@ -1019,7 +1046,7 @@ describe('push e2e', () => {
       // reason to flag it and the PR body just says "modified: README.md".
       const remoteName = 'test-remote-stale-push';
       await registerAndClone(remoteName, fixtureRemoteDir);
-      const defaultBranch = (await simpleGit(fixtureRemoteDir).status()).current;
+      const defaultBranch = await currentBranch(simpleGit(fixtureRemoteDir));
 
       const artifact = TEST_ARTIFACTS.find((a) => a.id === 'welcome-template')!;
 
@@ -1078,7 +1105,7 @@ describe('push e2e', () => {
       // change, so the PR reviewer is the last safeguard and has to be told.
       const remoteName = 'test-remote-stale-push-forced';
       await registerAndClone(remoteName, fixtureRemoteDir);
-      const defaultBranch = (await simpleGit(fixtureRemoteDir).status()).current;
+      const defaultBranch = await currentBranch(simpleGit(fixtureRemoteDir));
 
       const artifact = TEST_ARTIFACTS.find((a) => a.id === 'lint-config')!;
 
@@ -1223,7 +1250,7 @@ describe('push e2e', () => {
       // it's whatever `git init` produced (typically master or main
       // depending on local git config), and it never changes across this
       // test since we only ever push new deliveryos/* branches into it.
-      const defaultBranch = (await simpleGit(fixtureRemoteDir).status()).current;
+      const defaultBranch = await currentBranch(simpleGit(fixtureRemoteDir));
       expect(defaultBranch).toBeTruthy();
 
       // First push: an edit to artifact A (welcome-template). This is

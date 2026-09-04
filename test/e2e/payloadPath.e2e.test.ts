@@ -33,7 +33,7 @@ const FAKE_DEFAULT_BRANCH = 'main';
 type FakeOctokit = GithubClient & {
   rest: {
     repos: { get: ReturnType<typeof vi.fn> };
-    pulls: { create: ReturnType<typeof vi.fn> };
+    pulls: { create: ReturnType<typeof vi.fn>; get: ReturnType<typeof vi.fn> };
   };
 };
 
@@ -46,6 +46,16 @@ function makeFakeOctokit(): FakeOctokit {
       pulls: {
         create: vi.fn().mockResolvedValue({
           data: { html_url: 'https://github.com/test-owner/test-repo/pull/1', number: 1 },
+        }),
+        // Required by GithubClient even though these tests never reach the
+        // pending-push resolver. Shaped like a real open PR so a test that
+        // does reach it gets a plausible answer rather than undefined.
+        get: vi.fn().mockResolvedValue({
+          data: {
+            html_url: 'https://github.com/test-owner/test-repo/pull/1',
+            state: 'open',
+            merged: false,
+          },
         }),
       },
     },
