@@ -215,14 +215,6 @@
     lastScanCandidates: [],
   };
 
-  // Unlisten function for the current `sidecar-progress` event subscription,
-  // if one is active -- there is at most one live subscription at a time
-  // (only one pull/push runs at once, whether triggered from Detail's action
-  // button or a row/Pull-all button in a Tag Folder view), torn down and
-  // re-created fresh every time a new action starts or a new Detail view is
-  // opened.
-  let progressUnlisten = null;
-
   // ---------- small DOM helpers ----------
 
   function $(id) {
@@ -7374,7 +7366,7 @@ ${bodyHtml}
     });
     try {
       localStorage.setItem(THEME_KEY, next);
-    } catch (err) {
+    } catch {
       // localStorage unavailable -- the choice just won't survive a
       // restart; the toggle itself still works for this session.
     }
