@@ -6,6 +6,87 @@ All notable changes to DeliveryOS are recorded here, newest first. See
 
 ---
 
+## `files: []` for 57% of the catalog (branch `payload/single-file-addressable`)
+
+`payload_path` "may name a single file or a directory" (`schema.ts:150-158`).
+Measured against the live catalog: **131 of 230 artifacts, 57%, are the single
+file kind.** Every one of them answered `get_artifact` with `files: []`.
+
+In the same response as `hasDoc: true`. And `read_artifact_file`'s own
+description told the agent to read by a path `get_artifact` listed in `files`.
+So for most of the catalog the surface said, simultaneously, *there is a
+document here* and *there is nothing you can name to read*.
+
+This is the comforting half of the silent-coercion class, which is the worse
+half. A wrong error gets investigated; a wrong all-clear gets believed. An agent
+reading `files: []` concludes the artifact ships nothing worth opening and moves
+on -- while holding the entire document in `doc.content` of that same response.
+
+### What was actually broken, and what was not
+
+Worth separating, because the first framing was wrong and the measurements are
+what corrected it.
+
+**Nothing was unreachable.** `doc.content` carried the whole document for all
+131. The largest single-file payload is 35,093 chars against a 65,536-byte doc
+cap and a 40,000-char page limit, so nothing was truncated and nothing needed
+paging either. The defect was a false contract, not a missing capability -- and
+an early estimate that 45% of these needed pagination came from comparing file
+sizes against `BINARY_SNIFF_BYTES` (8,000) as though it were the page size.
+
+**The address was the broken part.** `resolvePrimaryDoc` reported `relPath: '.'`
+for a file payload -- a deliberate sentinel, documented as letting a caller tell
+the two payload shapes apart without re-statting. It bought that at the cost of
+the one thing `relPath` is for: `'.'` is not a name, so it could not be handed
+to `read_artifact_file`, and on the MCP surface it reached agents as a literal
+dot beside an empty list.
+
+And `resolveWithinPayloadDir` is pure path arithmetic, so against a file root
+`resolve(<file>, <anything>)` yields a path *under* the file -- which passes
+containment and then fails to exist. Every name resolved to nothing, including
+the file's own.
+
+### One contract, three invariants
+
+- `files` is never empty for a payload that is on disk; a single-file payload
+  reports that file's basename.
+- `doc.path` is always a member of `files`.
+- every member of `files` reads back.
+
+A file root now answers to an allowlist of exactly three spellings of itself --
+its basename, `'.'`, and `''`. An allowlist rather than a path join is the
+point: there is no arithmetic to get wrong and no input that can address
+anything else. `'.'` keeps working, so callers written against the old sentinel
+are not broken.
+
+### The containment near-miss
+
+The first version routed a file root *around* `resolveWithinPayloadDir` and
+returned `not-found` for `../not-yours.md`. That is this repo's own coercion
+habit applied to its containment check -- a traversal attempt is a refusal, not
+an absence.
+
+It was caught by the anti-vacuity run: the containment tests failed against the
+**pre-fix** code, and a test guarding a widening should pass before *and* after.
+One that flips is reporting a behaviour change nobody asked for. Traversal now
+throws exactly as it always did; only the three self-spellings were added.
+
+### Verification
+
+Run against the real 230-artifact catalog, every artifact, every listed file:
+
+```
+checked=230   singleFile=131   directory=99
+files-empty        0   (was 131)
+doc-not-in-files   0
+listed-but-unreadable  0
+```
+
+912 tests / 84 files, lint and typecheck green. Anti-vacuity: 4 contract tests
+fail against pre-fix code, 5 containment tests pass on both sides.
+
+---
+
 ## The drift the manifest could not see (branch `cli/scope-check-updates`)
 
 `src/capabilities.ts` exists to stop the three surfaces disagreeing about what

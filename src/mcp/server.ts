@@ -613,6 +613,15 @@ export function buildMcpServer({ port: engine, configPort, contributePort, versi
           // agent asked to fill a template in needs the template, and for
           // `friction-log` that is `friction-log.md`, sitting beside the README
           // and unnameable without this list.
+          //
+          // Two invariants this response is now required to keep, because
+          // breaking either one told agents something false for 57% of the
+          // catalog: `files` is never empty for an artifact whose payload is on
+          // disk (a single-file payload reports that file's basename), and
+          // `doc.path` is always one of `files`. `hasDoc: true` alongside
+          // `files: []` was the shape that shipped, and an agent reading it
+          // concludes there is nothing to read while holding the whole document
+          // in `doc.content`.
           files,
           // The exact command, ready to run, rather than leaving the agent to
           // assemble it. These tools are read-only on purpose, so installing is
@@ -635,7 +644,9 @@ export function buildMcpServer({ port: engine, configPort, contributePort, versi
       title: 'Read one file from an artifact',
       description:
         'Returns the contents of a single file from an artifact\'s payload, by the relative path '
-        + '`get_artifact` listed in `files`. Use this to read a TEMPLATE an artifact ships -- '
+        + '`get_artifact` listed in `files`. Every path in `files` is readable here, '
+        + 'including when an artifact ships exactly one file and `files` holds only that '
+        + 'name. Use this to read a TEMPLATE an artifact ships -- '
         + 'get_artifact returns the README, which describes the artifact rather than being the '
         + 'thing you fill in. Reads the catalog cache only; it never touches the project, and '
         + 'writing the finished document is yours to do.',

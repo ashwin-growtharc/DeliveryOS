@@ -41,9 +41,18 @@ const DOC_CANDIDATES = [
 export const DEFAULT_MAX_DOC_BYTES = 64 * 1024;
 
 export interface PrimaryDoc {
-  /** Path relative to the payload root, POSIX-separated. `'.'` when the
-   * payload IS a single file, so a caller can tell the two shapes apart
-   * without re-statting anything. */
+  /** Path relative to the payload root, POSIX-separated, and always an
+   * ADDRESS: a value a caller can hand straight back to
+   * `readArtifactPayloadPage`. For a single-file payload that is the file's own
+   * basename.
+   *
+   * This used to be the sentinel `'.'` for that case, so a caller could tell
+   * the two payload shapes apart without re-statting. That traded a question
+   * nobody asked for an answer nobody could use: `'.'` is not a name, so
+   * `doc.path` could not be passed to the very tool whose job is reading a
+   * named file, and on the MCP surface it reached agents as a literal dot.
+   * The shape is still knowable and more plainly -- `listArtifactPayloadFiles`
+   * returns exactly one entry, equal to this, for a single-file payload. */
   relPath: string;
   content: string;
   /** True when the file was longer than `maxBytes` and `content` is a prefix.
@@ -101,7 +110,9 @@ export function resolvePrimaryDoc(
 
   if (stat.isFile()) {
     const read = readTextPrefix(payloadDir, maxBytes);
-    return read ? { relPath: '.', content: read.content, truncated: read.truncated } : null;
+    return read
+      ? { relPath: path.basename(payloadDir), content: read.content, truncated: read.truncated }
+      : null;
   }
 
   if (!stat.isDirectory()) return null;

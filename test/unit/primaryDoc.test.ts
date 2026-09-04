@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { resolvePrimaryDoc, DEFAULT_MAX_DOC_BYTES } from '../../src/engine/payload/primaryDoc';
 import { remotesRegistryPath, remoteCachePath } from '../../src/engine/paths';
+import { readArtifactPayloadPage } from '../../src/engine/payload/readPayloadFile';
 
 /**
  * `resolvePayloadDir` returns two different KINDS of path -- a file for the
@@ -76,16 +77,31 @@ describe('resolvePrimaryDoc', () => {
     expect(doc?.truncated).toBe(false);
   });
 
-  it('reads the FILE itself when payload_path names one, reporting relPath "."', () => {
-    // The other half of the fork, and the majority case in the real catalog.
+  it('reads the FILE itself when payload_path names one, reporting its basename', () => {
+    // The other half of the fork, and the majority case in the real catalog:
+    // 131 of 230 artifacts.
+    //
+    // This asserted `relPath` was '.' until the single-file payload work. The
+    // sentinel told a caller the payload SHAPE without re-statting, which was
+    // its stated purpose -- but it cost the one thing `relPath` is for. '.' is
+    // not a name, so it could not be handed to `readArtifactPayloadPage`, and
+    // on the MCP surface it reached agents as a literal dot beside an empty
+    // `files` list. The shape is still knowable, and more plainly:
+    // `listArtifactPayloadFiles` returns exactly this one entry.
     const docsDir = path.join(remoteCachePath(REMOTE), 'docs');
     fs.mkdirSync(docsDir, { recursive: true });
     fs.writeFileSync(path.join(docsDir, 'handbook.md'), '# Handbook\n', 'utf-8');
     writeManifest('file-artifact', 'docs/handbook.md');
 
     const doc = resolvePrimaryDoc(REMOTE, 'file-artifact');
-    expect(doc?.relPath).toBe('.');
+    expect(doc?.relPath, 'an address, not a sentinel').toBe('handbook.md');
     expect(doc?.content).toBe('# Handbook\n');
+
+    // The property that makes the rename worth it: the name it reports is a
+    // name that reads back.
+    const page = readArtifactPayloadPage(REMOTE, 'file-artifact', doc!.relPath);
+    expect(page.kind).toBe('text');
+    if (page.kind === 'text') expect(page.content).toBe('# Handbook\n');
   });
 
   it('prefers SKILL.md over README.md when a payload has both', () => {
