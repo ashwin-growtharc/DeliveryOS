@@ -2,7 +2,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { execSync } from 'child_process';
 import { buildCatalog, CatalogEntry } from '../catalog/catalog';
-import { cachePath, refreshRemoteCache } from '../remote/remoteCache';
+import { cachePath, refreshRemoteCache, lastFetchedAt } from '../remote/remoteCache';
+import { listRemotes } from '../remote/remoteRegistry';
 import { upsertEntry, readLockfile } from '../lockfile/lockfile';
 import { pristinePath, resolveContainedPath, adaptSrcDirPath, isRootInstall, ensureProjectDeliveryOsDir, readPayloadFootprint } from '../paths';
 import { isSensitiveTargetPath } from './wiring';
@@ -82,6 +83,62 @@ export const POST_INSTALL_TIMEOUT_MS = 10 * 60 * 1000;
 export const POST_INSTALL_MAX_BUFFER_BYTES = 10 * 1024 * 1024;
 
 /**
+ * How recently a cache must have been fetched before "it does not exist" is a
+ * safe thing to say. A refresh takes seconds, so if one has just run and the id
+ * is still absent, it really is absent -- and the caller deserves a plain answer
+ * rather than a hedge. Beyond this window the honest answer is "not in your
+ * copy of the catalog".
+ */
+const CATALOG_FRESH_WINDOW_MS = 5 * 60 * 1000;
+
+/** Human-readable age, coarse on purpose: the exact minute never matters here,
+ * only the order of magnitude that tells someone whether to refresh. */
+function describeAge(since: Date): string {
+  const ms = Date.now() - since.getTime();
+  const minutes = Math.floor(ms / 60_000);
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'} ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+  const days = Math.floor(hours / 24);
+  return `${days} day${days === 1 ? '' : 's'} ago`;
+}
+
+/**
+ * The sentence that turns "this does not exist" into "this is not in your copy".
+ *
+ * The catalog is read from local clones. When a colleague pushes an artifact
+ * upstream, every machine that has not refreshed reports it as nonexistent --
+ * a failure that reads as an ANSWER rather than as a gap, which is the whole
+ * silent-coercion class this codebase keeps finding. Over MCP it is worse
+ * still: an agent relays it to a person as fact.
+ *
+ * Returns '' when every relevant cache is demonstrably fresh, so a genuine miss
+ * is still reported plainly. Hedging every miss would trade a wrong answer for
+ * an unusable one.
+ */
+function staleCatalogHint(remoteNames: string[]): string {
+  if (remoteNames.length === 0) return '';
+
+  const ages = remoteNames.map((name) => lastFetchedAt(name));
+  if (ages.every((at) => at !== undefined && Date.now() - at.getTime() < CATALOG_FRESH_WINDOW_MS)) {
+    return '';
+  }
+
+  // The OLDEST cache is the one that decides: if any remote might be behind,
+  // the artifact might be in it.
+  const known = ages.filter((at): at is Date => at !== undefined);
+  const oldest = known.length > 0
+    ? known.reduce((a, b) => (a.getTime() < b.getTime() ? a : b))
+    : undefined;
+
+  const when = oldest && known.length === ages.length
+    ? `was last refreshed ${describeAge(oldest)}`
+    : 'is of unknown age';
+  return ` Your local catalog ${when}, so this may exist upstream already --`
+    + ' run `deliveryos refresh` and try again before concluding it does not exist.';
+}
+
+/**
  * Resolves which catalog entry `id` refers to. Throws
  * ArtifactResolutionError if the id doesn't exist anywhere, or if it exists
  * in more than one remote and `remoteName` wasn't supplied to disambiguate.
@@ -94,14 +151,18 @@ export function resolveArtifact(
   const matches = catalog.filter((entry) => entry.manifest.id === id);
 
   if (matches.length === 0) {
-    throw new ArtifactResolutionError(`No artifact with id "${id}" found in any registered remote`);
+    throw new ArtifactResolutionError(
+      `No artifact with id "${id}" found in any registered remote.`
+      + staleCatalogHint(listRemotes().map((r) => r.name)),
+    );
   }
 
   if (remoteName) {
     const match = matches.find((entry) => entry.remoteName === remoteName);
     if (!match) {
       throw new ArtifactResolutionError(
-        `No artifact with id "${id}" found in remote "${remoteName}"`,
+        `No artifact with id "${id}" found in remote "${remoteName}".`
+        + staleCatalogHint([remoteName]),
       );
     }
     return match;

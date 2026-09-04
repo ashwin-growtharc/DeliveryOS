@@ -9,6 +9,35 @@ export function cachePath(name: string): string {
   return remoteCachePath(name);
 }
 
+/**
+ * When this remote's cache was last brought up to date, or `undefined` when
+ * that cannot be determined.
+ *
+ * Deliberately derived from the clone rather than recorded in the registry.
+ * `RemoteEntry` holds only `name`, `url` and `addedAt`, and adding a
+ * `lastFetched` field would mean a schema migration for information git already
+ * keeps: `git fetch` rewrites `.git/FETCH_HEAD` every time, so its mtime IS the
+ * last-fetch time. A fresh `clone` does not always write that file, so the
+ * clone's own `.git` directory is the fallback -- for a never-refreshed remote
+ * "when it was cloned" is the right answer anyway.
+ *
+ * `undefined` is a real third outcome, not a stand-in for "old": a caller that
+ * cannot tell how stale a catalog is must say so rather than assert freshness.
+ */
+export function lastFetchedAt(name: string): Date | undefined {
+  const gitDir = path.join(cachePath(name), '.git');
+  for (const candidate of [path.join(gitDir, 'FETCH_HEAD'), gitDir]) {
+    try {
+      return fs.statSync(candidate).mtime;
+    } catch {
+      // Try the next candidate. A missing FETCH_HEAD is normal on a fresh
+      // clone; a missing .git means there is no usable cache at all, which the
+      // final `undefined` reports honestly.
+    }
+  }
+  return undefined;
+}
+
 /** Clones `url` into the cache directory for `name`. */
 export async function cloneRemote(name: string, url: string): Promise<string> {
   const dest = cachePath(name);
