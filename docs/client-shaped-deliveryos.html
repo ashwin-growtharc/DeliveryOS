@@ -113,13 +113,15 @@
 <div class="lede">
   <p>
     <strong>The short version.</strong> A client who keeps their artifacts in SharePoint
-    rather than git cannot use DeliveryOS at all today. And when a new client has no
-    onboarding document, we have no way to produce one for them.
+    rather than git cannot use DeliveryOS at all today. And every document we hand a client
+    &mdash; onboarding, proposal, delivery plan, business case &mdash; still starts from a
+    blank page.
   </p>
   <p>
     Both are fixable. The storage one is <strong>three functions</strong>, because git turns
-    out to be barely entangled. The onboarding one is <strong>one new artifact and no code at
-    all</strong>, because the pattern for it already ships twice over.
+    out to be barely entangled. The documents one is <strong>a convention plus one artifact,
+    and no product code at all</strong> &mdash; after which every new template is content
+    somebody writes, not engineering.
   </p>
 </div>
 
@@ -217,24 +219,29 @@ that can open a pull request for review.</span></code></pre>
 </table>
 </div>
 
-<h2>Part two &mdash; the onboarding interview</h2>
+<h2>Part two &mdash; documents that interview you</h2>
 
 <div class="part">
   <span class="label">The gap</span>
-  <h3>A new client with no onboarding document</h3>
+  <h3>Every document we hand a client starts from a blank page</h3>
   <p>
-    When they have one, we circulate it. When they do not, we want to produce one &mdash; from
-    a template we maintain, filled in with how that client actually works.
+    Onboarding is the obvious one, but it is not special. Proposals, delivery plans, business
+    cases, scoping documents &mdash; each is a document we have written many times, where the
+    <em>structure</em> is always ours and only the <em>answers</em> change per client.
   </p>
 </div>
+
+<p>
+  So the thing to build is not an onboarding feature. It is <strong>a shape every one of those
+  documents follows</strong>, with onboarding as the first one through it.
+</p>
 
 <h3>The agent asks the questions, not DeliveryOS</h3>
 
 <p>
   This is the decision everything else follows from. DeliveryOS never asks anyone anything
-  today, and it should stay that way. Instead we ship an <strong>instruction file</strong>: it
-  tells whichever AI agent the consultant is using how to run the interview and what document
-  to produce.
+  today, and it should stay that way. Instead a template <em>declares its own questions</em>,
+  and one shared instruction file teaches any AI agent how to run the interview.
 </p>
 
 <p>
@@ -249,17 +256,66 @@ that can open a pull request for review.</span></code></pre>
 </blockquote>
 
 <p>
-  That last clause is why it also answers your other requirement: it works with Claude, Codex,
+  That last clause is also why it answers the other requirement: it works with Claude, Codex,
   Cursor or a local model, because a plain instruction file is something any of them can read.
+</p>
+
+<h3>How the pieces fit</h3>
+
+<div class="tablewrap">
+<table>
+  <tr><th>Piece</th><th>How many</th><th>Who writes it</th></tr>
+  <tr><td><strong>The method</strong> &mdash; how to interview, what never to do, where to save</td><td class="num">One, shared</td><td class="yes">Us, once</td></tr>
+  <tr><td><strong>The templates</strong> &mdash; onboarding, proposal, delivery plan, business case&hellip;</td><td class="num">Many</td><td class="yes">Anyone. No code involved</td></tr>
+</table>
+</div>
+
+<p>
+  Keeping the method in <em>one</em> place is the whole point. If it were copied into each
+  template, then fixing a bad instruction &mdash; or adding a rule like "never invent an
+  answer" &mdash; would mean editing every template we have ever written, and they would
+  quietly drift apart. This product has been bitten by exactly that shape more than once.
+</p>
+
+<h3>What a template looks like</h3>
+
+<p>
+  A template is an ordinary markdown document with its questions declared at the top. Nothing
+  in DeliveryOS needs to understand them &mdash; the agent reads them:
+</p>
+
+<pre><code><span class="c">client-onboarding.md</span>
+<span class="y">---
+document: Client onboarding
+interview:
+  - ask: What does the team use for chat?
+    options: [Slack, Microsoft Teams, Google Chat]
+  - ask: Where does documentation live?
+  - ask: How does someone get access on their first day?
+---</span>
+
+# Onboarding &mdash; [client name]
+
+## How this team communicates
+[chat tool, and what each channel is for]
+
+## Where things live
+[documentation, code, designs]</code></pre>
+
+<p>
+  Adding a proposal template means writing one more file like that. No engineering, no release,
+  no new concept &mdash; and a template with no interviewer installed is still just a document
+  someone can fill in by hand, exactly like the ones we ship today.
 </p>
 
 <h3>What it looks like in use</h3>
 
-<pre><code><span class="g">&gt;</span> deliveryos pull client-onboarding-interview
+<pre><code><span class="g">&gt;</span> deliveryos pull document-interview      <span class="c">the method, once per project</span>
+<span class="g">&gt;</span> deliveryos pull client-onboarding       <span class="c">the template you need today</span>
 
 <span class="c">...then, in whichever agent you use:</span>
 
-<span class="g">You:</span>    Run the onboarding interview for Acme Corp.
+<span class="g">You:</span>    Run the client-onboarding interview for Acme Corp.
 
 <span class="y">Agent:</span>  What does the team use for chat &mdash; Slack, Teams,
         Google Chat, or something else?
@@ -268,26 +324,24 @@ that can open a pull request for review.</span></code></pre>
 <span class="y">Agent:</span>  And where does documentation live?
 <span class="g">You:</span>    SharePoint, mostly. Some older stuff in Confluence.
 
-<span class="y">Agent:</span>  How do people get access on day one &mdash; is there
-        someone who grants it, or a self-service portal?
-<span class="g">You:</span>    You raise a ticket with IT.
+<span class="y">Agent:</span>  How does someone get access on their first day?
+<span class="g">You:</span>    Not sure, actually &mdash; IT handles it.
 
-        <span class="c">...eight or so questions...</span>
+<span class="y">Agent:</span>  Written ONBOARDING.md &mdash; 6 sections, 1 gap flagged
+        where you weren't sure.</code></pre>
 
-<span class="y">Agent:</span>  Written ONBOARDING.md &mdash; 6 sections, 2 gaps flagged
-        where you said "not sure".</code></pre>
-
-<h3>Two rules the instruction file must carry</h3>
+<h3>Two rules the method must carry</h3>
 
 <p>
   <strong>Never invent.</strong> If the client does not know, the document says so rather than
-  guessing a plausible answer. We already use exactly this rule elsewhere, phrased as
-  <em>"never invent a URL"</em>.
+  filling in something plausible. We already use exactly this rule elsewhere, phrased as
+  <em>"never invent a URL"</em>. A proposal with a confidently wrong budget in it is worse than
+  one with a blank.
 </p>
 
 <p>
   <strong>Write the finished document to the project's own folder</strong> &mdash; not into the
-  artifact's folder. This one matters more than it sounds:
+  template's folder. This matters more than it sounds:
 </p>
 
 <div class="note">
@@ -295,12 +349,13 @@ that can open a pull request for review.</span></code></pre>
   <p>
     DeliveryOS keeps a private copy of every artifact you install, so it can tell when you have
     edited one &mdash; and contributing sends your edits back to the shared library. A finished
-    onboarding document sitting in the artifact's folder would be treated as an edit, and could
-    be <strong>published to a shared library with a real client's details in it</strong>.
+    document sitting in the template's folder would be treated as an edit, and could be
+    <strong>published to a shared library with a real client's commercials in it</strong>.
   </p>
   <p>
     The product already warns about this shape elsewhere. Nothing prevents it automatically, so
-    the instruction file has to say it plainly.
+    the method has to state it &mdash; which is another reason it belongs in one file rather
+    than copied into twenty.
   </p>
 </div>
 
@@ -314,14 +369,15 @@ that can open a pull request for review.</span></code></pre>
 <div class="tablewrap">
 <table>
   <tr><th>Already ships</th><th>What it does</th></tr>
-  <tr><td><code>codebase-onboarding</code></td><td>Produces a structured onboarding guide &mdash; but reads the <em>code</em> for its facts</td></tr>
+  <tr><td><code>codebase-onboarding</code></td><td>Produces a structured guide &mdash; but reads the <em>code</em> for its facts</td></tr>
   <tr><td><code>friction-log</code></td><td>A document template with blanks, examples and instructions, filled in by a <em>person</em></td></tr>
-  <tr><td><strong>the new one</strong></td><td><strong>The first one's shape, taking its facts from a conversation</strong></td></tr>
+  <tr><td><strong>the method</strong></td><td><strong>The first one's shape, taking its facts from a conversation &mdash; and pointed at any template</strong></td></tr>
 </table>
 </div>
 
 <p>
-  So this is a new artifact, not a new mechanism. Nothing in the product changes.
+  So this is a convention plus one artifact, not a change to the product. Templates after the
+  first are content.
 </p>
 
 <h2>The thing nobody had noticed</h2>
@@ -368,8 +424,9 @@ that can open a pull request for review.</span></code></pre>
 
 <ol>
   <li><strong>This document.</strong></li>
-  <li><strong>The onboarding interview artifact</strong> &mdash; one artifact, no code, and it
-  can be used on the next client immediately.</li>
+  <li><strong>The method, plus onboarding as the first template</strong> &mdash; one artifact
+  and one template, no code, usable on the next client immediately. Proposal, delivery plan
+  and business case follow as content whenever somebody writes them.</li>
   <li><strong>Folder libraries</strong> &mdash; read-only, plus the honest refusal when someone
   tries to contribute back. This is the piece that turns a "no" into a "yes" in a sales
   conversation.</li>
