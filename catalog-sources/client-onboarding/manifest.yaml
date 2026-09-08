@@ -1,0 +1,20 @@
+id: client-onboarding
+kind: doc
+description: The document a new person on a client engagement reads in their first
+  week -- chat, docs, code, access, who decides, how work ships. Declares its own
+  interview questions, so document-interview can fill it in by asking the client
+  rather than guessing.
+owner: ashwin-growtharc
+version: 1.0.0
+tags:
+  roles:
+    - delivery
+  teams: []
+  stacks:
+    - delivery-tooling
+  componentTypes: []
+source_repo: https://github.com/ashwin-growtharc/growtharc-ai-helpers.git
+install_target: client-onboarding
+review_required: false
+install_params: []
+wiring_actions: []
