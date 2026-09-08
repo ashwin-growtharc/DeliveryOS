@@ -12,6 +12,7 @@ import {
   isRootInstall,
   readPayloadFootprint,
 } from '../paths';
+import { parseGithubUrl } from '../github/github';
 import {
   PushModeConflictError,
   RemoteRegistryError,
@@ -115,9 +116,22 @@ export function planPush(
   }
 
   const remoteName = lockEntry.remote;
-  if (!findRemote(remoteName)) {
+  const remoteEntry = findRemote(remoteName);
+  if (!remoteEntry) {
     throw new RemoteRegistryError(`No remote named "${remoteName}" is registered`);
   }
+
+  // A preview must not succeed where the real push will refuse.
+  //
+  // `pushArtifact` calls `parseGithubUrl(remoteEntry.url)` before it does any
+  // work, so a remote on a host DeliveryOS cannot open a pull request against
+  // fails there. `planPush` only ever checked that the remote was *registered*,
+  // so the preview rendered a full, plausible diff for a push that could never
+  // happen -- the worst shape for a plan/apply pair, since the plan is the
+  // thing people trust before approving.
+  //
+  // Calling it purely for the throw: the owner/repo are not needed here.
+  parseGithubUrl(remoteEntry.url);
 
   const entry = resolveArtifact(id, remoteName);
   const { manifest } = entry;

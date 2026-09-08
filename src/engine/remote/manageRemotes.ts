@@ -7,6 +7,7 @@ import {
   RemoteEntry,
 } from './remoteRegistry';
 import { cloneRemote, cachePath } from './remoteCache';
+import { classifyRemoteUrl } from './classifyRemoteUrl';
 import { RemoteRegistryError } from '../errors';
 
 /**
@@ -39,6 +40,20 @@ export interface AddedRemote {
  * checked first, so nothing is cloned before the refusal.
  */
 export async function addRemote(url: string, name?: string): Promise<AddedRemote> {
+  // Before anything else, and before a name is even derived: refuse URLs that
+  // cannot be git remotes, with a sentence that says what to do instead.
+  //
+  // Previously the first thing to inspect a URL was `git clone`, so pasting a
+  // SharePoint link produced git's own stderr -- accurate, and no help at all.
+  // Deriving the name first was also actively harmful for those URLs: a
+  // SharePoint browser link derives a "name" like
+  // `AllItems.aspx?id=%2Fsites%2FHR`, which passes the path-segment guard and
+  // then fails much deeper in git or the filesystem.
+  const verdict = classifyRemoteUrl(url);
+  if (!verdict.supported) {
+    throw new RemoteRegistryError(verdict.reason);
+  }
+
   const resolvedName = name ?? deriveNameFromUrl(url);
 
   // Fail fast, before cloning. A duplicate name discovered after the clone

@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { DeliveryOsError } from './errors';
 
 /**
  * Single source of truth for every ~/.deliveryos/* and ./.deliveryos/* path
@@ -365,7 +366,15 @@ export function adaptSrcDirPath(cwd: string, manifestPath: string): string | und
  * this is a real boundary, not defense-in-depth for its own sake. */
 function assertSafePathSegment(segment: string, label: string): void {
   if (segment.length === 0 || segment.includes('/') || segment.includes('\\') || segment === '.' || segment === '..') {
-    throw new Error(`Invalid ${label}: "${segment}"`);
+    // `DeliveryOsError`, not a bare `Error`. `src/index.ts` prints
+    // `error.message` and exits 1 for the former and `err.stack` for anything
+    // else, so a bare Error here meant a real user typo produced a stack
+    // trace: `deliveryos remote add ""` derives an empty remote name, lands
+    // in this branch, and printed a Node stack.
+    //
+    // Importing from `errors` is safe rather than circular -- `errors.ts` has
+    // no imports of its own, deliberately, so that every layer can throw.
+    throw new DeliveryOsError(`Invalid ${label}: "${segment}"`);
   }
 }
 

@@ -31,10 +31,24 @@ export interface GithubClient {
   };
 }
 
+// The repo group is `[^/]+?`, NOT `.+?`, and that difference is the whole
+// point of this comment.
+//
+// With `.+?` the repo group happily swallowed path separators, so
+// `https://github.com/acme/artifacts/tree/main/skills` parsed as owner
+// `acme`, repo `artifacts/tree/main/skills` -- no refusal, just a confusing
+// 404 from the GitHub API much later, wrapped as `GithubApiError`.
+//
+// That is not an exotic input. It is what you get by copying the URL out of a
+// browser while looking at a folder, which is exactly how someone hands over
+// "the link to our artifacts". A deep link is now refused by the same
+// `UnsupportedRemoteError` as any other unrecognized URL, which is what tells
+// the user to paste the repository URL instead.
+
 // git@github.com:owner/repo(.git)
-const SSH_PATTERN = /^git@github\.com:([^/]+)\/(.+?)(?:\.git)?\/?$/;
+const SSH_PATTERN = /^git@github\.com:([^/]+)\/([^/]+?)(?:\.git)?\/?$/;
 // https://github.com/owner/repo(.git)
-const HTTPS_PATTERN = /^https:\/\/github\.com\/([^/]+)\/(.+?)(?:\.git)?\/?$/;
+const HTTPS_PATTERN = /^https:\/\/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?\/?$/;
 
 /**
  * Parses a github.com remote URL (SSH or HTTPS form) into its owner/repo.
