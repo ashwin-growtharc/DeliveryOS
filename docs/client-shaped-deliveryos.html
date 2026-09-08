@@ -106,22 +106,24 @@
   <h1>Clients Who Aren't Us</h1>
   <p class="standfirst">
     DeliveryOS quietly assumes every client looks like we do &mdash; a git repository, and
-    Claude. Two gaps follow from that, and both turned out cheaper to close than expected.
+    Claude. Three gaps follow from that, and none is as expensive to close as it looks.
   </p>
 </header>
 
 <div class="lede">
   <p>
-    <strong>The short version.</strong> A client who keeps their artifacts in SharePoint
-    rather than git cannot use DeliveryOS at all today. And every document we hand a client
-    &mdash; onboarding, proposal, delivery plan, business case &mdash; still starts from a
-    blank page.
+    <strong>The short version.</strong> A client who keeps their material in SharePoint cannot
+    use DeliveryOS at all today. If they send us a link, nothing turns what is behind it into
+    something we can read. And every document we hand a client &mdash; onboarding, proposal,
+    delivery plan, business case &mdash; still starts from a blank page.
   </p>
   <p>
-    Both are fixable. The storage one is <strong>three functions</strong>, because git turns
-    out to be barely entangled. The documents one is <strong>a convention plus one artifact,
-    and no product code at all</strong> &mdash; after which every new template is content
-    somebody writes, not engineering.
+    All three are fixable, and two of them mostly by copying something we have already done.
+    Reading a non-git folder is <strong>three functions</strong>, because git turns out to be
+    barely entangled. Making a client's folder usable is <strong>the same shape our own library
+    already has</strong>, which nothing moves or copies. And the documents one is <strong>a
+    convention plus one artifact and no product code at all</strong> &mdash; after which every
+    new template is content somebody writes, not engineering.
   </p>
 </div>
 
@@ -177,6 +179,16 @@
 
 <span class="g">Added remote "acme-shared" (folder)
 Found 34 artifacts.</span></code></pre>
+
+<div class="note">
+  <span class="tag">Read that example carefully</span>
+  <p>
+    It says <em>"found 34 artifacts"</em>, and that quietly assumes the folder is already
+    organised the way DeliveryOS expects. A real client's folder will not be.
+    <strong>That is a second problem, and it is the bigger one</strong> &mdash; it has its own
+    section below.
+  </p>
+</div>
 
 <div class="note">
   <span class="tag">One limitation in the first slice</span>
@@ -330,6 +342,185 @@ for these yet.</span></code></pre>
   </tr>
 </table>
 </div>
+
+<h2>The harder half: a folder is not a catalog</h2>
+
+<div class="part">
+  <span class="label">The gap</span>
+  <h3>A client sends a link, not a library</h3>
+  <p>
+    Everything above answers <em>where the files live</em>. It does not answer the question
+    underneath it: whatever is behind that link is a pile of documents, and DeliveryOS needs a
+    library. Nothing in the product turns one into the other today.
+  </p>
+</div>
+
+<h3>What a pasted link can actually get you</h3>
+
+<p>
+  Researched against Microsoft's and Google's own documentation, and the useful conclusion is
+  a negative one: <strong>the link is a hint, not a way in.</strong>
+</p>
+
+<ul>
+  <li>
+    <strong>There is no documented way to turn a SharePoint address into the folder on your
+    disk.</strong> The registry keys people use for it appear in no official documentation, the
+    sync app updates roughly fortnightly, and a company policy can rename the folder anyway.
+  </li>
+  <li>
+    <strong>But Windows will list every synced folder on the machine</strong>, properly and
+    supported &mdash; including Google Drive's, not just Microsoft's. So the honest design is:
+    read the names out of the link, look for a matching folder, and <em>ask the person to
+    confirm the match once</em>. That turns an unavoidable guess into a single click rather
+    than a thing that can silently be wrong.
+  </li>
+  <li>
+    <strong>Microsoft can resolve a share link directly</strong> if someone signs in &mdash;
+    one call returns the folder and its contents. Two catches: the least-privileged permission
+    on offer is a <em>write</em> permission for a read operation, and their documentation is
+    explicit that even an "anyone with the link" link cannot be read without a signed-in user.
+  </li>
+  <li>
+    <strong>Google is the opposite</strong>, and it is the one genuinely cheap path: their
+    documentation says a plain API key can read content shared as "anyone with the link" &mdash;
+    no sign-in at all. If that extends to listing a folder's contents, Google onboarding
+    becomes <em>one sharing toggle by the client</em>. That is a five-minute test and it is
+    worth running before anything else.
+  </li>
+</ul>
+
+<h3>Why the obvious tools do not close it</h3>
+
+<div class="tablewrap">
+<table>
+  <tr><th>What you would reach for</th><th>Why it does not help</th></tr>
+  <tr>
+    <td><code>deliveryos scan</code></td>
+    <td class="no">It looks in six fixed places that are all Claude Code conventions, has no
+    reader for Word, PDF or Excel, and can only look at the folder you are standing in. A
+    client's <code>playbooks/</code> folder returns <strong>nothing</strong></td>
+  </tr>
+  <tr>
+    <td>Pushing each file as a new artifact</td>
+    <td class="no">It works, and it is one pull request per artifact. Two hundred files is two
+    hundred pull requests</td>
+  </tr>
+</table>
+</div>
+
+<h3>The answer is sitting in our own library</h3>
+
+<p>
+  We have already done this once, at scale, and the shape it produced is the design. Our own
+  library was <strong>never reorganised</strong>. The original collection still sits exactly
+  where it was, and a thin layer of small description files was laid over the top, each one
+  pointing back at an untouched original:
+</p>
+
+<pre><code>the library/   agents/  commands/  rules/  files/   <span class="c">&lt;- originals, untouched</span>
+               artifacts/                          <span class="c">&lt;- the layer we added</span>
+                 230 entries, 131 of them nothing but a description
+                 pointing back at:  agents/ 67   rules/ 35   commands/ 28</code></pre>
+
+<p>
+  <strong>Nothing moves and nothing is copied.</strong> The entire footprint of making a folder
+  DeliveryOS-compatible is one directory of small text files &mdash; a median of 527 bytes
+  each, 132 KB for all 230, against a library of 8.8 MB. And the link is two-way: editing an
+  adopted file and contributing it back writes to the real file, so it stays live rather than
+  forking into a copy.
+</p>
+
+<h3>Where that layer can live &mdash; and it is not a free choice</h3>
+
+<p>
+  A description file can only point at something in the same repository as itself. That single
+  constraint decides the question:
+</p>
+
+<div class="tablewrap">
+<table>
+  <tr><th>What the client hands over</th><th>What has to happen</th></tr>
+  <tr>
+    <td>A git repository</td>
+    <td class="yes">Add the layer beside their files. Nothing moves, nothing is copied, and
+    contributions still work</td>
+  </tr>
+  <tr>
+    <td>A SharePoint or Drive folder</td>
+    <td>A copy is unavoidable &mdash; mirror the folder into a library we manage, then add the
+    layer to that. Not a preference: a description file cannot reach into SharePoint, and
+    SharePoint is not a git remote, so refreshing and contributing would not work there anyway</td>
+  </tr>
+</table>
+</div>
+
+<div class="note">
+  <span class="tag">So, a rule</span>
+  <p>
+    <strong>Never write our files into a client's SharePoint or Drive.</strong> Not merely
+    intrusive &mdash; the rest of the product cannot work against it. DeliveryOS's job starts at
+    "a folder inside a git repository", and getting a client's material that far stays a
+    separate, boring step: an export, a sync, an existing tool. Teaching DeliveryOS to speak to
+    Microsoft's and Google's services directly would be building a different product.
+  </p>
+</div>
+
+<h3>What can be worked out, and what has to be asked</h3>
+
+<p>
+  Our own import is the evidence, and it is encouraging in one direction and clear in the other.
+  All 210 imported entries got genuinely useful descriptions &mdash; because the source files
+  already carried their own. But <strong>half of them ended up with an empty stack field</strong>,
+  because nothing could work it out.
+</p>
+
+<div class="tablewrap">
+<table>
+  <tr><th>Needed for each artifact</th><th>Where it comes from</th></tr>
+  <tr><td>Its name, version, source, and whether review is required</td><td class="yes">Worked out automatically</td></tr>
+  <tr><td>Its description</td><td class="yes">Lifted from the file itself where the file says; otherwise best-effort and marked as a guess</td></tr>
+  <tr><td><strong>What kind of thing it is, and where it should land in someone's project</strong></td><td class="no">Genuinely needs a person. These are the two DeliveryOS has always refused to guess</td></tr>
+</table>
+</div>
+
+<h3>The move that makes it tractable: decide per folder, not per file</h3>
+
+<p>
+  Two hundred judgement calls is where quality collapses &mdash; our own import needed two
+  clean-up rounds afterwards, one correcting 134 files and one fixing twenty whose tags were
+  wrong. Asking about a <em>directory</em> instead turns that into about eight decisions
+  somebody can actually hold in their head:
+</p>
+
+<pre><code><span class="y">Agent:</span>  There are 47 markdown files under playbooks/. Three examples:
+        onboarding-call.md, escalation.md, handover.md
+        What are these, and where should they land in a project?
+
+<span class="g">You:</span>    They are process rules. Put them under .claude/rules/playbooks/
+
+<span class="y">Agent:</span>  Understood. That covers 47 of the 212 files. Next: docs/templates/ ...</code></pre>
+
+<p>
+  One answer becomes a rule that covers a whole folder. The rules are written to a file the
+  person reads and edits before anything is committed &mdash; which also means re-running it
+  later is safe, because new files land under the rules already agreed.
+</p>
+
+<p>
+  That is also the same principle as the document templates in the next section: <strong>work
+  out what you can, ask about the rest, never invent.</strong> Two features, one rule.
+</p>
+
+<h3>One-time, not continuous</h3>
+
+<p>
+  The temptation is to have this run constantly, so a document dropped in SharePoint appears
+  automatically. The evidence says do not. Our own import was one-time with a person reviewing
+  it and <em>still</em> needed two rounds of corrections. A continuous version has nobody
+  reviewing, and the two judgement calls do not get easier by being made more often. It is the
+  shape most likely to look like automation and behave like drift.
+</p>
 
 <h2>Part two &mdash; documents that interview you</h2>
 
@@ -650,13 +841,31 @@ interview:
 <h2>Order of work</h2>
 
 <ol>
+  <li>
+    <strong>Make a pasted link fail well.</strong> <em>Done.</em> Everything else here is
+    weeks; this was a day, and it is the first thing a client-facing flow touches. Pasting a
+    SharePoint link used to produce git's own error message; a link copied from a browser while
+    looking at a folder was silently misread; an empty one printed a crash report; and a
+    private link could hang forever with nothing to cancel. All five now fail with a sentence
+    that says what to do instead.
+  </li>
   <li><strong>This document.</strong></li>
-  <li><strong>The method, plus onboarding as the first template</strong> &mdash; one artifact
-  and one template, no code, usable on the next client immediately. Proposal, delivery plan
-  and business case follow as content whenever somebody writes them.</li>
-  <li><strong>Folder libraries</strong> &mdash; read-only, plus the honest refusal when someone
-  tries to contribute back. This is the piece that turns a "no" into a "yes" in a sales
-  conversation.</li>
+  <li>
+    <strong>The method, plus onboarding as the first template</strong> &mdash; one artifact and
+    one template, no code, usable on the next client immediately. Proposal, delivery plan and
+    business case follow as content whenever somebody writes them.
+  </li>
+  <li>
+    <strong>Folder libraries</strong> &mdash; read-only, plus the honest refusal when someone
+    tries to contribute back. This is the piece that turns a "no" into a "yes" in a sales
+    conversation.
+  </li>
+  <li>
+    <strong>Adoption</strong> &mdash; the layer that makes a client's folder readable at all.
+    Start with the narrowest useful case: a repository already on GitHub, markdown only, one
+    folder rule. The test that it worked is not "a pull request opened" but
+    <em>installing one of the adopted artifacts puts the original file in the right place</em>.
+  </li>
   <li><strong>Other agents</strong> &mdash; when a client actually uses one.</li>
 </ol>
 
