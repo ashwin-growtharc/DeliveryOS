@@ -5,8 +5,20 @@ import { addRemote, removeRemote } from '../../engine/remote/manageRemotes';
 export async function runRemoteAdd(gitUrl: string, nameOption: string | undefined): Promise<void> {
   // Orchestration lives in `engine/remote/manageRemotes.ts` -- it was
   // duplicated here and in the sidecar, and the sidecar's copy said so.
-  const { name, url, dest } = await addRemote(gitUrl, nameOption);
+  const { name, url, dest, backend } = await addRemote(gitUrl, nameOption);
   console.log(`Added remote "${name}" (${url}) -> ${dest}`);
+
+  // Said at ADD time rather than left to be discovered at push time.
+  //
+  // A folder library reads perfectly well and cannot accept contributions --
+  // and the moment someone finds that out matters. Learning it here costs a
+  // line of output; learning it from `push` costs having already done the work
+  // and written the edit.
+  if (backend === 'folder') {
+    console.log(
+      'This is a folder library: reading and installing work, contributing back does not.',
+    );
+  }
 }
 
 /** Removes a remote's registry entry and deletes its local cache clone.
