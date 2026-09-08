@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import simpleGit from 'simple-git';
 import { addRemoteEntry } from '../../src/engine/remote/remoteRegistry';
-import { cachePath, cloneRemote, refreshRemoteCache } from '../../src/engine/remote/remoteCache';
+import { cloneRemote, refreshRemoteCache } from '../../src/engine/remote/remoteCache';
 import { addRemote } from '../../src/engine/remote/manageRemotes';
 import { buildCatalog } from '../../src/engine/catalog/catalog';
 import { pullArtifact } from '../../src/engine/pull/pull';

@@ -3,6 +3,7 @@ import * as path from 'path';
 import { Manifest, ManifestSchema } from '../manifest/schema';
 import { guessDescriptionFromFrontmatter } from '../manifest/frontmatter';
 import { AdoptionProfile, AdoptionRule, slugify } from './profile';
+import { describeOfficeFile, isOfficeFile } from './officeText';
 
 /**
  * What adopting a client's folder WOULD produce, without producing any of it.
@@ -78,6 +79,15 @@ function filesUnder(root: string, dir: string, extensions: string[]): string[] {
  * caller must ask rather than assert.
  */
 function describeFile(absolute: string): { description: string; guessed: boolean } | undefined {
+  // Word, Excel and PowerPoint before the text path, because reading a ZIP as
+  // UTF-8 produces binary noise that has neither frontmatter nor a heading --
+  // which is why every Office file used to be skipped, and why a client's
+  // actual template library could not be adopted at all.
+  if (isOfficeFile(absolute)) {
+    const office = describeOfficeFile(absolute);
+    return office ? { description: office.description, guessed: !office.declared } : undefined;
+  }
+
   let content: string;
   try {
     content = fs.readFileSync(absolute, 'utf-8');
