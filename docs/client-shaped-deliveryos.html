@@ -179,17 +179,129 @@
 Found 34 artifacts.</span></code></pre>
 
 <div class="note">
-  <span class="tag">One honest limitation, and it is not a bug</span>
+  <span class="tag">One limitation in the first slice</span>
   <p>
-    <strong>You cannot contribute back to a folder library.</strong> Contributing means
-    proposing a change someone reviews and approves &mdash; a folder has no such thing.
-    Rather than half-working, DeliveryOS says so:
+    <strong>Contributing back is off to begin with</strong>, and DeliveryOS says so rather
+    than half-working:
   </p>
 <pre style="margin-top:12px; margin-bottom:0;"><code><span class="g">&gt;</span> deliveryos push my-skill --remote acme-shared
 
-<span class="r">"acme-shared" is a folder remote. Contributing needs a library
-that can open a pull request for review.</span></code></pre>
+<span class="r">"acme-shared" is a folder library. Contributing is not turned on
+for these yet.</span></code></pre>
+  <p style="margin-top:12px; margin-bottom:0;">
+    That is a choice about sequencing, not a permanent fact &mdash; the next section is about
+    what these services can and cannot actually do when written to.
+  </p>
 </div>
+
+<h3>Can we push things back to them?</h3>
+
+<p>
+  Worth researching properly rather than assuming, because the answer turned out better than
+  expected in one direction and worse in another.
+</p>
+
+<div class="tablewrap">
+<table>
+  <tr>
+    <th>&nbsp;</th>
+    <th>Can we write?</th>
+    <th>Keeps version history?</th>
+    <th>Can a change be reviewed <em>before</em> it lands?</th>
+  </tr>
+  <tr>
+    <td><strong>SharePoint</strong></td>
+    <td class="yes">Yes</td>
+    <td class="yes">Yes &mdash; with who and when</td>
+    <td>Approval exists, but only through their old programming interface</td>
+  </tr>
+  <tr>
+    <td><strong>OneDrive</strong> (personal)</td>
+    <td class="yes">Yes</td>
+    <td class="yes">Yes</td>
+    <td class="no">No such thing at all</td>
+  </tr>
+  <tr>
+    <td><strong>Google Drive</strong></td>
+    <td class="yes">Yes</td>
+    <td>Yes, but you cannot roll back &mdash; only download an old copy and re-upload it</td>
+    <td>A real approvals feature, with two catches below</td>
+  </tr>
+</table>
+</div>
+
+<h3>The good surprise: history comes free</h3>
+
+<p>
+  <strong>Writing a file into the synced folder creates a proper version in the cloud.</strong>
+  Microsoft's own documentation treats the sync app as something that produces versions, and a
+  new version is recorded whenever a file is uploaded or replaced.
+</p>
+
+<p>
+  So an artifact written into a client's SharePoint folder gets a real history entry &mdash;
+  who changed it, when, and the ability to restore what was there before &mdash; with no
+  accounts, no keys and nothing for their IT to approve. That is genuinely more than we get
+  from a plain folder, and more than this plan originally assumed.
+</p>
+
+<h3>The bad surprise: you cannot gate anything</h3>
+
+<p>
+  Contributing in DeliveryOS today means <em>proposing</em> a change that somebody reviews and
+  accepts or rejects. Nothing here can do that honestly:
+</p>
+
+<ul>
+  <li>
+    <strong>SharePoint</strong> does have proper approval &mdash; a document can sit as a draft
+    that only editors see until somebody approves it. But those controls are missing from the
+    modern programming interface and reachable only through the older one, which means a whole
+    second way of signing in. It is also switched <em>off</em> by default, so most libraries
+    could not do it without an administrator changing a setting first.
+  </li>
+  <li>
+    <strong>Google Drive</strong> has a genuine approvals feature, and its states line up
+    neatly with what we already track. But it is only on paid tiers, and it approves the file
+    <em>as it already is</em> &mdash; the change has landed before anyone looks at it. That is
+    the opposite of proposing something while the original stays untouched.
+  </li>
+  <li><strong>Personal OneDrive</strong> has nothing.</li>
+</ul>
+
+<div class="note">
+  <span class="tag">The honest product line</span>
+  <p>
+    You <em>can</em> contribute to a SharePoint or Drive library, and the change is recorded
+    with your name against it. What nobody can offer is <strong>review before it lands</strong>
+    &mdash; whatever checking the organisation does happens in their tools, not in ours.
+  </p>
+  <p>
+    A client who wants contributions reviewed and approved is a client who wants a git library.
+    That is a real answer to give in a sales conversation, not a dodge.
+  </p>
+</div>
+
+<h3>The one thing we could not verify</h3>
+
+<p>
+  <strong>What happens when two people change the same file.</strong> There is no current
+  documentation from Microsoft on it &mdash; the page that used to cover it is gone. What is
+  widely observed is that OneDrive keeps <em>both</em> copies and renames the loser after the
+  computer it came from (<code>skill-DESKTOP-A1B2C3.md</code>). It never merges, and nobody is
+  told.
+</p>
+
+<p>
+  That is the strongest argument for eventually writing through the proper programming
+  interface rather than dropping files in the folder: it can be told <em>"only save this if
+  nobody else changed it since I looked"</em> and gives a clean error instead of a silent
+  duplicate. Same free version history, without the mystery twin.
+</p>
+
+<p>
+  Not needed for reading, which is the first slice. Worth knowing before we write anything.
+</p>
 
 <h3>Things that will bite, stated up front</h3>
 
