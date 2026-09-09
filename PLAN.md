@@ -941,8 +941,10 @@ Ordered by what blocks value, not by phase number.
    `.agents/skills`), and `app-skill.ts`'s `buildAppSkillPack()` emits Codex,
    Claude-marketplace, generic-MCP and ChatGPT-connector formats from one
    manifest. The transcript raises reach twice; this is what answering it costs.
-4. **Split `app.js`** — 7,464 lines in one IIFE. Deferred until ESLint covers
-   it, so the move happens with a linter watching.
+4. **Split `app.js`** — 7,605 lines in one IIFE. Deferred until ESLint covers
+   it, so the move happens with a linter watching. Frozen in the meantime:
+   `test/unit/appJsCeiling.test.ts` fails if the file grows, and fails the other
+   way if a move-out lands without lowering the ceiling to match.
 5. **A shared command surface** — the CLI exposes 15 commands and the sidecar
    40, with nothing shared between them, so they drift. Now scoped properly as
    **Phase 16** (see above), which found this is worse than described: the
