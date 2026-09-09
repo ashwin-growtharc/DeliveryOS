@@ -22,6 +22,8 @@
  * everything unrecognised falls through to git exactly as before.
  */
 
+import { parseSharepointLink, SharepointLink } from './sharepointLink';
+
 /** A verdict, not an exception, so the message can be unit-tested without a
  * try/catch and without touching the filesystem. */
 export type RemoteUrlVerdict =
@@ -39,6 +41,54 @@ function syncedFolderAdvice(service: string): string {
     + 'folder, so point DeliveryOS at that folder instead -- for example: '
     + 'deliveryos remote add "C:/Users/you/Contoso/Shared Documents/Artifacts"'
   );
+}
+
+/**
+ * What to do about a SharePoint or OneDrive link, given what the link itself
+ * says.
+ *
+ * The split that matters is folder versus file. A document library can become a
+ * catalog once it is synced; a single document cannot become one ever, because
+ * a catalog is a directory of files and a link to one spreadsheet is not a
+ * directory of anything. Sending somebody off to sync a library when they are
+ * holding a link to one workbook wastes their afternoon and then fails.
+ */
+function sharepointAdvice(link: SharepointLink): string {
+  const where = link.personal
+    ? `${link.ownerSegment ?? 'someone'}'s OneDrive`
+    : `the SharePoint site ${link.sitePath ?? 'it lives in'}`;
+
+  // Getting a library onto disk differs by where it lives, and both routes end
+  // at the same place: an ordinary folder DeliveryOS can read.
+  const getItLocal = link.personal
+    ? 'Open the link, choose "Add shortcut to My files", and let OneDrive finish syncing'
+    : 'Open the library in the browser, choose "Sync", and let OneDrive finish syncing';
+
+  if (link.kind === 'file') {
+    const what = link.fileName
+      ? `a single file, "${link.fileName}"`
+      : `a single ${link.app ?? 'file'}`;
+    return (
+      `That link points at ${what} in ${where}, not at a library. `
+      + 'A catalog is a folder of files, so there is nothing here for DeliveryOS to read -- '
+      + 'and that stays true once the file is on this machine. '
+      + `${getItLocal}, then point DeliveryOS at the FOLDER that document sits in: `
+      + 'deliveryos remote add "C:/Users/you/OneDrive - Contoso/Templates"'
+    );
+  }
+
+  if (link.kind === 'folder') {
+    return (
+      `That link points at a folder in ${where}. DeliveryOS cannot read it over the web, `
+      + 'but it can read the copy your sync client puts on this machine. '
+      + `${getItLocal}, then point DeliveryOS at that folder: `
+      + 'deliveryos remote add "C:/Users/you/OneDrive - Contoso/Templates"'
+    );
+  }
+
+  // The marker was missing or unrecognised, so the honest answer names the
+  // service and stops short of claiming what is behind the link.
+  return syncedFolderAdvice(link.service);
 }
 
 /** Host suffixes that are unambiguously cloud storage rather than git hosting.
@@ -93,7 +143,13 @@ export function classifyRemoteUrl(url: string): RemoteUrlVerdict {
     (entry) => host === entry.suffix || host.endsWith(`.${entry.suffix}`),
   );
   if (cloud) {
-    return { supported: false, reason: syncedFolderAdvice(cloud.service) };
+    // SharePoint and OneDrive links say enough about themselves to earn a
+    // specific answer. Everything else gets the general one.
+    const sharepoint = parseSharepointLink(trimmed);
+    return {
+      supported: false,
+      reason: sharepoint ? sharepointAdvice(sharepoint) : syncedFolderAdvice(cloud.service),
+    };
   }
 
   // A `.git` suffix is a positive statement that this IS a clone URL, so stop
