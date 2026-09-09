@@ -118,6 +118,21 @@
     font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:.08em;
     text-transform:uppercase; color:var(--ink-dim);
   }
+  ol.steps .who.sys { color:var(--accent); }
+  ol.steps p { margin:0 0 8px; }
+  ol.steps .behind {
+    margin:10px 0 0; padding:10px 13px; border-radius:6px;
+    background:var(--code-bg); color:var(--code-dim);
+    font-family:'IBM Plex Mono',ui-monospace,monospace; font-size:12px; line-height:1.62;
+  }
+  ol.steps .behind b {
+    display:inline; margin:0; color:var(--code-fg); font-weight:500;
+  }
+  ol.steps .behind .tag {
+    display:block; margin-bottom:5px; color:var(--accent);
+    font-size:10px; letter-spacing:.13em; text-transform:uppercase;
+  }
+  ol.steps .behind.none .tag { color:var(--amber); }
   footer {
     margin-top:60px; padding-top:18px; border-top:1px solid var(--line);
     font-size:13.5px; color:var(--ink-dim);
@@ -137,8 +152,10 @@
 
 <div class="lede">
   <p>
-    <strong>The short version.</strong> The link itself is a dead end &mdash;
-    nothing can read it without somebody signed in. That leaves two real routes:
+    <strong>The short version.</strong> The link cannot be <em>fetched</em> &mdash;
+    nothing reads its contents without somebody signed in. It can still be
+    <em>read</em>, and DeliveryOS now says exactly what a link points at and what
+    to do about it. Getting at the contents leaves two real routes:
     <strong>let the sync app put the files on a disk</strong>, which works today
     and needs no code at all, or <strong>ask Microsoft for them directly</strong>,
     which needs a sign-in system we do not have.
@@ -170,6 +187,74 @@
   getting past that, in very different ways.
 </p>
 
+<h2>What the link does tell you</h2>
+
+<p>
+  It cannot be fetched &mdash; but it is not opaque. Microsoft puts a type marker
+  in the first path segment, and the browser form carries the file's own name in
+  the query string. Both are ordinary text, so DeliveryOS can say what you are
+  holding without anybody signing in to anything.
+</p>
+
+<div class="tablewrap">
+<table>
+  <tr><th>Part of the link</th><th>What it says</th></tr>
+  <tr>
+    <td><code>:x:</code></td>
+    <td>An Excel workbook. <code>:w:</code> Word, <code>:p:</code> PowerPoint,
+        <code>:f:</code> a folder</td>
+  </tr>
+  <tr>
+    <td><code>&hellip;-my.sharepoint.com</code></td>
+    <td>Somebody's personal OneDrive, not a team site</td>
+  </tr>
+  <tr>
+    <td><code>/personal/rina_patel_contoso_com/</code></td>
+    <td>Whose it is</td>
+  </tr>
+  <tr>
+    <td><code>file=Build%20Time%20Line.xlsx</code></td>
+    <td>The file's name, in the clear</td>
+  </tr>
+</table>
+</div>
+
+<p>
+  Not every link is that generous. The short sharing form &mdash;
+  <code>/:w:/p/rina_patel/IQBJ&hellip;</code> &mdash; gives the type and the owner
+  and no name at all. So DeliveryOS reports the name it found, or none, and never
+  invents one.
+</p>
+
+<div class="note">
+  <span class="tag">The distinction that changes the advice</span>
+  <p>
+    <strong>A folder link can become a catalog. A document link cannot &mdash;
+    ever.</strong> A catalog is a folder of files, so a link to one spreadsheet
+    has nothing in it to read, and that stays true once the file is sitting on
+    the disk. The old message sent people off to sync a library, which does not
+    help, because the problem was never <em>where</em> the file was.
+  </p>
+</div>
+
+<pre><code><span class="g">&gt;</span> deliveryos remote add <span class="y">"https://&hellip;-my.sharepoint.com/:x:/r/personal/&hellip;"</span>
+
+<span class="r">That link points at a single file, "SLM Build time Line.xlsx" in</span>
+<span class="r">vaishak_bhuvan_growtharc_com's OneDrive, not at a library.</span>
+<span class="c">A catalog is a folder of files, so there is nothing here for
+DeliveryOS to read -- and that stays true once the file is on this
+machine. Open the link, choose "Add shortcut to My files", and let
+OneDrive finish syncing, then point DeliveryOS at the FOLDER that
+document sits in.</span></code></pre>
+
+<p>
+  One more branch worth knowing about: a team library gets told to hit
+  <em>"Sync"</em>, and a document in somebody else's OneDrive gets told
+  <em>"Add shortcut to My files"</em>, because the Sync button is not there.
+  Sending a person to look for a button that does not exist is its own kind of
+  failure.
+</p>
+
 <h2>Route A &mdash; let the sync app do it</h2>
 
 <div class="route a">
@@ -184,22 +269,111 @@
 
 <ol class="steps">
   <li>
+    <b>Paste the link</b>
+    <span class="who">Person &middot; five seconds</span>
+    <p>Whatever the client sent, exactly as they sent it.</p>
+    <div class="behind">
+      <span class="tag">Behind</span>
+      The host is matched against a short list of things that cannot be git.
+      Then the link is read: the <b>type marker</b>, the <b>owner</b>, and the
+      <b>file name</b> if the link carries one. <b>No network call, no sign-in.</b>
+    </div>
+  </li>
+  <li>
+    <b>DeliveryOS says what the link is, and what to do about it</b>
+    <span class="who sys">DeliveryOS &middot; immediately</span>
+    <p>
+      Named file, named owner, and one instruction that fits this link rather
+      than all links.
+    </p>
+    <div class="behind">
+      <span class="tag">Behind</span>
+      The refusal is a <b>value, not an error</b> &mdash; so the wording is
+      unit-tested directly. It branches twice: <b>folder or document</b>, then
+      <b>personal OneDrive or team library</b>, which is what decides between
+      "Add shortcut to My files" and "Sync".
+    </div>
+  </li>
+  <li>
     <b>Someone who already has access syncs the library</b>
-    <span class="who">Once, in their browser</span>
-    "Sync", or "Add shortcut to My files" for something in a person's own
-    OneDrive. It then appears in their file explorer like any other folder.
+    <span class="who">Person &middot; once, in their browser</span>
+    <p>
+      It then appears in their file explorer like any other folder. This is the
+      only step that needs a human, and it needs one exactly once.
+    </p>
+    <div class="behind none">
+      <span class="tag">Behind &mdash; nothing, deliberately</span>
+      DeliveryOS is not involved. The sync app writes the tree to disk under
+      that person's own account, which is why <b>no keys and no IT approval</b>
+      are needed anywhere in this flow.
+    </div>
   </li>
   <li>
-    <b>Point DeliveryOS at that folder</b>
-    <span class="who">One command</span>
-    No account, no keys, nothing for their IT department to approve.
+    <b>Point DeliveryOS at the folder</b>
+    <span class="who">Person &middot; one command</span>
+    <p>An ordinary path. The same command a git URL would use.</p>
+    <div class="behind">
+      <span class="tag">Behind</span>
+      Which kind of remote this is gets decided by <b>asking the filesystem</b>,
+      not by pattern-matching the text. The remote is recorded as a
+      <b>folder library</b>, and that carries its own honest limits &mdash;
+      reading and installing work, <b>proposing a change does not</b>.
+    </div>
   </li>
   <li>
-    <b>Adopt it</b>
-    <span class="who">Once per client</span>
-    A pile of documents becomes a library DeliveryOS can read.
+    <b>Mirror and adopt</b>
+    <span class="who">Person &middot; once per client</span>
+    <p>A pile of documents becomes a library DeliveryOS can read.</p>
+    <div class="behind">
+      <span class="tag">Behind</span>
+      The tree is copied into a catalog we manage, dropping the sync app's
+      leavings (<b>desktop.ini</b>, <b>~$&hellip;</b>, <b>.DS_Store</b>) so they
+      never become somebody's artifacts. Each file gets an id and a description
+      read <b>from the file itself</b> &mdash; a Word, Excel or PowerPoint file is
+      opened up and asked for its declared properties, then its first line of
+      text. Nothing is invented; a file that cannot describe itself is reported,
+      not guessed at.
+    </div>
+  </li>
+  <li>
+    <b>Review one pull request</b>
+    <span class="who">Person &middot; once</span>
+    <p>
+      One change, listing every proposed artifact and flagging which descriptions
+      were derived rather than declared.
+    </p>
+    <div class="behind">
+      <span class="tag">Behind</span>
+      Every manifest is checked <b>before any of them is committed</b>, and one
+      failure aborts the whole batch. That is not caution for its own sake: a
+      single malformed manifest makes the <b>entire catalog</b> unreadable, so it
+      lands all at once or not at all.
+    </div>
+  </li>
+  <li>
+    <b>Anyone installs an artifact</b>
+    <span class="who">Person &middot; whenever</span>
+    <p>The client's own document, in their project, where the rule said it goes.</p>
+    <div class="behind">
+      <span class="tag">Behind</span>
+      The original is copied <b>byte for byte</b>, and a pristine copy is kept so
+      later edits can be told apart from the original. <b>Nothing was converted
+      at any point</b> &mdash; the .docx that lands is the .docx they wrote.
+    </div>
   </li>
 </ol>
+
+<div class="note">
+  <span class="tag">Where the writing happens</span>
+  <p>
+    <strong>Nothing is ever written into the client's SharePoint.</strong> The
+    pull request in step 6 goes to a catalog we manage. Their library is read and
+    left alone &mdash; which is also why a folder remote cannot accept a proposed
+    change: there is nowhere for a proposal to sit while the original stays
+    untouched.
+  </p>
+</div>
+
 
 <pre><code><span class="g">&gt;</span> deliveryos remote add <span class="y">"C:/Users/priya/Contoso Ltd/Delivery Playbooks"</span> --name contoso
 
