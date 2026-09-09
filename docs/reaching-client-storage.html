@@ -381,6 +381,26 @@ document sits in.</span></code></pre>
 <span class="c">This is a folder library: reading and installing work,
 contributing back does not.</span></code></pre>
 
+<p>
+  And step 5, first as a rehearsal. The profile is a short YAML file saying,
+  per folder, what the files are and where they should install &mdash; the two
+  things nothing can read off the files themselves.
+</p>
+
+<pre><code><span class="g">&gt;</span> deliveryos adopt <span class="y">"C:/Users/priya/Contoso Ltd/Delivery Playbooks"</span> --profile contoso.yaml --dry-run
+
+<span class="g">Would adopt 3 artifact(s) from "Delivery Playbooks" into "contoso-catalog", copying 3 file(s):</span>
+
+  playbook-escalation  rule  playbooks/escalation.md -> .claude/rules/playbooks/escalation.md
+  playbook-handover    rule  playbooks/handover.md   -> .claude/rules/playbooks/handover.md  <span class="c">(description derived)</span>
+  template-proposal    doc   templates/proposal.docx -> templates/proposal.docx
+
+<span class="y">1 description(s) would be derived from the file's first heading rather than
+declared -- worth reading before you open the pull request:</span>
+  - playbook-handover: "Handover checklist"
+
+<span class="c">Nothing was written. Drop --dry-run to open the pull request.</span></code></pre>
+
 <div class="note">
   <span class="tag">The thing worth noticing</span>
   <p>

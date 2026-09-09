@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { isSyncDetritus } from '../remote/backends';
-import { AdoptionPlanError } from './planAdoption';
+import { AdoptionPlanError } from '../errors';
 
 /**
  * Copies a client's folder into a catalog repository, once, as one tree.

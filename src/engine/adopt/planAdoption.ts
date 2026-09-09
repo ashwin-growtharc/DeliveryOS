@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import { AdoptionPlanError } from '../errors';
 import * as path from 'path';
 import { Manifest, ManifestSchema } from '../manifest/schema';
 import { guessDescriptionFromFrontmatter } from '../manifest/frontmatter';
@@ -43,7 +44,6 @@ export interface AdoptionPlan {
   skipped: Array<{ sourcePath: string; reason: string }>;
 }
 
-export class AdoptionPlanError extends Error {}
 
 /** Every file under `dir` matching one of `extensions`, relative to `root`. */
 function filesUnder(root: string, dir: string, extensions: string[]): string[] {

@@ -91,6 +91,7 @@ It needs Rust and, on Windows, MSVC Build Tools — see
 | `push <id> --description <text>` | Metadata-only edit — no payload touched, no version bump |
 | `push <id> --new --path <dir> --kind <kind> --owner <owner> --description <text>` | Propose a brand-new artifact |
 | `scan -r <remote>` | Find reusable content already in your project and print a ready-to-run `push` for each |
+| `adopt <folder> --profile <yaml> [--dry-run]` | Mirror a synced SharePoint/OneDrive/Drive folder into a git catalog and propose its files as artifacts, in one PR. The profile says, per folder, what the files are and where they install. `--dry-run` shows the plan and writes nothing |
 
 `push --new` also accepts `--install-target`, `--artifact-version`,
 `--review-required`, `--post-install`, and `--roles`/`--teams`/`--stacks`/

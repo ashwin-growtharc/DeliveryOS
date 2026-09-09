@@ -1,4 +1,7 @@
+import * as fs from 'fs';
 import { z } from 'zod';
+import { parse as parseYaml } from 'yaml';
+import { AdoptionPlanError } from '../errors';
 
 /**
  * The reviewable object of an adoption: what a person decided about a client's
@@ -112,4 +115,40 @@ export function slugify(filename: string): string | undefined {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
   return ID_SAFE.test(slug) ? slug : undefined;
+}
+
+/**
+ * A profile from a YAML file, validated, or an `AdoptionPlanError` that names
+ * what is wrong with it.
+ *
+ * Issues are formatted the way `manifest/parser.ts` formats a manifest's --
+ * `rules.0.kind: Required` -- because a person who has seen one of those
+ * messages should recognise the other. `strict()` on the schemas means a typo
+ * like `install_target` is reported as an unrecognised key rather than
+ * silently ignored alongside a missing `installTarget`.
+ */
+export function readAdoptionProfile(filePath: string): AdoptionProfile {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(filePath, 'utf-8');
+  } catch {
+    throw new AdoptionPlanError(`Cannot read the adoption profile at "${filePath}".`);
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = parseYaml(raw);
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    throw new AdoptionPlanError(`The adoption profile at "${filePath}" is not valid YAML: ${detail}`);
+  }
+
+  const result = AdoptionProfileSchema.safeParse(parsed);
+  if (!result.success) {
+    const issues = result.error.issues
+      .map((issue) => `${issue.path.join('.') || '<root>'}: ${issue.message}`)
+      .join('; ');
+    throw new AdoptionPlanError(`The adoption profile at "${filePath}" failed validation: ${issues}`);
+  }
+  return result.data;
 }

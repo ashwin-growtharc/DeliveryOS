@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { planAdoption, AdoptionPlanError } from '../../src/engine/adopt/planAdoption';
+import { planAdoption } from '../../src/engine/adopt/planAdoption';
+import { AdoptionPlanError } from '../../src/engine/errors';
 import { AdoptionProfileSchema, slugify } from '../../src/engine/adopt/profile';
 
 /**

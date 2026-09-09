@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { stringify as stringifyYaml } from 'yaml';
-import { findRemote } from '../remote/remoteRegistry';
+import { findRemote, RemoteEntry } from '../remote/remoteRegistry';
 import { cachePath, withRemoteCacheLock } from '../remote/remoteCache';
 import { backendFor } from '../remote/backends';
 import {
@@ -126,22 +126,20 @@ function buildPr(
   return { title: `Adopt ${plan.candidates.length} artifact(s) from ${sourceLabel}`, body };
 }
 
-export async function mirrorAndAdopt(
-  sourceFolder: string,
-  profile: AdoptionProfile,
-  remoteName: string,
-  onProgress?: ProgressCallback,
-  injectedClient?: GithubClient,
-): Promise<MirrorAndAdoptResult> {
+/**
+ * The remote an adoption goes into, checked once for both the real run and
+ * `adopt --dry-run`, so the two cannot disagree about what is allowed.
+ *
+ * The destination has to be able to accept a proposal. Asserted here rather
+ * than discovered at `parseGithubUrl`, so the message names the real problem:
+ * mirroring INTO a folder library would produce a catalog nobody could review
+ * or contribute to, which defeats the point of mirroring at all.
+ */
+export function resolveAdoptionTarget(remoteName: string): RemoteEntry {
   const remoteEntry = findRemote(remoteName);
   if (!remoteEntry) {
     throw new RemoteRegistryError(`No remote named "${remoteName}" is registered`);
   }
-
-  // The destination has to be able to accept a proposal. Asserted here rather
-  // than discovered at `parseGithubUrl`, so the message names the real problem:
-  // mirroring INTO a folder library would produce a catalog nobody could review
-  // or contribute to, which defeats the point of mirroring at all.
   const backend = backendFor(remoteEntry.backend);
   if (!backend.capabilities.opensPullRequests) {
     throw new UnsupportedRemoteError(
@@ -150,6 +148,17 @@ export async function mirrorAndAdopt(
         + 'point this at a git catalog instead.',
     );
   }
+  return remoteEntry;
+}
+
+export async function mirrorAndAdopt(
+  sourceFolder: string,
+  profile: AdoptionProfile,
+  remoteName: string,
+  onProgress?: ProgressCallback,
+  injectedClient?: GithubClient,
+): Promise<MirrorAndAdoptResult> {
+  const remoteEntry = resolveAdoptionTarget(remoteName);
 
   const { owner, repo } = parseGithubUrl(remoteEntry.url);
   const client = injectedClient ?? (await createOctokit(getGithubToken()));
