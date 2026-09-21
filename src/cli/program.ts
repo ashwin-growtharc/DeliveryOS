@@ -27,7 +27,7 @@ export function buildProgram(): Command {
     // while the installer moved on, so the CLI shipped INSIDE a 0.1.2
     // installer reported 0.1.0 -- exactly the kind of drift a hardcoded
     // version guarantees and nothing was checking.
-    .version('0.1.2');
+    .version('0.2.0');
 
   registerRemoteCommand(program);
   registerListCommand(program);

@@ -1,0 +1,476 @@
+<title>Making Sure They Paid</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --bg:#faf8f3; --card:#fffefb; --ink:#1b2229; --ink-dim:#5a656f; --line:#e2ded4;
+    --accent:#0d6a5c; --accent-soft:#e3efe9; --amber:#8a5a00; --amber-soft:#f8efda;
+    --code-bg:#0d1318; --code-fg:#dbe5ec; --code-dim:#6f7f8c;
+    --red:#9c2f2f; --red-soft:#f7e6e4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:#10161b; --card:#182027; --ink:#e7eaed; --ink-dim:#97a3ad; --line:#29323b;
+      --accent:#5cc3ae; --accent-soft:#123029; --amber:#dba44a; --amber-soft:#2d2412;
+      --code-bg:#141b22; --code-fg:#dbe5ec; --code-dim:#7f8f9c;
+      --red:#e08b84; --red-soft:#2e1a18;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg:#10161b; --card:#182027; --ink:#e7eaed; --ink-dim:#97a3ad; --line:#29323b;
+    --accent:#5cc3ae; --accent-soft:#123029; --amber:#dba44a; --amber-soft:#2d2412;
+    --code-bg:#141b22; --code-fg:#dbe5ec; --code-dim:#7f8f9c;
+    --red:#e08b84; --red-soft:#2e1a18;
+  }
+  * { box-sizing:border-box; }
+  body {
+    background:var(--bg); color:var(--ink);
+    font-family:'IBM Plex Sans',system-ui,sans-serif;
+    font-size:16px; line-height:1.68; margin:0; padding:0 20px 80px;
+  }
+  .wrap { max-width:770px; margin:0 auto; }
+  header { padding:56px 0 14px; border-bottom:2px solid var(--ink); }
+  .eyebrow {
+    font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:.14em;
+    text-transform:uppercase; color:var(--accent); margin:0 0 12px;
+  }
+  h1 {
+    font-family:'IBM Plex Serif',Georgia,serif; font-size:40px; line-height:1.12;
+    font-weight:600; margin:0 0 14px; text-wrap:balance;
+  }
+  .standfirst { font-size:18px; color:var(--ink-dim); margin:0 0 20px; max-width:60ch; }
+  h2 {
+    font-family:'IBM Plex Serif',Georgia,serif; font-size:26px; font-weight:600;
+    margin:56px 0 8px; text-wrap:balance;
+  }
+  h3 { font-size:17px; font-weight:600; margin:30px 0 6px; }
+  p { margin:0 0 14px; max-width:66ch; }
+  ul, ol { max-width:66ch; padding-left:20px; }
+  li { margin-bottom:8px; }
+  code {
+    font-family:'IBM Plex Mono',ui-monospace,monospace; font-size:.87em;
+    background:var(--accent-soft); color:var(--accent); padding:1px 5px; border-radius:3px;
+  }
+  pre {
+    background:var(--code-bg); color:var(--code-fg);
+    font-family:'IBM Plex Mono',ui-monospace,monospace; font-size:13px; line-height:1.65;
+    padding:16px 18px; border-radius:7px; overflow-x:auto; margin:0 0 16px;
+  }
+  pre code { background:none; color:inherit; padding:0; font-size:inherit; }
+  pre .c { color:var(--code-dim); }
+  pre .g { color:#7fd3bd; }
+  pre .r { color:#e5928c; }
+  pre .y { color:#e0b877; }
+  .lede {
+    background:var(--card); border:1px solid var(--line); border-left:3px solid var(--accent);
+    padding:18px 22px; border-radius:0 7px 7px 0; margin:26px 0;
+  }
+  .lede p:last-child { margin-bottom:0; }
+  .note {
+    background:var(--amber-soft); border:1px solid var(--line); border-left:3px solid var(--amber);
+    padding:14px 18px; border-radius:0 7px 7px 0; margin:22px 0; font-size:15px;
+  }
+  .note p:last-child { margin-bottom:0; }
+  .note .tag {
+    font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:.1em;
+    text-transform:uppercase; color:var(--amber); display:block; margin-bottom:5px;
+  }
+  .glossary {
+    background:var(--card); border:1px solid var(--line); border-radius:8px;
+    padding:6px 22px; margin:22px 0;
+  }
+  .glossary dl { margin:0; }
+  .glossary dt { font-weight:600; margin:16px 0 2px; font-size:15.5px; }
+  .glossary dd { margin:0 0 12px; color:var(--ink-dim); font-size:15px; max-width:60ch; }
+  .tablewrap { overflow-x:auto; margin:0 0 18px; }
+  table { border-collapse:collapse; width:100%; font-size:14.5px; }
+  th, td { text-align:left; padding:10px 12px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th {
+    font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:.09em;
+    text-transform:uppercase; color:var(--ink-dim); border-bottom:2px solid var(--line);
+  }
+  td.yes { color:var(--accent); font-weight:500; }
+  td.no { color:var(--red); font-weight:500; }
+  .opt {
+    background:var(--card); border:1px solid var(--line); border-radius:8px;
+    padding:20px 24px; margin:20px 0;
+  }
+  .opt.first { border-left:3px solid var(--accent); }
+  .opt.second { border-left:3px solid var(--accent); }
+  .opt.third { border-left:3px solid var(--amber); }
+  .opt h3 { margin-top:0; font-size:19px; font-family:'IBM Plex Serif',Georgia,serif; }
+  .opt .label {
+    font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:.12em;
+    text-transform:uppercase; color:var(--accent); display:block; margin-bottom:4px;
+  }
+  .opt.third .label { color:var(--amber); }
+  .opt p:last-child { margin-bottom:0; }
+  .story {
+    background:var(--card); border:1px solid var(--line); border-radius:8px;
+    padding:18px 22px; margin:20px 0;
+  }
+  .story h3 { margin-top:0; }
+  .story p:last-child { margin-bottom:0; }
+  .who {
+    font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:.08em;
+    text-transform:uppercase; color:var(--ink-dim); display:block; margin-bottom:3px;
+  }
+  ol.flow { list-style:none; padding:0; counter-reset:s; }
+  ol.flow > li {
+    counter-increment:s; position:relative; padding:0 0 16px 42px;
+    margin:0 0 0 13px; border-left:1px solid var(--line);
+  }
+  ol.flow > li:last-child { border-left-color:transparent; padding-bottom:0; }
+  ol.flow > li::before {
+    content:counter(s); position:absolute; left:-13px; top:0;
+    width:26px; height:26px; border-radius:50%;
+    background:var(--accent); color:var(--bg);
+    font-family:'IBM Plex Mono',monospace; font-size:12px; font-weight:500;
+    display:grid; place-items:center;
+  }
+  ol.flow b { display:block; margin-bottom:2px; }
+  footer {
+    margin-top:60px; padding-top:18px; border-top:1px solid var(--line);
+    font-size:13.5px; color:var(--ink-dim);
+  }
+</style>
+
+<div class="wrap">
+
+<header>
+  <p class="eyebrow">DeliveryOS &middot; Selling it</p>
+  <h1>Making Sure They Paid</h1>
+  <p class="standfirst">
+    We sell DeliveryOS to a company. An employee sends the installer to a friend
+    at a different company. What already stops him, what doesn't, and the three
+    things we could build about it.
+  </p>
+</header>
+
+<div class="lede">
+  <p>
+    <strong>The short version.</strong> The friend cannot reach the customer's
+    artifacts &mdash; that already works. What he can do is use DeliveryOS with
+    his own library, for free. So this is about revenue, not safety.
+  </p>
+  <p>
+    A signed licence file does <em>not</em> fix it, because a file can be copied
+    along with the installer. A sign-in does, because there is nothing to copy.
+    And there is a third answer that avoids the fight entirely.
+  </p>
+</div>
+
+<h2>What the friend can and cannot do</h2>
+
+<div class="story">
+  <span class="who">Already handled</span>
+  <h3>He cannot see the customer's artifacts</h3>
+  <p>
+    The installer is not a key. It is an empty program until you point it at a
+    library, and every library is a private repository:
+  </p>
+<pre><code><span class="g">&gt;</span> deliveryos remote add https://github.com/acme-corp/artifacts.git
+
+<span class="r">remote: Repository not found.
+fatal: could not read from remote repository.</span></code></pre>
+  <p>
+    DeliveryOS holds no passwords or keys of its own &mdash; it asks the machine
+    it is running on, and that machine has no permission either. <strong>The copy
+    of the program grants nothing.</strong>
+  </p>
+</div>
+
+<div class="story">
+  <span class="who">The actual leak</span>
+  <h3>He can use it with his own library</h3>
+  <p>
+    He points it at his own company's repository and everything works. Full
+    product, no payment. He never touched Acme's data &mdash; which is precisely
+    why this is a billing question and not a security one.
+  </p>
+</div>
+
+<h2>The words, in plain terms</h2>
+
+<div class="glossary">
+<dl>
+  <dt>Entitlement</dt>
+  <dd>Just: <em>is this copy allowed to be used?</em> Nothing about who a person is &mdash; only whether this installation was paid for.</dd>
+  <dt>Seat</dt>
+  <dd>One person. "25 seats" means the customer paid for 25 people. Counting seats is the main practical reason to know who is signing in.</dd>
+  <dt>Revocation</dt>
+  <dd>Taking access back &mdash; someone left, or the customer stopped paying. A file cannot be recalled. An account can.</dd>
+  <dt>Federation</dt>
+  <dd>Letting people sign in with the work account they already have, instead of making them create a new one with us.</dd>
+</dl>
+</div>
+
+<h2>Two rules that shape everything</h2>
+
+<div class="note">
+  <span class="tag">Rule one</span>
+  <p>
+    <strong>A program on someone else's computer cannot be made impossible to
+    run.</strong> Any check inside it can be found and removed. This is true of
+    every product ever sold this way. The goal is <em>not casually shareable</em>,
+    not <em>uncrackable</em>.
+  </p>
+</div>
+
+<div class="note">
+  <span class="tag">Rule two &mdash; specific to this product</span>
+  <p>
+    <strong>DeliveryOS has nothing we could withhold.</strong> Search runs on the
+    user's machine, previews compile from libraries bundled into the app, the AI
+    features use the customer's own account, and the library is the customer's
+    own repository. There is no piece of the product that only works if we send
+    something.
+  </p>
+  <p>
+    That matters: it means every option below is a <em>check</em> that could be
+    removed, not a <em>dependency</em> that cannot be faked &mdash; unless we
+    change what we are selling, which is option two.
+  </p>
+</div>
+
+<h2>Where a check would go</h2>
+
+<p>
+  Not at startup. DeliveryOS with no library is an empty window &mdash; the
+  moment it becomes useful is when someone adds one:
+</p>
+
+<pre><code><span class="g">&gt;</span> deliveryos remote add https://github.com/his-company/artifacts.git
+<span class="y">This copy of DeliveryOS is not licensed.
+Ask your administrator, or visit deliveryos.com/activate</span></code></pre>
+
+<p>
+  Once per library rather than every launch, so it barely touches people who
+  paid; and it fails exactly where the value would have started.
+</p>
+
+<h2>Option one &mdash; sign in</h2>
+
+<div class="opt first">
+  <span class="label">Recommended</span>
+  <h3>People sign in with their work account</h3>
+  <p>
+    No file to hand out and nothing to copy. The friend cannot sign in, because
+    he does not have an account at the customer.
+  </p>
+</div>
+
+<ol class="flow">
+  <li><b>They open DeliveryOS and sign in</b>The same work login they use for email. Nothing new to remember.</li>
+  <li><b>We check they belong to a paying customer</b>One question, to a small service of ours.</li>
+  <li><b>It hands back a pass that lasts a while</b>Stored on their machine and renewed quietly in the background.</li>
+  <li><b>Adding a library checks the pass</b>The friend never gets one, so he never gets past this step.</li>
+</ol>
+
+<h3>Why this restricts where a file does not</h3>
+
+<p>
+  A licence file is a thing you have; it travels with a copy. A sign-in is a
+  thing you <em>are</em>, checked against a directory the friend is not in. To
+  get around it he would have to modify the program itself &mdash; a completely
+  different bar from copying a folder, and one a friend borrowing a tool will not
+  cross.
+</p>
+
+<h3>What it costs</h3>
+
+<ul>
+  <li><strong>A small service, always up.</strong> It holds no libraries and no customer files &mdash; it answers one question &mdash; but somebody runs it, and it sits on the path of starting work.</li>
+  <li><strong>Offline stops being free.</strong> DeliveryOS works on a plane today. With a sign-in it works offline only while the pass is valid.</li>
+  <li><strong>It stores a credential</strong> on every machine. Today the product stores none at all.</li>
+  <li><strong>Each customer has their own sign-in system</strong> &mdash; Microsoft, Google, Okta. Connecting to each is real work, and some providers charge per connection.</li>
+</ul>
+
+<h3>The one number you will argue about</h3>
+
+<div class="tablewrap">
+<table>
+  <tr><th>Pass lasts</th><th>Working offline</th><th>Cutting off someone who left</th></tr>
+  <tr><td>1 hour</td><td class="no">Painful</td><td class="yes">Almost immediate</td></tr>
+  <tr><td>7 days</td><td class="yes">Comfortable</td><td>Up to a week late</td></tr>
+  <tr><td>30 days</td><td class="yes">Never noticed</td><td class="no">A month of unpaid use</td></tr>
+</table>
+</div>
+
+<p>Products this size usually land between a week and a fortnight.</p>
+
+<h2>Option two &mdash; sell the part that cannot be copied</h2>
+
+<div class="opt second">
+  <span class="label">The one that avoids the fight</span>
+  <h3>Give away the tool, charge for the service</h3>
+  <p>
+    If the program cannot be locked, stop trying to lock it. Charge instead for
+    the things a copied installer cannot give anyone.
+  </p>
+</div>
+
+<p>
+  This is how most tools of this kind actually work. The client is free; the
+  service around it is the product. Nobody tries to stop you running the client,
+  because running it is not what they sell.
+</p>
+
+<p>What DeliveryOS could sell on those terms:</p>
+
+<div class="tablewrap">
+<table>
+  <tr><th>What we sell</th><th>Why a copied installer cannot get it</th></tr>
+  <tr><td><strong>A hosted, searchable library</strong></td><td>It runs on our machine. No account, no access</td></tr>
+  <tr><td><strong>Curation</strong> &mdash; a maintained collection worth having</td><td>It is our work, not our software</td></tr>
+  <tr><td><strong>Hosting libraries for companies without git</strong></td><td>We hold the files. This also removes a real sales objection</td></tr>
+  <tr><td><strong>Support and onboarding</strong></td><td>People, not code</td></tr>
+</table>
+</div>
+
+<div class="note">
+  <span class="tag">What this changes elsewhere</span>
+  <p>
+    Every previous conclusion treated hosting as a <strong>cost</strong> &mdash;
+    a server somebody has to run at 2am for no revenue. If hosting <em>is</em>
+    the product, that calculation inverts. It stops being overhead and becomes
+    the thing being paid for.
+  </p>
+  <p>
+    This is a business decision rather than an engineering one, which is why it
+    is not a recommendation here. But it is the only option where enforcement
+    stops being a losing arms race.
+  </p>
+</div>
+
+<h2>Option three &mdash; a licence file</h2>
+
+<div class="opt third">
+  <span class="label">Stopgap only</span>
+  <h3>A signed file we give each customer</h3>
+  <p>
+    Worth being blunt: <strong>this does not restrict anything.</strong> Copy the
+    file with the installer and it works.
+  </p>
+</div>
+
+<pre><code><span class="c">deliveryos.licence</span>
+{
+  <span class="y">"licensedTo"</span>: <span class="y">"Acme Corp"</span>,
+  <span class="y">"seats"</span>: 25,
+  <span class="y">"expires"</span>: <span class="y">"2027-03-31"</span>,
+  <span class="y">"signature"</span>: <span class="y">"MEUCIQD…"</span>   <span class="c">&lt;- only we can produce this</span>
+}</code></pre>
+
+<p>
+  What it does buy is a <em>legal</em> lever rather than a technical one. The
+  friend's copy runs visibly under <strong>Acme Corp's</strong> name, which makes
+  misuse obvious and provable instead of invisible. And it needs no server, works
+  offline forever, and takes days rather than weeks.
+</p>
+
+<p>
+  Reasonable as the thing in the first release we hand a paying company &mdash;
+  and honest only if nobody claims it prevents use.
+</p>
+
+<h2>All three, side by side</h2>
+
+<div class="tablewrap">
+<table>
+  <tr><th>&nbsp;</th><th>Sign in</th><th>Sell the service</th><th>Licence file</th></tr>
+  <tr><td>Actually stops the friend</td><td class="yes">Yes</td><td class="yes">Yes &mdash; nothing to stop</td><td class="no">No</td></tr>
+  <tr><td>Server needed</td><td>A small one</td><td>Yes &mdash; it is the product</td><td class="yes">None</td></tr>
+  <tr><td>Works offline</td><td>While the pass lasts</td><td>The paid part does not</td><td class="yes">Always</td></tr>
+  <tr><td>Counts seats</td><td class="yes">Automatically</td><td class="yes">Automatically</td><td class="no">No</td></tr>
+  <tr><td>Cuts off leavers</td><td class="yes">Yes</td><td class="yes">Yes</td><td class="no">No</td></tr>
+  <tr><td>Effort</td><td>Weeks, plus running it</td><td>A business change</td><td class="yes">Days</td></tr>
+</table>
+</div>
+
+<h2>What the code says about building this</h2>
+
+<p>
+  The checks were made against the current source. The shape of the product
+  happens to make this cheap, which is not always true.
+</p>
+
+<div class="tablewrap">
+<table>
+  <tr><th>What we would need</th><th>What already exists</th></tr>
+  <tr>
+    <td>One place to gate</td>
+    <td class="yes">Adding a library goes through a <strong>single engine function</strong>, called from exactly three places &mdash; one per surface. One gate covers all of them</td>
+  </tr>
+  <tr>
+    <td>To declare which operations need a licence</td>
+    <td class="yes">All <strong>43 operations are already declared in one file</strong> with per-operation flags, and <strong>11 tests</strong> force every surface to agree. A new flag follows the existing pattern</td>
+  </tr>
+  <tr>
+    <td>A clean way to refuse</td>
+    <td class="yes">A typed error family already exists and every surface already renders it properly &mdash; including one for a failed GitHub login, which is the same shape</td>
+  </tr>
+  <tr>
+    <td>Somewhere to keep the pass</td>
+    <td class="yes">There is already a global settings folder, holding the list of libraries</td>
+  </tr>
+  <tr><td>Credential storage</td><td class="no">None &mdash; the product deliberately stores nothing today</td></tr>
+  <tr><td>A sign-in screen</td><td class="no">None</td></tr>
+  <tr><td>A service to ask</td><td class="no">None. No hosting of any kind exists yet</td></tr>
+</table>
+</div>
+
+<h2>Two different jobs &mdash; keep them apart</h2>
+
+<div class="tablewrap">
+<table>
+  <tr><th>Job</th><th>Question</th><th>Who handles it</th></tr>
+  <tr><td><strong>Access</strong></td><td>May this person see Acme's artifacts?</td><td class="yes">Already solved &mdash; the repository decides, on their server, where it is real</td></tr>
+  <tr><td><strong>Entitlement</strong></td><td>Was this copy paid for?</td><td>New, and separate</td></tr>
+</table>
+</div>
+
+<p>
+  Access already works, and it is what makes the shared-installer story end
+  harmlessly. Do not rebuild it, do not route it through the sign-in, and do not
+  let one system answer both. Merging them is how products end up with a login
+  that protects nothing and irritates everyone.
+</p>
+
+<h2>What to do, in order</h2>
+
+<ol>
+  <li>
+    <strong>Decide option two first</strong>, because it changes everything else.
+    If the service is the product, enforcement stops mattering and most of this
+    page becomes unnecessary.
+  </li>
+  <li>
+    <strong>Put the check behind one small interface now</strong>, whichever way
+    that decision goes. One function answering "is this copy paid for?" costs
+    almost nothing today and makes every later choice a substitution rather than
+    a rewrite.
+  </li>
+  <li>
+    <strong>Ship the licence file with the first paid release</strong> &mdash;
+    days of work, no server &mdash; while being clear internally that it deters
+    rather than prevents.
+  </li>
+  <li>
+    <strong>Move to sign-in at the second customer</strong>, where counting seats
+    and cutting off leavers starts to matter more than simplicity.
+  </li>
+  <li><strong>Never chase uncrackable.</strong> It breaks honest customers who change laptops, and delays a determined person by an afternoon.</li>
+</ol>
+
+<footer>
+  <p>
+    <strong>Status:</strong> a proposal, not a commitment. There is no licensing,
+    entitlement or credential code in DeliveryOS today, and no hosting of any
+    kind. What the friend can and cannot do was checked in the current source;
+    the integration points above were counted in it. Everything else is a design.
+  </p>
+</footer>
+
+</div>
