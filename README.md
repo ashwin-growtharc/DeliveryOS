@@ -335,6 +335,7 @@ changes by hand.
 
 | Doc | What's in it |
 |---|---|
+| [docs/getting-started.md](docs/getting-started.md) | **Start here if you want to use it.** Install, add the catalog, pull one thing, wire up Claude Code, send a fix back -- ten minutes, no clone |
 | [PRODUCT_BRIEF.md](PRODUCT_BRIEF.md) | **Start here if you are not building it.** What it is, who it is for, and one small journey — plain language, no code |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | The design: layer model, artifact kinds, manifest schema, decisions, open risks |
 | [PLAN.md](PLAN.md) | What's shipped and what's next |
@@ -343,6 +344,7 @@ changes by hand.
 | [docs/backend-plugin-lifecycle.md](docs/backend-plugin-lifecycle.md) | Every backend-plugin stage: install, wire, merge, uninstall, secrets, updates |
 | [docs/skills.md](docs/skills.md) | The six Claude Code skills: what each does, and how to get them |
 | [docs/release-process.md](docs/release-process.md) | Runbook for cutting a signed release with working auto-update |
+| `docs/hosted-mcp-auth-decision.html`, `hosted-mcp-phase-0.html`, `arc-identity-for-deliveryos.html`, `licensing-deliveryos.html` | Why hosted MCP, sign-in and licensing are deferred, and what would revive each -- decision records, not plans |
 | [docs/manual-smoke-test-update-and-refusals.md](docs/manual-smoke-test-update-and-refusals.md) | By-hand runbook: the `src/`-project update path, the `install_target` denylist, and audit-log redaction |
 | [docs/reaching-client-storage.html](docs/reaching-client-storage.html) | A client's material is in SharePoint: what a link tells you, the sync-app route step by step with what happens behind each step, and where it stops |
 

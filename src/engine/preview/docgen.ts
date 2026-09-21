@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { withDefaultConfig, ComponentDoc, PropItem } from 'react-docgen-typescript';
+import type { ComponentDoc, PropItem, FileParser } from 'react-docgen-typescript';
+import { loadReactDocgen } from '../lazyDeps';
 
 export interface PropSchemaEntry {
   name: string;
@@ -13,7 +14,15 @@ export interface PropSchemaEntry {
 
 const COMPONENT_FILE_PATTERN = /\.(tsx|jsx)$/;
 
-const parser = withDefaultConfig({ savePropValueAsString: true });
+// Built on first use, not on import. `withDefaultConfig` loads the TypeScript
+// compiler behind it (~180 ms), and this module is reached from `scan` and
+// `push`, whose command modules are registered by every CLI invocation --
+// including `--help`. See `lazyDeps.ts`.
+let parser: FileParser | undefined;
+function docgenParser(): FileParser {
+  parser ??= loadReactDocgen().withDefaultConfig({ savePropValueAsString: true });
+  return parser;
+}
 
 /**
  * Parses a single `.tsx`/`.jsx` file via the real TypeScript compiler
@@ -29,7 +38,7 @@ const parser = withDefaultConfig({ savePropValueAsString: true });
  * erase that distinction instead of leaving each caller to decide.
  */
 export function parseComponentFile(file: string): ComponentDoc[] {
-  return parser.parse(file);
+  return docgenParser().parse(file);
 }
 
 /**

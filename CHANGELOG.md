@@ -6,6 +6,74 @@ All notable changes to DeliveryOS are recorded here, newest first. See
 
 ---
 
+## 0.2.0 — the first release anyone else installs (branch `release/0.2.0-prep`)
+
+Version `0.1.2` was never tagged, never published, and never installed on a
+machine other than the author's. After 332 commits and 1,000 tests, the
+product has met exactly one user. This is the work of putting it in front of
+a second one.
+
+- **`docs/getting-started.md`** — install, add the catalog, pull one thing,
+  wire up Claude Code, send a fix back. Ten minutes, no clone. It asks the
+  reader to time themselves, because "eleven minutes, not two days" has never
+  been measured on a colleague's machine, and says plainly that the
+  installer's PATH step is the one part not yet verified off the author's
+  laptop.
+- **`.github/workflows/release.yml`** — builds engine, sidecar, CLI and
+  installer on a tag push, derives `latest.json` from the real signature so
+  the two cannot disagree, refuses a tag that does not match `package.json`,
+  and publishes the NSIS installer (never the MSI, which does not put
+  `deliveryos` on PATH). Written, not yet run; the first `v*` tag is its test,
+  and the manual runbook stays as the fallback.
+- **`docs/release-process.md`** brought to the present. It said CI had never
+  executed; it has (PR #27). It said the version lives in `tauri.conf.json`;
+  `package.json` is canonical and four files must agree, three of them
+  enforced by `cliVersion.test.ts`.
+- **`.github/ISSUE_TEMPLATE/bug.md`** — version, command, what happened, what
+  you expected. Nothing else.
+- **Four decision records committed** — `hosted-mcp-auth-decision.html`,
+  `hosted-mcp-phase-0.html`, `arc-identity-for-deliveryos.html`,
+  `licensing-deliveryos.html`. They record why hosted MCP, sign-in and
+  licensing are deferred and what would revive each. They sat untracked for
+  two weeks, which is how a decision gets re-litigated.
+- Version bumped to `0.2.0` in all four pins.
+
+Not in this entry: a tag. Tagging lands on `main`, and that is the user's call.
+## `deliveryos --help` took a second (branch `perf/lazy-heavy-deps`)
+
+Measured on the CLI: `--help` **~1,000 ms**, `list` **~1,300 ms**. Neither does
+a second of work. Every command module is registered on every start, each
+imports the engine, and six modules eagerly imported tools that only
+`push --preview`, `scan`, signed pulls and `mcp` ever run. Their `require`
+cost in isolation -- Tailwind 247 ms, sigstore 240 ms, react-docgen 181 ms,
+the MCP SDK 180 ms, the TypeScript compiler 178 ms -- adds up to the whole
+startup time.
+
+**After:** `--help` **~260 ms**, `list` **~380 ms**. What `--help` now loads is
+commander and the engine core (simple-git, yaml, zod, proper-lockfile,
+ignore), which is what a catalog CLI should cost.
+
+### How, and why not the obvious way
+
+The async callers (`compile.ts`, `provenance/verify.ts`, the `mcp` command)
+defer with `await import()`, the pattern `createOctokit` and `playwright-core`
+already used. Two callers cannot: `parseRoutesTree` and
+`detectSelfNestingWarnings` are synchronous functions called from synchronous
+code, so they go through `src/engine/lazyDeps.ts`, the one file allowed a
+`require` -- with a literal specifier, because esbuild only bundles what it
+can see and a variable would have left the shipped executable without the
+package. Verified against the rebuilt SEA, not just the tests: `scan` from
+`deliveryos-cli.exe` found a `ui-component` candidate, which is the path that
+loads the compiler.
+
+### The guard
+
+`test/e2e/startupWeight.e2e.test.ts`, two layers. A static scan fails on any
+top-level value import of a heavy package and names the line. A spawn runs
+`--help` in-process (`node --import tsx`, not `tsx/cli`, which re-executes in
+a child and left the recorder watching an empty parent) and asserts none of
+the packages ended up in `require.cache`. Deterministic -- a timing assertion
+would also fail on a slow CI runner. Both layers failed before the fix.
 ## `deliveryos adopt` -- adoption becomes something a person can run (branch `feat/mirror-and-adopt`)
 
 Until this, `mirrorAndAdopt` -- the function that turns a client's synced

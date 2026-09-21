@@ -1,17 +1,21 @@
-# Release process (manual)
+# Release process
 
-No GitHub-Actions automation **releases** DeliveryOS — this is a deliberate
-scope boundary, not an oversight. Every release is built and published by hand,
-from the builder's own machine, following the steps below. Automating this (a
-workflow that builds, signs, and publishes on tag push) is a reasonable next
-step once releases stop being solo-developer-local, but it is out of scope for
-now.
+Two ways to cut a release, producing the same assets:
 
-A *verification* workflow now exists — `.github/workflows/ci.yml`, running lint,
-typecheck, a codegen drift check and the full suite — but **it has never
-executed**: it lives only on unpushed `tier0/*` branches, and `origin/main` has
-no `.github` directory, so GitHub has never had a workflow to run. It does not
-build or publish anything, so nothing below changes because of it.
+- **Tag push.** `.github/workflows/release.yml` builds the engine, sidecar, CLI
+  and installer on a Windows runner, derives `latest.json` from the real
+  signature, and publishes a GitHub Release. It refuses a tag that does not
+  match `package.json`. **It has not run yet** -- the first `v*` tag pushed
+  after it landed is its first real test, and if it fails the manual steps
+  below still work. Signing needs the `TAURI_SIGNING_PRIVATE_KEY` repository
+  secret (the key file's *contents*); without it the release installs fresh
+  but the auto-updater will not accept it.
+- **By hand**, following steps 1-6 below. This is how every release before
+  `0.2.0` was cut, and it remains the fallback.
+
+`.github/workflows/ci.yml` runs lint, typecheck and the full suite on every push
+and pull request; it has run green on an independent machine (PR #27). It does
+not build or publish anything.
 
 This process exists because auto-update (see PLAN.md's Phase 3 checklist) is
 wired up: the app checks `tauri.conf.json`'s `plugins.updater.endpoints` for a
@@ -52,9 +56,17 @@ $env:TAURI_SIGNING_PRIVATE_KEY_PATH = "$HOME\.tauri\deliveryos.key"
 
 ## 2. Bump the version
 
-Edit `version` in `src-tauri/tauri.conf.json` (e.g. `"0.1.0"` →
-`"0.2.0"`). This becomes both the installer's version and the version string
-the updater compares against.
+**`package.json` is canonical.** The same string must appear in four places,
+and `test/unit/cliVersion.test.ts` fails the build if the first three drift:
+
+| File | Why it is there |
+|---|---|
+| `package.json` | the version |
+| `src/cli/program.ts` `.version('...')` | what `deliveryos --version` prints; a literal because `rootDir: src` cannot import `package.json` |
+| `src-tauri/tauri.conf.json` | the installer's filename and what the updater compares against |
+| `src-tauri/Cargo.toml` | the Rust crate; not tested, so check it by hand |
+
+The tag is `v` plus that string, and `release.yml` refuses any other.
 
 ## 3. Build
 
@@ -168,12 +180,7 @@ not replace verifying a real published release at least once.)
 
 ## Scope note
 
-No CI/GitHub Actions automation exists for any of the above. Every release
-is built, signed, and published by hand from the builder's own machine. This
-is deliberate for the project's current solo-developer stage, not a gap
-waiting to be filled incidentally — automating it is a real (but currently
-out of scope) future task.
-
-The `ci.yml` verification workflow added on the `tier0/*` branches does not
-change this: it runs the test gates, never a build or a publish, and as of this
-writing it has not run at all (see the note at the top of this file).
+Windows only, on both paths. There is no macOS or Linux build of the installer
+or the CLI, and `release.yml` runs on `windows-latest` for that reason. Neither
+installer is code-signed (Authenticode); the minisign signature above is for
+the updater, not for SmartScreen.
