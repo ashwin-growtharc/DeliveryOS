@@ -1,50 +1,20 @@
-import * as fs from 'fs';
-import * as path from 'path';
-import { stringify as stringifyYaml } from 'yaml';
-import { cachePath, withRemoteCacheLock } from '../remote/remoteCache';
-import {
-  fetchAndReset,
-  createBranch,
-  commitPaths,
-  pushBranch,
-  getCommitIdentity,
-} from '../git/git';
-import {
-  fetchRepoInfo,
-  openPullRequest,
-  createOctokit,
-  GithubClient,
-} from '../github/github';
-import { getGithubToken } from '../github/githubAuth';
+import { GithubClient } from '../github/github';
 import { AdoptionPlan } from './planAdoption';
-import { leaveCacheOnTip } from './leaveCacheOnTip';
 import { ProgressCallback } from '../pull/pull';
-import { buildBranchName } from '../push/branchName';
-import { requireContributableRemote } from '../remote/requireContributableRemote';
+import { withAdoptionStaging, commitAdoption } from './adoptionStaging';
 
 /**
- * Commits an adoption plan as ONE change.
+ * Commits an adoption plan over a client's OWN git repository as one change.
  *
- * WHY THIS IS NOT `pushArtifact` IN A LOOP
+ * This is the manifests-only shape: the files are already in the repository,
+ * so the pull request adds N small YAML files and not one byte of content.
+ * That is the difference between a change somebody can read and one they
+ * rubber-stamp, and it is the entire point of `payload_path`.
  *
- * `pushArtifact` is id-scoped end to end -- the lockfile check, the branch
- * name, the collision check and the pull-request body all take a single
- * artifact -- and it carries three modes' worth of hard-won guards, including
- * the ones whose comments record a bug that opened a pull request DELETING an
- * artifact's entire payload. Threading a list through every branch of it would
- * put all of that at risk to save writing this.
- *
- * Its tail, though, is already generic: `createBranch`, `commitPaths` (which
- * takes a list already), `pushBranch`, `openPullRequest`. Those are reused
- * verbatim; the loop above them is the only new part.
- *
- * THE PROPERTY THAT MAKES A 200-ARTIFACT PULL REQUEST REVIEWABLE
- *
- * `filesToCommit` contains ONLY manifests. `push --new` copies a payload into
- * the catalog because the artifact is new to it; adoption does not, because the
- * files are already there -- that is the entire point of `payload_path`. So the
- * diff is N small YAML files and not one byte of content, which is the
- * difference between a change somebody can read and one they rubber-stamp.
+ * For a synced folder that is not a repository, see `mirrorAndAdopt`, which
+ * copies the tree in first and then does exactly this. Both run through
+ * `adoptionStaging`, so the lock, the reset, the commit and the cleanup are
+ * written once.
  */
 
 export interface AdoptionResult {
@@ -52,11 +22,6 @@ export interface AdoptionResult {
   prUrl: string;
   prNumber: number;
   adopted: number;
-}
-
-
-function manifestPathFor(cacheDir: string, id: string): string {
-  return path.join(cacheDir, 'artifacts', id, 'manifest.yaml');
 }
 
 /** The pull-request body: one table, not N sections. A reviewer needs to see
@@ -67,7 +32,7 @@ function buildAdoptionPr(plan: AdoptionPlan): { title: string; body: string } {
     .map(
       (c) =>
         `| \`${c.id}\` | ${c.manifest.kind} | \`${c.sourcePath}\` | \`${c.manifest.install_target}\` |`
-        + `${c.descriptionGuessed ? ' guessed |' : ' from the file |'}`,
+        + `${c.descriptionGuessed ? ' derived |' : ' from the file |'}`,
     )
     .join('\n');
 
@@ -114,63 +79,13 @@ export async function adoptArtifacts(
   onProgress?: ProgressCallback,
   injectedClient?: GithubClient,
 ): Promise<AdoptionResult> {
-  // Never checked the capability before -- a folder library would have failed
-  // later, at parseGithubUrl, blaming the URL. Same check as every other
-  // contributing path now.
-  const { owner, repo } = requireContributableRemote(remoteName);
-  // `createOctokit` is async: Octokit is ESM-only and reached via a dynamic
-  // import from a CommonJS build, which is why the whole repo has a Node 22.12
-  // engines floor.
-  const client = injectedClient ?? (await createOctokit(getGithubToken()));
-  const cacheDir = cachePath(remoteName);
-  const branch = buildBranchName('adopt');
-
-  return withRemoteCacheLock(remoteName, async () => {
-    onProgress?.('fetch', `Refreshing "${remoteName}"...`);
-    await fetchAndReset(cacheDir);
-
-    const { defaultBranch } = await fetchRepoInfo(client, owner, repo);
-    const identity = await getCommitIdentity(cacheDir);
-
-    try {
-    // Written only after the fetch, so nothing is staged against a stale tree.
-    const written: string[] = [];
-    for (const candidate of plan.candidates) {
-      const target = manifestPathFor(cacheDir, candidate.id);
-      fs.mkdirSync(path.dirname(target), { recursive: true });
-      fs.writeFileSync(target, stringifyYaml(candidate.manifest), 'utf-8');
-      written.push(path.relative(cacheDir, target).split(path.sep).join('/'));
-    }
-
-    const { title, body } = buildAdoptionPr(plan);
-
-    onProgress?.('branch', `Creating branch "${branch}"...`);
-    await createBranch(cacheDir, branch);
-    onProgress?.('commit', `Committing ${written.length} manifest(s)...`);
-    await commitPaths(cacheDir, written, title, identity);
-    onProgress?.('push', `Pushing branch "${branch}"...`);
-    await pushBranch(cacheDir, branch);
-
-    onProgress?.('pr-open', 'Opening pull request...');
-    const opened = await openPullRequest(client, {
-      owner,
-      repo,
-      head: branch,
-      base: defaultBranch,
-      title,
-      body,
-    });
-
+  return withAdoptionStaging(remoteName, onProgress, injectedClient, async (ctx) => {
+    const committed = await commitAdoption({ ctx, plan, pr: buildAdoptionPr(plan), onProgress });
     return {
-      branch,
-      prUrl: opened.url,
-      prNumber: opened.number,
+      branch: committed.branch,
+      prUrl: committed.prUrl,
+      prNumber: committed.prNumber,
       adopted: plan.candidates.length,
     };
-    } finally {
-      // Now actually finally-shaped, which the comment here used to only
-      // aspire to. See leaveCacheOnTip.
-      await leaveCacheOnTip(cacheDir, remoteName, onProgress);
-    }
   });
 }

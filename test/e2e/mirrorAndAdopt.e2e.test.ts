@@ -8,7 +8,7 @@ import { cloneRemote, refreshRemoteCache, cachePath } from '../../src/engine/rem
 import { addRemote } from '../../src/engine/remote/manageRemotes';
 import { buildCatalog } from '../../src/engine/catalog/catalog';
 import { pullArtifact } from '../../src/engine/pull/pull';
-import { mirrorAndAdopt } from '../../src/engine/adopt/mirrorAndAdopt';
+import { mirrorAndAdopt, planMirrorAndAdopt } from '../../src/engine/adopt/mirrorAndAdopt';
 import { mirrorFolder } from '../../src/engine/adopt/mirrorFolder';
 import { AdoptionProfileSchema } from '../../src/engine/adopt/profile';
 import { GithubClient } from '../../src/engine/github/github';
@@ -202,6 +202,48 @@ describe('a synced SharePoint folder, end to end', () => {
     // is refused by capability rather than failing later on the URL's shape.
     await expect(mirrorAndAdopt(synced, profile, 'not-a-catalog', undefined, fakeGithub()))
       .rejects.toThrow(/cannot receive a mirror/);
+  });
+});
+
+describe('the preview is the run, minus the commit', () => {
+  it('plans exactly the ids the real run then commits', async () => {
+    const synced = syncedSharepointFolder();
+    const catalogRepo = await emptyCatalogRepo();
+    await addRemoteEntry({ name: 'contoso', url: FAKE_GITHUB_URL, addedAt: new Date().toISOString() });
+    await cloneRemote('contoso', catalogRepo);
+    const client = fakeGithub();
+
+    // No GitHub client and no token: a dry run must stay something a person can
+    // do before setting anything up.
+    const preview = await planMirrorAndAdopt(synced, profile, 'contoso');
+    const run = await mirrorAndAdopt(synced, profile, 'contoso', undefined, client);
+
+    const previewed = preview.plan.candidates.map((c) => c.id).sort();
+    const body: string = (client.rest.pulls.create as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0].body;
+    const committed = [...body.matchAll(/^\| `([a-z0-9-]+)` \|/gm)].map((m) => m[1]).sort();
+
+    // The dry run used to mirror into an empty temp directory while the run
+    // mirrored onto the cache. Same code path now, so this cannot drift.
+    expect(committed).toEqual(previewed);
+    expect(run.adopted).toBe(previewed.length);
+  });
+
+  it('leaves the cache exactly as it found it', async () => {
+    const synced = syncedSharepointFolder();
+    const catalogRepo = await emptyCatalogRepo();
+    await addRemoteEntry({ name: 'contoso', url: FAKE_GITHUB_URL, addedAt: new Date().toISOString() });
+    await cloneRemote('contoso', catalogRepo);
+
+    await planMirrorAndAdopt(synced, profile, 'contoso');
+
+    // The preview now uses the cache as its workbench. Nothing of the mirror
+    // may survive it: not the copied tree, not a manifest, not a branch.
+    const cache = cachePath('contoso');
+    const git = simpleGit(cache);
+    expect((await git.branchLocal()).current).toBe('main');
+    expect((await git.status()).isClean()).toBe(true);
+    expect(fs.existsSync(path.join(cache, 'artifacts'))).toBe(false);
+    expect(fs.existsSync(path.join(cache, 'playbooks'))).toBe(false);
   });
 });
 

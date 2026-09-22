@@ -1,29 +1,11 @@
-import * as fs from 'fs';
 import * as path from 'path';
-import { stringify as stringifyYaml } from 'yaml';
-import { cachePath, withRemoteCacheLock } from '../remote/remoteCache';
-import {
-  fetchAndReset,
-  createBranch,
-  commitPaths,
-  pushBranch,
-  getCommitIdentity,
-} from '../git/git';
-import {
-  fetchRepoInfo,
-  openPullRequest,
-  createOctokit,
-  GithubClient,
-} from '../github/github';
-import { getGithubToken } from '../github/githubAuth';
+import { GithubClient } from '../github/github';
 import { ProgressCallback } from '../pull/pull';
 import { buildCatalog } from '../catalog/catalog';
 import { AdoptionProfile } from './profile';
 import { planAdoption, AdoptionPlan } from './planAdoption';
-import { mirrorFolder } from './mirrorFolder';
-import { leaveCacheOnTip } from './leaveCacheOnTip';
-import { buildBranchName } from '../push/branchName';
-import { requireContributableRemote } from '../remote/requireContributableRemote';
+import { mirrorFolder, MirrorResult } from './mirrorFolder';
+import { withAdoptionStaging, commitAdoption, StagingContext } from './adoptionStaging';
 
 /**
  * Takes a client's folder -- typically a synced SharePoint, OneDrive or Drive
@@ -51,7 +33,20 @@ import { requireContributableRemote } from '../remote/requireContributableRemote
  * already there, and the diff really is only manifests -- and mirroring from
  * storage that cannot host a catalog. Worth knowing before opening it: this
  * diff is as large as the client's folder.
+ *
+ * ONE PLAN PATH FOR THE PREVIEW AND THE RUN
+ *
+ * `planMirrorAndAdopt` and `mirrorAndAdopt` share `planInStaging`, so a dry
+ * run cannot describe a plan the real run would not commit. The dry run used
+ * to mirror into an empty temp directory while the run mirrored onto the
+ * cache; the two trees differed, and so could the plans.
  */
+
+export interface MirrorAndAdoptPlan {
+  sourceLabel: string;
+  mirror: MirrorResult;
+  plan: AdoptionPlan;
+}
 
 export interface MirrorAndAdoptResult {
   branch: string;
@@ -64,6 +59,52 @@ export interface MirrorAndAdoptResult {
    * artifacts, which is a normal outcome worth reporting rather than hiding. */
   notAdopted: number;
   unreadable: string[];
+}
+
+/**
+ * Mirrors the source into the staged cache and plans against the MIRRORED
+ * tree, not the source. Reading the copy is what guarantees the plan describes
+ * what will actually be committed rather than what was on the client's disk a
+ * moment ago -- and the copy is what drops the sync client's debris.
+ */
+function planInStaging(
+  ctx: StagingContext,
+  sourceFolder: string,
+  profile: AdoptionProfile,
+  onProgress?: ProgressCallback,
+): MirrorAndAdoptPlan {
+  const sourceLabel = path.basename(path.resolve(sourceFolder));
+
+  onProgress?.('mirror', `Copying "${sourceLabel}"...`);
+  const mirror = mirrorFolder(sourceFolder, ctx.cacheDir);
+
+  onProgress?.('plan', 'Working out what can become an artifact...');
+  const existing = buildCatalog()
+    .filter((e) => e.remoteName === ctx.remoteName)
+    .map((e) => e.manifest.id);
+  const plan = planAdoption(ctx.cacheDir, profile, existing, ctx.remoteEntry.url, { files: mirror.written });
+
+  return { sourceLabel, mirror, plan };
+}
+
+/**
+ * What `mirrorAndAdopt` would commit, without committing it.
+ *
+ * Runs inside the same staging as the real thing -- the cache is mirrored into
+ * and then put back on the remote's tip by the staging's `finally` -- so the
+ * preview is computed by the code that would do the work, on the tree it would
+ * do it to. Needs no GitHub token: the staging only reaches GitHub when a
+ * caller asks to commit.
+ */
+export async function planMirrorAndAdopt(
+  sourceFolder: string,
+  profile: AdoptionProfile,
+  remoteName: string,
+  onProgress?: ProgressCallback,
+): Promise<MirrorAndAdoptPlan> {
+  return withAdoptionStaging(remoteName, onProgress, undefined, async (ctx) =>
+    planInStaging(ctx, sourceFolder, profile, onProgress),
+  );
 }
 
 function buildPr(
@@ -125,7 +166,6 @@ function buildPr(
   return { title: `Adopt ${plan.candidates.length} artifact(s) from ${sourceLabel}`, body };
 }
 
-
 export async function mirrorAndAdopt(
   sourceFolder: string,
   profile: AdoptionProfile,
@@ -133,77 +173,25 @@ export async function mirrorAndAdopt(
   onProgress?: ProgressCallback,
   injectedClient?: GithubClient,
 ): Promise<MirrorAndAdoptResult> {
-  const { entry: remoteEntry, owner, repo } = requireContributableRemote(remoteName);
-  const client = injectedClient ?? (await createOctokit(getGithubToken()));
-  const cacheDir = cachePath(remoteName);
-  // Same shape as a push branch, random suffix included -- two adoptions in
-  // the same second used to collide on createBranch.
-  const branch = buildBranchName('adopt');
-  const sourceLabel = path.basename(path.resolve(sourceFolder));
+  return withAdoptionStaging(remoteName, onProgress, injectedClient, async (ctx) => {
+    const { sourceLabel, mirror, plan } = planInStaging(ctx, sourceFolder, profile, onProgress);
 
-  return withRemoteCacheLock(remoteName, async () => {
-    onProgress?.('fetch', `Refreshing "${remoteName}"...`);
-    await fetchAndReset(cacheDir);
-
-    const { defaultBranch } = await fetchRepoInfo(client, owner, repo);
-    const identity = await getCommitIdentity(cacheDir);
-
-    try {
-    onProgress?.('mirror', `Copying "${sourceLabel}"...`);
-    const mirror = mirrorFolder(sourceFolder, cacheDir);
-
-    // Planned against the MIRRORED tree, not the source. The two should be
-    // identical, and reading the copy is what guarantees the plan describes
-    // what will actually be committed rather than what was on the client's disk
-    // a moment ago.
-    onProgress?.('plan', 'Working out what can become an artifact...');
-    const existing = buildCatalog()
-      .filter((e) => e.remoteName === remoteName)
-      .map((e) => e.manifest.id);
-    const plan = planAdoption(cacheDir, profile, existing, remoteEntry.url, { files: mirror.written });
-
-    const manifests: string[] = [];
-    for (const candidate of plan.candidates) {
-      const target = path.join(cacheDir, 'artifacts', candidate.id, 'manifest.yaml');
-      fs.mkdirSync(path.dirname(target), { recursive: true });
-      fs.writeFileSync(target, stringifyYaml(candidate.manifest), 'utf-8');
-      manifests.push(path.relative(cacheDir, target).split(path.sep).join('/'));
-    }
-
-    const { title, body } = buildPr(sourceLabel, plan, mirror.written.length, mirror.unreadable);
-
-    onProgress?.('branch', `Creating branch "${branch}"...`);
-    await createBranch(cacheDir, branch);
-    onProgress?.('commit', `Committing ${mirror.written.length} file(s) and ${manifests.length} manifest(s)...`);
-    await commitPaths(cacheDir, [...mirror.written, ...manifests], title, identity);
-    onProgress?.('push', `Pushing branch "${branch}"...`);
-    await pushBranch(cacheDir, branch);
-
-    onProgress?.('pr-open', 'Opening pull request...');
-    const opened = await openPullRequest(client, {
-      owner,
-      repo,
-      head: branch,
-      base: defaultBranch,
-      title,
-      body,
+    const committed = await commitAdoption({
+      ctx,
+      plan,
+      pr: buildPr(sourceLabel, plan, mirror.written.length, mirror.unreadable),
+      extraPaths: mirror.written,
+      onProgress,
     });
 
     return {
-      branch,
-      prUrl: opened.url,
-      prNumber: opened.number,
+      branch: committed.branch,
+      prUrl: committed.prUrl,
+      prNumber: committed.prNumber,
       mirrored: mirror.written.length,
       adopted: plan.candidates.length,
       notAdopted: plan.skipped.length,
       unreadable: mirror.unreadable,
     };
-    } finally {
-      // Whatever happened above -- the PR opened, the push failed, the plan
-      // refused -- every later read of this cache must see the remote's real
-      // tip, not a half-built mirror. See leaveCacheOnTip for why this is a
-      // finally and why it cleans as well as resets.
-      await leaveCacheOnTip(cacheDir, remoteName, onProgress);
-    }
   });
 }

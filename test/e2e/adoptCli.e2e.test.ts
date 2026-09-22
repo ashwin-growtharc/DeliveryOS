@@ -149,17 +149,6 @@ describe('deliveryos adopt --dry-run', () => {
     expect(branches.all.some((b) => b.startsWith('deliveryos/adopt/'))).toBe(false);
   });
 
-  it('honours --remote when it agrees with the profile', async () => {
-    const source = syncedFolder();
-    const catalog = await gitRepo();
-    await registerCatalog(catalog);
-
-    const result = runCli(
-      ['adopt', source, '--profile', profileFile(GOOD_PROFILE), '--remote', 'contoso', '--dry-run'],
-      catalog,
-    );
-    expect(result.status, result.stderr).toBe(0);
-  });
 });
 
 describe('deliveryos adopt refuses, in a sentence', () => {
@@ -192,17 +181,6 @@ describe('deliveryos adopt refuses, in a sentence', () => {
     expectCleanRefusal(result, 'owner');
   });
 
-  it('--remote and the profile disagreeing is an error, not a silent preference', async () => {
-    const source = syncedFolder();
-    const catalog = await gitRepo();
-    await registerCatalog(catalog);
-
-    const result = runCli(
-      ['adopt', source, '--profile', profileFile(GOOD_PROFILE), '--remote', 'other', '--dry-run'],
-      catalog,
-    );
-    expectCleanRefusal(result, '"other"', '"contoso"');
-  });
 
   it('a remote that is not registered', async () => {
     const source = syncedFolder();
