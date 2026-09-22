@@ -196,3 +196,10 @@ export class SourcesFileInvalidError extends DeliveryOsError {}
  * a raw `SyntaxError` stack trace, rather than being reported as what it
  * actually is: a signature that cannot be verified. */
 export class SignatureBundleInvalidError extends DeliveryOsError {}
+
+/** An adoption could not be planned or mirrored: a folder that is not there, a
+ * profile that does not validate, an id that would collide, a source tree that
+ * would blend into the catalog's own bookkeeping. Every one is a person's
+ * mistake with a real fix, which is why it is a DeliveryOsError -- `index.ts`
+ * prints those as one line, and prints anything else as a stack trace. */
+export class AdoptionPlanError extends DeliveryOsError {}

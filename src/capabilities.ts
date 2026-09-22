@@ -366,6 +366,29 @@ export const CAPABILITIES: Capability[] = [
   },
   {
     ...read,
+    name: 'adopt.plan',
+    summary: 'Show what adopting a folder into a catalog would propose, writing nothing',
+    cli: 'adopt <folder>',
+    needsProjectDir: false,
+    remoteRequired: true,
+  },
+  {
+    ...read,
+    name: 'adopt.run',
+    summary: 'Mirror a folder into a git catalog and propose its files as artifacts, in one pull request',
+    cli: 'adopt <folder>',
+    // Writes the mirrored tree and a manifest layer into the remote's cache
+    // clone, pushes a branch and opens a PR. CLI only: an agent-callable tool
+    // that opens a pull request containing a client's whole folder is a larger
+    // authorisation surface than v1 needs. See src/cli/commands/adopt.ts.
+    mutates: true,
+    network: true,
+    emitsProgress: true,
+    needsProjectDir: false,
+    remoteRequired: true,
+  },
+  {
+    ...read,
     name: 'scan.run',
     summary: 'Find reusable content already in this project and propose it as artifacts',
     cli: 'scan',

@@ -7,6 +7,9 @@ import {
   RemoteEntry,
 } from './remoteRegistry';
 import { cloneRemote, cachePath } from './remoteCache';
+import { classifyRemoteUrl } from './classifyRemoteUrl';
+import { detectBackendKind } from './backends';
+import { RemoteBackendKind } from './backends/types';
 import { RemoteRegistryError } from '../errors';
 
 /**
@@ -29,6 +32,10 @@ export interface AddedRemote {
   url: string;
   /** Where the clone landed, so a caller can tell the user. */
   dest: string;
+  /** Which backend was chosen. Reported so the CLI can say "(folder)" rather
+   * than leaving someone to discover at push time that this is not a git
+   * remote. */
+  backend: RemoteBackendKind;
 }
 
 /**
@@ -39,6 +46,20 @@ export interface AddedRemote {
  * checked first, so nothing is cloned before the refusal.
  */
 export async function addRemote(url: string, name?: string): Promise<AddedRemote> {
+  // Before anything else, and before a name is even derived: refuse URLs that
+  // cannot be git remotes, with a sentence that says what to do instead.
+  //
+  // Previously the first thing to inspect a URL was `git clone`, so pasting a
+  // SharePoint link produced git's own stderr -- accurate, and no help at all.
+  // Deriving the name first was also actively harmful for those URLs: a
+  // SharePoint browser link derives a "name" like
+  // `AllItems.aspx?id=%2Fsites%2FHR`, which passes the path-segment guard and
+  // then fails much deeper in git or the filesystem.
+  const verdict = classifyRemoteUrl(url);
+  if (!verdict.supported) {
+    throw new RemoteRegistryError(verdict.reason);
+  }
+
   const resolvedName = name ?? deriveNameFromUrl(url);
 
   // Fail fast, before cloning. A duplicate name discovered after the clone
@@ -47,10 +68,24 @@ export async function addRemote(url: string, name?: string): Promise<AddedRemote
     throw new RemoteRegistryError(`A remote named "${resolvedName}" is already registered`);
   }
 
-  const dest = await cloneRemote(resolvedName, url);
-  await addRemoteEntry({ name: resolvedName, url, addedAt: new Date().toISOString() });
+  // Decided once, here, and recorded -- rather than re-derived on every read.
+  // A remote must be read back with the backend it was added with: re-detecting
+  // would silently change behaviour if a folder later gained a `.git`, or if a
+  // sync client was uninstalled and the folder disappeared.
+  const backend = detectBackendKind(url);
 
-  return { name: resolvedName, url, dest };
+  const dest = await cloneRemote(resolvedName, url, backend);
+  await addRemoteEntry({
+    name: resolvedName,
+    url,
+    addedAt: new Date().toISOString(),
+    // Omitted for git so that a registry written by this build stays readable,
+    // and diffable, against every one written before it. Absent already means
+    // git everywhere that reads this.
+    ...(backend === 'git' ? {} : { backend }),
+  });
+
+  return { name: resolvedName, url, dest, backend };
 }
 
 export interface RemovedRemote {

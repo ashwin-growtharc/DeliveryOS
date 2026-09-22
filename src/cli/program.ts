@@ -9,6 +9,7 @@ import { registerCheckUpdatesCommand } from './commands/checkUpdates';
 import { registerCheckPendingPushesCommand } from './commands/checkPendingPushes';
 import { registerCheckDriftCommand } from './commands/checkDrift';
 import { registerScanCommand } from './commands/scan';
+import { registerAdoptCommand } from './commands/adopt';
 import { registerWiringCommand } from './commands/wiring';
 import { registerWireCommand } from './commands/wire';
 import { registerScaffoldBackendPluginCommand } from './commands/scaffoldBackendPlugin';
@@ -39,6 +40,7 @@ export function buildProgram(): Command {
   registerCheckPendingPushesCommand(program);
   registerCheckDriftCommand(program);
   registerScanCommand(program);
+  registerAdoptCommand(program);
   registerWiringCommand(program);
   registerWireCommand(program);
   registerScaffoldBackendPluginCommand(program);

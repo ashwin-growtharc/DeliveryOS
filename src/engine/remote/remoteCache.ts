@@ -2,7 +2,9 @@ import * as fs from 'fs';
 import * as path from 'path';
 import properLockfile from 'proper-lockfile';
 import { remoteCachePath, remotesCacheRoot } from '../paths';
-import { cloneTo, fetchAndReset } from '../git/git';
+import { backendFor } from './backends';
+import { RemoteBackendKind } from './backends/types';
+import { findRemote } from './remoteRegistry';
 
 /** Filesystem path of the local clone cache for a named remote. */
 export function cachePath(name: string): string {
@@ -13,35 +15,31 @@ export function cachePath(name: string): string {
  * When this remote's cache was last brought up to date, or `undefined` when
  * that cannot be determined.
  *
- * Deliberately derived from the clone rather than recorded in the registry.
- * `RemoteEntry` holds only `name`, `url` and `addedAt`, and adding a
- * `lastFetched` field would mean a schema migration for information git already
- * keeps: `git fetch` rewrites `.git/FETCH_HEAD` every time, so its mtime IS the
- * last-fetch time. A fresh `clone` does not always write that file, so the
- * clone's own `.git` directory is the fallback -- for a never-refreshed remote
- * "when it was cloned" is the right answer anyway.
- *
- * `undefined` is a real third outcome, not a stand-in for "old": a caller that
- * cannot tell how stale a catalog is must say so rather than assert freshness.
+ * The mechanism now belongs to the backend, because the two answer it
+ * differently: git reads `.git/FETCH_HEAD`'s mtime, which it maintains for
+ * free, while a copied folder has to record the time itself. What is shared is
+ * the contract, and the important half of it is the third outcome --
+ * `undefined` is real, not a stand-in for "old". A caller that cannot tell how
+ * stale a catalog is must say so rather than assert freshness.
  */
 export function lastFetchedAt(name: string): Date | undefined {
-  const gitDir = path.join(cachePath(name), '.git');
-  for (const candidate of [path.join(gitDir, 'FETCH_HEAD'), gitDir]) {
-    try {
-      return fs.statSync(candidate).mtime;
-    } catch {
-      // Try the next candidate. A missing FETCH_HEAD is normal on a fresh
-      // clone; a missing .git means there is no usable cache at all, which the
-      // final `undefined` reports honestly.
-    }
-  }
-  return undefined;
+  return backendFor(findRemote(name)?.backend).lastChangedAt(cachePath(name));
 }
 
-/** Clones `url` into the cache directory for `name`. */
-export async function cloneRemote(name: string, url: string): Promise<string> {
+/**
+ * Populates the cache directory for `name` from `url`, using `backend`.
+ *
+ * The backend is passed in rather than looked up: at this point the registry
+ * entry does not exist yet, because `addRemote` deliberately clones before it
+ * records anything -- a failed clone must not leave a registered remote behind.
+ */
+export async function cloneRemote(
+  name: string,
+  url: string,
+  backendKind?: RemoteBackendKind,
+): Promise<string> {
   const dest = cachePath(name);
-  await cloneTo(url, dest);
+  await backendFor(backendKind).materialize(url, dest);
   return dest;
 }
 
@@ -108,5 +106,6 @@ export async function withRemoteCacheLock<T>(name: string, fn: () => Promise<T>)
  * staged edit.
  */
 export async function refreshRemoteCache(name: string): Promise<void> {
-  await withRemoteCacheLock(name, () => fetchAndReset(cachePath(name)));
+  const backend = backendFor(findRemote(name)?.backend);
+  await withRemoteCacheLock(name, () => backend.refresh(cachePath(name)));
 }

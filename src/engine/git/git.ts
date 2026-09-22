@@ -18,7 +18,23 @@ import { GitOperationError } from '../errors';
  * committed, regardless of the host machine's own git config.
  */
 export async function cloneTo(url: string, dest: string): Promise<void> {
-  const git = simpleGit();
+  // `GIT_TERMINAL_PROMPT=0` turns a credential prompt into an error.
+  //
+  // Without it, cloning a URL the machine has no access to -- a private repo,
+  // or anything that merely LOOKS like a git URL, which is what a pasted
+  // SharePoint link is -- leaves git blocked waiting for a username. On the
+  // CLI that is a confusing prompt for a repository the user may not even
+  // recognize. In the desktop sidecar there is no terminal at all, so it is a
+  // silent hang with no error and nothing to cancel.
+  //
+  // Failing is strictly better than waiting: `addRemote` already deletes the
+  // partial clone and rethrows as `GitOperationError`, so the user gets git's
+  // own "Authentication failed" instead of a frozen window.
+  // Set as a single override, NOT as `.env({ ...process.env, ... })`. The
+  // object form replaces the whole environment, and spreading `process.env`
+  // into it makes simple-git refuse outright -- it rejects forwarding `EDITOR`
+  // unless `allowUnsafeEditor` is set, which broke 93 tests when tried.
+  const git = simpleGit().env('GIT_TERMINAL_PROMPT', '0');
   try {
     await git.clone(url, dest, ['--config', 'core.autocrlf=false']);
   } catch (err) {
@@ -112,6 +128,24 @@ export async function fetchAndReset(repoDir: string): Promise<void> {
     const defaultBranch = await getRemoteDefaultBranch(git);
     await git.checkout(['-B', defaultBranch, `origin/${defaultBranch}`]);
     await git.reset(['--hard', `origin/${defaultBranch}`]);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new GitOperationError(message);
+  }
+}
+
+/**
+ * Removes untracked files and directories. Not `-x`: ignored files are left
+ * alone, since nothing here writes them and a cache clone has none worth
+ * destroying by accident.
+ *
+ * Exists because `fetchAndReset` restores what git tracks and nothing else,
+ * and an adoption stages a whole client tree as untracked files before it
+ * commits. See `leaveCacheOnTip`.
+ */
+export async function cleanUntracked(repoDir: string): Promise<void> {
+  try {
+    await simpleGit(repoDir).clean('fd');
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     throw new GitOperationError(message);

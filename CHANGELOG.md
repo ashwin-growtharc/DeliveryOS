@@ -74,6 +74,63 @@ top-level value import of a heavy package and names the line. A spawn runs
 a child and left the recorder watching an empty parent) and asserts none of
 the packages ended up in `require.cache`. Deterministic -- a timing assertion
 would also fail on a slow CI runner. Both layers failed before the fix.
+## `deliveryos adopt` -- adoption becomes something a person can run (branch `feat/mirror-and-adopt`)
+
+Until this, `mirrorAndAdopt` -- the function that turns a client's synced
+SharePoint folder into a catalog -- had **zero callers outside the test
+suite**. The whole client-shaped direction was proven end to end (synced folder
+→ one PR → `pull` lands the original byte for byte) and reachable by nobody.
+
+```
+deliveryos adopt "C:/Users/priya/Contoso Ltd/Delivery Playbooks" --profile contoso.yaml --dry-run
+deliveryos adopt "C:/Users/priya/Contoso Ltd/Delivery Playbooks" --profile contoso.yaml
+```
+
+The profile is the reviewable object: the remote, the owner, and one rule per
+folder saying what its files are and where they install. Decisions about
+`kind`, `install_target` and tags come from it, per folder, never guessed --
+the same rule the adoption engine has always had, now with a file format and a
+reader (`readAdoptionProfile`) whose errors read like the manifest parser's.
+
+### `--dry-run` goes through the same mirror as the real run
+
+It could plan against the source folder directly. It does not: it mirrors into
+a temporary directory and plans against that, exactly as the real run plans
+against the mirrored tree in the cache. The mirror is what drops the sync
+client's debris, so planning against the raw folder would show
+`~$escalation.md` as a candidate the real run would never produce -- a preview
+that lies about the thing it previews. Asserted in `adoptCli.e2e.test.ts`.
+
+### Refusals are sentences
+
+`AdoptionPlanError` extended `Error`, so every user mistake in this path -- a
+folder that is not there, a profile missing `owner`, an id collision -- printed
+a stack trace through `index.ts`. It now extends `DeliveryOsError` like the
+other twenty-six, and the CLI test asserts `^Error: ` with no `at ` lines for
+six distinct refusals. Same defect class as `remote add ""`, fixed the same way.
+
+### A failed adopt leaves the cache as it found it
+
+Both adoption paths reset the cache only on success. A failed `pushBranch` or
+`openPullRequest` left it parked on `deliveryos/adopt/<stamp>` with the unmerged
+mirror committed -- the defect `pushArtifact`'s own `finally` documents having
+had -- and a refusal from `planAdoption` left the mirrored client tree and
+half-written manifests as *untracked* files, which `reset --hard` ignores and
+`discoverManifests` reads anyway. One `leaveCacheOnTip` helper now runs in a
+`finally` in both, resetting and `git clean`ing. Two tests, both failing before.
+
+### Declared twice, on purpose
+
+`capabilities.ts` gains `adopt.plan` (read) and `adopt.run` (mutates, network,
+progress). One command backs two operations distinguished by a flag, exactly as
+`check-updates` / `check-updates --apply`, and the registry test's allow-list
+says so. **CLI only** -- not on MCP. An agent-callable tool that opens a pull
+request containing a client's whole folder is a larger authorisation surface
+than v1 needs.
+
+The real run is covered at the engine level with a fake GitHub client
+(`mirrorAndAdopt.e2e.test.ts`); the CLI cannot inject one, so the CLI test
+covers the dry run and every refusal -- the half a person sees first.
 
 ---
 

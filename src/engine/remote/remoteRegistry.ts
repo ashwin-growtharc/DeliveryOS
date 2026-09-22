@@ -3,11 +3,24 @@ import * as path from 'path';
 import * as properLockfile from 'proper-lockfile';
 import { remotesRegistryPath, deliveryOsHome } from '../paths';
 import { RemoteRegistryError } from '../errors';
+import { RemoteBackendKind } from './backends/types';
 
 export interface RemoteEntry {
   name: string;
   url: string;
   addedAt: string;
+
+  /**
+   * Which backend materialises this remote's cache. Absent means `git`.
+   *
+   * Optional on purpose, and that is what makes this change need no migration:
+   * every registry already on disk predates it, and every remote in one IS a
+   * git remote, because git was all DeliveryOS could do. An older build reading
+   * a newer registry is also safe by accident rather than design --
+   * `readRegistry` parses and `writeRegistry` re-serialises whole objects, so an
+   * unknown field survives a round trip rather than being stripped.
+   */
+  backend?: RemoteBackendKind;
 }
 
 export interface RemoteRegistry {

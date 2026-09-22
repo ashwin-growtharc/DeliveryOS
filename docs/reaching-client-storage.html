@@ -1,0 +1,558 @@
+<title>Reaching a Client's SharePoint</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --bg:#faf8f3; --card:#fffefb; --ink:#1b2229; --ink-dim:#5a656f; --line:#e2ded4;
+    --accent:#0d6a5c; --accent-soft:#e3efe9; --amber:#8a5a00; --amber-soft:#f8efda;
+    --code-bg:#0d1318; --code-fg:#dbe5ec; --code-dim:#6f7f8c; --red:#9c2f2f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:#10161b; --card:#182027; --ink:#e7eaed; --ink-dim:#97a3ad; --line:#29323b;
+      --accent:#5cc3ae; --accent-soft:#123029; --amber:#dba44a; --amber-soft:#2d2412;
+      --code-bg:#141b22; --code-fg:#dbe5ec; --code-dim:#7f8f9c; --red:#e08b84;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg:#10161b; --card:#182027; --ink:#e7eaed; --ink-dim:#97a3ad; --line:#29323b;
+    --accent:#5cc3ae; --accent-soft:#123029; --amber:#dba44a; --amber-soft:#2d2412;
+    --code-bg:#141b22; --code-fg:#dbe5ec; --code-dim:#7f8f9c; --red:#e08b84;
+  }
+  * { box-sizing:border-box; }
+  body {
+    background:var(--bg); color:var(--ink);
+    font-family:'IBM Plex Sans',system-ui,sans-serif;
+    font-size:16px; line-height:1.68; margin:0; padding:0 20px 80px;
+  }
+  .wrap { max-width:770px; margin:0 auto; }
+  header { padding:56px 0 14px; border-bottom:2px solid var(--ink); }
+  .eyebrow {
+    font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:.14em;
+    text-transform:uppercase; color:var(--accent); margin:0 0 12px;
+  }
+  h1 {
+    font-family:'IBM Plex Serif',Georgia,serif; font-size:40px; line-height:1.12;
+    font-weight:600; margin:0 0 14px; text-wrap:balance;
+  }
+  .standfirst { font-size:18px; color:var(--ink-dim); margin:0 0 20px; max-width:60ch; }
+  h2 {
+    font-family:'IBM Plex Serif',Georgia,serif; font-size:26px; font-weight:600;
+    margin:56px 0 8px; text-wrap:balance;
+  }
+  h3 { font-size:17px; font-weight:600; margin:30px 0 6px; }
+  p { margin:0 0 14px; max-width:66ch; }
+  ul, ol { max-width:66ch; padding-left:20px; }
+  li { margin-bottom:8px; }
+  code {
+    font-family:'IBM Plex Mono',ui-monospace,monospace; font-size:.87em;
+    background:var(--accent-soft); color:var(--accent); padding:1px 5px; border-radius:3px;
+  }
+  pre {
+    background:var(--code-bg); color:var(--code-fg);
+    font-family:'IBM Plex Mono',ui-monospace,monospace; font-size:13px; line-height:1.65;
+    padding:16px 18px; border-radius:7px; overflow-x:auto; margin:0 0 16px;
+  }
+  pre code { background:none; color:inherit; padding:0; font-size:inherit; }
+  pre .c { color:var(--code-dim); }
+  pre .g { color:#7fd3bd; }
+  pre .r { color:#e5928c; }
+  pre .y { color:#e0b877; }
+  .lede {
+    background:var(--card); border:1px solid var(--line); border-left:3px solid var(--accent);
+    padding:18px 22px; border-radius:0 7px 7px 0; margin:26px 0;
+  }
+  .lede p:last-child { margin-bottom:0; }
+  .note {
+    background:var(--amber-soft); border:1px solid var(--line); border-left:3px solid var(--amber);
+    padding:14px 18px; border-radius:0 7px 7px 0; margin:22px 0; font-size:15px;
+  }
+  .note p:last-child { margin-bottom:0; }
+  .note .tag {
+    font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:.1em;
+    text-transform:uppercase; color:var(--amber); display:block; margin-bottom:5px;
+  }
+  .route {
+    background:var(--card); border:1px solid var(--line); border-radius:8px;
+    padding:20px 24px; margin:22px 0;
+  }
+  .route.a { border-left:3px solid var(--accent); }
+  .route.b { border-left:3px solid var(--amber); }
+  .route .label {
+    font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:.12em;
+    text-transform:uppercase; color:var(--accent); display:block; margin-bottom:4px;
+  }
+  .route.b .label { color:var(--amber); }
+  .route h3 { margin-top:0; font-size:19px; font-family:'IBM Plex Serif',Georgia,serif; }
+  .route p:last-child { margin-bottom:0; }
+  .tablewrap { overflow-x:auto; margin:0 0 18px; }
+  table { border-collapse:collapse; width:100%; font-size:14.5px; }
+  th, td { text-align:left; padding:10px 12px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th {
+    font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:.09em;
+    text-transform:uppercase; color:var(--ink-dim); border-bottom:2px solid var(--line);
+  }
+  td.yes { color:var(--accent); font-weight:500; }
+  td.no { color:var(--red); font-weight:500; }
+  td.num { font-variant-numeric:tabular-nums; white-space:nowrap; }
+  table.cmp th:nth-child(2) { color:var(--accent); }
+  table.cmp th:nth-child(3) { color:var(--amber); }
+  table.cmp td:nth-child(2) { background:color-mix(in srgb, var(--accent-soft) 45%, transparent); }
+  table.cmp td:nth-child(3) { background:color-mix(in srgb, var(--amber-soft) 45%, transparent); }
+  ol.steps { list-style:none; padding:0; counter-reset:s; }
+  ol.steps > li {
+    counter-increment:s; position:relative; padding:0 0 16px 42px;
+    margin:0 0 0 13px; border-left:1px solid var(--line);
+  }
+  ol.steps > li:last-child { border-left-color:transparent; padding-bottom:0; }
+  ol.steps > li::before {
+    content:counter(s); position:absolute; left:-13px; top:0;
+    width:26px; height:26px; border-radius:50%;
+    background:var(--accent); color:var(--bg);
+    font-family:'IBM Plex Mono',monospace; font-size:12px; font-weight:500;
+    display:grid; place-items:center;
+  }
+  ol.steps b { display:block; margin-bottom:2px; }
+  ol.steps .who {
+    font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:.08em;
+    text-transform:uppercase; color:var(--ink-dim);
+  }
+  ol.steps .who.sys { color:var(--accent); }
+  ol.steps p { margin:0 0 8px; }
+  ol.steps .behind {
+    margin:10px 0 0; padding:10px 13px; border-radius:6px;
+    background:var(--code-bg); color:var(--code-dim);
+    font-family:'IBM Plex Mono',ui-monospace,monospace; font-size:12px; line-height:1.62;
+  }
+  ol.steps .behind b {
+    display:inline; margin:0; color:var(--code-fg); font-weight:500;
+  }
+  ol.steps .behind .tag {
+    display:block; margin-bottom:5px; color:var(--accent);
+    font-size:10px; letter-spacing:.13em; text-transform:uppercase;
+  }
+  ol.steps .behind.none .tag { color:var(--amber); }
+  footer {
+    margin-top:60px; padding-top:18px; border-top:1px solid var(--line);
+    font-size:13.5px; color:var(--ink-dim);
+  }
+</style>
+
+<div class="wrap">
+
+<header>
+  <p class="eyebrow">DeliveryOS &middot; Client storage</p>
+  <h1>Reaching a Client's SharePoint</h1>
+  <p class="standfirst">
+    A client's material is in SharePoint and they send you a link. There are two
+    ways DeliveryOS can get at it, and they differ by about a month of work.
+  </p>
+</header>
+
+<div class="lede">
+  <p>
+    <strong>The short version.</strong> The link cannot be <em>fetched</em> &mdash;
+    nothing reads its contents without somebody signed in. It can still be
+    <em>read</em>, and DeliveryOS now says exactly what a link points at and what
+    to do about it. Getting at the contents leaves two real routes:
+    <strong>let the sync app put the files on a disk</strong>, which works today
+    and needs no code at all, or <strong>ask Microsoft for them directly</strong>,
+    which needs a sign-in system we do not have.
+  </p>
+  <p>
+    The first one does <em>not</em> work everywhere, and the last section says
+    exactly where it stops.
+  </p>
+</div>
+
+<h2>Why the link alone never works</h2>
+
+<p>
+  A SharePoint link opens in a browser because the browser already knows who you
+  are. A program has no such session. Microsoft's own documentation is blunt
+  about it: their interface <em>"always requires authentication and can't be used
+  to access anonymously shared content without a user context."</em>
+</p>
+
+<p>
+  Tried against a real link, that is a flat refusal:
+</p>
+
+<pre><code><span class="c">fetching https://growtharc-my.sharepoint.com/:w:/p/...</span>
+<span class="r">HTTP 403 Forbidden</span></code></pre>
+
+<p>
+  So "just read the link" is not one of the options. Both routes below are about
+  getting past that, in very different ways.
+</p>
+
+<h2>What the link does tell you</h2>
+
+<p>
+  It cannot be fetched &mdash; but it is not opaque. Microsoft puts a type marker
+  in the first path segment, and the browser form carries the file's own name in
+  the query string. Both are ordinary text, so DeliveryOS can say what you are
+  holding without anybody signing in to anything.
+</p>
+
+<div class="tablewrap">
+<table>
+  <tr><th>Part of the link</th><th>What it says</th></tr>
+  <tr>
+    <td><code>:x:</code></td>
+    <td>An Excel workbook. <code>:w:</code> Word, <code>:p:</code> PowerPoint,
+        <code>:f:</code> a folder</td>
+  </tr>
+  <tr>
+    <td><code>&hellip;-my.sharepoint.com</code></td>
+    <td>Somebody's personal OneDrive, not a team site</td>
+  </tr>
+  <tr>
+    <td><code>/personal/rina_patel_contoso_com/</code></td>
+    <td>Whose it is</td>
+  </tr>
+  <tr>
+    <td><code>file=Build%20Time%20Line.xlsx</code></td>
+    <td>The file's name, in the clear</td>
+  </tr>
+</table>
+</div>
+
+<p>
+  Not every link is that generous. The short sharing form &mdash;
+  <code>/:w:/p/rina_patel/IQBJ&hellip;</code> &mdash; gives the type and the owner
+  and no name at all. So DeliveryOS reports the name it found, or none, and never
+  invents one.
+</p>
+
+<div class="note">
+  <span class="tag">The distinction that changes the advice</span>
+  <p>
+    <strong>A folder link can become a catalog. A document link cannot &mdash;
+    ever.</strong> A catalog is a folder of files, so a link to one spreadsheet
+    has nothing in it to read, and that stays true once the file is sitting on
+    the disk. The old message sent people off to sync a library, which does not
+    help, because the problem was never <em>where</em> the file was.
+  </p>
+</div>
+
+<pre><code><span class="g">&gt;</span> deliveryos remote add <span class="y">"https://&hellip;-my.sharepoint.com/:x:/r/personal/&hellip;"</span>
+
+<span class="r">That link points at a single file, "SLM Build time Line.xlsx" in</span>
+<span class="r">vaishak_bhuvan_growtharc_com's OneDrive, not at a library.</span>
+<span class="c">A catalog is a folder of files, so there is nothing here for
+DeliveryOS to read -- and that stays true once the file is on this
+machine. Open the link, choose "Add shortcut to My files", and let
+OneDrive finish syncing, then point DeliveryOS at the FOLDER that
+document sits in.</span></code></pre>
+
+<p>
+  One more branch worth knowing about: a team library gets told to hit
+  <em>"Sync"</em>, and a document in somebody else's OneDrive gets told
+  <em>"Add shortcut to My files"</em>, because the Sync button is not there.
+  Sending a person to look for a button that does not exist is its own kind of
+  failure.
+</p>
+
+<h2>Route A &mdash; let the sync app do it</h2>
+
+<div class="route a">
+  <span class="label">Works today &middot; no code</span>
+  <h3>The files land on a disk, and DeliveryOS reads the folder</h3>
+  <p>
+    SharePoint, OneDrive and Google Drive all have a sync app that makes their
+    content appear as an ordinary folder. DeliveryOS does not integrate with
+    three clouds &mdash; it reads a folder, and the same code covers all three.
+  </p>
+</div>
+
+<ol class="steps">
+  <li>
+    <b>Paste the link</b>
+    <span class="who">Person &middot; five seconds</span>
+    <p>Whatever the client sent, exactly as they sent it.</p>
+    <div class="behind">
+      <span class="tag">Behind</span>
+      The host is matched against a short list of things that cannot be git.
+      Then the link is read: the <b>type marker</b>, the <b>owner</b>, and the
+      <b>file name</b> if the link carries one. <b>No network call, no sign-in.</b>
+    </div>
+  </li>
+  <li>
+    <b>DeliveryOS says what the link is, and what to do about it</b>
+    <span class="who sys">DeliveryOS &middot; immediately</span>
+    <p>
+      Named file, named owner, and one instruction that fits this link rather
+      than all links.
+    </p>
+    <div class="behind">
+      <span class="tag">Behind</span>
+      The refusal is a <b>value, not an error</b> &mdash; so the wording is
+      unit-tested directly. It branches twice: <b>folder or document</b>, then
+      <b>personal OneDrive or team library</b>, which is what decides between
+      "Add shortcut to My files" and "Sync".
+    </div>
+  </li>
+  <li>
+    <b>Someone who already has access syncs the library</b>
+    <span class="who">Person &middot; once, in their browser</span>
+    <p>
+      It then appears in their file explorer like any other folder. This is the
+      only step that needs a human, and it needs one exactly once.
+    </p>
+    <div class="behind none">
+      <span class="tag">Behind &mdash; nothing, deliberately</span>
+      DeliveryOS is not involved. The sync app writes the tree to disk under
+      that person's own account, which is why <b>no keys and no IT approval</b>
+      are needed anywhere in this flow.
+    </div>
+  </li>
+  <li>
+    <b>Point DeliveryOS at the folder</b>
+    <span class="who">Person &middot; one command</span>
+    <p>An ordinary path. The same command a git URL would use.</p>
+    <div class="behind">
+      <span class="tag">Behind</span>
+      Which kind of remote this is gets decided by <b>asking the filesystem</b>,
+      not by pattern-matching the text. The remote is recorded as a
+      <b>folder library</b>, and that carries its own honest limits &mdash;
+      reading and installing work, <b>proposing a change does not</b>.
+    </div>
+  </li>
+  <li>
+    <b>Mirror and adopt</b>
+    <span class="who">Person &middot; once per client</span>
+    <p>A pile of documents becomes a library DeliveryOS can read.</p>
+    <div class="behind">
+      <span class="tag">Behind</span>
+      The tree is copied into a catalog we manage, dropping the sync app's
+      leavings (<b>desktop.ini</b>, <b>~$&hellip;</b>, <b>.DS_Store</b>) so they
+      never become somebody's artifacts. Each file gets an id and a description
+      read <b>from the file itself</b> &mdash; a Word, Excel or PowerPoint file is
+      opened up and asked for its declared properties, then its first line of
+      text. Nothing is invented; a file that cannot describe itself is reported,
+      not guessed at.
+    </div>
+  </li>
+  <li>
+    <b>Review one pull request</b>
+    <span class="who">Person &middot; once</span>
+    <p>
+      One change, listing every proposed artifact and flagging which descriptions
+      were derived rather than declared.
+    </p>
+    <div class="behind">
+      <span class="tag">Behind</span>
+      Every manifest is checked <b>before any of them is committed</b>, and one
+      failure aborts the whole batch. That is not caution for its own sake: a
+      single malformed manifest makes the <b>entire catalog</b> unreadable, so it
+      lands all at once or not at all.
+    </div>
+  </li>
+  <li>
+    <b>Anyone installs an artifact</b>
+    <span class="who">Person &middot; whenever</span>
+    <p>The client's own document, in their project, where the rule said it goes.</p>
+    <div class="behind">
+      <span class="tag">Behind</span>
+      The original is copied <b>byte for byte</b>, and a pristine copy is kept so
+      later edits can be told apart from the original. <b>Nothing was converted
+      at any point</b> &mdash; the .docx that lands is the .docx they wrote.
+    </div>
+  </li>
+</ol>
+
+<div class="note">
+  <span class="tag">Where the writing happens</span>
+  <p>
+    <strong>Nothing is ever written into the client's SharePoint.</strong> The
+    pull request in step 6 goes to a catalog we manage. Their library is read and
+    left alone &mdash; which is also why a folder remote cannot accept a proposed
+    change: there is nowhere for a proposal to sit while the original stays
+    untouched.
+  </p>
+</div>
+
+
+<pre><code><span class="g">&gt;</span> deliveryos remote add <span class="y">"C:/Users/priya/Contoso Ltd/Delivery Playbooks"</span> --name contoso
+
+<span class="g">Added remote "contoso"</span>
+<span class="c">This is a folder library: reading and installing work,
+contributing back does not.</span></code></pre>
+
+<p>
+  And step 5, first as a rehearsal. The profile is a short YAML file saying,
+  per folder, what the files are and where they should install &mdash; the two
+  things nothing can read off the files themselves.
+</p>
+
+<pre><code><span class="g">&gt;</span> deliveryos adopt <span class="y">"C:/Users/priya/Contoso Ltd/Delivery Playbooks"</span> --profile contoso.yaml --dry-run
+
+<span class="g">Would adopt 3 artifact(s) from "Delivery Playbooks" into "contoso-catalog", copying 3 file(s):</span>
+
+  playbook-escalation  rule  playbooks/escalation.md -> .claude/rules/playbooks/escalation.md
+  playbook-handover    rule  playbooks/handover.md   -> .claude/rules/playbooks/handover.md  <span class="c">(description derived)</span>
+  template-proposal    doc   templates/proposal.docx -> templates/proposal.docx
+
+<span class="y">1 description(s) would be derived from the file's first heading rather than
+declared -- worth reading before you open the pull request:</span>
+  - playbook-handover: "Handover checklist"
+
+<span class="c">Nothing was written. Drop --dry-run to open the pull request.</span></code></pre>
+
+<div class="note">
+  <span class="tag">The thing worth noticing</span>
+  <p>
+    <strong>This asks nothing of the client that the link did not already ask.</strong>
+    Somebody has to have access either way. This route just does not spend a
+    month of engineering re-acquiring access that person already has.
+  </p>
+</div>
+
+<h2>Route B &mdash; ask Microsoft directly</h2>
+
+<div class="route b">
+  <span class="label">Real work &middot; needs a sign-in</span>
+  <h3>DeliveryOS holds a sign-in and fetches the content itself</h3>
+  <p>
+    Microsoft has an interface built for exactly this: give it the link, get
+    back the folder and everything in it. The mechanics are genuinely simple.
+    The cost is everything around them.
+  </p>
+</div>
+
+<p>
+  You scramble the link into a safe form, and ask for it:
+</p>
+
+<pre><code><span class="c"># the link, encoded and prefixed with u!</span>
+<span class="g">GET</span> /shares/<span class="y">u!aHR0cHM6Ly9ncm93dGhhcmMtbXkuc2hhcmVwb2ludC5jb20v...</span>/driveItem?$expand=children
+
+<span class="c"># comes back with the folder AND its contents, in one call</span>
+{ <span class="y">"name"</span>: "Delivery Playbooks",
+  <span class="y">"folder"</span>: { <span class="y">"childCount"</span>: 12 },
+  <span class="y">"children"</span>: [ { <span class="y">"name"</span>: "Proposal Template.docx" }, ... ] }</code></pre>
+
+<p>
+  There is even a polite mode that peeks at a link without permanently claiming
+  access to it. So the reading part is easy.
+</p>
+
+<h3>What it actually costs</h3>
+
+<div class="tablewrap">
+<table>
+  <tr><th>What is needed</th><th>Why it is not small</th></tr>
+  <tr>
+    <td>A sign-in system</td>
+    <td>DeliveryOS holds no accounts or passwords today, deliberately. This adds all of it: signing in, storing the pass, renewing it, and handling it expiring at a bad moment</td>
+  </tr>
+  <tr>
+    <td>Registering with each client</td>
+    <td>Someone in their organisation has to approve our app before it can read anything</td>
+  </tr>
+  <tr>
+    <td class="no">A <em>write</em> permission, to do a read</td>
+    <td>The least-powerful permission Microsoft offers for this is one that includes changing files. An awkward thing to ask for, on a tool that only reads</td>
+  </tr>
+  <tr>
+    <td>Google separately</td>
+    <td>None of this transfers. Google is a second integration with its own approvals</td>
+  </tr>
+</table>
+</div>
+
+<h2>Side by side</h2>
+
+<div class="tablewrap">
+<table class="cmp">
+  <tr><th>&nbsp;</th><th>A &mdash; sync app</th><th>B &mdash; ask Microsoft</th></tr>
+  <tr><td>Works today</td><td class="yes">Yes</td><td class="no">No</td></tr>
+  <tr><td>Code to write</td><td class="yes">None</td><td>Weeks, plus a sign-in system</td></tr>
+  <tr><td>Client IT involvement</td><td class="yes">None</td><td>Approval, per client</td></tr>
+  <tr><td>Covers Google Drive too</td><td class="yes">Same code</td><td class="no">A second integration</td></tr>
+  <tr><td>Needs someone's machine</td><td class="no">Yes &mdash; see below</td><td class="yes">No</td></tr>
+  <tr><td>Works unattended (a server, overnight)</td><td class="no">No</td><td class="yes">Yes</td></tr>
+</table>
+</div>
+
+<h2>Will route A work everywhere? No &mdash; here is where it stops</h2>
+
+<p>
+  This is the honest limit, and it is worth knowing before promising anything.
+  The sync app is <strong>a person's computer</strong>, and everything follows
+  from that.
+</p>
+
+<div class="tablewrap">
+<table>
+  <tr><th>Situation</th><th>Does the sync route work?</th></tr>
+  <tr><td>Windows 10 (22H2) or Windows 11</td><td class="yes">Yes</td></tr>
+  <tr><td>macOS 14.4 or newer</td><td class="yes">Yes</td></tr>
+  <tr><td><strong>Linux</strong></td><td class="no">No &mdash; Microsoft lists no Linux version at all</td></tr>
+  <tr><td>Older macOS, or Windows 10 before 22H2</td><td class="no">No longer supported</td></tr>
+  <tr><td><strong>A server, a build machine, anything unattended</strong></td><td class="no">No. There is nobody to click "sync"</td></tr>
+  <tr><td>A locked-down laptop where IT blocks the sync app</td><td class="no">No</td></tr>
+  <tr><td>A very large library</td><td>Microsoft recommends staying under <strong>300,000 items</strong></td></tr>
+  <tr><td>Files not downloaded yet ("online only")</td><td>Partly &mdash; those files are skipped and reported, rather than breaking the run</td></tr>
+</table>
+</div>
+
+<div class="note">
+  <span class="tag">The one that matters most</span>
+  <p>
+    <strong>Route A cannot run unattended.</strong> It needs a person, on a
+    supported computer, who has already synced the library. That is completely
+    fine for a consultant adopting a client's material once &mdash; and it rules
+    out anything automatic, scheduled or server-side, forever.
+  </p>
+  <p>
+    If DeliveryOS ever needs to pick up a client's changes overnight with nobody
+    watching, that is the day route B stops being optional.
+  </p>
+</div>
+
+<h3>A small thing that validates the approach</h3>
+
+<p>
+  DeliveryOS filters out the debris a sync app leaves behind &mdash;
+  <code>desktop.ini</code>, and the <code>~$</code> files Word creates while a
+  document is open. It turns out Microsoft lists <em>those exact names</em> among
+  the filenames SharePoint refuses to store. So they are noise by Microsoft's own
+  definition, not just by ours.
+</p>
+
+<h2>What to do</h2>
+
+<ol>
+  <li>
+    <strong>Use route A.</strong> It works today, end to end, including Word,
+    Excel and PowerPoint templates. It asks nothing of a client's IT department,
+    which is a genuine advantage in a sales conversation rather than a
+    compromise.
+  </li>
+  <li>
+    <strong>Know the two triggers for route B</strong>, so nobody is surprised
+    by them: a client who will not let anyone sync their library, or a need to
+    pick up changes with no person involved.
+  </li>
+  <li>
+    <strong>Do not build route B on speculation.</strong> It is a sign-in system,
+    a per-client approval and a second integration for Google &mdash; and it buys
+    only "no sync app on the consultant's machine" until one of those triggers
+    actually happens.
+  </li>
+</ol>
+
+<footer>
+  <p>
+    <strong>Status:</strong> route A is built and working. Route B is not built.
+    The Microsoft limits quoted here &mdash; supported systems, the 300,000-item
+    guidance, the prohibited filenames and the authentication requirement &mdash;
+    were read from Microsoft's own documentation; the 403 was a real request
+    against a real link.
+  </p>
+</footer>
+
+</div>

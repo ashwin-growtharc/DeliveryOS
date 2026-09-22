@@ -116,6 +116,10 @@ const CLI_COMMANDS_BACKING_TWO_CAPABILITIES = new Set([
   // `check-updates` is a safe read; `check-updates --apply` is a destructive
   // write. One command, two operations, distinguished only by a flag.
   'check-updates [id]',
+  // `adopt --dry-run` plans and writes nothing; `adopt` mirrors, commits and
+  // opens a pull request. Same shape as check-updates: one command, two
+  // operations, distinguished only by a flag.
+  'adopt <folder>',
 ]);
 
 /** Not an operation: the composition root that boots the MCP server. */

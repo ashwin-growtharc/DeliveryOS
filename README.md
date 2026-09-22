@@ -91,6 +91,7 @@ It needs Rust and, on Windows, MSVC Build Tools — see
 | `push <id> --description <text>` | Metadata-only edit — no payload touched, no version bump |
 | `push <id> --new --path <dir> --kind <kind> --owner <owner> --description <text>` | Propose a brand-new artifact |
 | `scan -r <remote>` | Find reusable content already in your project and print a ready-to-run `push` for each |
+| `adopt <folder> --profile <yaml> [--dry-run]` | Mirror a synced SharePoint/OneDrive/Drive folder into a git catalog and propose its files as artifacts, in one PR. The profile says, per folder, what the files are and where they install. `--dry-run` shows the plan and writes nothing |
 
 `push --new` also accepts `--install-target`, `--artifact-version`,
 `--review-required`, `--post-install`, and `--roles`/`--teams`/`--stacks`/
@@ -345,6 +346,7 @@ changes by hand.
 | [docs/release-process.md](docs/release-process.md) | Runbook for cutting a signed release with working auto-update |
 | `docs/hosted-mcp-auth-decision.html`, `hosted-mcp-phase-0.html`, `arc-identity-for-deliveryos.html`, `licensing-deliveryos.html` | Why hosted MCP, sign-in and licensing are deferred, and what would revive each -- decision records, not plans |
 | [docs/manual-smoke-test-update-and-refusals.md](docs/manual-smoke-test-update-and-refusals.md) | By-hand runbook: the `src/`-project update path, the `install_target` denylist, and audit-log redaction |
+| [docs/reaching-client-storage.html](docs/reaching-client-storage.html) | A client's material is in SharePoint: what a link tells you, the sync-app route step by step with what happens behind each step, and where it stops |
 
 ---
 
