@@ -5,7 +5,8 @@ import { Command } from 'commander';
 import { readAdoptionProfile } from '../../engine/adopt/profile';
 import { planAdoption, AdoptionPlan } from '../../engine/adopt/planAdoption';
 import { mirrorFolder } from '../../engine/adopt/mirrorFolder';
-import { mirrorAndAdopt, resolveAdoptionTarget } from '../../engine/adopt/mirrorAndAdopt';
+import { mirrorAndAdopt } from '../../engine/adopt/mirrorAndAdopt';
+import { requireContributableRemote } from '../../engine/remote/requireContributableRemote';
 import { buildCatalog } from '../../engine/catalog/catalog';
 import { AdoptionPlanError } from '../../engine/errors';
 
@@ -106,7 +107,7 @@ export function registerAdoptCommand(program: Command): void {
         // Same target check as the real run, so a dry run against a folder
         // library refuses with the same sentence rather than previewing a PR
         // that could never open.
-        const target = resolveAdoptionTarget(remoteName);
+        const { entry: target } = requireContributableRemote(remoteName);
         const staging = fs.mkdtempSync(path.join(os.tmpdir(), 'deliveryos-adopt-dry-run-'));
         try {
           const mirror = mirrorFolder(sourceFolder, staging);

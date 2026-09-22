@@ -2,9 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { stringify as stringifyYaml } from 'yaml';
 import { readLockfile, upsertEntry } from '../lockfile/lockfile';
-import { findRemote } from '../remote/remoteRegistry';
 import { cachePath, withRemoteCacheLock } from '../remote/remoteCache';
-import { backendFor } from '../remote/backends';
 import { resolveArtifact, ProgressCallback } from '../pull/pull';
 import { buildCatalog } from '../catalog/catalog';
 import { ManifestSchema, Manifest, InstallParam } from '../manifest/schema';
@@ -35,21 +33,19 @@ import {
   getCommitIdentity,
 } from '../git/git';
 import {
-  parseGithubUrl,
   fetchRepoInfo,
   openPullRequest,
   createOctokit,
   GithubClient,
 } from '../github/github';
 import { getGithubToken } from '../github/githubAuth';
+import { requireContributableRemote } from '../remote/requireContributableRemote';
 import {
   PushModeConflictError,
   NoLocalChangesError,
   StalePushError,
   IdCollisionError,
-  RemoteRegistryError,
   ManifestValidationError,
-  UnsupportedRemoteError,
 } from '../errors';
 
 export interface MetadataEditOptions {
@@ -233,29 +229,10 @@ export async function pushArtifact(
     }
   }
 
-  const remoteEntry = findRemote(remoteName);
-  if (!remoteEntry) {
-    throw new RemoteRegistryError(`No remote named "${remoteName}" is registered`);
-  }
-
-  // Assert the capability before anything git-shaped is attempted.
-  //
-  // This is the point of declaring capabilities at all. Without it a folder
-  // remote fails at `parseGithubUrl` with "not a recognizable github.com URL",
-  // which is true, unhelpful, and blames the wrong thing -- the problem is not
-  // the URL's spelling, it is that a folder cannot hold a proposal somebody
-  // reviews while the original stays untouched. Contributing is not "writing a
-  // file"; it is opening something that can later be asked whether it was
-  // merged, closed, or is still waiting.
-  const backend = backendFor(remoteEntry.backend);
-  if (!backend.capabilities.opensPullRequests) {
-    throw new UnsupportedRemoteError(
-      `"${remoteName}" is a ${backend.kind} library, and contributions need somewhere a change can be `
-        + 'reviewed before it lands. Reading from it works; pushing back to it does not.',
-    );
-  }
-
-  const { owner: ghOwner, repo: ghRepo } = parseGithubUrl(remoteEntry.url);
+  // Registered, able to hold a proposal, and on a host DeliveryOS can open a
+  // pull request against -- one check, shared with planPush so a preview can
+  // never succeed where the push would refuse. See requireContributableRemote.
+  const { entry: remoteEntry, owner: ghOwner, repo: ghRepo } = requireContributableRemote(remoteName);
   // Constructing the client is local/free (no network call happens until
   // one of its methods is actually invoked) -- safe to do unconditionally
   // here. The actual `repos.get` call (`fetchRepoInfo`, needed for Phase

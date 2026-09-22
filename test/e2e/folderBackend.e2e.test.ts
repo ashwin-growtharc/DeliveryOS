@@ -9,6 +9,7 @@ import { refreshRemoteCache, cachePath, lastFetchedAt } from '../../src/engine/r
 import { detectBackendKind, backendFor, isSyncDetritus } from '../../src/engine/remote/backends';
 import { pullArtifact } from '../../src/engine/pull/pull';
 import { pushArtifact } from '../../src/engine/push/push';
+import { planPush } from '../../src/engine/push/planPush';
 import { rmDirWithRetry } from '../../src/engine/execHelpers';
 
 /**
@@ -238,6 +239,22 @@ describe('contributing to a folder library', () => {
     await expect(pushArtifact('team-playbook', {}, project)).rejects.toThrow(
       /folder library.*reviewed before it lands/s,
     );
+  });
+
+  it('refuses the PREVIEW with the same sentence, not the URL parser\'s', async () => {
+    const src = tempDir('deliveryos-src-');
+    seedCatalog(src);
+    await addRemote(src, 'acme');
+    const project = tempDir('deliveryos-project-');
+    await pullArtifact('team-playbook', undefined, project);
+    fs.writeFileSync(path.join(project, 'team-playbook', 'playbook.md'), '# Playbook, edited\n', 'utf-8');
+
+    // planPush used to call parseGithubUrl purely for its throw, so the preview
+    // -- the thing a person reads before approving -- blamed the URL's spelling
+    // while the push itself blamed the missing review step. Plan and apply must
+    // refuse for the same reason in the same words.
+    expect(() => planPush('team-playbook', project)).toThrow(/folder library.*reviewed before it lands/s);
+    expect(() => planPush('team-playbook', project)).not.toThrow(/github\.com URL/);
   });
 });
 

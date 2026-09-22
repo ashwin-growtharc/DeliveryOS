@@ -1,7 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { stringify as stringifyYaml } from 'yaml';
-import { findRemote } from '../remote/remoteRegistry';
 import { cachePath, withRemoteCacheLock } from '../remote/remoteCache';
 import {
   fetchAndReset,
@@ -11,18 +10,17 @@ import {
   getCommitIdentity,
 } from '../git/git';
 import {
-  parseGithubUrl,
   fetchRepoInfo,
   openPullRequest,
   createOctokit,
   GithubClient,
 } from '../github/github';
 import { getGithubToken } from '../github/githubAuth';
-import { RemoteRegistryError } from '../errors';
 import { AdoptionPlan } from './planAdoption';
 import { leaveCacheOnTip } from './leaveCacheOnTip';
 import { ProgressCallback } from '../pull/pull';
 import { buildBranchName } from '../push/branchName';
+import { requireContributableRemote } from '../remote/requireContributableRemote';
 
 /**
  * Commits an adoption plan as ONE change.
@@ -116,12 +114,10 @@ export async function adoptArtifacts(
   onProgress?: ProgressCallback,
   injectedClient?: GithubClient,
 ): Promise<AdoptionResult> {
-  const remoteEntry = findRemote(remoteName);
-  if (!remoteEntry) {
-    throw new RemoteRegistryError(`No remote named "${remoteName}" is registered`);
-  }
-
-  const { owner, repo } = parseGithubUrl(remoteEntry.url);
+  // Never checked the capability before -- a folder library would have failed
+  // later, at parseGithubUrl, blaming the URL. Same check as every other
+  // contributing path now.
+  const { owner, repo } = requireContributableRemote(remoteName);
   // `createOctokit` is async: Octokit is ESM-only and reached via a dynamic
   // import from a CommonJS build, which is why the whole repo has a Node 22.12
   // engines floor.

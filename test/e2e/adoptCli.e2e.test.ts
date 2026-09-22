@@ -5,6 +5,8 @@ import * as path from 'path';
 import { spawnSync } from 'child_process';
 import simpleGit from 'simple-git';
 import { rmDirWithRetry } from '../../src/engine/execHelpers';
+import { addRemoteEntry } from '../../src/engine/remote/remoteRegistry';
+import { cloneRemote } from '../../src/engine/remote/remoteCache';
 
 /**
  * `deliveryos adopt`, through the real CLI.
@@ -26,7 +28,25 @@ const TSX_CLI = require.resolve('tsx/cli');
 const CLI_ENTRY = path.join(REPO_ROOT, 'src', 'index.ts');
 
 let home: string;
+let originalHome: string | undefined;
 let scratch: string[] = [];
+
+/**
+ * Registers the catalog the way every other adoption test does: a github.com
+ * URL on the registry entry, a real local repository behind the clone.
+ *
+ * This used to be `remote add <local path>`, and the dry run passed against
+ * it -- while the real run would have refused at parseGithubUrl, because a
+ * bare path is not somewhere a pull request can be opened. The dry run was
+ * previewing a PR that could never open, which is the exact plan/apply
+ * disagreement requireContributableRemote now closes. So the fixture, not the
+ * check, was wrong.
+ */
+const FAKE_GITHUB_URL = 'https://github.com/acme/contoso-catalog.git';
+async function registerCatalog(repoDir: string): Promise<void> {
+  await addRemoteEntry({ name: 'contoso', url: FAKE_GITHUB_URL, addedAt: new Date().toISOString() });
+  await cloneRemote('contoso', repoDir);
+}
 
 function runCli(args: string[], cwd: string): { status: number; stdout: string; stderr: string } {
   const result = spawnSync(process.execPath, [TSX_CLI, CLI_ENTRY, ...args], {
@@ -87,11 +107,17 @@ const GOOD_PROFILE = [
 ].join('\n');
 
 beforeEach(() => {
+  originalHome = process.env.DELIVERYOS_HOME;
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'deliveryos-adopt-home-'));
+  // Set in-process too: registerCatalog runs here, the CLI runs in a child
+  // with the same value, and both must see one registry.
+  process.env.DELIVERYOS_HOME = home;
   scratch = [];
 });
 
 afterEach(async () => {
+  if (originalHome === undefined) delete process.env.DELIVERYOS_HOME;
+  else process.env.DELIVERYOS_HOME = originalHome;
   for (const dir of [home, ...scratch]) await rmDirWithRetry(dir);
 });
 
@@ -99,7 +125,7 @@ describe('deliveryos adopt --dry-run', () => {
   it('shows the plan the real run would commit, and writes nothing', async () => {
     const source = syncedFolder();
     const catalog = await gitRepo();
-    expect(runCli(['remote', 'add', catalog, '--name', 'contoso'], catalog).status).toBe(0);
+    await registerCatalog(catalog);
 
     const result = runCli(['adopt', source, '--profile', profileFile(GOOD_PROFILE), '--dry-run'], catalog);
 
@@ -126,7 +152,7 @@ describe('deliveryos adopt --dry-run', () => {
   it('honours --remote when it agrees with the profile', async () => {
     const source = syncedFolder();
     const catalog = await gitRepo();
-    runCli(['remote', 'add', catalog, '--name', 'contoso'], catalog);
+    await registerCatalog(catalog);
 
     const result = runCli(
       ['adopt', source, '--profile', profileFile(GOOD_PROFILE), '--remote', 'contoso', '--dry-run'],
@@ -159,7 +185,7 @@ describe('deliveryos adopt refuses, in a sentence', () => {
   it('a profile that fails validation names the field', async () => {
     const source = syncedFolder();
     const catalog = await gitRepo();
-    runCli(['remote', 'add', catalog, '--name', 'contoso'], catalog);
+    await registerCatalog(catalog);
 
     const bad = profileFile(GOOD_PROFILE.replace('owner: consultant\n', ''));
     const result = runCli(['adopt', source, '--profile', bad, '--dry-run'], catalog);
@@ -169,7 +195,7 @@ describe('deliveryos adopt refuses, in a sentence', () => {
   it('--remote and the profile disagreeing is an error, not a silent preference', async () => {
     const source = syncedFolder();
     const catalog = await gitRepo();
-    runCli(['remote', 'add', catalog, '--name', 'contoso'], catalog);
+    await registerCatalog(catalog);
 
     const result = runCli(
       ['adopt', source, '--profile', profileFile(GOOD_PROFILE), '--remote', 'other', '--dry-run'],
@@ -186,7 +212,7 @@ describe('deliveryos adopt refuses, in a sentence', () => {
 
   it('a folder that is not there', async () => {
     const catalog = await gitRepo();
-    runCli(['remote', 'add', catalog, '--name', 'contoso'], catalog);
+    await registerCatalog(catalog);
 
     const result = runCli(
       ['adopt', path.join(catalog, 'does-not-exist'), '--profile', profileFile(GOOD_PROFILE), '--dry-run'],

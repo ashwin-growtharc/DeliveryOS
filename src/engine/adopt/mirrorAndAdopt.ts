@@ -1,9 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { stringify as stringifyYaml } from 'yaml';
-import { findRemote, RemoteEntry } from '../remote/remoteRegistry';
 import { cachePath, withRemoteCacheLock } from '../remote/remoteCache';
-import { backendFor } from '../remote/backends';
 import {
   fetchAndReset,
   createBranch,
@@ -12,14 +10,12 @@ import {
   getCommitIdentity,
 } from '../git/git';
 import {
-  parseGithubUrl,
   fetchRepoInfo,
   openPullRequest,
   createOctokit,
   GithubClient,
 } from '../github/github';
 import { getGithubToken } from '../github/githubAuth';
-import { RemoteRegistryError, UnsupportedRemoteError } from '../errors';
 import { ProgressCallback } from '../pull/pull';
 import { buildCatalog } from '../catalog/catalog';
 import { AdoptionProfile } from './profile';
@@ -27,6 +23,7 @@ import { planAdoption, AdoptionPlan } from './planAdoption';
 import { mirrorFolder } from './mirrorFolder';
 import { leaveCacheOnTip } from './leaveCacheOnTip';
 import { buildBranchName } from '../push/branchName';
+import { requireContributableRemote } from '../remote/requireContributableRemote';
 
 /**
  * Takes a client's folder -- typically a synced SharePoint, OneDrive or Drive
@@ -128,30 +125,6 @@ function buildPr(
   return { title: `Adopt ${plan.candidates.length} artifact(s) from ${sourceLabel}`, body };
 }
 
-/**
- * The remote an adoption goes into, checked once for both the real run and
- * `adopt --dry-run`, so the two cannot disagree about what is allowed.
- *
- * The destination has to be able to accept a proposal. Asserted here rather
- * than discovered at `parseGithubUrl`, so the message names the real problem:
- * mirroring INTO a folder library would produce a catalog nobody could review
- * or contribute to, which defeats the point of mirroring at all.
- */
-export function resolveAdoptionTarget(remoteName: string): RemoteEntry {
-  const remoteEntry = findRemote(remoteName);
-  if (!remoteEntry) {
-    throw new RemoteRegistryError(`No remote named "${remoteName}" is registered`);
-  }
-  const backend = backendFor(remoteEntry.backend);
-  if (!backend.capabilities.opensPullRequests) {
-    throw new UnsupportedRemoteError(
-      `"${remoteName}" is a ${backend.kind} library, so it cannot receive a mirror. `
-        + 'Mirroring exists to get a client\'s material somewhere changes can be reviewed -- '
-        + 'point this at a git catalog instead.',
-    );
-  }
-  return remoteEntry;
-}
 
 export async function mirrorAndAdopt(
   sourceFolder: string,
@@ -160,9 +133,7 @@ export async function mirrorAndAdopt(
   onProgress?: ProgressCallback,
   injectedClient?: GithubClient,
 ): Promise<MirrorAndAdoptResult> {
-  const remoteEntry = resolveAdoptionTarget(remoteName);
-
-  const { owner, repo } = parseGithubUrl(remoteEntry.url);
+  const { entry: remoteEntry, owner, repo } = requireContributableRemote(remoteName);
   const client = injectedClient ?? (await createOctokit(getGithubToken()));
   const cacheDir = cachePath(remoteName);
   // Same shape as a push branch, random suffix included -- two adoptions in
