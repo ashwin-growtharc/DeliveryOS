@@ -9,6 +9,14 @@ describe('buildBranchName', () => {
     expect(name).toMatch(/^deliveryos\/code-reviewer\/20260726090215-[0-9a-f]{4}$/);
   });
 
+  it('gives an adoption branch the same shape as a push branch, random suffix included', () => {
+    // Adoption used to hand-roll `deliveryos/adopt/<ISO stamp>` with no suffix,
+    // so two runs in one second collided on createBranch and nothing that
+    // recognises DeliveryOS branches by this shape recognised them.
+    const name = buildBranchName('adopt', fixedDate);
+    expect(name).toMatch(/^deliveryos\/adopt\/20260726090215-[0-9a-f]{4}$/);
+  });
+
   it('sanitizes an id with spaces and mixed case into a valid git ref', () => {
     // The exact real-world input that crashed push with:
     // "fatal: 'deliveryos/GrowthArc-Brand Guidelines/...' is not a valid branch name"

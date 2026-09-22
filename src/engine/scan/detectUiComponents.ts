@@ -5,6 +5,7 @@ import { parseComponentFile, parseEnumValues } from '../preview/docgen';
 import { detectSelfNestingWarnings } from './detectSelfNesting';
 import { scanStagingDir, ensureProjectDeliveryOsDir } from '../paths';
 import { ScanCandidate } from './types';
+import { slugifyName } from '../ids/slugify';
 
 const COMPONENT_FILE_PATTERN = /\.(tsx|jsx)$/i;
 const TEST_FILE_PATTERN = /\.(test|spec)\.(tsx|jsx)$/i;
@@ -236,21 +237,15 @@ function collectComponentShapedFiles(dir: string, results: string[]): void {
  * characters in a folder/file name -- no randomness, no timestamps.
  */
 function deriveComponentId(filePath: string, srcRoot: string): string {
-  const baseName = slugify(path.basename(filePath, path.extname(filePath)));
+  const baseName = slugifyName(path.basename(filePath, path.extname(filePath)));
   const folder = path.dirname(filePath);
   if (folder === srcRoot) {
     return baseName;
   }
-  const folderName = slugify(path.basename(folder));
+  const folderName = slugifyName(path.basename(folder));
   return folderName === baseName ? folderName : `${folderName}-${baseName}`;
 }
 
-function slugify(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-}
 
 interface MaterializedPayload {
   payloadPath: string;

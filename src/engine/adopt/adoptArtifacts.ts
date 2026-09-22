@@ -22,6 +22,7 @@ import { RemoteRegistryError } from '../errors';
 import { AdoptionPlan } from './planAdoption';
 import { leaveCacheOnTip } from './leaveCacheOnTip';
 import { ProgressCallback } from '../pull/pull';
+import { buildBranchName } from '../push/branchName';
 
 /**
  * Commits an adoption plan as ONE change.
@@ -55,13 +56,6 @@ export interface AdoptionResult {
   adopted: number;
 }
 
-/** Deterministic and dated rather than random, so two runs on the same day are
- * distinguishable and a stale branch is obvious. Mirrors `buildBranchName`'s
- * shape without reusing it: that one is per-artifact by construction. */
-function adoptionBranchName(): string {
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-').replace('T', '-').slice(0, 19);
-  return `deliveryos/adopt/${stamp}`;
-}
 
 function manifestPathFor(cacheDir: string, id: string): string {
   return path.join(cacheDir, 'artifacts', id, 'manifest.yaml');
@@ -133,7 +127,7 @@ export async function adoptArtifacts(
   // engines floor.
   const client = injectedClient ?? (await createOctokit(getGithubToken()));
   const cacheDir = cachePath(remoteName);
-  const branch = adoptionBranchName();
+  const branch = buildBranchName('adopt');
 
   return withRemoteCacheLock(remoteName, async () => {
     onProgress?.('fetch', `Refreshing "${remoteName}"...`);

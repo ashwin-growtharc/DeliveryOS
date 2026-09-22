@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import { z } from 'zod';
 import { parse as parseYaml } from 'yaml';
 import { AdoptionPlanError } from '../errors';
+import { slugifyName } from '../ids/slugify';
 
 /**
  * The reviewable object of an adoption: what a person decided about a client's
@@ -109,11 +110,7 @@ export type AdoptionProfile = z.infer<typeof AdoptionProfileSchema>;
  * nobody can find or refer to.
  */
 export function slugify(filename: string): string | undefined {
-  const stem = filename.replace(/\.[^.]+$/, '');
-  const slug = stem
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
+  const slug = slugifyName(filename.replace(/\.[^.]+$/, ''));
   return ID_SAFE.test(slug) ? slug : undefined;
 }
 

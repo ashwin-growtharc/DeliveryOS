@@ -85,7 +85,7 @@ function describeFile(absolute: string): { description: string; guessed: boolean
   // actual template library could not be adopted at all.
   if (isOfficeFile(absolute)) {
     const office = describeOfficeFile(absolute);
-    return office ? { description: office.description, guessed: !office.declared } : undefined;
+    return office ?? undefined;
   }
 
   let content: string;

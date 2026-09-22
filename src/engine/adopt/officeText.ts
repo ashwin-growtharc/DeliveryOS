@@ -194,16 +194,30 @@ function firstLineOfSheet(buf: Buffer, entries: ZipEntry[]): string | undefined 
 
 export interface OfficeDescription {
   description: string;
-  /** False only when the author actually filled in the document's properties,
+  /** True unless the author actually filled in the document's properties,
    * which almost nobody does -- the real `.xlsx` in our own catalog has an
    * empty title, description AND subject. Treated exactly like markdown
-   * frontmatter: authoritative when present, absent most of the time. */
-  declared: boolean;
+   * frontmatter: authoritative when present, absent most of the time. Named
+   * for what every consumer asks (`descriptionGuessed`), not its inverse. */
+  guessed: boolean;
 }
 
-/** Extensions this can describe. Anything else is not an Office file and should
- * not be guessed at. */
-export const OFFICE_EXTENSIONS = ['.docx', '.xlsx', '.pptx'] as const;
+/**
+ * Extensions this can describe. Anything else is not an Office file and should
+ * not be guessed at.
+ *
+ * The template (`.dotx`, `.xltx`, `.potx`) and macro-enabled (`.docm`, `.xlsm`,
+ * `.pptm`...) variants are the same OOXML zip inside, and a client's
+ * template library is exactly where they turn up -- a Word TEMPLATE is a
+ * `.dotx`. An extension table rather than magic-number sniffing alone,
+ * because every `.zip` and `.jar` starts with the same two bytes; the sniff
+ * in `describeOfficeFile` stays as the authority on what is really inside.
+ */
+export const OFFICE_EXTENSIONS = [
+  '.docx', '.docm', '.dotx', '.dotm',
+  '.xlsx', '.xlsm', '.xltx', '.xltm',
+  '.pptx', '.pptm', '.potx', '.potm', '.ppsx',
+] as const;
 
 export function isOfficeFile(filename: string): boolean {
   return OFFICE_EXTENSIONS.some((ext) => filename.toLowerCase().endsWith(ext));
@@ -237,7 +251,7 @@ export function describeOfficeFile(absolutePath: string): OfficeDescription | un
     const declared = tagValue(core, 'dc:description')
       ?? tagValue(core, 'dc:subject')
       ?? tagValue(core, 'dc:title');
-    if (declared) return { description: declared, declared: true };
+    if (declared) return { description: declared, guessed: false };
   }
 
   // Tier two: the document's own first line -- and "first line" means something
@@ -250,5 +264,5 @@ export function describeOfficeFile(absolutePath: string): OfficeDescription | un
   // Capped: a description is a sentence for choosing between artifacts, not the
   // document. The whole of a proposal template would be useless in a list.
   const capped = firstLine.length > 200 ? `${firstLine.slice(0, 197).trimEnd()}...` : firstLine;
-  return { description: capped, declared: false };
+  return { description: capped, guessed: true };
 }

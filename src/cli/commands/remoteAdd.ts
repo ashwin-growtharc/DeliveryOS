@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import { listRemotes } from '../../engine/remote/remoteRegistry';
 import { addRemote, removeRemote } from '../../engine/remote/manageRemotes';
+import { backendFor } from '../../engine/remote/backends';
 
 export async function runRemoteAdd(gitUrl: string, nameOption: string | undefined): Promise<void> {
   // Orchestration lives in `engine/remote/manageRemotes.ts` -- it was
@@ -14,7 +15,11 @@ export async function runRemoteAdd(gitUrl: string, nameOption: string | undefine
   // and the moment someone finds that out matters. Learning it here costs a
   // line of output; learning it from `push` costs having already done the work
   // and written the edit.
-  if (backend === 'folder') {
+  //
+  // Keyed on the capability, not on the kind's name: a third backend that
+  // also cannot open pull requests gets the same notice without anyone
+  // remembering to add another branch here.
+  if (!backendFor(backend).capabilities.opensPullRequests) {
     console.log(
       'This is a folder library: reading and installing work, contributing back does not.',
     );

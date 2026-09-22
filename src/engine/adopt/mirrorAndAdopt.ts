@@ -26,6 +26,7 @@ import { AdoptionProfile } from './profile';
 import { planAdoption, AdoptionPlan } from './planAdoption';
 import { mirrorFolder } from './mirrorFolder';
 import { leaveCacheOnTip } from './leaveCacheOnTip';
+import { buildBranchName } from '../push/branchName';
 
 /**
  * Takes a client's folder -- typically a synced SharePoint, OneDrive or Drive
@@ -164,8 +165,9 @@ export async function mirrorAndAdopt(
   const { owner, repo } = parseGithubUrl(remoteEntry.url);
   const client = injectedClient ?? (await createOctokit(getGithubToken()));
   const cacheDir = cachePath(remoteName);
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-').replace('T', '-').slice(0, 19);
-  const branch = `deliveryos/adopt/${stamp}`;
+  // Same shape as a push branch, random suffix included -- two adoptions in
+  // the same second used to collide on createBranch.
+  const branch = buildBranchName('adopt');
   const sourceLabel = path.basename(path.resolve(sourceFolder));
 
   return withRemoteCacheLock(remoteName, async () => {
