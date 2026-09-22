@@ -6,6 +6,44 @@ All notable changes to DeliveryOS are recorded here, newest first. See
 
 ---
 
+## `deliveryos --help` took a second (branch `perf/lazy-heavy-deps`)
+
+Measured on the CLI: `--help` **~1,000 ms**, `list` **~1,300 ms**. Neither does
+a second of work. Every command module is registered on every start, each
+imports the engine, and six modules eagerly imported tools that only
+`push --preview`, `scan`, signed pulls and `mcp` ever run. Their `require`
+cost in isolation -- Tailwind 247 ms, sigstore 240 ms, react-docgen 181 ms,
+the MCP SDK 180 ms, the TypeScript compiler 178 ms -- adds up to the whole
+startup time.
+
+**After:** `--help` **~260 ms**, `list` **~380 ms**. What `--help` now loads is
+commander and the engine core (simple-git, yaml, zod, proper-lockfile,
+ignore), which is what a catalog CLI should cost.
+
+### How, and why not the obvious way
+
+The async callers (`compile.ts`, `provenance/verify.ts`, the `mcp` command)
+defer with `await import()`, the pattern `createOctokit` and `playwright-core`
+already used. Two callers cannot: `parseRoutesTree` and
+`detectSelfNestingWarnings` are synchronous functions called from synchronous
+code, so they go through `src/engine/lazyDeps.ts`, the one file allowed a
+`require` -- with a literal specifier, because esbuild only bundles what it
+can see and a variable would have left the shipped executable without the
+package. Verified against the rebuilt SEA, not just the tests: `scan` from
+`deliveryos-cli.exe` found a `ui-component` candidate, which is the path that
+loads the compiler.
+
+### The guard
+
+`test/e2e/startupWeight.e2e.test.ts`, two layers. A static scan fails on any
+top-level value import of a heavy package and names the line. A spawn runs
+`--help` in-process (`node --import tsx`, not `tsx/cli`, which re-executes in
+a child and left the recorder watching an empty parent) and asserts none of
+the packages ended up in `require.cache`. Deterministic -- a timing assertion
+would also fail on a slow CI runner. Both layers failed before the fix.
+
+---
+
 ## `files: []` for 57% of the catalog (branch `payload/single-file-addressable`)
 
 `payload_path` "may name a single file or a directory" (`schema.ts:150-158`).
