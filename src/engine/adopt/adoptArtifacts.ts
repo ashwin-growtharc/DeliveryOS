@@ -20,6 +20,7 @@ import {
 import { getGithubToken } from '../github/githubAuth';
 import { RemoteRegistryError } from '../errors';
 import { AdoptionPlan } from './planAdoption';
+import { leaveCacheOnTip } from './leaveCacheOnTip';
 import { ProgressCallback } from '../pull/pull';
 
 /**
@@ -141,6 +142,7 @@ export async function adoptArtifacts(
     const { defaultBranch } = await fetchRepoInfo(client, owner, repo);
     const identity = await getCommitIdentity(cacheDir);
 
+    try {
     // Written only after the fetch, so nothing is staged against a stale tree.
     const written: string[] = [];
     for (const candidate of plan.candidates) {
@@ -169,16 +171,16 @@ export async function adoptArtifacts(
       body,
     });
 
-    // Same `finally`-shaped concern `pushArtifact` documents: the cache is both
-    // the catalog's read-model and this staging area, so leaving it on an
-    // adoption branch would make every later read see uncommitted manifests.
-    await fetchAndReset(cacheDir);
-
     return {
       branch,
       prUrl: opened.url,
       prNumber: opened.number,
       adopted: plan.candidates.length,
     };
+    } finally {
+      // Now actually finally-shaped, which the comment here used to only
+      // aspire to. See leaveCacheOnTip.
+      await leaveCacheOnTip(cacheDir, remoteName, onProgress);
+    }
   });
 }

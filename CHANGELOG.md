@@ -109,6 +109,16 @@ a stack trace through `index.ts`. It now extends `DeliveryOsError` like the
 other twenty-six, and the CLI test asserts `^Error: ` with no `at ` lines for
 six distinct refusals. Same defect class as `remote add ""`, fixed the same way.
 
+### A failed adopt leaves the cache as it found it
+
+Both adoption paths reset the cache only on success. A failed `pushBranch` or
+`openPullRequest` left it parked on `deliveryos/adopt/<stamp>` with the unmerged
+mirror committed -- the defect `pushArtifact`'s own `finally` documents having
+had -- and a refusal from `planAdoption` left the mirrored client tree and
+half-written manifests as *untracked* files, which `reset --hard` ignores and
+`discoverManifests` reads anyway. One `leaveCacheOnTip` helper now runs in a
+`finally` in both, resetting and `git clean`ing. Two tests, both failing before.
+
 ### Declared twice, on purpose
 
 `capabilities.ts` gains `adopt.plan` (read) and `adopt.run` (mutates, network,

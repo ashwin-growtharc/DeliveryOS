@@ -25,6 +25,7 @@ import { buildCatalog } from '../catalog/catalog';
 import { AdoptionProfile } from './profile';
 import { planAdoption, AdoptionPlan } from './planAdoption';
 import { mirrorFolder } from './mirrorFolder';
+import { leaveCacheOnTip } from './leaveCacheOnTip';
 
 /**
  * Takes a client's folder -- typically a synced SharePoint, OneDrive or Drive
@@ -174,6 +175,7 @@ export async function mirrorAndAdopt(
     const { defaultBranch } = await fetchRepoInfo(client, owner, repo);
     const identity = await getCommitIdentity(cacheDir);
 
+    try {
     onProgress?.('mirror', `Copying "${sourceLabel}"...`);
     const mirror = mirrorFolder(sourceFolder, cacheDir);
 
@@ -214,11 +216,6 @@ export async function mirrorAndAdopt(
       body,
     });
 
-    // The cache is the catalog's read-model as well as this staging area.
-    // Leaving it on the branch would make every later read see a mirror that
-    // was never merged.
-    await fetchAndReset(cacheDir);
-
     return {
       branch,
       prUrl: opened.url,
@@ -228,5 +225,12 @@ export async function mirrorAndAdopt(
       notAdopted: plan.skipped.length,
       unreadable: mirror.unreadable,
     };
+    } finally {
+      // Whatever happened above -- the PR opened, the push failed, the plan
+      // refused -- every later read of this cache must see the remote's real
+      // tip, not a half-built mirror. See leaveCacheOnTip for why this is a
+      // finally and why it cleans as well as resets.
+      await leaveCacheOnTip(cacheDir, remoteName, onProgress);
+    }
   });
 }

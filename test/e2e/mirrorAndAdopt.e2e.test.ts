@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import simpleGit from 'simple-git';
 import { addRemoteEntry } from '../../src/engine/remote/remoteRegistry';
-import { cloneRemote, refreshRemoteCache } from '../../src/engine/remote/remoteCache';
+import { cloneRemote, refreshRemoteCache, cachePath } from '../../src/engine/remote/remoteCache';
 import { addRemote } from '../../src/engine/remote/manageRemotes';
 import { buildCatalog } from '../../src/engine/catalog/catalog';
 import { pullArtifact } from '../../src/engine/pull/pull';
@@ -202,6 +202,55 @@ describe('a synced SharePoint folder, end to end', () => {
     // is refused by capability rather than failing later on the URL's shape.
     await expect(mirrorAndAdopt(synced, profile, 'not-a-catalog', undefined, fakeGithub()))
       .rejects.toThrow(/cannot receive a mirror/);
+  });
+});
+
+describe('a failed adoption leaves the cache as it found it', () => {
+  /** Branch, cleanliness, and which top-level folders survived. All three
+   * together, because each failure below dirties a different one. */
+  async function cacheState(remote: string): Promise<{ branch: string; clean: boolean; leftovers: string[] }> {
+    const cache = cachePath(remote);
+    const git = simpleGit(cache);
+    return {
+      branch: (await git.branchLocal()).current,
+      clean: (await git.status()).isClean(),
+      leftovers: ['artifacts', 'playbooks', 'templates'].filter((d) => fs.existsSync(path.join(cache, d))),
+    };
+  }
+
+  it('when the pull request fails to open', async () => {
+    const synced = syncedSharepointFolder();
+    const catalogRepo = await emptyCatalogRepo();
+    await addRemoteEntry({ name: 'contoso', url: FAKE_GITHUB_URL, addedAt: new Date().toISOString() });
+    await cloneRemote('contoso', catalogRepo);
+    const client = fakeGithub();
+    (client.rest.pulls.create as unknown as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('GitHub is down'));
+
+    await expect(mirrorAndAdopt(synced, profile, 'contoso', undefined, client)).rejects.toThrow(/GitHub is down/);
+
+    // Before this guard the cache stayed parked on deliveryos/adopt/* with the
+    // unmerged mirror committed, and every later list or pull read it as the
+    // remote's real state -- the defect pushArtifact's own finally documents.
+    expect(await cacheState('contoso')).toEqual({ branch: 'main', clean: true, leftovers: [] });
+  });
+
+  it('when planning refuses, before anything was committed', async () => {
+    const synced = syncedSharepointFolder();
+    // Two files under one rule that slug to the same id: an in-batch collision,
+    // which planAdoption refuses -- AFTER the mirror has already copied the
+    // client's tree into the cache.
+    fs.mkdirSync(path.join(synced, 'playbooks', 'archive'), { recursive: true });
+    fs.writeFileSync(path.join(synced, 'playbooks', 'archive', 'handover.md'), '# Old handover\n', 'utf-8');
+    const catalogRepo = await emptyCatalogRepo();
+    await addRemoteEntry({ name: 'contoso', url: FAKE_GITHUB_URL, addedAt: new Date().toISOString() });
+    await cloneRemote('contoso', catalogRepo);
+
+    await expect(mirrorAndAdopt(synced, profile, 'contoso', undefined, fakeGithub())).rejects.toThrow(/created twice/);
+
+    // reset --hard restores tracked files and ignores untracked ones. Without
+    // the clean, the mirrored folders and any half-written manifests stay in
+    // the cache, and discoverManifests reads artifacts/ regardless of git.
+    expect(await cacheState('contoso')).toEqual({ branch: 'main', clean: true, leftovers: [] });
   });
 });
 

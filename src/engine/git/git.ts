@@ -134,6 +134,24 @@ export async function fetchAndReset(repoDir: string): Promise<void> {
   }
 }
 
+/**
+ * Removes untracked files and directories. Not `-x`: ignored files are left
+ * alone, since nothing here writes them and a cache clone has none worth
+ * destroying by accident.
+ *
+ * Exists because `fetchAndReset` restores what git tracks and nothing else,
+ * and an adoption stages a whole client tree as untracked files before it
+ * commits. See `leaveCacheOnTip`.
+ */
+export async function cleanUntracked(repoDir: string): Promise<void> {
+  try {
+    await simpleGit(repoDir).clean('fd');
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new GitOperationError(message);
+  }
+}
+
 /** Creates and checks out a new local branch in `repoDir`, off the current
  * HEAD. `repoDir` is expected to already be reset to the base tip via
  * `fetchAndReset` before this is called. */
