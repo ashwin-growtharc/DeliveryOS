@@ -40,10 +40,17 @@ function describeCandidates(plan: AdoptionPlan): string[] {
   const kindWidth = Math.max(...plan.candidates.map((c) => c.manifest.kind.length), 4);
   for (const c of plan.candidates) {
     lines.push(
-      `  ${c.id.padEnd(idWidth)}  ${c.manifest.kind.padEnd(kindWidth)}  `
+      `  ${c.action.padEnd(6)}  ${c.id.padEnd(idWidth)}  ${c.manifest.kind.padEnd(kindWidth)}  `
         + `${c.sourcePath} -> ${c.manifest.install_target}`
+        + (c.action === 'update' ? `  (version -> ${c.manifest.version})` : '')
         + (c.descriptionGuessed ? '  (description derived)' : ''),
     );
+  }
+  for (const r of plan.retired) {
+    lines.push(`  retire  ${r.id.padEnd(idWidth)}  ${''.padEnd(kindWidth)}  was ${r.sourcePath}`);
+  }
+  if (plan.unchanged.length > 0) {
+    lines.push(`  ${plan.unchanged.length} artifact(s) unchanged`);
   }
   return lines;
 }
@@ -89,7 +96,9 @@ export function registerAdoptCommand(program: Command): void {
         console.log('');
         console.log(
           `Would adopt ${plan.candidates.length} artifact(s) from "${sourceLabel}" into "${remoteName}", `
-            + `copying ${mirror.written.length} file(s):`,
+            + `copying ${mirror.written.length} file(s) `
+            + `(${mirror.added.length} added, ${mirror.changed.length} changed, ${mirror.removed.length} removed, `
+            + `${mirror.unchanged.length} unchanged since the last adoption):`,
         );
         console.log('');
         for (const line of describeCandidates(plan)) console.log(line);

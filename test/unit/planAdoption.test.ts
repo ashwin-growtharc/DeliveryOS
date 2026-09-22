@@ -5,6 +5,7 @@ import * as path from 'path';
 import { planAdoption } from '../../src/engine/adopt/planAdoption';
 import { AdoptionPlanError } from '../../src/engine/errors';
 import { AdoptionProfileSchema, slugify } from '../../src/engine/adopt/profile';
+import { ManifestSchema, Manifest } from '../../src/engine/manifest/schema';
 
 /**
  * Turning a client's folder of documents into something a catalog can read.
@@ -168,11 +169,27 @@ describe('refusing rather than half-working', () => {
     expect(() => planAdoption(root, profile(), [], 'acme-shared')).toThrow(/conflicting id/i);
   });
 
-  it('refuses an id the catalog already has, and says where it came from', () => {
+  /** A manifest already in the catalog under `id`, pointing at some OTHER file
+   * -- the shape that stays a collision now that same-file is an update. */
+  function takenBy(id: string, payloadPath: string): Manifest {
+    return ManifestSchema.parse({
+      id,
+      kind: 'rule',
+      description: 'Somebody else\'s.',
+      owner: 'other-team',
+      version: '1.0.0',
+      source_repo: 'acme-shared',
+      install_target: payloadPath,
+      payload_path: payloadPath,
+      review_required: false,
+    });
+  }
+
+  it('refuses an id the catalog already has pointing at a different file, and says where', () => {
     write('playbooks/escalation.md', '# Escalation\n');
 
-    expect(() => planAdoption(root, profile(), ['escalation'], 'acme-shared')).toThrow(
-      /already exists in the catalog/,
+    expect(() => planAdoption(root, profile(), [takenBy('escalation', 'archive/escalation.md')], 'acme-shared')).toThrow(
+      /already exists in the catalog, pointing at "archive\/escalation.md"/,
     );
   });
 
@@ -182,7 +199,7 @@ describe('refusing rather than half-working', () => {
     // already adopted this".
     write('playbooks/x.md', '# X\n');
     try {
-      planAdoption(root, profile(), ['x'], 'acme-shared');
+      planAdoption(root, profile(), [takenBy('x', 'elsewhere/x.md')], 'acme-shared');
     } catch (err) {
       expect((err as Error).message).toContain('already exists in the catalog');
       expect((err as Error).message).not.toContain('would be created twice');
@@ -225,6 +242,69 @@ describe('refusing rather than half-working', () => {
     expect(() => planAdoption(path.join(root, 'nope'), profile(), [], 'r')).toThrow(
       /not a folder on this machine/,
     );
+  });
+});
+
+describe('adopting again', () => {
+  const REPO = 'https://github.com/acme/catalog.git';
+
+  /** What the catalog already holds: the manifest a first adoption wrote, then
+   * a person edited -- the description is theirs, not a derived heading. */
+  function existing(overrides: Partial<Manifest> = {}): Manifest {
+    return ManifestSchema.parse({
+      id: 'escalation',
+      kind: 'rule',
+      description: 'When to escalate, written by a human on day ten.',
+      owner: 'consultant',
+      version: '1.0.0',
+      source_repo: REPO,
+      install_target: '.claude/rules/playbooks/escalation.md',
+      payload_path: 'playbooks/escalation.md',
+      review_required: false,
+      ...overrides,
+    });
+  }
+
+  it('updates an existing artifact whose file changed, keeping the catalog\'s own description', () => {
+    write('playbooks/escalation.md', '# Escalation, revised\n');
+
+    // Before: every id already in the catalog was a fatal collision, so the
+    // second adoption failed for every file the moment the client edited one.
+    const plan = planAdoption(root, profile(), [existing()], REPO, { changed: ['playbooks/escalation.md'] });
+
+    expect(plan.candidates).toHaveLength(1);
+    expect(plan.candidates[0].action).toBe('update');
+    expect(plan.candidates[0].manifest.version).toBe('1.0.1');
+    // A heading derived on day one must never overwrite what somebody wrote.
+    expect(plan.candidates[0].manifest.description).toBe('When to escalate, written by a human on day ten.');
+    expect(plan.candidates[0].descriptionGuessed).toBe(false);
+  });
+
+  it('reports an existing artifact whose file did not change as unchanged, and writes nothing for it', () => {
+    write('playbooks/escalation.md', '# Escalation\n');
+    const plan = planAdoption(root, profile(), [existing()], REPO, { changed: [] });
+    expect(plan.candidates).toHaveLength(0);
+    expect(plan.unchanged).toEqual([{ id: 'escalation', sourcePath: 'playbooks/escalation.md' }]);
+  });
+
+  it('treats every existing file as changed when nothing recorded what changed', () => {
+    // The safe direction: a missing record must never mean "skip the update".
+    write('playbooks/escalation.md', '# Escalation\n');
+    const plan = planAdoption(root, profile(), [existing()], REPO);
+    expect(plan.candidates.map((c) => c.action)).toEqual(['update']);
+  });
+
+  it('still refuses the same id pointing at a DIFFERENT file', () => {
+    write('playbooks/escalation.md', '# Escalation\n');
+    const other = existing({ payload_path: 'archive/escalation.md', install_target: 'archive/escalation.md' });
+    expect(() => planAdoption(root, profile(), [other], REPO)).toThrow(/already exists in the catalog, pointing at "archive\/escalation.md"/);
+  });
+
+  it('retires an artifact whose file the source no longer has', () => {
+    write('playbooks/handover.md', '# Handover\n');
+    const plan = planAdoption(root, profile(), [existing()], REPO, { removed: ['playbooks/escalation.md'] });
+    expect(plan.retired).toEqual([{ id: 'escalation', sourcePath: 'playbooks/escalation.md' }]);
+    expect(plan.candidates.map((c) => c.id)).toEqual(['handover']);
   });
 });
 

@@ -2,6 +2,13 @@ import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 
+/** sha256 of one buffer, hex. The building block `computePayloadDigest` uses
+ * per file, exported for the adoption mirror, which records a hash per mirrored
+ * file so a later run can say what changed. */
+export function sha256Hex(data: Buffer): string {
+  return crypto.createHash('sha256').update(data).digest('hex');
+}
+
 function listFilesRecursive(dir: string, baseDir: string): string[] {
   const entries = fs.readdirSync(dir, { withFileTypes: true });
   const files: string[] = [];
