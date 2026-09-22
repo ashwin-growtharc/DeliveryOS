@@ -1,0 +1,18 @@
+id: document-interview
+kind: skill
+description: Interview someone and fill in a document template from their answers,
+  then write the finished document into their project. Pairs with any template
+  that declares an interview block in its frontmatter -- onboarding notes,
+  proposals, delivery plans, business cases.
+owner: ashwin-growtharc
+version: 1.0.0
+tags:
+  roles:
+    - delivery
+  teams: []
+  stacks:
+    - delivery-tooling
+  componentTypes: []
+source_repo: https://github.com/ashwin-growtharc/growtharc-ai-helpers.git
+install_target: .claude/skills/document-interview
+review_required: false

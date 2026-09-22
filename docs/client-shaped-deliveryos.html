@@ -1,0 +1,881 @@
+<title>Clients Who Aren't Us</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --bg:#faf8f3; --card:#fffefb; --ink:#1b2229; --ink-dim:#5a656f; --line:#e2ded4;
+    --accent:#0d6a5c; --accent-soft:#e3efe9; --amber:#8a5a00; --amber-soft:#f8efda;
+    --code-bg:#0d1318; --code-fg:#dbe5ec; --code-dim:#6f7f8c; --red:#9c2f2f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:#10161b; --card:#182027; --ink:#e7eaed; --ink-dim:#97a3ad; --line:#29323b;
+      --accent:#5cc3ae; --accent-soft:#123029; --amber:#dba44a; --amber-soft:#2d2412;
+      --code-bg:#141b22; --code-fg:#dbe5ec; --code-dim:#7f8f9c; --red:#e08b84;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg:#10161b; --card:#182027; --ink:#e7eaed; --ink-dim:#97a3ad; --line:#29323b;
+    --accent:#5cc3ae; --accent-soft:#123029; --amber:#dba44a; --amber-soft:#2d2412;
+    --code-bg:#141b22; --code-fg:#dbe5ec; --code-dim:#7f8f9c; --red:#e08b84;
+  }
+  * { box-sizing:border-box; }
+  body {
+    background:var(--bg); color:var(--ink);
+    font-family:'IBM Plex Sans',system-ui,sans-serif;
+    font-size:16px; line-height:1.68; margin:0; padding:0 20px 80px;
+  }
+  .wrap { max-width:780px; margin:0 auto; }
+  header { padding:56px 0 14px; border-bottom:2px solid var(--ink); }
+  .eyebrow {
+    font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:.14em;
+    text-transform:uppercase; color:var(--accent); margin:0 0 12px;
+  }
+  h1 {
+    font-family:'IBM Plex Serif',Georgia,serif; font-size:40px; line-height:1.12;
+    font-weight:600; margin:0 0 14px; text-wrap:balance;
+  }
+  .standfirst { font-size:18px; color:var(--ink-dim); margin:0 0 20px; max-width:60ch; }
+  h2 {
+    font-family:'IBM Plex Serif',Georgia,serif; font-size:26px; font-weight:600;
+    margin:56px 0 8px; text-wrap:balance;
+  }
+  h3 { font-size:17px; font-weight:600; margin:30px 0 6px; }
+  p { margin:0 0 14px; max-width:66ch; }
+  ul, ol { max-width:66ch; padding-left:20px; }
+  li { margin-bottom:8px; }
+  code {
+    font-family:'IBM Plex Mono',ui-monospace,monospace; font-size:.87em;
+    background:var(--accent-soft); color:var(--accent); padding:1px 5px; border-radius:3px;
+  }
+  pre {
+    background:var(--code-bg); color:var(--code-fg);
+    font-family:'IBM Plex Mono',ui-monospace,monospace; font-size:13px; line-height:1.65;
+    padding:16px 18px; border-radius:7px; overflow-x:auto; margin:0 0 16px;
+  }
+  pre code { background:none; color:inherit; padding:0; font-size:inherit; }
+  pre .c { color:var(--code-dim); }
+  pre .g { color:#7fd3bd; }
+  pre .r { color:#e5928c; }
+  pre .y { color:#e0b877; }
+  .lede {
+    background:var(--card); border:1px solid var(--line); border-left:3px solid var(--accent);
+    padding:18px 22px; border-radius:0 7px 7px 0; margin:26px 0;
+  }
+  .lede p:last-child { margin-bottom:0; }
+  .note {
+    background:var(--amber-soft); border:1px solid var(--line); border-left:3px solid var(--amber);
+    padding:14px 18px; border-radius:0 7px 7px 0; margin:22px 0; font-size:15px;
+  }
+  .note p:last-child { margin-bottom:0; }
+  .note .tag {
+    font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:.1em;
+    text-transform:uppercase; color:var(--amber); display:block; margin-bottom:5px;
+  }
+  .tablewrap { overflow-x:auto; margin:0 0 18px; }
+  table { border-collapse:collapse; width:100%; font-size:14.5px; }
+  th, td { text-align:left; padding:10px 12px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th {
+    font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:.09em;
+    text-transform:uppercase; color:var(--ink-dim); border-bottom:2px solid var(--line);
+  }
+  td.yes { color:var(--accent); font-weight:500; }
+  td.no { color:var(--red); font-weight:500; }
+  td.num { font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .part {
+    background:var(--card); border:1px solid var(--line); border-left:3px solid var(--accent);
+    border-radius:0 8px 8px 0; padding:20px 24px; margin:24px 0;
+  }
+  .part .label {
+    font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:.12em;
+    text-transform:uppercase; color:var(--accent); display:block; margin-bottom:4px;
+  }
+  .part h3 { margin-top:0; font-size:20px; font-family:'IBM Plex Serif',Georgia,serif; }
+  .part p:last-child { margin-bottom:0; }
+  footer {
+    margin-top:60px; padding-top:18px; border-top:1px solid var(--line);
+    font-size:13.5px; color:var(--ink-dim);
+  }
+</style>
+
+<div class="wrap">
+
+<header>
+  <p class="eyebrow">DeliveryOS &middot; Findings and plan</p>
+  <h1>Clients Who Aren't Us</h1>
+  <p class="standfirst">
+    DeliveryOS quietly assumes every client looks like we do &mdash; a git repository, and
+    Claude. Three gaps follow from that, and none is as expensive to close as it looks.
+  </p>
+</header>
+
+<div class="lede">
+  <p>
+    <strong>The short version.</strong> A client who keeps their material in SharePoint cannot
+    use DeliveryOS at all today. If they send us a link, nothing turns what is behind it into
+    something we can read. And every document we hand a client &mdash; onboarding, proposal,
+    delivery plan, business case &mdash; still starts from a blank page.
+  </p>
+  <p>
+    All three are fixable, and two of them mostly by copying something we have already done.
+    Reading a non-git folder is <strong>three functions</strong>, because git turns out to be
+    barely entangled. Making a client's folder usable is <strong>the same shape our own library
+    already has</strong>, which nothing moves or copies. And the documents one is <strong>a
+    convention plus one artifact and no product code at all</strong> &mdash; after which every
+    new template is content somebody writes, not engineering.
+  </p>
+</div>
+
+<h2>Part one &mdash; not everyone uses git</h2>
+
+<div class="part">
+  <span class="label">The gap</span>
+  <h3>A client with no git library cannot buy DeliveryOS</h3>
+  <p>
+    HR, compliance, design and ops teams keep their shared material in SharePoint, OneDrive or
+    Google Drive. Today, adding a library is a <code>git clone</code> &mdash; so those teams
+    are not a hard sell, they are simply not a customer.
+  </p>
+</div>
+
+<h3>What we found in the code</h3>
+
+<p>
+  Git is far less woven in than it looks. It lives in <strong>one 205-line file</strong> with
+  nine functions, imported by exactly <strong>three</strong> files. And the reading side asks
+  git for only one thing:
+</p>
+
+<blockquote style="margin:0 0 16px; padding:12px 18px; border-left:3px solid var(--line); color:var(--ink-dim); font-style:italic; max-width:64ch;">
+  Put a folder of files here, and tell me when it last changed.
+</blockquote>
+
+<p>
+  Everything downstream already works on plain files and does not care where they came from:
+</p>
+
+<div class="tablewrap">
+<table>
+  <tr><th>Part of the product</th><th>Needs git?</th></tr>
+  <tr><td>Reading the library and its manifests</td><td class="yes">No &mdash; plain directory listing</td></tr>
+  <tr><td>Knowing an artifact has a newer version</td><td class="yes">No &mdash; compares a version number in a file</td></tr>
+  <tr><td>Noticing you edited an installed artifact</td><td class="yes">No &mdash; compares against its own saved copy</td></tr>
+  <tr><td>Detecting the source drifted</td><td class="yes">No &mdash; compares checksums</td></tr>
+  <tr><td><strong>Contributing an artifact back</strong></td><td class="no"><strong>Yes, genuinely</strong> &mdash; it makes a branch and opens a pull request</td></tr>
+</table>
+</div>
+
+<h3>The answer: read the synced folder</h3>
+
+<p>
+  SharePoint, OneDrive and Drive all install a sync client that makes the content appear as an
+  ordinary folder on the machine. So we do not integrate with three different clouds &mdash;
+  we read a folder, and one adapter covers all three. No accounts, no API keys, nothing for
+  the client's IT department to approve.
+</p>
+
+<pre><code><span class="g">&gt;</span> deliveryos remote add <span class="y">"C:/Users/priya/Acme Corp/Shared Artifacts"</span> --name acme-shared
+
+<span class="g">Added remote "acme-shared" (folder)
+Found 34 artifacts.</span></code></pre>
+
+<div class="note">
+  <span class="tag">Read that example carefully</span>
+  <p>
+    It says <em>"found 34 artifacts"</em>, and that quietly assumes the folder is already
+    organised the way DeliveryOS expects. A real client's folder will not be.
+    <strong>That is a second problem, and it is the bigger one</strong> &mdash; it has its own
+    section below.
+  </p>
+</div>
+
+<div class="note">
+  <span class="tag">One limitation in the first slice</span>
+  <p>
+    <strong>Contributing back is off to begin with</strong>, and DeliveryOS says so rather
+    than half-working:
+  </p>
+<pre style="margin-top:12px; margin-bottom:0;"><code><span class="g">&gt;</span> deliveryos push my-skill --remote acme-shared
+
+<span class="r">"acme-shared" is a folder library. Contributing is not turned on
+for these yet.</span></code></pre>
+  <p style="margin-top:12px; margin-bottom:0;">
+    That is a choice about sequencing, not a permanent fact &mdash; the next section is about
+    what these services can and cannot actually do when written to.
+  </p>
+</div>
+
+<h3>Can we push things back to them?</h3>
+
+<p>
+  Worth researching properly rather than assuming, because the answer turned out better than
+  expected in one direction and worse in another.
+</p>
+
+<div class="tablewrap">
+<table>
+  <tr>
+    <th>&nbsp;</th>
+    <th>Can we write?</th>
+    <th>Keeps version history?</th>
+    <th>Can a change be reviewed <em>before</em> it lands?</th>
+  </tr>
+  <tr>
+    <td><strong>SharePoint</strong></td>
+    <td class="yes">Yes</td>
+    <td class="yes">Yes &mdash; with who and when</td>
+    <td>Approval exists, but only through their old programming interface</td>
+  </tr>
+  <tr>
+    <td><strong>OneDrive</strong> (personal)</td>
+    <td class="yes">Yes</td>
+    <td class="yes">Yes</td>
+    <td class="no">No such thing at all</td>
+  </tr>
+  <tr>
+    <td><strong>Google Drive</strong></td>
+    <td class="yes">Yes</td>
+    <td>Yes, but you cannot roll back &mdash; only download an old copy and re-upload it</td>
+    <td>A real approvals feature, with two catches below</td>
+  </tr>
+</table>
+</div>
+
+<h3>The good surprise: history comes free</h3>
+
+<p>
+  <strong>Writing a file into the synced folder creates a proper version in the cloud.</strong>
+  Microsoft's own documentation treats the sync app as something that produces versions, and a
+  new version is recorded whenever a file is uploaded or replaced.
+</p>
+
+<p>
+  So an artifact written into a client's SharePoint folder gets a real history entry &mdash;
+  who changed it, when, and the ability to restore what was there before &mdash; with no
+  accounts, no keys and nothing for their IT to approve. That is genuinely more than we get
+  from a plain folder, and more than this plan originally assumed.
+</p>
+
+<h3>The bad surprise: you cannot gate anything</h3>
+
+<p>
+  Contributing in DeliveryOS today means <em>proposing</em> a change that somebody reviews and
+  accepts or rejects. Nothing here can do that honestly:
+</p>
+
+<ul>
+  <li>
+    <strong>SharePoint</strong> does have proper approval &mdash; a document can sit as a draft
+    that only editors see until somebody approves it. But those controls are missing from the
+    modern programming interface and reachable only through the older one, which means a whole
+    second way of signing in. It is also switched <em>off</em> by default, so most libraries
+    could not do it without an administrator changing a setting first.
+  </li>
+  <li>
+    <strong>Google Drive</strong> has a genuine approvals feature, and its states line up
+    neatly with what we already track. But it is only on paid tiers, and it approves the file
+    <em>as it already is</em> &mdash; the change has landed before anyone looks at it. That is
+    the opposite of proposing something while the original stays untouched.
+  </li>
+  <li><strong>Personal OneDrive</strong> has nothing.</li>
+</ul>
+
+<div class="note">
+  <span class="tag">The honest product line</span>
+  <p>
+    You <em>can</em> contribute to a SharePoint or Drive library, and the change is recorded
+    with your name against it. What nobody can offer is <strong>review before it lands</strong>
+    &mdash; whatever checking the organisation does happens in their tools, not in ours.
+  </p>
+  <p>
+    A client who wants contributions reviewed and approved is a client who wants a git library.
+    That is a real answer to give in a sales conversation, not a dodge.
+  </p>
+</div>
+
+<h3>The one thing we could not verify</h3>
+
+<p>
+  <strong>What happens when two people change the same file.</strong> There is no current
+  documentation from Microsoft on it &mdash; the page that used to cover it is gone. What is
+  widely observed is that OneDrive keeps <em>both</em> copies and renames the loser after the
+  computer it came from (<code>skill-DESKTOP-A1B2C3.md</code>). It never merges, and nobody is
+  told.
+</p>
+
+<p>
+  That is the strongest argument for eventually writing through the proper programming
+  interface rather than dropping files in the folder: it can be told <em>"only save this if
+  nobody else changed it since I looked"</em> and gives a clean error instead of a silent
+  duplicate. Same free version history, without the mystery twin.
+</p>
+
+<p>
+  Not needed for reading, which is the first slice. Worth knowing before we write anything.
+</p>
+
+<h3>Things that will bite, stated up front</h3>
+
+<div class="tablewrap">
+<table>
+  <tr><th>Problem</th><th>What we do about it</th></tr>
+  <tr>
+    <td><strong>Sync clutter.</strong> <code>desktop.ini</code>, <code>~$report.docx</code> and
+    <code>.DS_Store</code> would be read as if they were part of an artifact</td>
+    <td class="yes">Fixed &mdash; ignore them, the way git files are already ignored</td>
+  </tr>
+  <tr>
+    <td><strong>Files that are not really there.</strong> OneDrive can leave a placeholder
+    that only downloads when opened &mdash; which fails offline</td>
+    <td class="yes">Fixed &mdash; report it as a skipped artifact instead of crashing</td>
+  </tr>
+  <tr>
+    <td><strong>Half-synced folders.</strong> Nothing stops the sync app rewriting files while
+    we are reading them</td>
+    <td>Accepted and written down. A folder library declares that it cannot promise this</td>
+  </tr>
+  <tr>
+    <td><strong>Altered files.</strong> Some services quietly change line endings, which breaks
+    our tamper checks</td>
+    <td>Accepted and written down, beside the code that checks</td>
+  </tr>
+</table>
+</div>
+
+<h2>The harder half: a folder is not a catalog</h2>
+
+<div class="part">
+  <span class="label">The gap</span>
+  <h3>A client sends a link, not a library</h3>
+  <p>
+    Everything above answers <em>where the files live</em>. It does not answer the question
+    underneath it: whatever is behind that link is a pile of documents, and DeliveryOS needs a
+    library. Nothing in the product turns one into the other today.
+  </p>
+</div>
+
+<h3>What a pasted link can actually get you</h3>
+
+<p>
+  Researched against Microsoft's and Google's own documentation, and the useful conclusion is
+  a negative one: <strong>the link is a hint, not a way in.</strong>
+</p>
+
+<ul>
+  <li>
+    <strong>There is no documented way to turn a SharePoint address into the folder on your
+    disk.</strong> The registry keys people use for it appear in no official documentation, the
+    sync app updates roughly fortnightly, and a company policy can rename the folder anyway.
+  </li>
+  <li>
+    <strong>But Windows will list every synced folder on the machine</strong>, properly and
+    supported &mdash; including Google Drive's, not just Microsoft's. So the honest design is:
+    read the names out of the link, look for a matching folder, and <em>ask the person to
+    confirm the match once</em>. That turns an unavoidable guess into a single click rather
+    than a thing that can silently be wrong.
+  </li>
+  <li>
+    <strong>Microsoft can resolve a share link directly</strong> if someone signs in &mdash;
+    one call returns the folder and its contents. Two catches: the least-privileged permission
+    on offer is a <em>write</em> permission for a read operation, and their documentation is
+    explicit that even an "anyone with the link" link cannot be read without a signed-in user.
+  </li>
+  <li>
+    <strong>Google is the opposite</strong>, and it is the one genuinely cheap path: their
+    documentation says a plain API key can read content shared as "anyone with the link" &mdash;
+    no sign-in at all. If that extends to listing a folder's contents, Google onboarding
+    becomes <em>one sharing toggle by the client</em>. That is a five-minute test and it is
+    worth running before anything else.
+  </li>
+</ul>
+
+<h3>Why the obvious tools do not close it</h3>
+
+<div class="tablewrap">
+<table>
+  <tr><th>What you would reach for</th><th>Why it does not help</th></tr>
+  <tr>
+    <td><code>deliveryos scan</code></td>
+    <td class="no">It looks in six fixed places that are all Claude Code conventions, has no
+    reader for Word, PDF or Excel, and can only look at the folder you are standing in. A
+    client's <code>playbooks/</code> folder returns <strong>nothing</strong></td>
+  </tr>
+  <tr>
+    <td>Pushing each file as a new artifact</td>
+    <td class="no">It works, and it is one pull request per artifact. Two hundred files is two
+    hundred pull requests</td>
+  </tr>
+</table>
+</div>
+
+<h3>The answer is sitting in our own library</h3>
+
+<p>
+  We have already done this once, at scale, and the shape it produced is the design. Our own
+  library was <strong>never reorganised</strong>. The original collection still sits exactly
+  where it was, and a thin layer of small description files was laid over the top, each one
+  pointing back at an untouched original:
+</p>
+
+<pre><code>the library/   agents/  commands/  rules/  files/   <span class="c">&lt;- originals, untouched</span>
+               artifacts/                          <span class="c">&lt;- the layer we added</span>
+                 230 entries, 131 of them nothing but a description
+                 pointing back at:  agents/ 67   rules/ 35   commands/ 28</code></pre>
+
+<p>
+  <strong>Nothing moves and nothing is copied.</strong> The entire footprint of making a folder
+  DeliveryOS-compatible is one directory of small text files &mdash; a median of 527 bytes
+  each, 132 KB for all 230, against a library of 8.8 MB. And the link is two-way: editing an
+  adopted file and contributing it back writes to the real file, so it stays live rather than
+  forking into a copy.
+</p>
+
+<h3>Where that layer can live &mdash; and it is not a free choice</h3>
+
+<p>
+  A description file can only point at something in the same repository as itself. That single
+  constraint decides the question:
+</p>
+
+<div class="tablewrap">
+<table>
+  <tr><th>What the client hands over</th><th>What has to happen</th></tr>
+  <tr>
+    <td>A git repository</td>
+    <td class="yes">Add the layer beside their files. Nothing moves, nothing is copied, and
+    contributions still work</td>
+  </tr>
+  <tr>
+    <td>A SharePoint or Drive folder</td>
+    <td>A copy is unavoidable &mdash; mirror the folder into a library we manage, then add the
+    layer to that. Not a preference: a description file cannot reach into SharePoint, and
+    SharePoint is not a git remote, so refreshing and contributing would not work there anyway</td>
+  </tr>
+</table>
+</div>
+
+<div class="note">
+  <span class="tag">So, a rule</span>
+  <p>
+    <strong>Never write our files into a client's SharePoint or Drive.</strong> Not merely
+    intrusive &mdash; the rest of the product cannot work against it. DeliveryOS's job starts at
+    "a folder inside a git repository", and getting a client's material that far stays a
+    separate, boring step: an export, a sync, an existing tool. Teaching DeliveryOS to speak to
+    Microsoft's and Google's services directly would be building a different product.
+  </p>
+</div>
+
+<h3>What can be worked out, and what has to be asked</h3>
+
+<p>
+  Our own import is the evidence, and it is encouraging in one direction and clear in the other.
+  All 210 imported entries got genuinely useful descriptions &mdash; because the source files
+  already carried their own. But <strong>half of them ended up with an empty stack field</strong>,
+  because nothing could work it out.
+</p>
+
+<div class="tablewrap">
+<table>
+  <tr><th>Needed for each artifact</th><th>Where it comes from</th></tr>
+  <tr><td>Its name, version, source, and whether review is required</td><td class="yes">Worked out automatically</td></tr>
+  <tr><td>Its description</td><td class="yes">Lifted from the file itself where the file says; otherwise best-effort and marked as a guess</td></tr>
+  <tr><td><strong>What kind of thing it is, and where it should land in someone's project</strong></td><td class="no">Genuinely needs a person. These are the two DeliveryOS has always refused to guess</td></tr>
+</table>
+</div>
+
+<h3>The move that makes it tractable: decide per folder, not per file</h3>
+
+<p>
+  Two hundred judgement calls is where quality collapses &mdash; our own import needed two
+  clean-up rounds afterwards, one correcting 134 files and one fixing twenty whose tags were
+  wrong. Asking about a <em>directory</em> instead turns that into about eight decisions
+  somebody can actually hold in their head:
+</p>
+
+<pre><code><span class="y">Agent:</span>  There are 47 markdown files under playbooks/. Three examples:
+        onboarding-call.md, escalation.md, handover.md
+        What are these, and where should they land in a project?
+
+<span class="g">You:</span>    They are process rules. Put them under .claude/rules/playbooks/
+
+<span class="y">Agent:</span>  Understood. That covers 47 of the 212 files. Next: docs/templates/ ...</code></pre>
+
+<p>
+  One answer becomes a rule that covers a whole folder. The rules are written to a file the
+  person reads and edits before anything is committed &mdash; which also means re-running it
+  later is safe, because new files land under the rules already agreed.
+</p>
+
+<p>
+  That is also the same principle as the document templates in the next section: <strong>work
+  out what you can, ask about the rest, never invent.</strong> Two features, one rule.
+</p>
+
+<h3>One-time, not continuous</h3>
+
+<p>
+  The temptation is to have this run constantly, so a document dropped in SharePoint appears
+  automatically. The evidence says do not. Our own import was one-time with a person reviewing
+  it and <em>still</em> needed two rounds of corrections. A continuous version has nobody
+  reviewing, and the two judgement calls do not get easier by being made more often. It is the
+  shape most likely to look like automation and behave like drift.
+</p>
+
+<h2>Part two &mdash; documents that interview you</h2>
+
+<div class="part">
+  <span class="label">The gap</span>
+  <h3>Every document we hand a client starts from a blank page</h3>
+  <p>
+    Onboarding is the obvious one, but it is not special. Proposals, delivery plans, business
+    cases, scoping documents &mdash; each is a document we have written many times, where the
+    <em>structure</em> is always ours and only the <em>answers</em> change per client.
+  </p>
+</div>
+
+<p>
+  So the thing to build is not an onboarding feature. It is <strong>a shape every one of those
+  documents follows</strong>, with onboarding as the first one through it.
+</p>
+
+<h3>The agent asks the questions, not DeliveryOS</h3>
+
+<p>
+  This is the decision everything else follows from. DeliveryOS never asks anyone anything
+  today, and it should stay that way. Instead a template <em>declares its own questions</em>,
+  and one shared instruction file teaches any AI agent how to run the interview.
+</p>
+
+<p>
+  That is not a shortcut. It is the same decision already made once in this product and written
+  down at the time &mdash; when we chose not to have the server ask questions directly:
+</p>
+
+<blockquote style="margin:0 0 16px; padding:12px 18px; border-left:3px solid var(--accent); color:var(--ink-dim); max-width:64ch;">
+  "The agent is a better interviewer anyway: it already has the conversation, it can ask
+  follow-up questions the server never anticipated, and this shape works in every client that
+  speaks the protocol at all."
+</blockquote>
+
+<p>
+  That last clause is also why it answers the other requirement: it works with Claude, Codex,
+  Cursor or a local model, because a plain instruction file is something any of them can read.
+</p>
+
+<h3>How the pieces fit</h3>
+
+<div class="tablewrap">
+<table>
+  <tr><th>Piece</th><th>How many</th><th>Who writes it</th></tr>
+  <tr><td><strong>The method</strong> &mdash; how to interview, what never to do, where to save</td><td class="num">One, shared</td><td class="yes">Us, once</td></tr>
+  <tr><td><strong>The templates</strong> &mdash; onboarding, proposal, delivery plan, business case&hellip;</td><td class="num">Many</td><td class="yes">Anyone. No code involved</td></tr>
+</table>
+</div>
+
+<p>
+  Keeping the method in <em>one</em> place is the whole point. If it were copied into each
+  template, then fixing a bad instruction &mdash; or adding a rule like "never invent an
+  answer" &mdash; would mean editing every template we have ever written, and they would
+  quietly drift apart. This product has been bitten by exactly that shape more than once.
+</p>
+
+<h3>What a template looks like</h3>
+
+<p>
+  A template is an ordinary markdown document with its questions declared at the top. Nothing
+  in DeliveryOS needs to understand them &mdash; the agent reads them:
+</p>
+
+<pre><code><span class="c">client-onboarding.md</span>
+<span class="y">---
+document: Client onboarding
+interview:
+  - ask: What does the team use for chat?
+    options: [Slack, Microsoft Teams, Google Chat]
+  - ask: Where does documentation live?
+  - ask: How does someone get access on their first day?
+---</span>
+
+# Onboarding &mdash; [client name]
+
+## How this team communicates
+[chat tool, and what each channel is for]
+
+## Where things live
+[documentation, code, designs]</code></pre>
+
+<p>
+  Adding a proposal template means writing one more file like that. No engineering, no release,
+  no new concept &mdash; and a template with no interviewer installed is still just a document
+  someone can fill in by hand, exactly like the ones we ship today.
+</p>
+
+<h3>What it looks like in use</h3>
+
+<pre><code><span class="g">&gt;</span> deliveryos pull document-interview      <span class="c">the method, once per project</span>
+<span class="g">&gt;</span> deliveryos pull client-onboarding       <span class="c">the template you need today</span>
+
+<span class="c">...then, in whichever agent you use:</span>
+
+<span class="g">You:</span>    Run the client-onboarding interview for Acme Corp.
+
+<span class="y">Agent:</span>  What does the team use for chat &mdash; Slack, Teams,
+        Google Chat, or something else?
+<span class="g">You:</span>    Teams.
+
+<span class="y">Agent:</span>  And where does documentation live?
+<span class="g">You:</span>    SharePoint, mostly. Some older stuff in Confluence.
+
+<span class="y">Agent:</span>  How does someone get access on their first day?
+<span class="g">You:</span>    Not sure, actually &mdash; IT handles it.
+
+<span class="y">Agent:</span>  Written ONBOARDING.md &mdash; 6 sections, 1 gap flagged
+        where you weren't sure.</code></pre>
+
+<h3>Two rules the method must carry</h3>
+
+<p>
+  <strong>Never invent.</strong> If the client does not know, the document says so rather than
+  filling in something plausible. We already use exactly this rule elsewhere, phrased as
+  <em>"never invent a URL"</em>. A proposal with a confidently wrong budget in it is worse than
+  one with a blank.
+</p>
+
+<p>
+  <strong>Write the finished document to the project's own folder</strong> &mdash; not into the
+  template's folder. This matters more than it sounds:
+</p>
+
+<div class="note">
+  <span class="tag">Why that rule exists</span>
+  <p>
+    DeliveryOS keeps a private copy of every artifact you install, so it can tell when you have
+    edited one &mdash; and contributing sends your edits back to the shared library. A finished
+    document sitting in the template's folder would be treated as an edit, and could be
+    <strong>published to a shared library with a real client's commercials in it</strong>.
+  </p>
+  <p>
+    The product already warns about this shape elsewhere. Nothing prevents it automatically, so
+    the method has to state it &mdash; which is another reason it belongs in one file rather
+    than copied into twenty.
+  </p>
+</div>
+
+<h3>Why this needs no new code</h3>
+
+<p>
+  Two artifacts already in the library do most of it, and the new one is the small gap between
+  them:
+</p>
+
+<div class="tablewrap">
+<table>
+  <tr><th>Already ships</th><th>What it does</th></tr>
+  <tr><td><code>codebase-onboarding</code></td><td>Produces a structured guide &mdash; but reads the <em>code</em> for its facts</td></tr>
+  <tr><td><code>friction-log</code></td><td>A document template with blanks, examples and instructions, filled in by a <em>person</em></td></tr>
+  <tr><td><strong>the method</strong></td><td><strong>The first one's shape, taking its facts from a conversation &mdash; and pointed at any template</strong></td></tr>
+</table>
+</div>
+
+<p>
+  So this is a convention plus one artifact, not a change to the product. Templates after the
+  first are content.
+</p>
+
+<h2>Where this fits the architecture</h2>
+
+<p>
+  Worth answering directly, because it is the strongest argument for doing the storage work
+  now rather than when a client finally asks.
+</p>
+
+<h3>DeliveryOS is already built this way</h3>
+
+<p>
+  The design has a name &mdash; a <em>hexagon</em>: one engine in the middle, and everything
+  around it plugged in through a declared interface rather than wired straight in. The
+  architecture document says so plainly, and adds that it is not wishful thinking:
+</p>
+
+<blockquote style="margin:0 0 16px; padding:12px 18px; border-left:3px solid var(--accent); color:var(--ink-dim); max-width:64ch;">
+  "The repository is a hexagon: one engine, and several driving adapters over it. That is not
+  aspiration &mdash; the test suite fails the build if the newest adapter reaches past its
+  port."
+</blockquote>
+
+<h3>But it is lopsided, and storage is the gap</h3>
+
+<p>
+  There are two sides to a hexagon: things that call <em>in</em> to the engine, and things the
+  engine calls <em>out</em> to. Only one side is properly built:
+</p>
+
+<div class="tablewrap">
+<table>
+  <tr><th>Side</th><th>What plugs in there</th><th>State today</th></tr>
+  <tr>
+    <td><strong>Calling in</strong></td>
+    <td>The command line, the desktop app, the agent surface</td>
+    <td class="yes">Well built &mdash; declared interfaces and seven tests guarding them</td>
+  </tr>
+  <tr>
+    <td><strong>Calling out</strong></td>
+    <td>GitHub&hellip; and nothing else</td>
+    <td class="no">Exactly one, and <strong>no interface for storage at all</strong></td>
+  </tr>
+</table>
+</div>
+
+<p>
+  So git is not plugged in &mdash; it is wired in. Which is why supporting a second kind of
+  library looks daunting and turns out not to be.
+</p>
+
+<h3>It clears the bar this team already set</h3>
+
+<p>
+  An interface you only ever have one implementation of is usually just extra ceremony, so the
+  team's rule is that you build one when a genuine second implementation is waiting. This is
+  the case that rule was written for &mdash; from our own notes on the call where it was
+  agreed:
+</p>
+
+<blockquote style="margin:0 0 16px; padding:12px 18px; border-left:3px solid var(--accent); color:var(--ink-dim); max-width:64ch;">
+  "He named SharePoint, S3 and 'a folder somewhere' as where clients actually keep their
+  libraries, and today only local and GitHub work. That's the one port with a real second
+  implementation waiting &mdash; which is exactly the bar he set for when a port is worth
+  building at all."
+</blockquote>
+
+<p>
+  So this is not architecture for its own sake. It is the one case already identified by name
+  as qualifying, by the person who set the test.
+</p>
+
+<h3>What it looks like</h3>
+
+<pre><code>   the engine                     the plug              what plugs in
+   <span class="c">(reading the library,</span>
+   <span class="c"> updates, edits, drift)</span>
+
+        <span class="g">unchanged</span>       &mdash;&mdash;&mdash;&gt;   <span class="y">"give me a</span>    &mdash;&mdash;&mdash;&gt;   git
+                                <span class="y">folder of files"</span>   &mdash;&mdash;&mdash;&gt;   a synced folder
+                                                    &mdash;&mdash;&mdash;&gt;   <span class="c">(anything later)</span></code></pre>
+
+<p>
+  <strong>The engine does not change at all</strong> &mdash; and that is the evidence the seam
+  is in the right place. Reading the library, checking for updates, spotting your edits and
+  detecting drift already work on plain folders. They ask for a directory and read it. Nothing
+  in them knows or cares that git put it there.
+</p>
+
+<div class="note">
+  <span class="tag">A useful side effect</span>
+  <p>
+    Tests currently have to build real git repositories to have something to read. With a
+    folder library they can use an ordinary directory instead &mdash; faster, and far less
+    machinery. This team has already measured what a declared interface buys: testing the
+    desktop side needs a <strong>1,283-line</strong> harness that starts a real process, while
+    the agent surface tests against a stand-in in <strong>87 milliseconds</strong>.
+  </p>
+</div>
+
+<h3>Two things this deliberately does not become</h3>
+
+<p>
+  <strong>The document templates get no architecture at all.</strong> They are content &mdash;
+  a markdown file with its questions written at the top. Wrapping content in an interface would
+  be inventing structure for something that is not code, and one reason this codebase stays
+  workable is that it does not do that.
+</p>
+
+<p>
+  <strong>The command line and desktop app stay as they are.</strong> They are wired straight
+  into the engine, and that genuinely costs something &mdash; it is why the desktop tests need
+  that 1,283-line harness. But neither has a second implementation waiting, so neither meets
+  the bar. "Make it all hexagonal" is how a real, narrow architectural win becomes a quarter of
+  churn.
+</p>
+
+<h2>The thing nobody had noticed</h2>
+
+<p>
+  You asked for other agents &mdash; Codex, Cursor, local models &mdash; and checking that
+  turned up something worth knowing:
+</p>
+
+<div class="tablewrap">
+<table>
+  <tr><th>&nbsp;</th><th class="num">Count</th><th>&nbsp;</th></tr>
+  <tr><td>Artifacts that install into a Claude-specific folder</td><td class="num">213 of 230</td><td class="no">93%</td></tr>
+  <tr><td>Places in the whole codebase that know another agent exists</td><td class="num">0</td><td class="no">none</td></tr>
+</table>
+</div>
+
+<p>
+  So the <em>library</em> is Claude-shaped, not just the new artifact. Supporting Codex means
+  the destination folder stops being a fixed string and starts depending on the project &mdash;
+  which the product already does elsewhere, for a different reason, in about twenty lines.
+</p>
+
+<p>
+  We are doing Claude first, as agreed. This is written down so that when a client turns up
+  using something else, nobody rediscovers it as a surprise.
+</p>
+
+<h2>What we are deliberately not doing</h2>
+
+<ul>
+  <li><strong>Not integrating with Microsoft or Google directly.</strong> No app approvals, no
+  tokens, no per-client IT conversation. The synced folder covers all three services with one
+  adapter. Revisit only if a real client needs version history the folder cannot give.</li>
+  <li><strong>Not building a template engine.</strong> The agent writes the document.
+  DeliveryOS does not fill in blanks &mdash; adding that would create a second, competing way
+  to configure an artifact.</li>
+  <li><strong>Not building a questionnaire into the product.</strong> That is weeks of work to
+  do worse than a conversation already does.</li>
+  <li><strong>Nothing for Codex or Cursor yet.</strong></li>
+</ul>
+
+<h2>Order of work</h2>
+
+<ol>
+  <li>
+    <strong>Make a pasted link fail well.</strong> <em>Done.</em> Everything else here is
+    weeks; this was a day, and it is the first thing a client-facing flow touches. Pasting a
+    SharePoint link used to produce git's own error message; a link copied from a browser while
+    looking at a folder was silently misread; an empty one printed a crash report; and a
+    private link could hang forever with nothing to cancel. All five now fail with a sentence
+    that says what to do instead.
+  </li>
+  <li><strong>This document.</strong></li>
+  <li>
+    <strong>The method, plus onboarding as the first template</strong> &mdash; one artifact and
+    one template, no code, usable on the next client immediately. Proposal, delivery plan and
+    business case follow as content whenever somebody writes them.
+  </li>
+  <li>
+    <strong>Folder libraries</strong> &mdash; read-only, plus the honest refusal when someone
+    tries to contribute back. This is the piece that turns a "no" into a "yes" in a sales
+    conversation.
+  </li>
+  <li>
+    <strong>Adoption</strong> &mdash; the layer that makes a client's folder readable at all.
+    Start with the narrowest useful case: a repository already on GitHub, markdown only, one
+    folder rule. The test that it worked is not "a pull request opened" but
+    <em>installing one of the adopted artifacts puts the original file in the right place</em>.
+  </li>
+  <li><strong>Other agents</strong> &mdash; when a client actually uses one.</li>
+</ol>
+
+<footer>
+  <p>
+    <strong>Status:</strong> a plan, not built. The counts and the code findings were measured
+    in the repositories; the examples are illustrative of the intended behaviour rather than
+    transcripts of working software. The onboarding artifact needs no product changes; folder
+    libraries do.
+  </p>
+</footer>
+
+</div>
