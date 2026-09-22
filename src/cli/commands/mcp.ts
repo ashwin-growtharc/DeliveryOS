@@ -1,11 +1,4 @@
 import { Command } from 'commander';
-import { runMcpServer } from '../../mcp/server';
-import {
-  createEngineConfigPort,
-  createEngineContributePort,
-  createEngineReadPort,
-} from '../../mcp/engineAdapter';
-import { createContributionTokens } from '../../mcp/contributionToken';
 
 /**
  * A subcommand rather than a second binary.
@@ -28,6 +21,18 @@ export function registerMcpCommand(program: Command): void {
         + 'MCP client such as Claude Code or Claude Desktop',
     )
     .action(async () => {
+      // Imported here and not at the top of the file. Every command module is
+      // registered on every CLI start, so a top-level import of the server
+      // made `deliveryos --help` load the MCP SDK -- 180 ms, measured -- to
+      // print usage text. `test/e2e/startupWeight.e2e.test.ts` asserts the
+      // SDK stays out of every command but this one.
+      const [{ runMcpServer }, adapter, { createContributionTokens }] = await Promise.all([
+        import('../../mcp/server'),
+        import('../../mcp/engineAdapter'),
+        import('../../mcp/contributionToken'),
+      ]);
+      const { createEngineConfigPort, createEngineContributePort, createEngineReadPort } = adapter;
+
       // `program.version()` rather than a literal: see the note on
       // `McpServerDeps.version`. Commander returns the configured string when
       // called with no argument.
