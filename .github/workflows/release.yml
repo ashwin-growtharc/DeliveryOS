@@ -1,0 +1,142 @@
+name: Release
+
+# Builds and publishes a release when a `v*` tag is pushed.
+#
+# STATUS: written, not yet exercised. Every release so far has been cut by hand
+# from the author's machine, following docs/release-process.md. The first tag
+# pushed after this lands IS the verification of this workflow -- if it fails,
+# the manual runbook still works and nothing about the tag needs undoing.
+#
+# What it produces, and why each piece:
+#   deliveryos_<v>_x64-setup.exe  the NSIS installer -- the one to distribute.
+#                                 It puts `deliveryos` on PATH; the MSI does not,
+#                                 which is why the MSI is built and NOT attached.
+#   deliveryos_<v>_x64-setup.exe.sig  detached minisign signature, only when the
+#                                 TAURI_SIGNING_PRIVATE_KEY secret is set. The
+#                                 auto-updater refuses an unsigned update.
+#   deliveryos-cli.exe            the standalone CLI, for people who want the
+#                                 command without the app.
+#   latest.json                   what the running app's updater fetches. It
+#                                 MUST be attached under exactly that name, and
+#                                 the release MUST be the repository's latest
+#                                 non-prerelease -- tauri.conf.json points at
+#                                 releases/latest/download/latest.json.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: build and publish
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Same pin as ci.yml, for the same reason: package.json's engines floor.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.12.0'
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install
+        run: npm ci
+
+      # The tag must be the version the code says it is. Tagging the wrong
+      # commit is the easiest release mistake to make and the hardest to see
+      # afterwards -- the installer's filename would carry one version and the
+      # CLI inside it another. test/unit/cliVersion.test.ts keeps the four
+      # in-repo pins together; this keeps the tag with them.
+      - name: Tag matches package.json
+        shell: bash
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
+            echo "tag is ${GITHUB_REF_NAME} but package.json is ${version}" >&2
+            exit 1
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+        id: version
+
+      # The same four steps, in the same order, as docs/release-process.md --
+      # tauri.conf.json silently depends on the first three having run.
+      - name: Build engine
+        run: npm run build
+      - name: Build sidecar
+        run: npm run build:sidecar
+      - name: Build CLI
+        run: npm run build:cli
+
+      - name: Build installer
+        working-directory: src-tauri
+        env:
+          # Optional. Absent, the installer still builds but no .sig is produced
+          # and the updater will not accept the release as an update -- fresh
+          # installs are unaffected. Set the secret to the contents of the key
+          # file, not a path; there is no file on the runner.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npx tauri build
+
+      # latest.json is hand-written in the manual runbook; here it is derived,
+      # so the signature and URL cannot disagree with the asset actually
+      # attached. Skipped when there is no signature, because an unsigned entry
+      # would make every running app's update check fail loudly instead of
+      # finding nothing.
+      - name: Write latest.json
+        id: latest
+        shell: bash
+        run: |
+          version="${{ steps.version.outputs.version }}"
+          installer="src-tauri/target/release/bundle/nsis/deliveryos_${version}_x64-setup.exe"
+          test -f "$installer" || { echo "installer not found at $installer" >&2; exit 1; }
+          if [ -f "${installer}.sig" ]; then
+            node -e '
+              const fs = require("fs");
+              const [version, sigPath, repo, tag] = process.argv.slice(1);
+              const out = {
+                version,
+                notes: "See CHANGELOG.md for what changed.",
+                pub_date: new Date().toISOString(),
+                platforms: {
+                  "windows-x86_64": {
+                    signature: fs.readFileSync(sigPath, "utf-8").trim(),
+                    url: `https://github.com/${repo}/releases/download/${tag}/deliveryos_${version}_x64-setup.exe`,
+                  },
+                },
+              };
+              fs.writeFileSync("latest.json", JSON.stringify(out, null, 2) + "\n");
+            ' "$version" "${installer}.sig" "${{ github.repository }}" "${GITHUB_REF_NAME}"
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "no signature produced; release will install fresh but not auto-update" >&2
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${{ steps.version.outputs.version }}"
+          nsis="src-tauri/target/release/bundle/nsis"
+          assets=("${nsis}/deliveryos_${version}_x64-setup.exe" "build/deliveryos-cli.exe")
+          if [ "${{ steps.latest.outputs.signed }}" = "true" ]; then
+            assets+=("${nsis}/deliveryos_${version}_x64-setup.exe.sig" "latest.json")
+          fi
+          gh release create "${GITHUB_REF_NAME}" "${assets[@]}" \
+            --title "${GITHUB_REF_NAME}" \
+            --notes "See CHANGELOG.md for what changed in ${GITHUB_REF_NAME}." \
+            --verify-tag

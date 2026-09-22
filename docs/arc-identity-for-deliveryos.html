@@ -1,0 +1,678 @@
+<title>Logging In To DeliveryOS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --bg: #faf8f3; --card: #fffefb; --ink: #1b2229; --ink-dim: #5a656f;
+    --line: #e2ded4; --accent: #0d6a5c; --accent-soft: #e3efe9;
+    --amber: #8a5a00; --amber-soft: #f8efda; --code-bg: #0d1318;
+    --code-fg: #dbe5ec; --code-dim: #6f7f8c; --red: #9c2f2f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #10161b; --card: #182027; --ink: #e7eaed; --ink-dim: #97a3ad;
+      --line: #29323b; --accent: #5cc3ae; --accent-soft: #123029;
+      --amber: #dba44a; --amber-soft: #2d2412; --code-bg: #141b22;
+      --code-fg: #dbe5ec; --code-dim: #7f8f9c; --red: #e08b84;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #10161b; --card: #182027; --ink: #e7eaed; --ink-dim: #97a3ad;
+    --line: #29323b; --accent: #5cc3ae; --accent-soft: #123029;
+    --amber: #dba44a; --amber-soft: #2d2412; --code-bg: #141b22;
+    --code-fg: #dbe5ec; --code-dim: #7f8f9c; --red: #e08b84;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font-family: 'IBM Plex Sans', system-ui, sans-serif;
+    font-size: 16px; line-height: 1.65; margin: 0; padding: 0 20px 80px;
+  }
+  .wrap { max-width: 800px; margin: 0 auto; }
+
+  header { padding: 56px 0 14px; border-bottom: 2px solid var(--ink); }
+  .eyebrow {
+    font-family: 'IBM Plex Mono', monospace; font-size: 11px;
+    letter-spacing: .14em; text-transform: uppercase;
+    color: var(--accent); margin: 0 0 12px;
+  }
+  h1 {
+    font-family: 'IBM Plex Serif', Georgia, serif;
+    font-size: 40px; line-height: 1.12; font-weight: 600;
+    margin: 0 0 14px; text-wrap: balance;
+  }
+  .standfirst { font-size: 18px; color: var(--ink-dim); margin: 0 0 20px; max-width: 62ch; }
+
+  h2 {
+    font-family: 'IBM Plex Serif', Georgia, serif;
+    font-size: 25px; font-weight: 600; margin: 54px 0 6px; text-wrap: balance;
+  }
+  h3 { font-size: 16.5px; font-weight: 600; margin: 28px 0 6px; }
+  p { margin: 0 0 14px; max-width: 68ch; }
+  ul, ol { max-width: 68ch; padding-left: 20px; }
+  li { margin-bottom: 7px; }
+
+  code {
+    font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: .87em;
+    background: var(--accent-soft); color: var(--accent);
+    padding: 1px 5px; border-radius: 3px;
+  }
+  pre {
+    background: var(--code-bg); color: var(--code-fg);
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: 13px; line-height: 1.6; padding: 16px 18px;
+    border-radius: 7px; overflow-x: auto; margin: 0 0 16px;
+  }
+  pre code { background: none; color: inherit; padding: 0; font-size: inherit; }
+  pre .c { color: var(--code-dim); }
+  pre .k { color: #7fd3bd; }
+  pre .s { color: #e0b877; }
+
+  .lede {
+    background: var(--card); border: 1px solid var(--line);
+    border-left: 3px solid var(--accent);
+    padding: 18px 22px; border-radius: 0 7px 7px 0; margin: 26px 0;
+  }
+  .lede p:last-child { margin-bottom: 0; }
+
+  .note {
+    background: var(--amber-soft); border: 1px solid var(--line);
+    border-left: 3px solid var(--amber);
+    padding: 14px 18px; border-radius: 0 7px 7px 0; margin: 22px 0; font-size: 15px;
+  }
+  .note p:last-child { margin-bottom: 0; }
+  .note .tag {
+    font-family: 'IBM Plex Mono', monospace; font-size: 11px;
+    letter-spacing: .1em; text-transform: uppercase; color: var(--amber);
+    display: block; margin-bottom: 5px;
+  }
+
+  .route {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 8px; padding: 20px 24px; margin: 20px 0;
+  }
+  .route h3 { margin-top: 0; font-size: 19px; font-family: 'IBM Plex Serif', Georgia, serif; }
+  .route .label {
+    font-family: 'IBM Plex Mono', monospace; font-size: 11px;
+    letter-spacing: .12em; text-transform: uppercase;
+    color: var(--accent); display: block; margin-bottom: 4px;
+  }
+  .route.heavy .label { color: var(--amber); }
+  .route p:last-child { margin-bottom: 0; }
+
+  .tablewrap { overflow-x: auto; margin: 0 0 18px; }
+  table { border-collapse: collapse; width: 100%; font-size: 14.5px; }
+  th, td {
+    text-align: left; padding: 9px 12px;
+    border-bottom: 1px solid var(--line); vertical-align: top;
+  }
+  th {
+    font-family: 'IBM Plex Mono', monospace; font-size: 11px;
+    letter-spacing: .09em; text-transform: uppercase; color: var(--ink-dim);
+    border-bottom: 2px solid var(--line);
+  }
+  td.yes { color: var(--accent); font-weight: 500; }
+  td.no { color: var(--red); font-weight: 500; }
+  table.cmp th:first-child, table.cmp td:first-child { width: 25%; }
+  table.cmp th:nth-child(2) { color: var(--accent); }
+  table.cmp th:nth-child(3) { color: var(--amber); }
+  table.cmp td:nth-child(2) { background: color-mix(in srgb, var(--accent-soft) 45%, transparent); }
+  table.cmp td:nth-child(3) { background: color-mix(in srgb, var(--amber-soft) 45%, transparent); }
+
+  ol.steps { list-style: none; padding: 0; counter-reset: s; }
+  ol.steps > li {
+    counter-increment: s; position: relative; padding: 0 0 18px 44px;
+    margin: 0 0 0 13px; border-left: 1px solid var(--line);
+  }
+  ol.steps > li:last-child { border-left-color: transparent; padding-bottom: 0; }
+  ol.steps > li::before {
+    content: counter(s); position: absolute; left: -13px; top: 0;
+    width: 26px; height: 26px; border-radius: 50%;
+    background: var(--accent); color: var(--bg);
+    font-family: 'IBM Plex Mono', monospace; font-size: 12px; font-weight: 500;
+    display: grid; place-items: center;
+  }
+  ol.steps b { display: block; margin-bottom: 2px; }
+  ol.steps .who {
+    font-family: 'IBM Plex Mono', monospace; font-size: 11px;
+    letter-spacing: .08em; text-transform: uppercase; color: var(--ink-dim);
+  }
+
+  .scale { display: flex; gap: 14px; flex-wrap: wrap; margin: 20px 0 24px; }
+  .scale div {
+    flex: 1 1 190px; border: 1px solid var(--line); border-radius: 7px;
+    padding: 14px 16px; background: var(--card);
+  }
+  .scale .n {
+    font-family: 'IBM Plex Mono', monospace; font-size: 26px; font-weight: 500;
+    display: block; line-height: 1.1; margin-bottom: 3px;
+    font-variant-numeric: tabular-nums;
+  }
+  .scale .a .n { color: var(--accent); }
+  .scale .b .n { color: var(--amber); }
+  .scale .cap { font-size: 13.5px; color: var(--ink-dim); }
+
+  footer {
+    margin-top: 60px; padding-top: 18px; border-top: 1px solid var(--line);
+    font-size: 13.5px; color: var(--ink-dim);
+  }
+</style>
+
+<div class="wrap">
+
+<header>
+  <p class="eyebrow">DeliveryOS &middot; Identity</p>
+  <h1>Logging In To DeliveryOS</h1>
+  <p class="standfirst">
+    DeliveryOS has never asked anyone to log in, and it stores no password,
+    token or key of its own. That is not an oversight &mdash; it is what running
+    on your own machine buys you, and git already answers the permission half.
+    Hosting is what takes both away.
+  </p>
+</header>
+
+<div class="lede">
+  <p>
+    <strong>The short version.</strong> Locally, DeliveryOS doesn't authenticate
+    you &mdash; it <em>borrows</em> three identities you already have. A hosted
+    server can borrow none of them, which is the entire reason a login question
+    exists.
+  </p>
+  <p>
+    If it stays local, there is no work here at all. If it is hosted, there are
+    two ways to get a login, and they differ by about seventy-five times in size.
+  </p>
+</div>
+
+<h2>How DeliveryOS knows who you are today</h2>
+
+<p>
+  It doesn't, directly. Every action that needs an identity reaches for one that
+  is already on your machine. Checked in the source: DeliveryOS holds no
+  credential of its own anywhere.
+</p>
+
+<div class="tablewrap">
+<table>
+  <tr><th>When it needs to know</th><th>Whose identity it uses</th><th>Where that comes from</th></tr>
+  <tr><td>Can you run it at all?</td><td>Your computer login</td><td>It runs as a child of your editor, as you</td></tr>
+  <tr><td>Reading the catalog</td><td>Your git access</td><td>Your SSH key or git credential helper</td></tr>
+  <tr><td>Who authored a contribution</td><td>Your git identity</td><td><code>git config user.name</code> / <code>user.email</code></td></tr>
+  <tr><td>Permission to open a pull request</td><td>Your GitHub CLI login</td><td>It asks <code>gh</code> for your token, and never keeps it</td></tr>
+</table>
+</div>
+
+<p>
+  This is why contributing works the way people expect. A pull request from
+  DeliveryOS arrives <strong>from you</strong>, with your name on the commit,
+  against repositories you already have access to. Nobody granted DeliveryOS
+  anything &mdash; it is standing in your shoes.
+</p>
+
+<p>
+  It is also why there is nothing to leak. There is no DeliveryOS account, no
+  DeliveryOS password, and no store of tokens to be stolen.
+</p>
+
+<h2>What hosting takes away</h2>
+
+<p>
+  A server in a data centre has none of those three. It is not running as you.
+  It has no git identity of yours. It has no <code>gh</code> login of yours. Every
+  borrowed identity in the table above disappears at once.
+</p>
+
+<p>
+  So a hosted DeliveryOS has to do something it has never had to do: ask you to
+  <strong>prove</strong> who you are. That is the whole of the work below.
+</p>
+
+<div class="note">
+  <span class="tag">The consequence people miss</span>
+  <p>
+    Two things can never be hosted, no matter how good the login is.
+    <strong>Contributing pushes as you</strong>, and
+    <strong>installing writes into your working copy</strong> &mdash; and a login
+    proves who you are without handing over your git access or your files. So
+    hosting buys <em>browsing</em>. It does not buy the rest, and no amount of
+    auth work changes that.
+  </p>
+</div>
+
+<h2>Who is allowed to do what</h2>
+
+<p>
+  Identity and permission are different questions. The section above is
+  <em>who are you</em>. This one is <em>what may you do</em> &mdash; and locally
+  the answer is not "nothing enforces it", it is "something else does".
+</p>
+
+<h3>DeliveryOS has no permission system, on purpose</h3>
+
+<p>
+  Checked in the source: there is no refusal anywhere based on who you are.
+  <code>review_required</code> is recorded in an artifact's manifest and reported
+  to callers, but nothing gates on it. <code>owner</code> is a label. Contributing
+  opens a <strong>pull request on a branch</strong> &mdash; never a direct push.
+</p>
+
+<p>
+  That is not a missing feature. Git is already the access control, and it is
+  the one the organisation actually runs on:
+</p>
+
+<div class="tablewrap">
+<table>
+  <tr><th>Question</th><th>Answered by</th></tr>
+  <tr><td>Who can see an artifact</td><td>Who can clone the repository it lives in</td></tr>
+  <tr><td>Who can propose a change</td><td>Who can push a branch and open a pull request</td></tr>
+  <tr><td>Who approves it</td><td>Branch protection, code owners, reviewers</td></tr>
+  <tr><td>Someone leaves the company</td><td>Remove them from the organisation &mdash; effective everywhere at once</td></tr>
+</table>
+</div>
+
+<div class="note">
+  <span class="tag">Why local roles would be worse than none</span>
+  <p>
+    The catalog is a git clone on your own disk, and the tool runs as you.
+    Anything DeliveryOS refused, you could still do with plain <code>git</code>
+    &mdash; so a local permission system would <em>look</em> like a control
+    without being one. People would trust it, and it would not hold. Leaving the
+    enforcement where it is real is the safer design, not the lazier one.
+  </p>
+</div>
+
+<h3>Hosting is what makes roles enforceable</h3>
+
+<p>
+  A server sits between the person and the catalog, so for the first time a rule
+  can actually be applied rather than suggested &mdash; "this team sees only
+  these remotes", say.
+</p>
+
+<p>
+  On Route A that arrives largely for free: ArcAI's pass already carries the
+  person's <strong>roles, permissions and teams</strong>, worked out fresh each
+  time one is issued. It also refuses to issue for a deactivated account, so
+  offboarding genuinely propagates rather than waiting for a token to expire.
+</p>
+
+<p>
+  On Route B it does not arrive at all &mdash; it is another
+  <strong>4,428 lines</strong> to port, on top of the 7,605:
+</p>
+
+<div class="tablewrap">
+<table>
+  <tr><th>Part</th><th>Lines</th><th>What it does</th></tr>
+  <tr><td><code>role_catalog/</code></td><td>2,406</td><td>What roles exist and what they grant</td></tr>
+  <tr><td><code>idp_role_maps/</code></td><td>685</td><td>Mapping company groups onto roles</td></tr>
+  <tr><td><code>teams/</code></td><td>519</td><td>Team membership</td></tr>
+  <tr><td><code>permission_sets/</code></td><td>489</td><td>Bundles of permissions</td></tr>
+  <tr><td><code>user_levels/</code></td><td>329</td><td>Seniority tiers</td></tr>
+  <tr><td><strong>Additional to port</strong></td><td><strong>4,428</strong></td><td>&nbsp;</td></tr>
+</table>
+</div>
+
+<p>
+  Worth saying plainly: <strong>nobody has asked for roles yet.</strong> This
+  section exists so the option is understood, not because it is needed. If
+  hosting never happens, neither does this.
+</p>
+
+<h2>If it stays local</h2>
+
+<p>
+  Then this page stops here. No login, no server, no accounts, no dependency on
+  anyone else's identity system, and nothing to operate. All nine tools keep
+  working, including the two that hosting could never offer.
+</p>
+
+<p>
+  The one thing local cannot do is serve somebody without a terminal &mdash; and
+  that is a <em>packaging</em> problem, not a login problem. It is also further
+  along than anyone has written down: <code>npm run build:cli</code> already
+  produces a standalone executable, and it runs on a machine with no Node, no
+  git and no GitHub CLI installed &mdash; verified by listing the real catalog
+  from an empty folder with the toolchain removed from the path.
+</p>
+
+<p>
+  What is missing is not the build. It is a signed installer, a first-run check
+  that says "please install Git" instead of printing a crash, and one clean
+  machine to prove it. None of that needs a login, a server, or anyone else's
+  identity system.
+</p>
+
+<h2>A middle option: local tool, central login</h2>
+
+<p>
+  There is a third shape, and it is worth naming because it sounds like the best
+  of both: keep DeliveryOS on people's machines, but have it log in to ArcAI
+  anyway. Nothing is hosted, yet there is an account behind it.
+</p>
+
+<p>
+  The direction of the login flips. In the hosted case DeliveryOS <em>checks</em>
+  passes. Here the local command line <em>obtains</em> one &mdash; it opens a
+  browser, you sign in to ArcAI, and it gets a pass back for later use.
+</p>
+
+<h3>Can arc-identity do it? Yes, with two constraints</h3>
+
+<p>
+  Its client records allow a client with no secret, which is the correct shape
+  for a command-line tool. Two things it does not do, both checked:
+</p>
+
+<ul>
+  <li>
+    <strong>No device flow.</strong> There is no "open this URL and type this
+    code" path, so <strong>anything without a browser on the same machine cannot
+    sign in</strong> &mdash; an SSH session, a container, a CI job.
+  </li>
+  <li>
+    <strong>Redirect addresses are matched exactly</strong>, with no allowance
+    for a changing local port. The tool would have to claim one fixed port and
+    have it registered in advance, which fails when something else is already
+    using it.
+  </li>
+</ul>
+
+<h3>What would it actually be for?</h3>
+
+<p>
+  This is the part worth settling first, because three of the four plausible
+  answers are already answered by something we have.
+</p>
+
+<div class="tablewrap">
+<table>
+  <tr><th>The hope</th><th>Verdict</th></tr>
+  <tr>
+    <td>Control who may run DeliveryOS</td>
+    <td class="no">Cannot work. The catalog is a git clone on the machine and the tool runs as you &mdash; the same reason local roles cannot hold</td>
+  </tr>
+  <tr>
+    <td>Keep some catalogs private</td>
+    <td class="no">Git already does this, and enforces it on the server where it is real</td>
+  </tr>
+  <tr>
+    <td>Curate the list of sources centrally</td>
+    <td class="no">Git already does this too &mdash; publish the list as a repository and let people pull it. No login, no server</td>
+  </tr>
+  <tr>
+    <td>See which artifacts actually get used</td>
+    <td class="yes">Genuine. Git cannot answer this, and neither can we today</td>
+  </tr>
+</table>
+</div>
+
+<p>
+  So of the three things hosting was going to buy, this middle path delivers
+  <strong>one</strong>. Browsing with nothing installed still needs a hosted
+  server; this does not provide it.
+</p>
+
+<div class="note">
+  <span class="tag">And it spends something we currently have</span>
+  <p>
+    Today DeliveryOS stores no credential at all &mdash; it borrows the GitHub
+    CLI's token and never keeps it. A sign-in means a <strong>token saved on
+    disk</strong>, in every developer's home directory. "Nothing to leak" stops
+    being true, in exchange for one answer.
+  </p>
+</div>
+
+<h3>Two things to settle before building it</h3>
+
+<ol>
+  <li>
+    <strong>Does usage have to be per-person?</strong> Per-team or anonymous
+    counting answers "which artifacts get used" just as well, needs no login at
+    all, and avoids both the stored token and the question of tracking
+    individuals.
+  </li>
+  <li>
+    <strong>Does it need ArcAI at all?</strong> The tool already knows the git
+    identity of whoever is running it. If that is good enough to attribute usage,
+    the whole login disappears.
+  </li>
+</ol>
+
+<p>
+  Worth being plain: this option is cheaper than hosting and buys less. It is
+  only the right shape if usage visibility is the actual goal and the other two
+  are not.
+</p>
+
+<h2>If it is hosted: whose front door</h2>
+
+<p>
+  ArcAI has a service called <code>arc-identity</code>. It is the front door of a
+  building: it checks who you are once and gives you a signed pass, and every
+  room inside can check that pass without knowing how you were identified.
+</p>
+
+<p>
+  The signature can be checked <strong>offline</strong> &mdash; our server would
+  hold no shared secret and would not call ArcAI on every request. It downloads a
+  public key once and checks the maths itself.
+</p>
+
+<p>
+  It was built for exactly this case. The work is titled <em>"OAuth 2.1
+  authorization server for FastMCP solutions"</em>, so that <em>"independent
+  solutions authenticate the same users as the ArcAI Platform."</em>
+</p>
+
+<div class="tablewrap">
+<table>
+  <tr><th>Thing</th><th>State</th></tr>
+  <tr><td>OAuth 2.1 authorization server</td><td class="yes">Merged to main</td></tr>
+  <tr><td>Login, consent, PKCE, refresh, revoke</td><td class="yes">Working</td></tr>
+  <tr><td>Turned on</td><td class="no">Off by default</td></tr>
+  <tr><td>An audience name for DeliveryOS</td><td class="no">Does not exist yet</td></tr>
+  <tr><td>Anything on the DeliveryOS side</td><td class="no">Not started</td></tr>
+</table>
+</div>
+
+<div class="route">
+  <span class="label">Route A</span>
+  <h3>Borrow ArcAI's front door</h3>
+  <p>
+    ArcAI issues the passes; we check them. We never see a password, never store
+    an account, never run a login screen &mdash; which keeps the property local
+    already has: nothing of anyone's to leak.
+  </p>
+</div>
+
+<div class="route heavy">
+  <span class="label">Route B</span>
+  <h3>Build our own front door</h3>
+  <p>
+    DeliveryOS issues its own passes: our accounts, our login screen, our signing
+    keys, our database &mdash; porting what ArcAI already has into TypeScript,
+    because their service is Python.
+  </p>
+</div>
+
+<h3>How Route A works</h3>
+
+<ol class="steps">
+  <li><b>Someone adds DeliveryOS in Claude</b><span class="who">Their browser</span>They paste our URL. No install, no terminal.</li>
+  <li><b>Claude asks our server how to log in</b><span class="who">Claude &rarr; DeliveryOS</span>We answer with a small file: <em>I don't do logins, ArcAI does. Here is where.</em></li>
+  <li><b>Claude asks ArcAI where its front door is</b><span class="who">Claude &rarr; ArcAI</span>ArcAI publishes this already. We write nothing.</li>
+  <li><b>The person logs in to ArcAI</b><span class="who">Their browser &rarr; ArcAI</span>Their normal login. We never see the password.</li>
+  <li><b>ArcAI hands back a signed pass</b><span class="who">ArcAI &rarr; Claude</span>Good for ten minutes, renewed quietly.</li>
+  <li><b>Every tool call carries the pass, and we check it</b><span class="who">Claude &rarr; DeliveryOS</span>This check is the only piece we write.</li>
+</ol>
+
+<p>One function. Take a pass, return who it belongs to, or throw.</p>
+
+<pre><code><span class="c">// Downloaded once, cached, refreshed automatically.</span>
+<span class="k">const</span> keys = createRemoteJWKSet(<span class="k">new</span> URL(`${ISSUER}/.well-known/jwks.json`));
+
+<span class="k">export const</span> arcIdentity = {
+  <span class="k">async</span> verifyAccessToken(token) {
+    <span class="k">const</span> { payload } = <span class="k">await</span> jwtVerify(token, keys, {
+      issuer:   ISSUER,    <span class="c">// who signed it</span>
+      audience: AUDIENCE,  <span class="c">// who it was meant for</span>
+    });
+    <span class="k">return</span> {
+      token,
+      clientId:  String(payload.client_id ?? <span class="s">''</span>),
+      scopes:    String(payload.scope ?? <span class="s">''</span>).split(<span class="s">' '</span>).filter(Boolean),
+      expiresAt: payload.exp,
+      extra:     { userId: payload.sub },
+    };
+  },
+};</code></pre>
+
+<h3>What Route B actually contains</h3>
+
+<p>
+  "Pull their auth code across so it's ours" sounds like copying a folder. It is
+  a rewrite &mdash; their service is Python, ours is TypeScript &mdash; and a
+  rewrite of security code, where the bugs are the kind somebody else finds
+  first.
+</p>
+
+<p>
+  Issuing a pass is the easy part. Everything that must be true <em>before</em>
+  you issue one is the real service. Counted in their repository:
+</p>
+
+<div class="tablewrap">
+<table>
+  <tr><th>Part</th><th>Lines</th><th>What it does</th></tr>
+  <tr><td><code>oauth/</code></td><td>1,132</td><td>Issue, redeem, refresh, revoke</td></tr>
+  <tr><td><code>auth/</code></td><td>4,330</td><td>Logins, SSO, signing keys, rotation</td></tr>
+  <tr><td><code>users/</code></td><td>837</td><td>Accounts and their lifecycle</td></tr>
+  <tr><td><code>clients/</code></td><td>358</td><td>Which apps may ask for a pass</td></tr>
+  <tr><td>models, config, wiring</td><td>948</td><td>Tables and startup</td></tr>
+  <tr><td><strong>Minimum to port</strong></td><td><strong>~7,605</strong></td><td>&nbsp;</td></tr>
+  <tr><td>Their tests, which we would not inherit</td><td>13,887</td><td>&nbsp;</td></tr>
+</table>
+</div>
+
+<div class="scale">
+  <div class="a"><span class="n">~100</span><span class="cap">Lines for Route A. No database.</span></div>
+  <div class="b"><span class="n">~7,600</span><span class="cap">Lines to port for Route B, plus a database and its migrations.</span></div>
+</div>
+
+<p>
+  And the part with no line count: on Route B <strong>we store people's
+  credentials</strong>, permanently. That is the one property local has today
+  &mdash; nothing to leak &mdash; deliberately given away.
+</p>
+
+<h3>Route A and Route B, side by side</h3>
+
+<div class="tablewrap">
+<table class="cmp">
+  <tr><th>&nbsp;</th><th>Route A &mdash; borrow</th><th>Route B &mdash; own it</th></tr>
+  <tr><td>Code we write</td><td>~100 lines</td><td>~7,600 lines, ported by hand</td></tr>
+  <tr><td>Database</td><td>None</td><td>Postgres, with migrations</td></tr>
+  <tr><td>Who stores passwords</td><td>ArcAI</td><td>Us, forever</td></tr>
+  <tr><td>Who owns accounts</td><td>ArcAI &mdash; already does</td><td>Us: create, disable, remove</td></tr>
+  <tr><td>Signing keys</td><td>Not ours</td><td>Ours to generate and rotate</td></tr>
+  <tr><td>Time to something working</td><td>Days</td><td>Weeks, then hardening</td></tr>
+  <tr><td>If ArcAI is down</td><td>New logins fail; issued passes keep working</td><td>Unaffected</td></tr>
+  <tr><td>If ArcAI changes their login</td><td>We follow, on their schedule</td><td>Unaffected</td></tr>
+  <tr><td>Users' experience</td><td>Their existing ArcAI login</td><td>A second account to remember</td></tr>
+  <tr><td>If we get it wrong</td><td>Nothing to leak &mdash; we hold no secrets</td><td>A credential breach is ours</td></tr>
+  <tr><td>Roles and teams</td><td>Arrive in the pass, free</td><td>A further ~4,400 lines</td></tr>
+  <tr><td>Independence from ArcAI</td><td>Via configuration &mdash; see below</td><td>Total, and paid for in full</td></tr>
+</table>
+</div>
+
+<h3>The independence is free, and it isn't in the code</h3>
+
+<p>
+  Route A's hundred lines contain exactly two ArcAI-specific facts &mdash; an
+  address and a name &mdash; and neither is written into the code:
+</p>
+
+<pre><code>DELIVERYOS_OAUTH_ISSUER=<span class="c">&lt;the login service&gt;</span>
+DELIVERYOS_OAUTH_AUDIENCE=<span class="c">&lt;the name reserved for us&gt;</span></code></pre>
+
+<p>
+  Point them at ArcAI and we use ArcAI. Point them at a standard login product,
+  another team's, or our own one day, and DeliveryOS follows with
+  <strong>no code change at all</strong>. Same check, different addresses.
+</p>
+
+<p>
+  So Route A is not "depending on ArcAI". It is <em>supporting any login service,
+  and choosing ArcAI first because the team already has accounts there.</em>
+  Route B buys the same freedom for 7,600 lines and custody of everyone's
+  credentials.
+</p>
+
+<div class="note">
+  <span class="tag">The one discipline that makes this true</span>
+  <p>
+    Those two values must be configuration from the first line written, never
+    constants in the source. Free today; a rewrite if discovered later. It is the
+    difference between <em>DeliveryOS works with ArcAI</em> and
+    <em>DeliveryOS is part of ArcAI</em>.
+  </p>
+</div>
+
+<h3>What Route A needs from the platform team</h3>
+
+<ol>
+  <li><strong>An audience name reserved for DeliveryOS.</strong> The only ask that needs something <em>created</em>, so worth raising first. Their own note says why: without it, <em>"every solution in the cluster accepts every other solution's tokens."</em></li>
+  <li><strong>Register DeliveryOS as a client.</strong> There is no self-registration endpoint, so this is done by hand, once.</li>
+  <li><strong>Turn the feature on</strong> in whichever environment we target first.</li>
+  <li><strong>The issuer address.</strong> Everything else is derived from it.</li>
+</ol>
+
+<h2>What a login can never fix</h2>
+
+<p>
+  Proving who you are is not the same as being on your machine. Six of the nine
+  tools need the path to your project, and a hosted server has no such path.
+</p>
+
+<div class="tablewrap">
+<table>
+  <tr><th>Tool</th><th>Hosted?</th><th>Why</th></tr>
+  <tr><td><code>read_artifact_file</code></td><td class="yes">Works now</td><td>Reads the catalog only</td></tr>
+  <tr><td><code>list_remotes</code></td><td class="yes">Works now</td><td>Reads the catalog only</td></tr>
+  <tr><td><code>add_remote</code></td><td class="yes">Works now</td><td>Reads the catalog only</td></tr>
+  <tr><td><code>search_artifacts</code></td><td>Adaptable</td><td>Loses "do you already have this?"</td></tr>
+  <tr><td><code>get_artifact</code></td><td>Adaptable</td><td>Loses "do you already have this?"</td></tr>
+  <tr><td><code>catalog_overview</code></td><td>Adaptable</td><td>Loses "do you already have this?"</td></tr>
+  <tr><td><code>refresh_catalog</code></td><td>Adaptable</td><td>Loses "do you already have this?"</td></tr>
+  <tr><td><code>preview_contribution</code></td><td class="no">Never</td><td>Reads your working copy</td></tr>
+  <tr><td><code>contribute_artifact</code></td><td class="no">Never</td><td>Pushes as you, with your git access</td></tr>
+</table>
+</div>
+
+<p>
+  Installing is not on that list because it is not a tool at all &mdash; it is
+  handed over as a command for a person to run, deliberately.
+</p>
+
+<p>
+  So hosted and local are complements, never alternatives. A login gets a browser
+  through the front door; it does not put the server in your shoes. Local needs
+  no account, no server and no permission, and that is what makes DeliveryOS
+  something you can hand to anyone.
+</p>
+
+<footer>
+  <p>
+    <strong>Status:</strong> a findings note, not a commitment. The local identity
+    behaviour and the tool split were read from our own source; the arc-identity
+    figures were counted in the platform repository. Everything on the hosted
+    side is unbuilt, and the code shown is illustrative of the shape rather than
+    written.
+  </p>
+</footer>
+
+</div>
