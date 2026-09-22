@@ -1,0 +1,389 @@
+<title>The Login Handshake</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Serif:ital,wght@0,400;0,500;1,400&display=swap">
+<style>
+  :root {
+    --paper: #f7f5f0;
+    --card: #fffefb;
+    --ink: #1b2229;
+    --muted: #5c6773;
+    --line: #e2ded4;
+    --accent: #0d6a5c;
+    --accent-soft: #e3efe9;
+    --amber: #8a5a00;
+    --amber-soft: #f8efda;
+    --code-bg: #141b22;
+    --code-fg: #dbe5ec;
+    --code-dim: #7f8f9c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #12171c;
+      --card: #182027;
+      --ink: #e7eaed;
+      --muted: #94a1ad;
+      --line: #29323b;
+      --accent: #5cc3ae;
+      --accent-soft: #123029;
+      --amber: #dba44a;
+      --amber-soft: #2d2412;
+      --code-bg: #0d1318;
+      --code-fg: #dbe5ec;
+      --code-dim: #6f7f8c;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #12171c;
+    --card: #182027;
+    --ink: #e7eaed;
+    --muted: #94a1ad;
+    --line: #29323b;
+    --accent: #5cc3ae;
+    --accent-soft: #123029;
+    --amber: #dba44a;
+    --amber-soft: #2d2412;
+    --code-bg: #0d1318;
+    --code-fg: #dbe5ec;
+    --code-dim: #6f7f8c;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: 'IBM Plex Serif', Georgia, 'Times New Roman', serif;
+    font-size: 1.02rem;
+    line-height: 1.65;
+    margin: 0;
+    padding: 0 1.25rem 5rem;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 47rem; margin: 0 auto; }
+
+  h1, h2, h3, .eyebrow, .label, .btn, th {
+    font-family: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  }
+  h1 {
+    font-size: clamp(2rem, 5vw, 2.9rem);
+    line-height: 1.1; font-weight: 700; letter-spacing: -0.02em;
+    margin: 0 0 1rem; text-wrap: balance;
+  }
+  h2 {
+    font-size: 1.4rem; font-weight: 600; letter-spacing: -0.01em;
+    margin: 3.2rem 0 0.9rem; text-wrap: balance;
+    padding-top: 1.4rem; border-top: 1px solid var(--line);
+  }
+  h3 { font-size: 1.05rem; font-weight: 600; margin: 1.8rem 0 0.4rem; }
+  p { margin: 0 0 1rem; max-width: 62ch; }
+
+  header.mast { padding: 3.5rem 0 0.5rem; }
+  .eyebrow {
+    display: flex; flex-wrap: wrap; gap: 0.6rem;
+    font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.11em;
+    font-weight: 600; color: var(--accent); margin-bottom: 1.4rem;
+  }
+  .eyebrow span:not(:last-child)::after { content: ' /'; color: var(--line); }
+  .standfirst {
+    font-size: 1.18rem; line-height: 1.55; color: var(--muted);
+    max-width: 56ch; font-style: italic;
+  }
+
+  .ask {
+    background: var(--accent-soft); border-radius: 10px;
+    padding: 1.4rem 1.5rem; margin: 2.4rem 0 1rem;
+  }
+  .ask p:last-child { margin-bottom: 0; }
+  .ask strong { color: var(--ink); }
+
+  .cards { display: grid; gap: 1rem; margin: 1.5rem 0 0; }
+  @media (min-width: 46rem) { .cards { grid-template-columns: repeat(3, 1fr); } }
+  .card {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 10px; padding: 1.1rem 1.15rem;
+  }
+  .card .num {
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.75rem;
+    color: var(--accent); font-weight: 500; letter-spacing: 0.06em;
+  }
+  .card h3 { margin: 0.35rem 0 0.4rem; font-size: 1rem; }
+  .card p { font-size: 0.93rem; margin: 0; color: var(--muted); }
+
+  code, .mono { font-family: 'IBM Plex Mono', ui-monospace, monospace; }
+  code {
+    font-size: 0.87em; background: var(--accent-soft);
+    padding: 0.12em 0.35em; border-radius: 4px; word-break: break-word;
+  }
+  pre {
+    background: var(--code-bg); color: var(--code-fg);
+    border-radius: 10px; padding: 1.1rem 1.2rem; overflow-x: auto;
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: 0.84rem; line-height: 1.6; margin: 1rem 0;
+  }
+  pre code { background: none; padding: 0; font-size: inherit; color: inherit; }
+  pre .c { color: var(--code-dim); }
+
+  .steps { list-style: none; counter-reset: s; padding: 0; margin: 1.2rem 0; }
+  .steps li {
+    counter-increment: s; position: relative;
+    padding: 0 0 1.15rem 3rem; margin: 0;
+  }
+  .steps li::before {
+    content: counter(s);
+    position: absolute; left: 0; top: 0;
+    width: 1.95rem; height: 1.95rem; border-radius: 50%;
+    background: var(--accent); color: var(--paper);
+    font-family: 'IBM Plex Sans', sans-serif; font-size: 0.85rem; font-weight: 600;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .steps li:not(:last-child)::after {
+    content: ''; position: absolute; left: 0.95rem; top: 2.1rem; bottom: 0.2rem;
+    width: 1px; background: var(--line);
+  }
+  .steps strong { font-family: 'IBM Plex Sans', sans-serif; font-weight: 600; }
+  .steps p { margin: 0.15rem 0 0; font-size: 0.96rem; color: var(--muted); }
+
+  .note {
+    border-left: 3px solid var(--accent); background: var(--accent-soft);
+    padding: 0.9rem 1.1rem; border-radius: 0 8px 8px 0; margin: 1.4rem 0;
+  }
+  .note p { margin: 0; font-size: 0.95rem; }
+  .warn { border-left-color: var(--amber); background: var(--amber-soft); }
+
+  .label {
+    display: inline-block; font-size: 0.68rem; text-transform: uppercase;
+    letter-spacing: 0.1em; font-weight: 700; color: var(--amber);
+    background: var(--amber-soft); padding: 0.2em 0.55em; border-radius: 4px;
+    vertical-align: middle;
+  }
+
+  .tablewrap { overflow-x: auto; margin: 1.2rem 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.93rem; }
+  th, td { text-align: left; padding: 0.6rem 0.8rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); font-weight: 600; }
+  td.yes { color: var(--accent); font-weight: 600; }
+  td.no { color: var(--amber); font-weight: 600; }
+
+  .send {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 10px; padding: 1.3rem 1.5rem; margin: 1.2rem 0;
+  }
+  .send p { font-size: 0.97rem; }
+  .send p:last-child { margin-bottom: 0; }
+
+  footer {
+    margin-top: 4rem; padding-top: 1.4rem; border-top: 1px solid var(--line);
+    font-size: 0.85rem; color: var(--muted);
+  }
+</style>
+
+<div class="wrap">
+
+<header class="mast">
+  <div class="eyebrow"><span>DeliveryOS</span><span>Hosted MCP</span><span>Phase 0</span></div>
+  <h1>The Login Handshake</h1>
+  <p class="standfirst">
+    Before we can host anything, we need three pieces of information from the
+    platform team. This page explains what they are, why we need them, and what
+    happens if they don't exist.
+  </p>
+</header>
+
+<div class="ask">
+  <p><strong>The whole ask, in one line:</strong> we need three settings from
+  whoever runs ArcAI's login system, so DeliveryOS can check that someone is
+  really signed in without building a second login of our own.</p>
+</div>
+
+<div class="cards">
+  <div class="card">
+    <div class="num">01</div>
+    <h3>Issuer</h3>
+    <p>Who issued the pass. Lets us reject anything that didn't come from ArcAI.</p>
+  </div>
+  <div class="card">
+    <div class="num">02</div>
+    <h3>Key list</h3>
+    <p>How we check the pass is genuine and hasn't been forged or edited.</p>
+  </div>
+  <div class="card">
+    <div class="num">03</div>
+    <h3>Audience</h3>
+    <p>Which door the pass opens. Stops a pass for another system working on ours.</p>
+  </div>
+</div>
+
+<h2>The idea, using a ticket</h2>
+
+<p>
+  Imagine a festival wristband. Three things make it work, and they map exactly
+  onto what we're asking for.
+</p>
+
+<p>
+  <strong>The box office issued it.</strong> If a wristband turns up from some
+  other event, security rejects it. That's the <em>issuer</em>.
+</p>
+<p>
+  <strong>It has a hologram.</strong> Staff hold it to the light and confirm it's
+  real rather than printed at home. They don't phone the box office each time —
+  they know what a genuine hologram looks like. That's the <em>key list</em>.
+</p>
+<p>
+  <strong>It says which stage it admits you to.</strong> A wristband for the main
+  stage doesn't get you backstage. That's the <em>audience</em> — and it's the
+  one people skip, which is exactly why it matters.
+</p>
+
+<div class="note">
+  <p>
+    Without the third one, a pass someone was given for a completely different
+    ArcAI service would also open DeliveryOS. The audience value is what makes a
+    pass specific to us.
+  </p>
+</div>
+
+<h2>What the three values look like</h2>
+
+<p>
+  Roughly this shape. <span class="label">Illustrative</span> — these are made-up
+  examples to show the form, not real values.
+</p>
+
+<pre><code><span class="c">// 1. Issuer -- who signs the passes</span>
+https://identity.arcai.example.com
+
+<span class="c">// 2. Key list -- where we check a pass is genuine</span>
+https://identity.arcai.example.com/.well-known/jwks.json
+
+<span class="c">// 3. Audience -- the name that means "this pass is for DeliveryOS"</span>
+deliveryos-mcp</code></pre>
+
+<p>
+  The good news: the first two almost certainly already exist. We found the key
+  list endpoint in the platform's identity service while researching this. The
+  third — a name reserved for us — is the one that may need creating, and it's a
+  small piece of configuration rather than new software.
+</p>
+
+<h2>What actually happens when someone connects</h2>
+
+<ol class="steps">
+  <li>
+    <strong>A person signs in to ArcAI as normal.</strong>
+    <p>Same login they already use. Nothing new for them to learn, and no second password.</p>
+  </li>
+  <li>
+    <strong>Their AI assistant connects to DeliveryOS and presents the pass.</strong>
+    <p>This happens automatically in the background. The person doesn't see it.</p>
+  </li>
+  <li>
+    <strong>DeliveryOS checks four things.</strong>
+    <p>Is the hologram genuine? Did ArcAI issue it? Is it meant for us? Has it expired? Any one of those failing means refusal.</p>
+  </li>
+  <li>
+    <strong>If it all checks out, we answer. If not, we refuse.</strong>
+    <p>There's no anonymous mode and no guest access. No valid pass, no answer.</p>
+  </li>
+</ol>
+
+<div class="note">
+  <p>
+    Step 3 needs no phone call to ArcAI. We fetch the key list once and can then
+    verify passes on our own — which means DeliveryOS keeps working even if the
+    login service is briefly down.
+  </p>
+</div>
+
+<h2>What's actually inside a pass</h2>
+
+<p>
+  A pass isn't just a yes or no — it carries facts about who's holding it. Opened
+  up, one looks roughly like this. <span class="label">Illustrative</span>
+</p>
+
+<pre><code>{
+  "iss": "https://identity.arcai.example.com",  <span class="c">// who issued it</span>
+  "aud": "deliveryos-mcp",                      <span class="c">// who it's for</span>
+  "sub": "a4f1...",                             <span class="c">// which person</span>
+  "tenant_id": "acme-corp",                     <span class="c">// which customer</span>
+  "roles": ["engineer"],                        <span class="c">// what they are</span>
+  "exp": 1789412400                             <span class="c">// when it stops working</span>
+}</code></pre>
+
+<p>
+  That <code>tenant_id</code> is worth noticing. It's how one customer's people
+  are kept separate from another's — and it arrives with the pass, so we never
+  have to ask "who is this and what are they allowed to see?" ourselves.
+</p>
+
+<h2>Why we're asking instead of just building it</h2>
+
+<div class="tablewrap">
+  <table>
+    <tr><th>Option</th><th>What it costs</th><th>Sensible?</th></tr>
+    <tr>
+      <td>Use ArcAI's existing login</td>
+      <td>Three settings and a small amount of code on our side</td>
+      <td class="yes">Yes</td>
+    </tr>
+    <tr>
+      <td>Build our own login for DeliveryOS</td>
+      <td>Weeks of work, plus a second set of passwords for people to manage and for us to keep secure</td>
+      <td class="no">No</td>
+    </tr>
+  </table>
+</div>
+
+<p>
+  ArcAI's identity service already does this properly — we checked. It handles
+  sign-in, expiry, renewals and revocation, and it already publishes the key list
+  we'd verify against. Rebuilding that would mean a second place for logins to go
+  wrong, and every serious security problem in this area comes from having two
+  systems that disagree.
+</p>
+
+<h2>If the answer is "we don't have those"</h2>
+
+<div class="note warn">
+  <p>
+    Then that is the real blocker, and it sits with the platform team rather than
+    with us. Better to find that out this week than after we've built against an
+    assumption.
+  </p>
+</div>
+
+<p>
+  There are two ways this could come back. If the issuer and key list exist but
+  there's no name reserved for DeliveryOS, that's a small configuration change on
+  their side. If the login service can't issue passes for other systems at all,
+  that's a genuine piece of work for them — and it changes the timeline for
+  hosting, which is something the sponsor would want to know early rather than
+  late.
+</p>
+
+<h2>The message to send</h2>
+
+<div class="send">
+  <p>Hi — we're adding a hosted version of DeliveryOS that AI assistants can
+  connect to, and we'd like it to use ArcAI's existing login rather than
+  building a separate one.</p>
+  <p>To do that we need three things:</p>
+  <p>
+    <strong>1.</strong> The issuer URL for tokens ArcAI issues.<br>
+    <strong>2.</strong> The JWKS URL, so we can verify them.<br>
+    <strong>3.</strong> An audience value reserved for DeliveryOS, so a token
+    issued for another service can't be used against ours.
+  </p>
+  <p>If the first two already exist and only the third needs setting up, that's
+  all we need. If issuing tokens for other services isn't supported yet, let us
+  know — that would change our timeline and we'd rather know now.</p>
+</div>
+
+<footer>
+  DeliveryOS &middot; Phase 0 of hosted MCP. Nothing gets built until these three
+  values come back &mdash; deliberately, so we don't build against a guess.
+  Example values on this page are illustrative.
+</footer>
+
+</div>

@@ -1,0 +1,344 @@
+<title>Borrowing ArcAI's Front Door</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Serif:ital,wght@0,400;0,500;1,400&display=swap">
+<style>
+  :root {
+    --paper: #f7f5f0;
+    --card: #fffefb;
+    --ink: #1b2229;
+    --muted: #5c6773;
+    --line: #e2ded4;
+    --accent: #0d6a5c;
+    --accent-soft: #e3efe9;
+    --tie: #7a4a86;
+    --tie-soft: #efe6f2;
+    --amber: #8a5a00;
+    --amber-soft: #f8efda;
+    --code-bg: #141b22;
+    --code-fg: #dbe5ec;
+    --code-dim: #7f8f9c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #12171c; --card: #182027; --ink: #e7eaed; --muted: #94a1ad;
+      --line: #29323b; --accent: #5cc3ae; --accent-soft: #123029;
+      --tie: #c3a0cd; --tie-soft: #2a2030;
+      --amber: #dba44a; --amber-soft: #2d2412;
+      --code-bg: #0d1318; --code-fg: #dbe5ec; --code-dim: #6f7f8c;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #12171c; --card: #182027; --ink: #e7eaed; --muted: #94a1ad;
+    --line: #29323b; --accent: #5cc3ae; --accent-soft: #123029;
+    --tie: #c3a0cd; --tie-soft: #2a2030;
+    --amber: #dba44a; --amber-soft: #2d2412;
+    --code-bg: #0d1318; --code-fg: #dbe5ec; --code-dim: #6f7f8c;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--paper); color: var(--ink);
+    font-family: 'IBM Plex Serif', Georgia, serif;
+    font-size: 1.02rem; line-height: 1.65; margin: 0;
+    padding: 0 1.25rem 5rem; -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 48rem; margin: 0 auto; }
+  h1, h2, h3, .eyebrow, .label, th, .vs, .card h3, .opt h3 {
+    font-family: 'IBM Plex Sans', system-ui, sans-serif;
+  }
+  h1 { font-size: clamp(2rem, 5vw, 2.9rem); line-height: 1.1; font-weight: 700;
+       letter-spacing: -0.02em; margin: 0 0 1rem; text-wrap: balance; }
+  h2 { font-size: 1.4rem; font-weight: 600; letter-spacing: -0.01em;
+       margin: 3.2rem 0 0.9rem; padding-top: 1.4rem; border-top: 1px solid var(--line);
+       text-wrap: balance; }
+  h3 { font-size: 1.05rem; font-weight: 600; margin: 1.8rem 0 0.4rem; }
+  p { margin: 0 0 1rem; max-width: 63ch; }
+
+  header.mast { padding: 3.5rem 0 0.5rem; }
+  .eyebrow { display: flex; flex-wrap: wrap; gap: 0.6rem; font-size: 0.72rem;
+    text-transform: uppercase; letter-spacing: 0.11em; font-weight: 600;
+    color: var(--accent); margin-bottom: 1.4rem; }
+  .eyebrow span:not(:last-child)::after { content: ' /'; color: var(--line); }
+  .standfirst { font-size: 1.18rem; line-height: 1.55; color: var(--muted);
+    max-width: 56ch; font-style: italic; }
+
+  .verdict { background: var(--accent-soft); border-radius: 10px;
+    padding: 1.4rem 1.5rem; margin: 2.4rem 0 1rem; }
+  .verdict p:last-child { margin-bottom: 0; }
+  .verdict strong { color: var(--ink); }
+
+  .ba { display: grid; gap: 1rem; margin: 1.4rem 0; align-items: start; }
+  @media (min-width: 44rem) { .ba { grid-template-columns: 1fr 1fr; } }
+  .col { background: var(--card); border: 1px solid var(--line);
+    border-radius: 10px; padding: 1.15rem 1.25rem; }
+  .col.now { border-left: 3px solid var(--accent); }
+  .col.after { border-left: 3px solid var(--tie); }
+  .col h3 { margin: 0 0 0.7rem; font-size: 0.95rem; }
+  .col ul { margin: 0; padding-left: 1.1rem; font-size: 0.94rem; }
+  .col li { margin-bottom: 0.45rem; }
+  .col li:last-child { margin-bottom: 0; }
+
+  .opts { display: grid; gap: 1rem; margin: 1.4rem 0; }
+  @media (min-width: 44rem) { .opts { grid-template-columns: 1fr 1fr; } }
+  .opt { border-radius: 10px; padding: 1.2rem 1.3rem; border: 1px solid var(--line); background: var(--card); }
+  .opt.bad { border-top: 3px solid var(--amber); }
+  .opt.good { border-top: 3px solid var(--accent); }
+  .opt h3 { margin: 0 0 0.5rem; }
+  .opt p { font-size: 0.94rem; margin-bottom: 0.6rem; }
+  .opt p:last-child { margin-bottom: 0; }
+
+  code, .mono { font-family: 'IBM Plex Mono', ui-monospace, monospace; }
+  code { font-size: 0.87em; background: var(--accent-soft); padding: 0.12em 0.35em;
+    border-radius: 4px; word-break: break-word; }
+  pre { background: var(--code-bg); color: var(--code-fg); border-radius: 10px;
+    padding: 1.1rem 1.2rem; overflow-x: auto; font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.83rem; line-height: 1.6; margin: 1rem 0; }
+  pre code { background: none; padding: 0; font-size: inherit; color: inherit; }
+  pre .c { color: var(--code-dim); }
+  pre .hi { color: #7fd6bf; }
+  pre .warnhi { color: #e0b062; }
+
+  .note { border-left: 3px solid var(--accent); background: var(--accent-soft);
+    padding: 0.9rem 1.1rem; border-radius: 0 8px 8px 0; margin: 1.4rem 0; }
+  .note p { margin: 0; font-size: 0.95rem; }
+  .note.tie { border-left-color: var(--tie); background: var(--tie-soft); }
+  .note.warn { border-left-color: var(--amber); background: var(--amber-soft); }
+
+  .label { display: inline-block; font-size: 0.68rem; text-transform: uppercase;
+    letter-spacing: 0.1em; font-weight: 700; color: var(--amber);
+    background: var(--amber-soft); padding: 0.2em 0.55em; border-radius: 4px;
+    vertical-align: middle; }
+
+  .tablewrap { overflow-x: auto; margin: 1.2rem 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.93rem; }
+  th, td { text-align: left; padding: 0.6rem 0.8rem; border-bottom: 1px solid var(--line);
+    vertical-align: top; }
+  th { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--muted); font-weight: 600; }
+  td.yes { color: var(--accent); font-weight: 600; white-space: nowrap; }
+  td.no { color: var(--amber); font-weight: 600; white-space: nowrap; }
+
+  .checks { list-style: none; padding: 0; margin: 1.2rem 0; }
+  .checks li { position: relative; padding-left: 1.9rem; margin-bottom: 0.7rem; font-size: 0.96rem; }
+  .checks li::before { content: ''; position: absolute; left: 0; top: 0.5em;
+    width: 0.6rem; height: 0.6rem; border-radius: 2px; background: var(--accent); }
+  .checks li.them::before { background: var(--tie); }
+  .checks strong { font-family: 'IBM Plex Sans', sans-serif; font-weight: 600; }
+
+  footer { margin-top: 4rem; padding-top: 1.4rem; border-top: 1px solid var(--line);
+    font-size: 0.85rem; color: var(--muted); }
+</style>
+
+<div class="wrap">
+
+<header class="mast">
+  <div class="eyebrow"><span>DeliveryOS</span><span>Hosted MCP</span><span>The coupling question</span></div>
+  <h1>Borrowing ArcAI's Front Door</h1>
+  <p class="standfirst">
+    If DeliveryOS uses ArcAI's login, does DeliveryOS become part of ArcAI?
+    It's the right question to ask before we build, because this kind of tie is
+    much easier to make than to undo.
+  </p>
+</header>
+
+<div class="verdict">
+  <p><strong>Short answer: only if we build it that way.</strong> The login
+  standard we'd be using is an open one that every major identity system speaks.
+  Pointing it at ArcAI is a setting, not a marriage — <em>provided</em> we treat
+  it as a setting from day one. If we hard-code ArcAI instead, then yes,
+  DeliveryOS becomes an ArcAI product and stops working without it.</p>
+</div>
+
+<h2>Where DeliveryOS stands today</h2>
+
+<p>
+  Worth being precise about this, because it's the thing we'd be giving up.
+  <strong>DeliveryOS currently has no connection to ArcAI at all.</strong> It runs
+  on your laptop, uses your own GitHub login, reads from git repositories you
+  choose, and installs into your own project. There is no account, no server, and
+  nothing to sign up for.
+</p>
+
+<p>
+  That independence is worth something. It means DeliveryOS can be handed to a
+  client, used on a project that has nothing to do with ArcAI, or open-sourced —
+  without a conversation about accounts.
+</p>
+
+<h2>Before and after</h2>
+
+<div class="ba">
+  <div class="col now">
+    <h3>Today &mdash; running locally</h3>
+    <ul>
+      <li>Runs on the developer's own machine</li>
+      <li>Signs in with their existing GitHub account</li>
+      <li>No server, no accounts, nothing to operate</li>
+      <li>Works for anyone, anywhere, with no permission needed</li>
+      <li>Nothing to keep running at 2am</li>
+    </ul>
+  </div>
+  <div class="col after">
+    <h3>After &mdash; hosted, with ArcAI login</h3>
+    <ul>
+      <li>Browsing runs on a server your team operates</li>
+      <li>Signing in needs an ArcAI account</li>
+      <li>If ArcAI's login is down, hosted browsing is down</li>
+      <li>New users need someone to grant them access</li>
+      <li><strong>Local use is completely unchanged</strong></li>
+    </ul>
+  </div>
+</div>
+
+<div class="note tie">
+  <p>
+    That last line matters more than it looks. The laptop version keeps working
+    exactly as it does now, with GitHub and no ArcAI account. Only the
+    <em>hosted browsing</em> version gains a login requirement. We would be adding
+    a second way in, not replacing the first.
+  </p>
+</div>
+
+<h2>Why the three settings aren't ArcAI-specific</h2>
+
+<p>
+  This is the part that decides the whole question. The three values we'd ask for
+  are not an ArcAI invention — they're the standard way <em>any</em> system proves
+  who someone is. Microsoft, Google, Okta, Auth0 and every corporate login system
+  publishes the same three things.
+</p>
+
+<p>So the difference between "part of ArcAI" and "works with ArcAI" is this:</p>
+
+<div class="opts">
+  <div class="opt bad">
+    <h3>Hard-wired <span class="label">avoid</span></h3>
+    <p>ArcAI's addresses written directly into our code.</p>
+    <pre><code><span class="c">// baked in</span>
+issuer = <span class="warnhi">"identity.arcai.com"</span></code></pre>
+    <p>DeliveryOS now <em>requires</em> ArcAI. It cannot be used by anyone
+    without an account, and it cannot be given to a client on its own.</p>
+  </div>
+  <div class="opt good">
+    <h3>Configured</h3>
+    <p>The addresses are settings, and ArcAI is what we happen to set them to.</p>
+    <pre><code><span class="c">// supplied at run time</span>
+issuer = <span class="hi">env.OIDC_ISSUER</span></code></pre>
+    <p>DeliveryOS works with ArcAI, or a client's own login, or anything else
+    standard. Swapping is a configuration change, not a rewrite.</p>
+  </div>
+</div>
+
+<p>
+  Both cost the same to build. The second one is simply the version where we can
+  change our mind later. <span class="label">Illustrative</span> &mdash; the code
+  above is simplified to show the shape of the difference.
+</p>
+
+<h2>What actually changes, for whom</h2>
+
+<div class="tablewrap">
+  <table>
+    <tr><th>Person</th><th>What changes</th><th>Needs ArcAI?</th></tr>
+    <tr>
+      <td>Developer using it on their laptop</td>
+      <td>Nothing at all</td>
+      <td class="yes">No</td>
+    </tr>
+    <tr>
+      <td>Someone browsing the library from a browser</td>
+      <td>Signs in first</td>
+      <td class="no">Yes</td>
+    </tr>
+    <tr>
+      <td>Someone installing or contributing an artifact</td>
+      <td>Nothing &mdash; this stays on their machine either way</td>
+      <td class="yes">No</td>
+    </tr>
+    <tr>
+      <td>Whoever runs it</td>
+      <td>Gains a server to operate, monitor and patch</td>
+      <td class="no">Yes</td>
+    </tr>
+  </table>
+</div>
+
+<h2>What's required</h2>
+
+<p><strong>From the platform team</strong> &mdash; three values, and nothing else:</p>
+
+<ul class="checks">
+  <li class="them"><strong>Issuer</strong> &mdash; the address that signs their logins.</li>
+  <li class="them"><strong>Key list</strong> &mdash; where we check a login is genuine.</li>
+  <li class="them"><strong>Audience</strong> &mdash; a name reserved for DeliveryOS, so a login meant for another system doesn't work on ours. <em>This is the one that may need creating.</em></li>
+</ul>
+
+<p><strong>From us</strong> &mdash; small, and mostly already provided:</p>
+
+<ul class="checks">
+  <li><strong>Turn on the HTTP connection.</strong> Our toolkit already ships it. Close to free.</li>
+  <li><strong>Check the login on each request.</strong> Roughly a hundred lines. The platform team's own estimate for the same piece was the same.</li>
+  <li><strong>Make three tools work without a project folder</strong>, since a server has no "your folder". Small.</li>
+  <li><strong>Keep the addresses as settings</strong>, never written into the code. Free &mdash; but only if decided now.</li>
+</ul>
+
+<div class="note warn">
+  <p>
+    <strong>The cost nobody has named yet is the last one:</strong> somebody has
+    to run this server, keep it patched, and answer for it when it breaks. That is
+    ongoing, it is not code, and it does not appear on any estimate so far.
+  </p>
+</div>
+
+<h2>The ties worth going in with your eyes open about</h2>
+
+<p>
+  Even done the careful way, hosting creates real dependencies. None of these are
+  reasons not to do it &mdash; they're things to have said out loud first.
+</p>
+
+<p>
+  <strong>Their uptime becomes our uptime.</strong> If ArcAI's login is down,
+  nobody can browse the hosted library. Local use keeps working, which limits the
+  damage, but the hosted version inherits someone else's reliability.
+</p>
+<p>
+  <strong>Their roadmap touches ours.</strong> If they change how logins work, we
+  change with them, on their schedule rather than ours.
+</p>
+<p>
+  <strong>Support questions get harder.</strong> "I can't sign in" stops being a
+  question we can answer alone.
+</p>
+<p>
+  <strong>Access becomes someone's job.</strong> Today anyone can use DeliveryOS.
+  Hosted, somebody has to grant people access &mdash; and remove it when they leave.
+</p>
+
+<h2>The recommendation</h2>
+
+<div class="verdict">
+  <p><strong>Do it, but keep the addresses as settings.</strong> Point them at
+  ArcAI because that's what the team already uses and it saves genuinely hard
+  work. Never write those addresses into the code.</p>
+  <p>That single discipline is the difference between <em>DeliveryOS works with
+  ArcAI</em> and <em>DeliveryOS is part of ArcAI</em> &mdash; and it costs nothing
+  extra, as long as it's decided before the first line is written rather than
+  discovered afterwards.</p>
+</div>
+
+<p>
+  And keep the local version first-class. It needs no account, no server and no
+  permission, and that is what makes DeliveryOS something you can hand to anyone.
+  Hosting should be a second door into the same building, never a replacement for
+  the one that already works.
+</p>
+
+<footer>
+  DeliveryOS &middot; A decision note, not a commitment. Nothing here is built
+  yet, and the prior question &mdash; whether hosting is wanted at all &mdash;
+  is still open. Example values and code are illustrative.
+</footer>
+
+</div>
