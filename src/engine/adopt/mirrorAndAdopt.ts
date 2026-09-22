@@ -160,7 +160,7 @@ export async function mirrorAndAdopt(
     const existing = buildCatalog()
       .filter((e) => e.remoteName === remoteName)
       .map((e) => e.manifest.id);
-    const plan = planAdoption(cacheDir, profile, existing, remoteEntry.url);
+    const plan = planAdoption(cacheDir, profile, existing, remoteEntry.url, { files: mirror.written });
 
     const manifests: string[] = [];
     for (const candidate of plan.candidates) {

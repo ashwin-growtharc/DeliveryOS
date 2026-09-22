@@ -74,7 +74,14 @@ function readStamp(dest: string): Stamp | undefined {
 }
 
 /**
- * Copies `from` into `to`, skipping detritus.
+ * Copies `from` into `to`, skipping detritus. Returns what it wrote, relative
+ * to `to` and forward-slashed, so a caller that goes on to commit the copy
+ * (`mirrorFolder`) has the list `commitPaths` wants without a second walk.
+ *
+ * Shared with the adoption mirror on purpose. The two used to be separate,
+ * coincidentally identical walks, and the next skip rule -- a new placeholder
+ * extension, a Drive `.gdoc` stub -- would have landed in one and left the
+ * other committing that clutter into a client's catalog.
  *
  * A file that cannot be read is SKIPPED rather than fatal, and that is the
  * OneDrive Files-On-Demand case: a placeholder stats perfectly well and then
@@ -86,9 +93,9 @@ function readStamp(dest: string): Stamp | undefined {
  * through `discoverManifests`'s existing `skipped` channel, and a missing
  * payload file fails at pull time, naming the file.
  */
-function copyTree(from: string, to: string): { copied: number; unreadable: string[] } {
+export function copyTree(from: string, to: string): { written: string[]; unreadable: string[] } {
   const unreadable: string[] = [];
-  let copied = 0;
+  const written: string[] = [];
 
   function walk(src: string, dst: string): void {
     fs.mkdirSync(dst, { recursive: true });
@@ -101,7 +108,7 @@ function copyTree(from: string, to: string): { copied: number; unreadable: strin
       } else if (entry.isFile()) {
         try {
           fs.copyFileSync(s, d);
-          copied += 1;
+          written.push(path.relative(to, d).split(path.sep).join('/'));
         } catch {
           unreadable.push(path.relative(from, s).split(path.sep).join('/'));
         }
@@ -113,7 +120,7 @@ function copyTree(from: string, to: string): { copied: number; unreadable: strin
   }
 
   walk(from, to);
-  return { copied, unreadable };
+  return { written, unreadable };
 }
 
 function writeStamp(dest: string, source: string): void {

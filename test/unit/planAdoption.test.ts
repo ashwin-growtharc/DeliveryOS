@@ -228,6 +228,37 @@ describe('refusing rather than half-working', () => {
   });
 });
 
+describe('which files a plan considers', () => {
+  const REPO = 'https://github.com/acme/catalog.git';
+
+  it('never proposes sync debris, even when planning a raw folder', () => {
+    write('playbooks/escalation.md', '# Escalation\n');
+    // A lock file with a heading, deliberately: a bodiless one is skipped for
+    // having no description before the walker's filtering is ever tested,
+    // which would let this pass against the unfixed code.
+    write('playbooks/~$escalation.md', '# Escalation\n');
+
+    // The planner's own walker skipped dotfiles and nothing else, so the
+    // Office lock file above was a candidate -- and slugified to the same id
+    // as the real document, which made this a collision refusal rather than
+    // a plan. Masked in production only because both callers happened to
+    // plan against the mirrored tree, which the mirror had already filtered.
+    const plan = planAdoption(root, profile(), [], REPO);
+    expect(plan.candidates.map((c) => c.sourcePath)).toEqual(['playbooks/escalation.md']);
+  });
+
+  it('plans exactly the files it is handed, when handed a list', () => {
+    write('playbooks/a.md', '# A\n');
+    write('playbooks/b.md', '# B\n');
+
+    // The mirror already knows what it wrote. Handing that list over is what
+    // guarantees the plan describes the copy and not a second walk of the
+    // disk a moment later.
+    const plan = planAdoption(root, profile(), [], REPO, { files: ['playbooks/a.md'] });
+    expect(plan.candidates.map((c) => c.sourcePath)).toEqual(['playbooks/a.md']);
+  });
+});
+
 describe('slugify', () => {
   it('makes an id out of a filename, or admits it cannot', () => {
     expect(slugify('Escalation Process.md')).toBe('escalation-process');

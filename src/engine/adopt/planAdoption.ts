@@ -5,6 +5,8 @@ import { Manifest, ManifestSchema } from '../manifest/schema';
 import { guessDescriptionFromFrontmatter } from '../manifest/frontmatter';
 import { AdoptionProfile, AdoptionRule, slugify } from './profile';
 import { describeOfficeFile, isOfficeFile } from './officeText';
+import { listFilesRecursive } from '../push/diff';
+import { isSyncDetritus } from '../remote/backends';
 
 /**
  * What adopting a client's folder WOULD produce, without producing any of it.
@@ -45,25 +47,39 @@ export interface AdoptionPlan {
 }
 
 
-/** Every file under `dir` matching one of `extensions`, relative to `root`. */
-function filesUnder(root: string, dir: string, extensions: string[]): string[] {
-  const abs = path.join(root, dir);
-  if (!fs.existsSync(abs) || !fs.statSync(abs).isDirectory()) return [];
+export interface PlanAdoptionOptions {
+  /** The files to consider, relative to the source root and forward-slashed.
+   * The mirror hands over exactly what it wrote, which is what makes the plan
+   * a description of the copy rather than of a second walk of the disk a
+   * moment later. Absent, the root is listed with the same filter the copy
+   * applies. */
+  files?: string[];
+}
 
-  const found: string[] = [];
-  const walk = (current: string): void => {
-    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
-      if (entry.name.startsWith('.')) continue;
-      const full = path.join(current, entry.name);
-      if (entry.isDirectory()) {
-        walk(full);
-      } else if (extensions.some((ext) => entry.name.toLowerCase().endsWith(ext.toLowerCase()))) {
-        found.push(path.relative(root, full).split(path.sep).join('/'));
-      }
-    }
-  };
-  walk(abs);
-  return found.sort();
+/**
+ * Every file under `root`, filtered the way a mirror filters: no sync debris,
+ * none of the catalog's own bookkeeping. Not a fifth walker -- `diff.ts`'s,
+ * which every push already trusts.
+ */
+function listSourceFiles(root: string): string[] {
+  return listFilesRecursive(root).filter(
+    (f) =>
+      f.length > 0
+      && !f.startsWith('artifacts/')
+      && !/^\.deliveryos-[^/]*\.json$/.test(f)
+      && !f.split('/').some((segment) => isSyncDetritus(segment)),
+  );
+}
+
+/** The files a rule covers: under its folder (subfolders included), not
+ * hidden at any level, and carrying one of its extensions. */
+function matchesForRule(files: string[], folder: string, extensions: string[]): string[] {
+  const prefix = `${folder.replace(/\/+$/, '')}/`;
+  return files
+    .filter((f) => f.startsWith(prefix))
+    .filter((f) => !f.split('/').some((segment) => segment.startsWith('.')))
+    .filter((f) => extensions.some((ext) => f.toLowerCase().endsWith(ext.toLowerCase())))
+    .sort();
 }
 
 /**
@@ -177,6 +193,7 @@ export function planAdoption(
   profile: AdoptionProfile,
   existingIds: Iterable<string>,
   sourceRepo: string,
+  options: PlanAdoptionOptions = {},
 ): AdoptionPlan {
   if (!fs.existsSync(sourceRoot) || !fs.statSync(sourceRoot).isDirectory()) {
     throw new AdoptionPlanError(`"${sourceRoot}" is not a folder on this machine.`);
@@ -187,9 +204,10 @@ export function planAdoption(
   const seen = new Map<string, string>();
   const taken = new Set(existingIds);
   const collisions: string[] = [];
+  const files = options.files ?? listSourceFiles(sourceRoot);
 
   for (const rule of profile.rules) {
-    const matches = filesUnder(sourceRoot, rule.folder, rule.extensions);
+    const matches = matchesForRule(files, rule.folder, rule.extensions);
     if (matches.length === 0) {
       skipped.push({
         sourcePath: rule.folder,

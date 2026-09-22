@@ -5,7 +5,7 @@ import { folderBackend } from './folderBackend';
 
 export { RemoteBackend, RemoteBackendCapabilities, RemoteBackendKind } from './types';
 export { gitBackend } from './gitBackend';
-export { folderBackend, isSyncDetritus } from './folderBackend';
+export { folderBackend, isSyncDetritus, copyTree } from './folderBackend';
 
 const BACKENDS: Record<RemoteBackendKind, RemoteBackend> = {
   git: gitBackend,

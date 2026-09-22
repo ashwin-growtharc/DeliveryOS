@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { isSyncDetritus } from '../remote/backends';
+import { copyTree } from '../remote/backends';
 import { AdoptionPlanError } from '../errors';
 
 /**
@@ -74,35 +74,11 @@ export function mirrorFolder(source: string, dest: string): MirrorResult {
     }
   }
 
-  const written: string[] = [];
-  const unreadable: string[] = [];
-
-  const walk = (from: string, to: string): void => {
-    fs.mkdirSync(to, { recursive: true });
-    for (const entry of fs.readdirSync(from, { withFileTypes: true })) {
-      // Same filter the folder backend applies, and for the same reason: sync
-      // clutter read as artifact content is clutter committed to a client's
-      // catalog forever.
-      if (entry.name === '.git' || isSyncDetritus(entry.name)) continue;
-
-      const src = path.join(from, entry.name);
-      const dst = path.join(to, entry.name);
-      if (entry.isDirectory()) {
-        walk(src, dst);
-      } else if (entry.isFile()) {
-        try {
-          fs.copyFileSync(src, dst);
-          written.push(path.relative(dest, dst).split(path.sep).join('/'));
-        } catch {
-          unreadable.push(path.relative(resolved, src).split(path.sep).join('/'));
-        }
-      }
-      // Symlinks skipped deliberately: following one could copy from outside
-      // the folder the client actually shared.
-    }
-  };
-
-  walk(resolved, dest);
+  // The same copy the folder backend does when it materialises a remote --
+  // same debris filter, same treatment of an unreadable placeholder -- so a
+  // dry run, a mirror and a folder remote can never disagree about which
+  // files exist.
+  const { written, unreadable } = copyTree(resolved, dest);
 
   if (written.length === 0) {
     throw new AdoptionPlanError(

@@ -114,7 +114,7 @@ export function registerAdoptCommand(program: Command): void {
           const existing = buildCatalog()
             .filter((e) => e.remoteName === remoteName)
             .map((e) => e.manifest.id);
-          const plan = planAdoption(staging, profile, existing, target.url);
+          const plan = planAdoption(staging, profile, existing, target.url, { files: mirror.written });
 
           console.log(
             `Would adopt ${plan.candidates.length} artifact(s) from "${sourceLabel}" into "${remoteName}", `
