@@ -1,8 +1,6 @@
-import * as esbuild from 'esbuild';
+import type { Plugin as EsbuildPlugin } from 'esbuild';
 import * as fs from 'fs';
 import * as path from 'path';
-import postcss from 'postcss';
-import tailwindcss from 'tailwindcss';
 import { previewCachePath } from '../paths';
 import { VENDORED_REACT_RUNTIME_JS } from './vendoredReactRuntime.generated';
 import { VENDORED_LIBRARIES_JS } from './vendoredLibraries.generated';
@@ -100,6 +98,13 @@ async function generateTailwindCss(resolveDir: string, previewEntryPath: string)
   }
 
   try {
+    // Loaded here, not at the top of the module: Tailwind alone is ~250 ms to
+    // require, and this module is imported by `push`, whose command is
+    // registered on every CLI start. See `lazyDeps.ts` for the measurement.
+    const [{ default: postcss }, { default: tailwindcss }] = await Promise.all([
+      import('postcss'),
+      import('tailwindcss'),
+    ]);
     const result = await postcss([
       tailwindcss({
         content: sourceTexts.map((raw) => ({ raw, extension: 'tsx' as const })),
@@ -286,7 +291,7 @@ export interface CompiledPreview {
  * this codebase's "artifact/manifest problems fail hard and loud" rule
  * (see docs/ui-components-feature-design.md §11's recurring principle).
  */
-function createDirectorySandboxPlugin(rootDir: string): esbuild.Plugin {
+function createDirectorySandboxPlugin(rootDir: string): EsbuildPlugin {
   const root = path.resolve(rootDir);
   return {
     name: 'artifact-directory-sandbox',
@@ -545,6 +550,7 @@ async function compileReactPreview(previewEntryPath: string): Promise<CompiledPr
     selectVariant('${firstVariantName}');
   `;
 
+  const esbuild = await import('esbuild');
   const result = await esbuild.build({
     stdin: {
       contents: harness,

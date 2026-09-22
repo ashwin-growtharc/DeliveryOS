@@ -1,4 +1,9 @@
-import * as ts from 'typescript';
+import type * as TS from 'typescript';
+import { loadTypescript } from '../lazyDeps';
+
+// Deferred: the compiler is ~180 ms to load and this runs only when a
+// person's project is actually being read. See `lazyDeps.ts`.
+const ts = loadTypescript;
 
 /**
  * First mechanical anti-pattern rule for `kind: ui-component` candidates
@@ -27,7 +32,7 @@ export function detectSelfNestingWarnings(
   componentName: string,
   filePath: string,
 ): string[] {
-  const sourceFile = ts.createSourceFile(filePath, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const sourceFile = ts().createSourceFile(filePath, source, ts().ScriptTarget.Latest, true, ts().ScriptKind.TSX);
   const warnings: string[] = [];
   // Tracks how many currently-open JSX ancestors share `componentName` --
   // reset per top-level visit, incremented/decremented around exactly
@@ -35,14 +40,14 @@ export function detectSelfNestingWarnings(
   // open-tag stack at any point during the walk, not a running total.
   let openSelfNestDepth = 0;
 
-  function jsxTagName(node: ts.JsxElement | ts.JsxSelfClosingElement): string {
-    const tagNameNode = ts.isJsxElement(node) ? node.openingElement.tagName : node.tagName;
+  function jsxTagName(node: TS.JsxElement | TS.JsxSelfClosingElement): string {
+    const tagNameNode = ts().isJsxElement(node) ? node.openingElement.tagName : node.tagName;
     return tagNameNode.getText(sourceFile);
   }
 
-  function visit(node: ts.Node): void {
+  function visit(node: TS.Node): void {
     const isMatchingJsx =
-      (ts.isJsxElement(node) || ts.isJsxSelfClosingElement(node)) && jsxTagName(node) === componentName;
+      (ts().isJsxElement(node) || ts().isJsxSelfClosingElement(node)) && jsxTagName(node) === componentName;
 
     if (isMatchingJsx) {
       openSelfNestDepth++;
@@ -66,7 +71,7 @@ export function detectSelfNestingWarnings(
       }
     }
 
-    ts.forEachChild(node, visit);
+    ts().forEachChild(node, visit);
 
     if (isMatchingJsx) {
       openSelfNestDepth--;

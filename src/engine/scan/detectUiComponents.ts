@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { ComponentDoc, PropItem } from 'react-docgen-typescript';
+import type { ComponentDoc, PropItem } from 'react-docgen-typescript';
 import { parseComponentFile, parseEnumValues } from '../preview/docgen';
 import { detectSelfNestingWarnings } from './detectSelfNesting';
 import { scanStagingDir, ensureProjectDeliveryOsDir } from '../paths';

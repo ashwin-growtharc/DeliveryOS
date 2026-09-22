@@ -1,4 +1,4 @@
-import { verify as sigstoreVerify, Bundle } from 'sigstore';
+import type { Bundle } from 'sigstore';
 import { Manifest } from '../manifest/schema';
 import { SignatureVerificationError } from '../errors';
 import { computePayloadDigest } from './digest';
@@ -47,6 +47,10 @@ export async function verifyArtifactSignature(
   }
 
   try {
+    // Loaded at the point of use. Almost no artifact declares a signature,
+    // and sigstore is ~240 ms to require -- paid on every `pull` if imported
+    // at the top, for a check that almost never runs. See `lazyDeps.ts`.
+    const { verify: sigstoreVerify } = await import('sigstore');
     await sigstoreVerify(
       signatureBundle as Bundle,
       // The signed payload is the UTF-8 bytes of the `content_digest` string
