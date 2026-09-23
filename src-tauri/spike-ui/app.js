@@ -7,7 +7,7 @@
   const call = window.DeliveryOS.call;
   const { invoke } = window.__TAURI__.core;
   const { open: openDialog, confirm: confirmDialog } = window.__TAURI__.dialog;
-  const { revealItemInDir, openUrl } = window.__TAURI__.opener;
+  const { openUrl } = window.__TAURI__.opener;
   const { listen } = window.__TAURI__.event;
   const { check } = window.__TAURI__.updater;
   const { relaunch } = window.__TAURI__.process;
@@ -4972,24 +4972,6 @@ ${bodyHtml}
 
   // ---------- detail ----------
 
-  /** Shows the Open-folder button's target in the OS file manager. Uses
-   * `revealItemInDir` (not `openPath`) specifically because install_target
-   * can be either a directory (payload_path pointed at a folder) or a
-   * single file (payload_path pointed at one file, e.g. code-reviewer's
-   * install target is a single .md file) -- openPath on a file would launch
-   * that file in its default app (e.g. an editor) instead of showing it in
-   * Explorer, which doesn't match what a button labeled "Open folder" should
-   * do for either case. revealItemInDir handles both uniformly. Errors (e.g.
-   * the path no longer exists on disk) surface as a toast, same as every
-   * other engine/OS call in this app. */
-  async function openInstallFolder(path) {
-    try {
-      await revealItemInDir(path);
-    } catch (err) {
-      toastError(err);
-    }
-  }
-
   /** Appends one `{stage, message}` line to the progress log and scrolls it
    * into view. Each line shows the stage as a small uppercase label
    * alongside the human-readable message -- deliberately not a percentage,
@@ -5297,6 +5279,7 @@ ${bodyHtml}
     { key: 'configuration', label: 'Configuration', panelId: 'detail-configuration-section' },
     { key: 'design', label: 'Design', panelId: 'detail-design-section' },
     { key: 'components', label: 'Components', panelId: 'detail-components-section' },
+    { key: 'document', label: 'Document', panelId: 'detail-document-section' },
     { key: 'documentation', label: 'Documentation', panelId: 'detail-documentation-section' },
     { key: 'preview', label: 'Preview', panelId: 'detail-preview-section' },
     { key: 'routes', label: 'Routes', panelId: 'detail-routes-section' },
@@ -5309,7 +5292,7 @@ ${bodyHtml}
   // already in hand. Used to show a real loading indicator while any of
   // these is still pending, so a tab that ends up applicable doesn't
   // just silently pop in with no warning it was coming.
-  const DETAIL_ASYNC_TAB_KEYS = ['documentation', 'design', 'components', 'routes', 'sourceDrift', 'activity'];
+  const DETAIL_ASYNC_TAB_KEYS = ['document', 'documentation', 'design', 'components', 'routes', 'sourceDrift', 'activity'];
 
   // Deliberately SEPARATE from DETAIL_TAB_DEFS's own display order
   // (Configuration leads there, per direct user feedback above) -- this is
@@ -5321,7 +5304,7 @@ ${bodyHtml}
   // must still win as the default tab once it resolves and applies, even
   // though Configuration now displays to its left.
   const DETAIL_DEFAULT_TAB_PRIORITY = [
-    'design', 'components', 'documentation', 'configuration', 'preview', 'routes', 'sourceDrift', 'activity',
+    'document', 'design', 'components', 'documentation', 'configuration', 'preview', 'routes', 'sourceDrift', 'activity',
   ];
 
   function firstByDefaultPriority(applicableDefs) {
@@ -5567,6 +5550,7 @@ ${bodyHtml}
     // real file presence -- resolves via RPC, so decides Documentation's
     // own tab membership once it knows (see renderDocumentationTab).
     void renderDocumentationTab(entry);
+    void window.DeliveryOSViewer.renderDocumentTab(entry, (applies) => { detailTabState.document = applies; refreshDetailTabs(); }, toastError);
 
     // Design/Components (design-kit's tokens/type-scale/layout-rules, and
     // its live component grid): gated on real content presence -- whether
@@ -5599,7 +5583,7 @@ ${bodyHtml}
     const openFolderBtn = $('detail-open-folder-btn');
     if (entry.localStatus !== 'not_pulled') {
       openFolderBtn.hidden = false;
-      openFolderBtn.onclick = () => void openInstallFolder(entry.installTarget);
+      openFolderBtn.onclick = () => void window.DeliveryOSViewer.openInstallFolder(entry.installTarget, toastError);
     } else {
       openFolderBtn.hidden = true;
       openFolderBtn.onclick = null;

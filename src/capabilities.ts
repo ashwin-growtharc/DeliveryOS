@@ -190,6 +190,22 @@ export const CAPABILITIES: Capability[] = [
   },
   {
     ...read,
+    name: 'artifact.listPayloadFiles',
+    summary: "List the files an artifact's payload ships, and whether the payload is one file",
+    sidecar: 'artifact.listPayloadFiles',
+    needsProjectDir: false,
+  },
+  {
+    ...read,
+    name: 'artifact.readPayloadBinary',
+    summary: "Read one payload file as bytes, for the desktop to render or hand to another program",
+    sidecar: 'artifact.readPayloadBinary',
+    // Sidecar only. Agents get extracted TEXT from Office files through
+    // read_artifact_file; handing them ten megabytes of base64 helps nobody.
+    needsProjectDir: false,
+  },
+  {
+    ...read,
     name: 'artifact.parseGuidelines',
     summary: "Parse a design kit's GUIDELINES.md into colour tokens and rules",
     sidecar: 'artifact.parseGuidelines',

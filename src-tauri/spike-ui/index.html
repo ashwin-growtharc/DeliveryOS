@@ -527,6 +527,11 @@
                    in a separate section from every other kind's; there's no
                    real reason for that split once every kind's README lands
                    in the same place. -->
+              <!-- The Word/PDF/Excel/PowerPoint files a payload ships, rendered or
+                   handed to their own programs. Filled entirely by viewer.js;
+                   app.js only kicks it off. Gated on real files, never a kind. -->
+              <div id="detail-document-section" hidden></div>
+
               <div id="detail-documentation-section" hidden>
                 <div id="detail-readme-block" hidden>
                   <div class="wiring-section-label">README</div>
@@ -985,6 +990,8 @@
     <script src="sidecar.js"></script>
     <script src="vendor/marked.min.js"></script>
     <script src="vendor/xterm.js"></script>
+    <script src="vendor/docx-preview.js"></script>
+    <script src="viewer.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

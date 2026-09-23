@@ -34,7 +34,7 @@ import * as path from 'path';
 const APP_JS = path.join(__dirname, '..', '..', 'src-tauri', 'spike-ui', 'app.js');
 
 /** Line count as `wc -l` reports it: newlines, not segments. */
-const CEILING = 7605;
+const CEILING = 7589;
 
 /** How far below the ceiling the file may sit before the ceiling must come
  * down to meet it. Small enough that a real move-out cannot land without

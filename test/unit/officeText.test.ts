@@ -3,84 +3,20 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { describeOfficeFile, isOfficeFile } from '../../src/engine/adopt/officeText';
+import { writeStoreOnlyZip, writeDocx, coreProperties } from '../fixtures/officeZip';
 
 /**
  * Describing a Word document, spreadsheet or deck well enough to put it in a
  * catalog.
  *
- * WHY THE FIXTURES ARE BUILT HERE RATHER THAN CHECKED IN
- *
- * An Office file is a ZIP of XML, and a binary fixture in a repository is a
- * thing nobody can review: a reader cannot tell what a committed `.docx`
- * contains, or why a test expects a particular string out of it. Written by
- * hand, the input is visible in the test.
- *
- * Store-only (no compression) is used because it keeps the writer to about
- * thirty lines. The reader handles both, and the real `.xlsx` in our own
- * catalog -- which is deflated -- was used to check that path by hand.
+ * Fixtures are built by hand in `test/fixtures/officeZip.ts` rather than
+ * checked in as binaries; that file says why.
  */
 
 let dir: string;
 
-/** A minimal ZIP writer: local headers, central directory, end record. */
-function writeZip(file: string, files: Record<string, string>): void {
-  const locals: Buffer[] = [];
-  const centrals: Buffer[] = [];
-  let offset = 0;
-
-  for (const [name, content] of Object.entries(files)) {
-    const nameBuf = Buffer.from(name, 'utf-8');
-    const data = Buffer.from(content, 'utf-8');
-
-    const local = Buffer.alloc(30);
-    local.writeUInt32LE(0x04034b50, 0);
-    local.writeUInt16LE(20, 4);
-    local.writeUInt16LE(0, 8); // stored
-    local.writeUInt32LE(0, 14); // crc, unchecked by the reader
-    local.writeUInt32LE(data.length, 18);
-    local.writeUInt32LE(data.length, 22);
-    local.writeUInt16LE(nameBuf.length, 26);
-    locals.push(local, nameBuf, data);
-
-    const central = Buffer.alloc(46);
-    central.writeUInt32LE(0x02014b50, 0);
-    central.writeUInt16LE(20, 6);
-    central.writeUInt16LE(0, 10); // stored
-    central.writeUInt32LE(data.length, 20);
-    central.writeUInt32LE(data.length, 24);
-    central.writeUInt16LE(nameBuf.length, 28);
-    central.writeUInt32LE(offset, 42);
-    centrals.push(central, nameBuf);
-
-    offset += 30 + nameBuf.length + data.length;
-  }
-
-  const centralBuf = Buffer.concat(centrals);
-  const eocd = Buffer.alloc(22);
-  eocd.writeUInt32LE(0x06054b50, 0);
-  eocd.writeUInt16LE(Object.keys(files).length, 8);
-  eocd.writeUInt16LE(Object.keys(files).length, 10);
-  eocd.writeUInt32LE(centralBuf.length, 12);
-  eocd.writeUInt32LE(offset, 16);
-
-  fs.writeFileSync(file, Buffer.concat([...locals, centralBuf, eocd]));
-}
-
-function core(fields: Record<string, string>): string {
-  const body = Object.entries(fields)
-    .map(([tag, value]) => `<${tag}>${value}</${tag}>`)
-    .join('');
-  return `<?xml version="1.0"?><cp:coreProperties>${body}</cp:coreProperties>`;
-}
-
 function docx(file: string, paragraphs: string[][], props?: Record<string, string>): void {
-  const body = paragraphs
-    .map((runs) => `<w:p>${runs.map((r) => `<w:t>${r}</w:t>`).join('')}</w:p>`)
-    .join('');
-  writeZip(path.join(dir, file), {
-    'docProps/core.xml': core(props ?? { 'dc:title': '', 'dc:description': '' }),
-    'word/document.xml': `<?xml version="1.0"?><w:document><w:body>${body}</w:body></w:document>`,
-  });
+  writeDocx(path.join(dir, file), paragraphs, props);
 }
 
 beforeEach(() => {
@@ -161,8 +97,8 @@ describe('describing a spreadsheet and a deck', () => {
     // Excel keeps every distinct cell string in one table. Joining them runs
     // unrelated column headings and data together -- which is exactly what the
     // first version of this did against the real catalog spreadsheet.
-    writeZip(path.join(dir, 'calc.xlsx'), {
-      'docProps/core.xml': core({ 'dc:title': '' }),
+    writeStoreOnlyZip(path.join(dir, 'calc.xlsx'), {
+      'docProps/core.xml': coreProperties({ 'dc:title': '' }),
       'xl/sharedStrings.xml': '<sst><si><t>Scoping calculator</t></si><si><t>Day rate</t></si><si><t>Complexity</t></si></sst>',
     });
 
@@ -170,8 +106,8 @@ describe('describing a spreadsheet and a deck', () => {
   });
 
   it('takes the title from a deck\'s first slide', () => {
-    writeZip(path.join(dir, 'deck.pptx'), {
-      'docProps/core.xml': core({ 'dc:title': '' }),
+    writeStoreOnlyZip(path.join(dir, 'deck.pptx'), {
+      'docProps/core.xml': coreProperties({ 'dc:title': '' }),
       'ppt/slides/slide1.xml': '<p:sld><a:t>Quarterly business review</a:t><a:t>Prepared by</a:t></p:sld>',
     });
 
