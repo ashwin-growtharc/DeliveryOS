@@ -1,13 +1,8 @@
-import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
 import { Command } from 'commander';
 import { readAdoptionProfile } from '../../engine/adopt/profile';
-import { planAdoption, AdoptionPlan } from '../../engine/adopt/planAdoption';
-import { mirrorFolder } from '../../engine/adopt/mirrorFolder';
-import { mirrorAndAdopt, resolveAdoptionTarget } from '../../engine/adopt/mirrorAndAdopt';
-import { buildCatalog } from '../../engine/catalog/catalog';
-import { AdoptionPlanError } from '../../engine/errors';
+import { AdoptionPlan } from '../../engine/adopt/planAdoption';
+import { mirrorAndAdopt, planMirrorAndAdopt } from '../../engine/adopt/mirrorAndAdopt';
 
 /**
  * The command that makes adoption something a person can run.
@@ -17,14 +12,14 @@ import { AdoptionPlanError } from '../../engine/errors';
  * suite. The whole client-shaped direction was proven end to end and reachable
  * by nobody.
  *
- * WHY `--dry-run` GOES THROUGH THE SAME MIRROR
+ * WHY `--dry-run` IS THE ENGINE'S PLAN, NOT THIS FILE'S
  *
- * A dry run could plan against the source folder directly. It does not: it
- * mirrors into a temporary directory and plans against THAT, exactly as the
- * real run plans against the mirrored tree in the cache. The mirror is what
- * drops the sync client's debris, so planning against the raw folder would
- * show `~$escalation.md` as a candidate the real run would never produce -- a
- * preview that lies about the thing it previews.
+ * `planMirrorAndAdopt` runs the same staging and the same plan code the real
+ * run does, on the same tree, and then puts the cache back. An earlier version
+ * of this command rebuilt the plan by hand in a temp directory; it worked, and
+ * it was a second code path that could drift from the first -- a preview that
+ * lies about the thing it previews is worse than no preview. This file only
+ * prints.
  *
  * WHY THIS IS CLI-ONLY
  *
@@ -36,7 +31,6 @@ import { AdoptionPlanError } from '../../engine/errors';
 
 interface AdoptFlags {
   profile: string;
-  remote?: string;
   dryRun?: boolean;
 }
 
@@ -46,10 +40,17 @@ function describeCandidates(plan: AdoptionPlan): string[] {
   const kindWidth = Math.max(...plan.candidates.map((c) => c.manifest.kind.length), 4);
   for (const c of plan.candidates) {
     lines.push(
-      `  ${c.id.padEnd(idWidth)}  ${c.manifest.kind.padEnd(kindWidth)}  `
+      `  ${c.action.padEnd(6)}  ${c.id.padEnd(idWidth)}  ${c.manifest.kind.padEnd(kindWidth)}  `
         + `${c.sourcePath} -> ${c.manifest.install_target}`
+        + (c.action === 'update' ? `  (version -> ${c.manifest.version})` : '')
         + (c.descriptionGuessed ? '  (description derived)' : ''),
     );
+  }
+  for (const r of plan.retired) {
+    lines.push(`  retire  ${r.id.padEnd(idWidth)}  ${''.padEnd(kindWidth)}  was ${r.sourcePath}`);
+  }
+  if (plan.unchanged.length > 0) {
+    lines.push(`  ${plan.unchanged.length} artifact(s) unchanged`);
   }
   return lines;
 }
@@ -73,81 +74,56 @@ export function registerAdoptCommand(program: Command): void {
     )
     .requiredOption(
       '--profile <file>',
-      'YAML adoption profile: the remote, the owner, and one rule per folder saying what its files '
-        + 'are and where they install',
-    )
-    .option(
-      '-r, --remote <name>',
-      'Catalog to propose into. Defaults to the profile\'s own `remote`; if both are given they '
-        + 'must agree',
+      'YAML adoption profile: the remote to propose into, the owner, and one rule per folder '
+        + 'saying what its files are and where they install',
     )
     .option(
       '--dry-run',
-      'Show what would be adopted and stop. Nothing is copied into the catalog, no branch is made, '
-        + 'no pull request is opened',
+      'Show what would be adopted and stop. No branch is made and no pull request is opened; '
+        + 'the catalog cache is used as a workbench and put back afterwards',
     )
     .action(async (folder: string, flags: AdoptFlags) => {
       const profile = readAdoptionProfile(flags.profile);
-
-      // Two places can name the remote. Silently preferring one would let a
-      // person adopt into the wrong catalog while looking at a profile that
-      // says otherwise.
-      if (flags.remote && flags.remote !== profile.remote) {
-        throw new AdoptionPlanError(
-          `--remote says "${flags.remote}" but the profile says "${profile.remote}". `
-            + 'Change one so they agree.',
-        );
-      }
-      const remoteName = flags.remote ?? profile.remote;
+      const remoteName = profile.remote;
       const sourceFolder = path.resolve(folder);
-      const sourceLabel = path.basename(sourceFolder);
+      const progress = (_stage: string, message: string): void => {
+        console.log(message);
+      };
 
       if (flags.dryRun) {
-        // Same target check as the real run, so a dry run against a folder
-        // library refuses with the same sentence rather than previewing a PR
-        // that could never open.
-        const target = resolveAdoptionTarget(remoteName);
-        const staging = fs.mkdtempSync(path.join(os.tmpdir(), 'deliveryos-adopt-dry-run-'));
-        try {
-          const mirror = mirrorFolder(sourceFolder, staging);
-          const existing = buildCatalog()
-            .filter((e) => e.remoteName === remoteName)
-            .map((e) => e.manifest.id);
-          const plan = planAdoption(staging, profile, existing, target.url);
+        const { sourceLabel, mirror, plan } = await planMirrorAndAdopt(sourceFolder, profile, remoteName, progress);
 
+        console.log('');
+        console.log(
+          `Would adopt ${plan.candidates.length} artifact(s) from "${sourceLabel}" into "${remoteName}", `
+            + `copying ${mirror.written.length} file(s) `
+            + `(${mirror.added.length} added, ${mirror.changed.length} changed, ${mirror.removed.length} removed, `
+            + `${mirror.unchanged.length} unchanged since the last adoption):`,
+        );
+        console.log('');
+        for (const line of describeCandidates(plan)) console.log(line);
+
+        const guessed = plan.candidates.filter((c) => c.descriptionGuessed);
+        if (guessed.length > 0) {
+          console.log('');
           console.log(
-            `Would adopt ${plan.candidates.length} artifact(s) from "${sourceLabel}" into "${remoteName}", `
-              + `copying ${mirror.written.length} file(s):`,
+            `${guessed.length} description(s) would be derived from the file's first heading `
+              + 'rather than declared -- worth reading before you open the pull request:',
           );
-          console.log('');
-          for (const line of describeCandidates(plan)) console.log(line);
-
-          const guessed = plan.candidates.filter((c) => c.descriptionGuessed);
-          if (guessed.length > 0) {
-            console.log('');
-            console.log(
-              `${guessed.length} description(s) would be derived from the file's first heading `
-                + 'rather than declared -- worth reading before you open the pull request:',
-            );
-            for (const c of guessed) console.log(`  - ${c.id}: "${c.manifest.description}"`);
-          }
-          for (const line of describeSkipped(plan, 'would be')) console.log(line);
-          if (mirror.unreadable.length > 0) {
-            console.log('');
-            console.log(`${mirror.unreadable.length} file(s) could not be read (not downloaded yet?):`);
-            for (const f of mirror.unreadable) console.log(`  - ${f}`);
-          }
-          console.log('');
-          console.log('Nothing was written. Drop --dry-run to open the pull request.');
-        } finally {
-          fs.rmSync(staging, { recursive: true, force: true });
+          for (const c of guessed) console.log(`  - ${c.id}: "${c.manifest.description}"`);
         }
+        for (const line of describeSkipped(plan, 'would be')) console.log(line);
+        if (mirror.unreadable.length > 0) {
+          console.log('');
+          console.log(`${mirror.unreadable.length} file(s) could not be read (not downloaded yet?):`);
+          for (const f of mirror.unreadable) console.log(`  - ${f}`);
+        }
+        console.log('');
+        console.log('Nothing was written. Drop --dry-run to open the pull request.');
         return;
       }
 
-      const result = await mirrorAndAdopt(sourceFolder, profile, remoteName, (_stage, message) => {
-        console.log(message);
-      });
+      const result = await mirrorAndAdopt(sourceFolder, profile, remoteName, progress);
 
       console.log(`Opened PR #${result.prNumber}: ${result.prUrl} (branch ${result.branch})`);
       console.log(

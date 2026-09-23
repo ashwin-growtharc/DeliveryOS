@@ -6,6 +6,65 @@ All notable changes to DeliveryOS are recorded here, newest first. See
 
 ---
 
+## Adopting again -- and one adoption pipeline instead of two (branch `feat/adopt-round-trip`)
+
+A pilot client would have hit this on day two: **a second `adopt` failed for
+every file** the moment the client edited one, because every id already in
+the catalog was a fatal collision. And the mirror never deleted anything, so a
+file the client removed stayed in the catalog forever.
+
+### Re-adoption
+
+The mirror records what it mirrored in `.deliveryos-mirror.json` at the
+catalog root -- the source, and a sha256 per file -- and the next run says
+what was **added, changed, removed and unchanged** against it. Removal is
+confined to paths the record says the mirror put there; never a walk of the
+destination, never the catalog's own bookkeeping.
+
+The planner takes the catalog's existing **manifests**, not ids. Same id, same
+`payload_path` → an **update**: the existing manifest wins for description,
+tags and install target (a heading derived on day one must never overwrite
+what somebody wrote on day ten; `push --description` is the reviewed path),
+and `version` moves one patch only if the bytes did. Same id, different file →
+still a collision. File gone from the source → the manifest is **retired**,
+deleted and staged in the same commit. Nothing changed anywhere → *"Nothing
+changed since the last adoption"*, not an empty pull request somebody has to
+read to discover is empty.
+
+### One pipeline, one plan path
+
+`mirrorAndAdopt` was a line-for-line copy of `adoptArtifacts`' git tail, and
+`adoptArtifacts` had no production caller to notice when they drifted.
+`adoptionStaging.ts` now holds the two shared halves: `withAdoptionStaging`
+(lock, reset, run, put the cache back whatever happened) and `commitAdoption`
+(manifests, one branch, one commit, one PR). The CLI's `--dry-run` rebuilt the
+plan by hand in a temp directory; `planMirrorAndAdopt` now runs the same
+staging and the same plan code the real run does, with a lazy `forCommit()` so
+a dry run still needs no GitHub token. Two tests pin it: the preview plans
+exactly the ids the run commits, and leaves the cache exactly as it found it.
+
+### Findings from the review of the merged adoption code, all fixed
+
+- `requireContributableRemote`: four call sites asked "can this remote take a
+  contribution?" three different ways, and `planPush` asked via
+  `parseGithubUrl`'s throw -- so a *preview* against a folder library blamed the
+  URL's spelling. One helper, one message, used everywhere.
+- One `copyTree` for the folder remote and the mirror; the planner is handed
+  the mirror's file list instead of walking a fifth time. Planning a raw
+  folder with an Office lock file used to refuse as a collision.
+- One `slugifyName` (was three copies -- ids are cross-catalog identity).
+- Both adoption branch names come from `buildBranchName('adopt')`; the
+  hand-rolled ISO stamp had no suffix, so two runs in a second collided.
+- `OfficeDescription.declared` → `guessed`; `OFFICE_EXTENSIONS` gains the
+  template and macro-enabled variants -- a Word template *is* a `.dotx`.
+- `remote add` keys its notice on the capability, not the string `'folder'`.
+- The `--remote` flag on `adopt` could only ever equal the profile's remote or
+  throw. Gone.
+- The adopt CLI test registered its catalog by local path, and the dry run
+  passed while the real run would have refused. Fixture fixed.
+
+---
+
 ## 0.2.0 — the first release anyone else installs (branch `release/0.2.0-prep`)
 
 Version `0.1.2` was never tagged, never published, and never installed on a

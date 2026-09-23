@@ -3,8 +3,11 @@ import { AdoptionPlanError } from '../errors';
 import * as path from 'path';
 import { Manifest, ManifestSchema } from '../manifest/schema';
 import { guessDescriptionFromFrontmatter } from '../manifest/frontmatter';
+import { bumpVersion } from '../manifest/version';
 import { AdoptionProfile, AdoptionRule, slugify } from './profile';
 import { describeOfficeFile, isOfficeFile } from './officeText';
+import { listFilesRecursive } from '../push/diff';
+import { isSyncDetritus } from '../remote/backends';
 
 /**
  * What adopting a client's folder WOULD produce, without producing any of it.
@@ -20,23 +23,55 @@ import { describeOfficeFile, isOfficeFile } from './officeText';
  * blanked all 227 artifacts. So adoption is all-or-nothing by construction. A
  * partial adoption that landed 180 good manifests and one bad one would take
  * the whole catalog down, and the bad one would be the hardest to find.
+ *
+ * WHY A SECOND ADOPTION IS AN UPDATE AND NOT A COLLISION
+ *
+ * The first version of this treated every id already in the catalog as a fatal
+ * collision. Correct for a first adoption; fatal for the second, because the
+ * moment a client edited one file, every file was "already in the catalog" and
+ * the catalog could never be brought up to date again. An existing manifest
+ * whose `payload_path` is the very file being planned is the same artifact,
+ * and planning it again is an update.
+ *
+ * In an update the EXISTING manifest wins for everything a person may have
+ * edited -- description, tags, install target, kind. A heading derived from the
+ * file on day one must never silently overwrite the description somebody wrote
+ * on day ten; `push --description` is the reviewed path for changing those.
+ * Only `version` moves, and only when the bytes did.
  */
 
-/** One artifact adoption would create. */
+export type AdoptionAction = 'create' | 'update';
+
+/** One artifact adoption would create or update. */
 export interface AdoptionCandidate {
   id: string;
+  action: AdoptionAction;
   /** Path of the original file, relative to the source root, forward-slashed.
    * Becomes `payload_path`, which is what makes this adopt-in-place: the file
    * is registered where it already lives rather than copied. */
   sourcePath: string;
   manifest: Manifest;
   /** True when the description had to be derived rather than read from the file
-   * itself. Surfaced so a reviewer knows which ones to actually read. */
+   * itself. Surfaced so a reviewer knows which ones to actually read. Always
+   * false for an update, whose description is the catalog's own. */
   descriptionGuessed: boolean;
 }
 
+export interface RetiredArtifact {
+  id: string;
+  /** The file the manifest pointed at, which the source no longer has. */
+  sourcePath: string;
+}
+
 export interface AdoptionPlan {
+  /** Manifests to write: new artifacts and updated ones. */
   candidates: AdoptionCandidate[];
+  /** Already in the catalog, pointing at the same file, bytes unchanged.
+   * Nothing to write; reported so the count adds up. */
+  unchanged: Array<{ id: string; sourcePath: string }>;
+  /** Manifests to delete, because the file they pointed at is gone from the
+   * source. Only ever computed when the caller says which files were removed. */
+  retired: RetiredArtifact[];
   /** Files a rule matched but which could not become artifacts, with the
    * reason. Reported rather than silently dropped -- a file that vanishes
    * between "47 markdown files" and "45 artifacts" is a question nobody can
@@ -44,26 +79,53 @@ export interface AdoptionPlan {
   skipped: Array<{ sourcePath: string; reason: string }>;
 }
 
+export interface PlanAdoptionOptions {
+  /** The files to consider, relative to the source root and forward-slashed.
+   * The mirror hands over exactly what it wrote, which is what makes the plan
+   * a description of the copy rather than of a second walk of the disk a
+   * moment later. Absent, the root is listed with the same filter the copy
+   * applies. */
+  files?: string[];
+  /** Files whose bytes differ from the last mirror. An existing artifact whose
+   * file is in here gets a patch bump; one whose file is not is unchanged.
+   * Absent, every existing artifact's file is treated as changed -- the safe
+   * direction when nothing recorded the previous state. */
+  changed?: Iterable<string>;
+  /** Files the last mirror had and the source no longer does. Existing
+   * artifacts pointing at them are retired. */
+  removed?: Iterable<string>;
+}
 
-/** Every file under `dir` matching one of `extensions`, relative to `root`. */
-function filesUnder(root: string, dir: string, extensions: string[]): string[] {
-  const abs = path.join(root, dir);
-  if (!fs.existsSync(abs) || !fs.statSync(abs).isDirectory()) return [];
+/**
+ * Every file under `root`, filtered the way a mirror filters: no sync debris,
+ * none of the catalog's own bookkeeping. Not a fifth walker -- `diff.ts`'s,
+ * which every push already trusts.
+ */
+function listSourceFiles(root: string): string[] {
+  return listFilesRecursive(root).filter(
+    (f) =>
+      f.length > 0
+      && !f.startsWith('artifacts/')
+      && !/^\.deliveryos-[^/]*\.json$/.test(f)
+      && !f.split('/').some((segment) => isSyncDetritus(segment)),
+  );
+}
 
-  const found: string[] = [];
-  const walk = (current: string): void => {
-    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
-      if (entry.name.startsWith('.')) continue;
-      const full = path.join(current, entry.name);
-      if (entry.isDirectory()) {
-        walk(full);
-      } else if (extensions.some((ext) => entry.name.toLowerCase().endsWith(ext.toLowerCase()))) {
-        found.push(path.relative(root, full).split(path.sep).join('/'));
-      }
-    }
-  };
-  walk(abs);
-  return found.sort();
+/** The files a rule covers: under its folder (subfolders included), not
+ * hidden at any level BELOW the folder, and carrying one of its extensions.
+ *
+ * The hidden check runs on the part after the folder, not the whole path. A
+ * rule may legitimately name a dot-directory -- `.claude/rules` is exactly the
+ * shape a Claude Code project keeps its rules in -- and a person who wrote that
+ * folder into a profile meant it. What they did not mean is `.obsidian/` or
+ * `.trash/` two levels down. */
+function matchesForRule(files: string[], folder: string, extensions: string[]): string[] {
+  const prefix = `${folder.replace(/\/+$/, '')}/`;
+  return files
+    .filter((f) => f.startsWith(prefix))
+    .filter((f) => !f.slice(prefix.length).split('/').some((segment) => segment.startsWith('.')))
+    .filter((f) => extensions.some((ext) => f.toLowerCase().endsWith(ext.toLowerCase())))
+    .sort();
 }
 
 /**
@@ -85,7 +147,7 @@ function describeFile(absolute: string): { description: string; guessed: boolean
   // actual template library could not be adopted at all.
   if (isOfficeFile(absolute)) {
     const office = describeOfficeFile(absolute);
-    return office ? { description: office.description, guessed: !office.declared } : undefined;
+    return office ?? undefined;
   }
 
   let content: string;
@@ -156,6 +218,7 @@ function candidateFor(
   return {
     candidate: {
       id,
+      action: 'create',
       sourcePath,
       manifest: parsed.data,
       descriptionGuessed: described.guessed,
@@ -166,30 +229,38 @@ function candidateFor(
 /**
  * Builds the plan.
  *
- * `existingIds` is the ids already in the target catalog -- pass
- * `buildCatalog()` filtered to the remote. Collisions are fatal rather than
- * suffixed, deliberately: `readme-3` is a catalog entry nobody can find or
- * refer to, and the fix is a real one (set an `idPrefix`) that only a person
- * can choose.
+ * `existing` is the target catalog's current manifests for this remote -- pass
+ * `buildCatalog()` filtered to the remote. An existing manifest pointing at the
+ * same file is updated; one with the same id pointing elsewhere is a collision.
+ * Collisions are fatal rather than suffixed, deliberately: `readme-3` is a
+ * catalog entry nobody can find or refer to, and the fix is a real one (set an
+ * `idPrefix`) that only a person can choose.
  */
 export function planAdoption(
   sourceRoot: string,
   profile: AdoptionProfile,
-  existingIds: Iterable<string>,
+  existing: Iterable<Manifest>,
   sourceRepo: string,
+  options: PlanAdoptionOptions = {},
 ): AdoptionPlan {
   if (!fs.existsSync(sourceRoot) || !fs.statSync(sourceRoot).isDirectory()) {
     throw new AdoptionPlanError(`"${sourceRoot}" is not a folder on this machine.`);
   }
 
+  const existingById = new Map<string, Manifest>();
+  for (const manifest of existing) existingById.set(manifest.id, manifest);
+  const changed = options.changed ? new Set(options.changed) : undefined;
+  const removed = new Set(options.removed ?? []);
+
   const candidates: AdoptionCandidate[] = [];
+  const unchanged: AdoptionPlan['unchanged'] = [];
   const skipped: AdoptionPlan['skipped'] = [];
   const seen = new Map<string, string>();
-  const taken = new Set(existingIds);
   const collisions: string[] = [];
+  const files = options.files ?? listSourceFiles(sourceRoot);
 
   for (const rule of profile.rules) {
-    const matches = filesUnder(sourceRoot, rule.folder, rule.extensions);
+    const matches = matchesForRule(files, rule.folder, rule.extensions);
     if (matches.length === 0) {
       skipped.push({
         sourcePath: rule.folder,
@@ -216,13 +287,41 @@ export function planAdoption(
         );
         continue;
       }
-      if (taken.has(candidate.id)) {
-        collisions.push(`"${candidate.id}" already exists in the catalog (from "${candidate.sourcePath}")`);
+      seen.set(candidate.id, candidate.sourcePath);
+
+      const current = existingById.get(candidate.id);
+      if (!current) {
+        candidates.push(candidate);
+        continue;
+      }
+      if (current.payload_path !== candidate.sourcePath) {
+        collisions.push(
+          `"${candidate.id}" already exists in the catalog, pointing at "${current.payload_path ?? 'a payload directory'}" `
+            + `rather than "${candidate.sourcePath}"`,
+        );
         continue;
       }
 
-      seen.set(candidate.id, candidate.sourcePath);
-      candidates.push(candidate);
+      // Same artifact. Nothing recorded which files changed -> treat as changed.
+      const bytesChanged = changed === undefined || changed.has(sourcePath);
+      if (!bytesChanged) {
+        unchanged.push({ id: candidate.id, sourcePath });
+        continue;
+      }
+      candidates.push({
+        id: candidate.id,
+        action: 'update',
+        sourcePath,
+        manifest: { ...current, version: bumpVersion(current.version, 'patch') },
+        descriptionGuessed: false,
+      });
+    }
+  }
+
+  const retired: RetiredArtifact[] = [];
+  for (const manifest of existingById.values()) {
+    if (manifest.payload_path !== undefined && removed.has(manifest.payload_path)) {
+      retired.push({ id: manifest.id, sourcePath: manifest.payload_path });
     }
   }
 
@@ -235,12 +334,12 @@ export function planAdoption(
     );
   }
 
-  if (candidates.length === 0) {
+  if (candidates.length === 0 && unchanged.length === 0 && retired.length === 0) {
     throw new AdoptionPlanError(
       'Nothing to adopt: no file matched a rule and produced a usable artifact.\n'
         + skipped.map((s) => `  - ${s.sourcePath}: ${s.reason}`).join('\n'),
     );
   }
 
-  return { candidates, skipped };
+  return { candidates, unchanged, retired: retired.sort((a, b) => a.id.localeCompare(b.id)), skipped };
 }

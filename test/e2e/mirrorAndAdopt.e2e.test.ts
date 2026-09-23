@@ -8,8 +8,8 @@ import { cloneRemote, refreshRemoteCache, cachePath } from '../../src/engine/rem
 import { addRemote } from '../../src/engine/remote/manageRemotes';
 import { buildCatalog } from '../../src/engine/catalog/catalog';
 import { pullArtifact } from '../../src/engine/pull/pull';
-import { mirrorAndAdopt } from '../../src/engine/adopt/mirrorAndAdopt';
-import { mirrorFolder } from '../../src/engine/adopt/mirrorFolder';
+import { mirrorAndAdopt, planMirrorAndAdopt } from '../../src/engine/adopt/mirrorAndAdopt';
+import { mirrorFolder, MIRROR_RECORD } from '../../src/engine/adopt/mirrorFolder';
 import { AdoptionProfileSchema } from '../../src/engine/adopt/profile';
 import { GithubClient } from '../../src/engine/github/github';
 import { rmDirWithRetry } from '../../src/engine/execHelpers';
@@ -205,6 +205,49 @@ describe('a synced SharePoint folder, end to end', () => {
   });
 });
 
+describe('the preview is the run, minus the commit', () => {
+  it('plans exactly the ids the real run then commits', async () => {
+    const synced = syncedSharepointFolder();
+    const catalogRepo = await emptyCatalogRepo();
+    await addRemoteEntry({ name: 'contoso', url: FAKE_GITHUB_URL, addedAt: new Date().toISOString() });
+    await cloneRemote('contoso', catalogRepo);
+    const client = fakeGithub();
+
+    // No GitHub client and no token: a dry run must stay something a person can
+    // do before setting anything up.
+    const preview = await planMirrorAndAdopt(synced, profile, 'contoso');
+    const run = await mirrorAndAdopt(synced, profile, 'contoso', undefined, client);
+
+    const previewed = preview.plan.candidates.map((c) => c.id).sort();
+    const body: string = (client.rest.pulls.create as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0].body;
+    // The table's first column is the action; the id is the second.
+    const committed = [...body.matchAll(/^\| (?:create|update) \| `([a-z0-9-]+)` \|/gm)].map((m) => m[1]).sort();
+
+    // The dry run used to mirror into an empty temp directory while the run
+    // mirrored onto the cache. Same code path now, so this cannot drift.
+    expect(committed).toEqual(previewed);
+    expect(run.adopted).toBe(previewed.length);
+  });
+
+  it('leaves the cache exactly as it found it', async () => {
+    const synced = syncedSharepointFolder();
+    const catalogRepo = await emptyCatalogRepo();
+    await addRemoteEntry({ name: 'contoso', url: FAKE_GITHUB_URL, addedAt: new Date().toISOString() });
+    await cloneRemote('contoso', catalogRepo);
+
+    await planMirrorAndAdopt(synced, profile, 'contoso');
+
+    // The preview now uses the cache as its workbench. Nothing of the mirror
+    // may survive it: not the copied tree, not a manifest, not a branch.
+    const cache = cachePath('contoso');
+    const git = simpleGit(cache);
+    expect((await git.branchLocal()).current).toBe('main');
+    expect((await git.status()).isClean()).toBe(true);
+    expect(fs.existsSync(path.join(cache, 'artifacts'))).toBe(false);
+    expect(fs.existsSync(path.join(cache, 'playbooks'))).toBe(false);
+  });
+});
+
 describe('a failed adoption leaves the cache as it found it', () => {
   /** Branch, cleanliness, and which top-level folders survived. All three
    * together, because each failure below dirties a different one. */
@@ -254,7 +297,115 @@ describe('a failed adoption leaves the cache as it found it', () => {
   });
 });
 
+describe('adopting the same folder again', () => {
+  async function adoptOnce(synced: string, catalogRepo: string, client = fakeGithub()) {
+    const result = await mirrorAndAdopt(synced, profile, 'contoso', undefined, client);
+    // Stand in for the merge, then refresh so the catalog reads the new tip.
+    await simpleGit(catalogRepo).raw(['merge', '--ff-only', result.branch]);
+    await refreshRemoteCache('contoso');
+    return { result, client };
+  }
+
+  it('lands the client\'s edits, additions and deletions as one pull request', async () => {
+    const synced = syncedSharepointFolder();
+    const catalogRepo = await emptyCatalogRepo();
+    await addRemoteEntry({ name: 'contoso', url: FAKE_GITHUB_URL, addedAt: new Date().toISOString() });
+    await cloneRemote('contoso', catalogRepo);
+    await adoptOnce(synced, catalogRepo);
+
+    // A week later, at the client.
+    fs.writeFileSync(path.join(synced, 'playbooks', 'handover.md'), '# Handover checklist\n\nRevised steps.\n', 'utf-8');
+    fs.rmSync(path.join(synced, 'templates', 'proposal.md'));
+    fs.writeFileSync(path.join(synced, 'templates', 'sow.md'), '# Statement of work\n', 'utf-8');
+
+    const client = fakeGithub();
+    const second = await mirrorAndAdopt(synced, profile, 'contoso', undefined, client);
+
+    // Before: refused outright -- every id was "already in the catalog".
+    expect(client.rest.pulls.create).toHaveBeenCalledTimes(1);
+    expect(second).toMatchObject({ created: 1, updated: 1, retired: 1, unchanged: 1 });
+
+    const status = (await simpleGit(catalogRepo).raw(['show', '--name-status', '--no-renames', '--pretty=format:', second.branch]))
+      .split('\n').map((l) => l.trim()).filter(Boolean);
+    expect(status).toContain('M\tplaybooks/handover.md');
+    expect(status).toContain('D\ttemplates/proposal.md');
+    expect(status).toContain('D\tartifacts/template-proposal/manifest.yaml');
+    expect(status).toContain('A\ttemplates/sow.md');
+    expect(status).toContain('A\tartifacts/template-sow/manifest.yaml');
+    expect(status).toContain('M\tartifacts/playbook-handover/manifest.yaml');
+    expect(status.some((l) => l.endsWith(MIRROR_RECORD))).toBe(true);
+
+    // The changed file's artifact moved a patch; the untouched one did not.
+    const handover = await simpleGit(catalogRepo).raw(['show', `${second.branch}:artifacts/playbook-handover/manifest.yaml`]);
+    expect(handover).toMatch(/version: 1\.0\.1/);
+    const body: string = (client.rest.pulls.create as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0].body;
+    expect(body).toContain('1 added, 1 changed, 1 removed, 1 unchanged');
+  });
+
+  it('refuses to open an empty pull request when nothing changed', async () => {
+    const synced = syncedSharepointFolder();
+    const catalogRepo = await emptyCatalogRepo();
+    await addRemoteEntry({ name: 'contoso', url: FAKE_GITHUB_URL, addedAt: new Date().toISOString() });
+    await cloneRemote('contoso', catalogRepo);
+    await adoptOnce(synced, catalogRepo);
+
+    const client = fakeGithub();
+    await expect(mirrorAndAdopt(synced, profile, 'contoso', undefined, client)).rejects.toThrow(/Nothing changed since the last adoption/);
+    expect(client.rest.pulls.create).not.toHaveBeenCalled();
+
+    // And the refusal left the cache as it found it.
+    const cache = cachePath('contoso');
+    expect((await simpleGit(cache).status()).isClean()).toBe(true);
+  });
+});
+
 describe('mirrorFolder', () => {
+  it('records what it mirrored, and on the next run removes only what it recorded', () => {
+    const source = tempDir('deliveryos-src-');
+    fs.mkdirSync(path.join(source, 'docs'), { recursive: true });
+    fs.writeFileSync(path.join(source, 'docs', 'a.md'), '# A\n', 'utf-8');
+    fs.writeFileSync(path.join(source, 'docs', 'b.md'), '# B\n', 'utf-8');
+    const dest = tempDir('deliveryos-dest-');
+    // Not the mirror's: the catalog's own README, which must survive.
+    fs.writeFileSync(path.join(dest, 'README.md'), '# catalog\n', 'utf-8');
+
+    const first = mirrorFolder(source, dest);
+    expect(first.added.sort()).toEqual(['docs/a.md', 'docs/b.md']);
+    expect(first.removed).toEqual([]);
+    const record = JSON.parse(fs.readFileSync(path.join(dest, MIRROR_RECORD), 'utf-8'));
+    expect(Object.keys(record.files).sort()).toEqual(['docs/a.md', 'docs/b.md']);
+    expect(record.files['docs/a.md']).toMatch(/^[0-9a-f]{64}$/);
+
+    fs.rmSync(path.join(source, 'docs', 'b.md'));
+    fs.writeFileSync(path.join(source, 'docs', 'a.md'), '# A, edited\n', 'utf-8');
+
+    const second = mirrorFolder(source, dest);
+    // Before this record existed the mirror was additive: b.md stayed forever.
+    expect(second.changed).toEqual(['docs/a.md']);
+    expect(second.removed).toEqual(['docs/b.md']);
+    expect(fs.existsSync(path.join(dest, 'docs', 'b.md'))).toBe(false);
+    expect(fs.existsSync(path.join(dest, 'README.md'))).toBe(true);
+    expect(second.stagePaths).toContain('docs/b.md');
+  });
+
+  it('never copies a record it finds in the source over the one it is about to write', () => {
+    // A source that was itself once mirrored, or is a folder remote's cache,
+    // carries a record describing SOME OTHER destination. Copying it would
+    // overwrite this mirror's record and, on the next run, delete files the
+    // other destination happened to have.
+    const source = tempDir('deliveryos-src-');
+    fs.mkdirSync(path.join(source, 'docs'), { recursive: true });
+    fs.writeFileSync(path.join(source, 'docs', 'a.md'), '# A\n', 'utf-8');
+    fs.writeFileSync(path.join(source, MIRROR_RECORD), JSON.stringify({ source: 'elsewhere', files: { 'ghost.md': 'x' } }), 'utf-8');
+    const dest = tempDir('deliveryos-dest-');
+
+    const result = mirrorFolder(source, dest);
+    expect(result.written).toEqual(['docs/a.md']);
+    const record = JSON.parse(fs.readFileSync(path.join(dest, MIRROR_RECORD), 'utf-8'));
+    expect(record.source).toBe(path.resolve(source));
+    expect(Object.keys(record.files)).toEqual(['docs/a.md']);
+  });
+
   it('refuses a folder whose top level would collide with the catalog\'s own', () => {
     const source = tempDir('deliveryos-collide-');
     fs.mkdirSync(path.join(source, 'artifacts'), { recursive: true });

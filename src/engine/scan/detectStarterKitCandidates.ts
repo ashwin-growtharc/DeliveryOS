@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { ScanCandidate } from './types';
+import { slugifyName } from '../ids/slugify';
 
 // Directory names that never contain a real, standalone project worth
 // flagging -- build output, dependency trees, VCS internals. Dot-directories
@@ -84,7 +85,7 @@ function walkForCandidates(
 ): void {
   const evaluated = evaluateDirectory(dir);
   if (evaluated) {
-    const id = slugify(path.basename(dir));
+    const id = slugifyName(path.basename(dir));
     if (isNew(id)) {
       // A candidate that IS the project root used to emit `'.'` here, which
       // scan then printed as a ready-to-paste `--install-target "."`. That is
@@ -216,9 +217,3 @@ function countRealFiles(dir: string): number {
   return count;
 }
 
-function slugify(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-}

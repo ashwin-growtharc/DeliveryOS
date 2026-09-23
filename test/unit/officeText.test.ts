@@ -128,7 +128,7 @@ describe('describing a Word document', () => {
     expect(result?.description).toBe('The standard proposal we send to new clients.');
     // The distinction that matters: declared metadata is authoritative, derived
     // text is a guess a reviewer should read. Same rule as markdown frontmatter.
-    expect(result?.declared).toBe(true);
+    expect(result?.guessed).toBe(false);
   });
 
   it('treats empty declared fields as absent, because real files have them', () => {
@@ -139,7 +139,7 @@ describe('describing a Word document', () => {
 
     const result = describeOfficeFile(path.join(dir, 'empty-props.docx'));
     expect(result?.description).toBe('Onboarding checklist');
-    expect(result?.declared).toBe(false);
+    expect(result?.guessed).toBe(true);
   });
 
   it('unescapes XML entities rather than showing them to a person', () => {
@@ -198,7 +198,10 @@ describe('refusing rather than guessing', () => {
   });
 
   it('recognises the three formats and nothing else', () => {
-    for (const name of ['a.docx', 'B.XLSX', 'c.pptx']) {
+    // The template and macro-enabled variants are what a client's library
+    // actually holds -- a Word TEMPLATE is a .dotx -- and every one is the
+    // same OOXML zip inside.
+    for (const name of ['a.docx', 'B.XLSX', 'c.pptx', 'd.dotx', 'E.XLTX', 'f.potx', 'g.docm', 'h.xlsm', 'i.pptm']) {
       expect(isOfficeFile(name), name).toBe(true);
     }
     // `.doc`, `.xls` and `.ppt` are the old binary formats -- not ZIPs, and not

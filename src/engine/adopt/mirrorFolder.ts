@@ -1,10 +1,12 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { isSyncDetritus } from '../remote/backends';
+import { copyTree } from '../remote/backends';
 import { AdoptionPlanError } from '../errors';
+import { sha256File } from '../provenance/digest';
 
 /**
- * Copies a client's folder into a catalog repository, once, as one tree.
+ * Copies a client's folder into a catalog repository as one tree, and remembers
+ * what it copied so the next mirror can say what changed.
  *
  * WHY A COPY IS FORCED HERE RATHER THAN CHOSEN
  *
@@ -30,23 +32,76 @@ import { AdoptionPlanError } from '../errors';
  * `agents/`, `rules/` and `commands/` sitting where the original collection put
  * them. The alternative, copying each file into its own `artifacts/<id>/payload/`,
  * would turn re-syncing into 200 separate copy targets and fork the client's
- * content into 200 places. This way a later re-mirror is one boring operation.
+ * content into 200 places.
+ *
+ * WHY THE MIRROR KEEPS A RECORD
+ *
+ * The first version of this was additive: it overwrote what it copied and
+ * never removed anything, so a file the client deleted stayed in the catalog
+ * forever -- the same class of bug as an update that adds files and never
+ * removes them. Deleting is only safe when the mirror knows what it put there
+ * in the first place: `.deliveryos-mirror.json` at the catalog root records
+ * every mirrored path with its hash. Removal is confined to that list, so a
+ * client folder that happens to be named like a catalog file can never delete
+ * something the mirror did not create. The hashes are also what lets the next
+ * mirror -- and, later, a release back to the client -- say which files
+ * actually changed rather than that "something was copied".
  */
 
+export const MIRROR_RECORD = '.deliveryos-mirror.json';
+
+export interface MirrorRecord {
+  /** Absolute path of the folder mirrored from, on the machine that mirrored
+   * it. Recorded so a later release knows where to write back to; note that
+   * it lands in the catalog, which is the client's own repository. */
+  source: string;
+  sourceLabel: string;
+  mirroredAt: string;
+  /** Relative path -> sha256 of the bytes as mirrored. */
+  files: Record<string, string>;
+}
+
 export interface MirrorResult {
-  /** Paths written, relative to the destination root, forward-slashed. Handed
-   * straight to `commitPaths`, which takes a list. */
+  /** Paths written, relative to the destination root, forward-slashed. */
   written: string[];
   /** Files that could not be read. The OneDrive Files-On-Demand case: a
    * placeholder stats fine and then fails to open because the bytes are still
    * in the cloud. Reported rather than fatal, and surfaced in the pull request
    * so a reviewer sees what did not make it. */
   unreadable: string[];
+  /** Against the previous mirror's record. On a first mirror everything is
+   * `added`. */
+  added: string[];
+  changed: string[];
+  unchanged: string[];
+  /** Previously mirrored, absent from the source now, and deleted from the
+   * destination by this mirror. */
+  removed: string[];
+  /** Everything the commit must include: the written files, the record, and
+   * the removals (staging a deleted path is how git records a deletion). */
+  stagePaths: string[];
+  record: MirrorRecord;
 }
 
 /** Directories at the destination root that a mirror must never touch, because
  * they are the catalog's own bookkeeping rather than client content. */
 const RESERVED = new Set(['.git', 'artifacts']);
+
+export function readMirrorRecord(dest: string): MirrorRecord | undefined {
+  const file = path.join(dest, MIRROR_RECORD);
+  if (!fs.existsSync(file)) return undefined;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf-8')) as Partial<MirrorRecord>;
+    if (typeof parsed.source !== 'string' || typeof parsed.files !== 'object' || parsed.files === null) {
+      return undefined;
+    }
+    return parsed as MirrorRecord;
+  } catch {
+    // A corrupt record means "no record": the mirror behaves as a first mirror,
+    // which adds everything and removes nothing. The safe direction.
+    return undefined;
+  }
+}
 
 /**
  * Mirrors `source` into `dest`.
@@ -74,35 +129,13 @@ export function mirrorFolder(source: string, dest: string): MirrorResult {
     }
   }
 
-  const written: string[] = [];
-  const unreadable: string[] = [];
+  const previous = readMirrorRecord(dest);
 
-  const walk = (from: string, to: string): void => {
-    fs.mkdirSync(to, { recursive: true });
-    for (const entry of fs.readdirSync(from, { withFileTypes: true })) {
-      // Same filter the folder backend applies, and for the same reason: sync
-      // clutter read as artifact content is clutter committed to a client's
-      // catalog forever.
-      if (entry.name === '.git' || isSyncDetritus(entry.name)) continue;
-
-      const src = path.join(from, entry.name);
-      const dst = path.join(to, entry.name);
-      if (entry.isDirectory()) {
-        walk(src, dst);
-      } else if (entry.isFile()) {
-        try {
-          fs.copyFileSync(src, dst);
-          written.push(path.relative(dest, dst).split(path.sep).join('/'));
-        } catch {
-          unreadable.push(path.relative(resolved, src).split(path.sep).join('/'));
-        }
-      }
-      // Symlinks skipped deliberately: following one could copy from outside
-      // the folder the client actually shared.
-    }
-  };
-
-  walk(resolved, dest);
+  // The same copy the folder backend does when it materialises a remote --
+  // same debris filter, same treatment of an unreadable placeholder -- so a
+  // dry run, a mirror and a folder remote can never disagree about which
+  // files exist.
+  const { written, unreadable } = copyTree(resolved, dest);
 
   if (written.length === 0) {
     throw new AdoptionPlanError(
@@ -114,5 +147,55 @@ export function mirrorFolder(source: string, dest: string): MirrorResult {
     );
   }
 
-  return { written, unreadable };
+  const files: Record<string, string> = {};
+  const added: string[] = [];
+  const changed: string[] = [];
+  const unchanged: string[] = [];
+  for (const rel of written) {
+    const hash = sha256File(path.join(dest, rel));
+    files[rel] = hash;
+    const before = previous?.files[rel];
+    if (before === undefined) added.push(rel);
+    else if (before !== hash) changed.push(rel);
+    else unchanged.push(rel);
+  }
+
+  // An unreadable placeholder is not a deletion: the file exists, its bytes
+  // are just not here. Its previous hash is carried forward so the next mirror
+  // does not treat a file that finally downloaded as new.
+  const unreadableSet = new Set(unreadable);
+  for (const rel of unreadable) {
+    if (previous?.files[rel] !== undefined) files[rel] = previous.files[rel];
+  }
+
+  const removed: string[] = [];
+  if (previous) {
+    for (const rel of Object.keys(previous.files)) {
+      if (files[rel] !== undefined || unreadableSet.has(rel)) continue;
+      // Only ever a path this mirror recorded putting there. Never a walk of
+      // the destination; never anything under RESERVED.
+      const abs = path.join(dest, rel);
+      if (fs.existsSync(abs) && fs.statSync(abs).isFile()) fs.rmSync(abs);
+      removed.push(rel);
+    }
+  }
+
+  const record: MirrorRecord = {
+    source: resolved,
+    sourceLabel: path.basename(resolved),
+    mirroredAt: new Date().toISOString(),
+    files,
+  };
+  fs.writeFileSync(path.join(dest, MIRROR_RECORD), `${JSON.stringify(record, null, 2)}\n`, 'utf-8');
+
+  return {
+    written,
+    unreadable,
+    added: added.sort(),
+    changed: changed.sort(),
+    unchanged: unchanged.sort(),
+    removed: removed.sort(),
+    stagePaths: [...written, MIRROR_RECORD, ...removed],
+    record,
+  };
 }

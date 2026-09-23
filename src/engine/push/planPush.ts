@@ -1,10 +1,10 @@
 import * as fs from 'fs';
 import { readLockfile } from '../lockfile/lockfile';
-import { findRemote } from '../remote/remoteRegistry';
 import { resolveArtifact } from '../pull/pull';
 import { computeChangedFiles, ChangedFile } from './diff';
 import { bumpVersion, VersionBumpKind } from '../manifest/version';
 import { compareVersions } from '../sync/sync';
+import { requireContributableRemote } from '../remote/requireContributableRemote';
 import {
   pristinePath,
   resolveContainedPath,
@@ -12,10 +12,8 @@ import {
   isRootInstall,
   readPayloadFootprint,
 } from '../paths';
-import { parseGithubUrl } from '../github/github';
 import {
   PushModeConflictError,
-  RemoteRegistryError,
   ManifestValidationError,
   NoLocalChangesError,
 } from '../errors';
@@ -116,22 +114,12 @@ export function planPush(
   }
 
   const remoteName = lockEntry.remote;
-  const remoteEntry = findRemote(remoteName);
-  if (!remoteEntry) {
-    throw new RemoteRegistryError(`No remote named "${remoteName}" is registered`);
-  }
-
-  // A preview must not succeed where the real push will refuse.
-  //
-  // `pushArtifact` calls `parseGithubUrl(remoteEntry.url)` before it does any
-  // work, so a remote on a host DeliveryOS cannot open a pull request against
-  // fails there. `planPush` only ever checked that the remote was *registered*,
-  // so the preview rendered a full, plausible diff for a push that could never
-  // happen -- the worst shape for a plan/apply pair, since the plan is the
-  // thing people trust before approving.
-  //
-  // Calling it purely for the throw: the owner/repo are not needed here.
-  parseGithubUrl(remoteEntry.url);
+  // A preview must not succeed where the real push will refuse -- and must
+  // refuse for the same reason, in the same words. This used to call
+  // parseGithubUrl purely for its throw, so a preview against a folder library
+  // blamed the URL's spelling while the push blamed the missing review step.
+  // Same helper as pushArtifact now, so they cannot drift.
+  requireContributableRemote(remoteName);
 
   const entry = resolveArtifact(id, remoteName);
   const { manifest } = entry;
