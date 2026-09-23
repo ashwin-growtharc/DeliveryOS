@@ -166,12 +166,15 @@ export async function commitAdoption(params: CommitAdoptionParams): Promise<Comm
     fs.writeFileSync(target, stringifyYaml(candidate.manifest), 'utf-8');
     manifests.push(path.relative(ctx.cacheDir, target).split(path.sep).join('/'));
   }
-  // A retired artifact's manifest is deleted and its path staged: `git add` of
-  // a removed tracked file is how git records a deletion.
+  // A retired artifact's whole directory is deleted and the DIRECTORY staged:
+  // `git add <path>` on removed tracked files records their deletion, and
+  // naming the directory rather than the manifest means anything else that
+  // lived beside it -- a README, a payload -- is retired with it instead of
+  // being deleted on disk and left tracked in the commit.
   for (const retired of plan.retired) {
-    const target = manifestPathFor(ctx.cacheDir, retired.id);
-    fs.rmSync(path.dirname(target), { recursive: true, force: true });
-    manifests.push(path.relative(ctx.cacheDir, target).split(path.sep).join('/'));
+    const dir = path.dirname(manifestPathFor(ctx.cacheDir, retired.id));
+    fs.rmSync(dir, { recursive: true, force: true });
+    manifests.push(path.relative(ctx.cacheDir, dir).split(path.sep).join('/'));
   }
 
   onProgress?.('branch', `Creating branch "${branch}"...`);

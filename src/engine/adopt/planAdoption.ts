@@ -112,12 +112,18 @@ function listSourceFiles(root: string): string[] {
 }
 
 /** The files a rule covers: under its folder (subfolders included), not
- * hidden at any level, and carrying one of its extensions. */
+ * hidden at any level BELOW the folder, and carrying one of its extensions.
+ *
+ * The hidden check runs on the part after the folder, not the whole path. A
+ * rule may legitimately name a dot-directory -- `.claude/rules` is exactly the
+ * shape a Claude Code project keeps its rules in -- and a person who wrote that
+ * folder into a profile meant it. What they did not mean is `.obsidian/` or
+ * `.trash/` two levels down. */
 function matchesForRule(files: string[], folder: string, extensions: string[]): string[] {
   const prefix = `${folder.replace(/\/+$/, '')}/`;
   return files
     .filter((f) => f.startsWith(prefix))
-    .filter((f) => !f.split('/').some((segment) => segment.startsWith('.')))
+    .filter((f) => !f.slice(prefix.length).split('/').some((segment) => segment.startsWith('.')))
     .filter((f) => extensions.some((ext) => f.toLowerCase().endsWith(ext.toLowerCase())))
     .sort();
 }

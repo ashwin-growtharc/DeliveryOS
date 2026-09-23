@@ -388,6 +388,24 @@ describe('mirrorFolder', () => {
     expect(second.stagePaths).toContain('docs/b.md');
   });
 
+  it('never copies a record it finds in the source over the one it is about to write', () => {
+    // A source that was itself once mirrored, or is a folder remote's cache,
+    // carries a record describing SOME OTHER destination. Copying it would
+    // overwrite this mirror's record and, on the next run, delete files the
+    // other destination happened to have.
+    const source = tempDir('deliveryos-src-');
+    fs.mkdirSync(path.join(source, 'docs'), { recursive: true });
+    fs.writeFileSync(path.join(source, 'docs', 'a.md'), '# A\n', 'utf-8');
+    fs.writeFileSync(path.join(source, MIRROR_RECORD), JSON.stringify({ source: 'elsewhere', files: { 'ghost.md': 'x' } }), 'utf-8');
+    const dest = tempDir('deliveryos-dest-');
+
+    const result = mirrorFolder(source, dest);
+    expect(result.written).toEqual(['docs/a.md']);
+    const record = JSON.parse(fs.readFileSync(path.join(dest, MIRROR_RECORD), 'utf-8'));
+    expect(record.source).toBe(path.resolve(source));
+    expect(Object.keys(record.files)).toEqual(['docs/a.md']);
+  });
+
   it('refuses a folder whose top level would collide with the catalog\'s own', () => {
     const source = tempDir('deliveryos-collide-');
     fs.mkdirSync(path.join(source, 'artifacts'), { recursive: true });

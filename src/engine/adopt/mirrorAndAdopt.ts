@@ -219,6 +219,12 @@ export async function mirrorAndAdopt(
   injectedClient?: GithubClient,
 ): Promise<MirrorAndAdoptResult> {
   return withAdoptionStaging(remoteName, onProgress, injectedClient, async (ctx) => {
+    // Resolve the token and the default branch BEFORE copying the client's
+    // tree. The staging fetches these lazily so a dry run needs neither; a real
+    // run needs both, and finding out that `gh auth login` was never run after
+    // copying two gigabytes of templates is the wrong order.
+    await ctx.forCommit();
+
     const { sourceLabel, mirror, plan } = planInStaging(ctx, sourceFolder, profile, onProgress);
 
     const committed = await commitAdoption({

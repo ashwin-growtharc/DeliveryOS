@@ -36,7 +36,11 @@ const IGNORED_SUFFIXES = ['.tmp', '.crdownload', '.partial'];
 /** Kept out of the cache entirely: pointing at a folder that happens to be a
  * git repository should produce a plain directory of files, not a second clone
  * whose `.git` would then look like a remote we could fetch from. */
-const NEVER_COPIED = new Set(['.git']);
+// `.git` because a repository's history is never content. The two DeliveryOS
+// records because they describe the DESTINATION of a copy, and a source that
+// happens to carry one (a folder that was itself once a mirror or a remote
+// cache) must not have it overwrite the record the copy is about to write.
+const NEVER_COPIED = new Set(['.git', '.deliveryos-source.json', '.deliveryos-mirror.json']);
 
 export function isSyncDetritus(name: string): boolean {
   const lower = name.toLowerCase();

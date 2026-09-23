@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { copyTree } from '../remote/backends';
 import { AdoptionPlanError } from '../errors';
-import { sha256Hex } from '../provenance/digest';
+import { sha256File } from '../provenance/digest';
 
 /**
  * Copies a client's folder into a catalog repository as one tree, and remembers
@@ -152,7 +152,7 @@ export function mirrorFolder(source: string, dest: string): MirrorResult {
   const changed: string[] = [];
   const unchanged: string[] = [];
   for (const rel of written) {
-    const hash = sha256Hex(fs.readFileSync(path.join(dest, rel)));
+    const hash = sha256File(path.join(dest, rel));
     files[rel] = hash;
     const before = previous?.files[rel];
     if (before === undefined) added.push(rel);

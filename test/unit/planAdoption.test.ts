@@ -327,6 +327,17 @@ describe('which files a plan considers', () => {
     expect(plan.candidates.map((c) => c.sourcePath)).toEqual(['playbooks/escalation.md']);
   });
 
+  it('lets a rule name a dot-directory, and still hides dot-directories beneath it', () => {
+    // `.claude/rules` is exactly the shape a Claude Code project keeps its rules
+    // in. The first version of the list-based matcher applied the hidden filter
+    // to the whole path, so such a rule silently matched nothing.
+    write('.claude/rules/escalation.md', '# Escalation\n');
+    write('.claude/rules/.trash/old.md', '# Old\n');
+
+    const plan = planAdoption(root, profile({ folder: '.claude/rules' }), [], REPO);
+    expect(plan.candidates.map((c) => c.sourcePath)).toEqual(['.claude/rules/escalation.md']);
+  });
+
   it('plans exactly the files it is handed, when handed a list', () => {
     write('playbooks/a.md', '# A\n');
     write('playbooks/b.md', '# B\n');
