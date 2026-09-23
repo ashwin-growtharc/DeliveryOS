@@ -63,7 +63,7 @@ import {
   compileLocalPreview,
   compileTemplateComponentPreview,
 } from './engine/preview/resolveArtifactPreview';
-import { readArtifactPayloadFile } from './engine/payload/readPayloadFile';
+import { readArtifactPayloadFile, describePayloadFiles, readArtifactPayloadBinary } from './engine/payload/readPayloadFile';
 import { resolvePayloadDir, resolveWithinPayloadDir } from './engine/payload/payloadDir';
 import { listArtifactPayloadComponents } from './engine/payload/listPayloadComponents';
 import { checkSourceDrift } from './engine/drift/checkDrift';
@@ -317,6 +317,25 @@ const commandTable: Record<string, CommandHandler> = {
     const relativePath = requireString(args, 'path');
     const content = readArtifactPayloadFile(remote, id, relativePath);
     return { content };
+  },
+
+  // The Document tab's two questions: what files does this payload ship, and
+  // give me one of them as bytes. Both read the catalog cache, never the
+  // project, so a template can be looked at before it is pulled.
+  'artifact.listPayloadFiles': (args) => {
+    const remote = requireString(args, 'remote');
+    const id = requireString(args, 'id');
+    return describePayloadFiles(remote, id);
+  },
+
+  // Base64 over the JSON line, capped at PAYLOAD_BINARY_MAX_BYTES by the
+  // engine, which checks the size before reading. Containment is the same as
+  // readPayloadFile's: an escaping path throws.
+  'artifact.readPayloadBinary': (args) => {
+    const remote = requireString(args, 'remote');
+    const id = requireString(args, 'id');
+    const relativePath = requireString(args, 'path');
+    return readArtifactPayloadBinary(remote, id, relativePath);
   },
 
   // Phase 11 Detail-view task: one read + parse of a design-kit-shaped

@@ -62,7 +62,7 @@ function actualMcpTools(): string[] {
   return names;
 }
 
-/** Every sidecar command name the DESKTOP APP actually calls.
+/** Every sidecar command name the DESKTOP UI actually calls, across all its scripts.
  *
  * app.js is now linted (61 rules, as of the flat-config block added for
  * `src-tauri/spike-ui/**\/*.js`), but it still has no COMPILER behind it:
@@ -83,11 +83,17 @@ function actualMcpTools(): string[] {
  * command that must exist anyway, so matching it costs nothing and a filter
  * would just be another thing to get wrong. */
 function actualAppRpcNames(): string[] {
-  const source = fs.readFileSync(
-    path.join(REPO_ROOT, 'src-tauri', 'spike-ui', 'app.js'),
-    'utf-8',
+  // Every top-level script in spike-ui, not just app.js. app.js is frozen
+  // (appJsCeiling.test.ts), so new desktop behaviour lives in sibling files
+  // -- and a `call('x.y')` in one of those is exactly as unchecked by any
+  // compiler as one in app.js. `vendor/` is a subdirectory and is excluded by
+  // reading only the top level: somebody else's bundle is not our surface.
+  const uiDir = path.join(REPO_ROOT, 'src-tauri', 'spike-ui');
+  const scripts = fs.readdirSync(uiDir).filter((f) => f.endsWith('.js'));
+  expect(scripts, 'spike-ui has no app.js -- this guard is reading the wrong directory').toContain('app.js');
+  const names = scripts.flatMap((f) =>
+    [...fs.readFileSync(path.join(uiDir, f), 'utf-8').matchAll(/\bcall\(\s*'([a-zA-Z]+\.[a-zA-Z]+)'/g)].map((m) => m[1]),
   );
-  const names = [...source.matchAll(/\bcall\(\s*'([a-zA-Z]+\.[a-zA-Z]+)'/g)].map((m) => m[1]);
   // Anti-vacuity, DERIVED rather than hardcoded. A literal threshold has two
   // faults: it drifts as the app grows, and it lets a partial parse through
   // while the message still claims "parsed zero" -- a guard whose assertion
@@ -100,7 +106,7 @@ function actualAppRpcNames(): string[] {
   const dispatchSize = actualSidecarKeys().length;
   expect(
     distinct,
-    `parsed only ${distinct} distinct app.js RPC names against a ${dispatchSize}-command `
+    `parsed only ${distinct} distinct desktop-UI RPC names against a ${dispatchSize}-command `
     + 'dispatch table -- the regex has stopped matching, so this guard is checking almost nothing',
   ).toBeGreaterThanOrEqual(Math.floor(dispatchSize / 2));
   return names;

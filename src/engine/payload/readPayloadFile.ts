@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { resolvePayloadDir, resolveWithinPayloadDir } from './payloadDir';
 import { listFilesRecursive } from '../push/diff';
+import { DeliveryOsError } from '../errors';
 
 /**
  * Resolves a caller-supplied relative path against a payload root that may be a
@@ -181,4 +182,79 @@ export function readArtifactPayloadPage(
     totalChars: whole.length,
     hasMore: offset + content.length < whole.length,
   };
+}
+
+/** The payload's file list together with whether the payload IS one file --
+ * the two facts the desktop's Document tab needs to name what it shows and to
+ * compute where each file landed after a pull (`install_target` is the file
+ * itself for a single-file payload, a directory otherwise). */
+export function describePayloadFiles(remoteName: string, id: string): { files: string[]; rootIsFile: boolean } {
+  const payloadDir = resolvePayloadDir(remoteName, id);
+  let rootIsFile = false;
+  try {
+    rootIsFile = fs.statSync(payloadDir).isFile();
+  } catch {
+    rootIsFile = false;
+  }
+  return { files: listArtifactPayloadFiles(remoteName, id), rootIsFile };
+}
+
+/** Largest payload file handed to the desktop as bytes. The sidecar answers
+ * over a JSON line, so this becomes ~13.4 MB of base64 in one message; a
+ * template library's Word and PDF files sit well under it, and a recorded
+ * workshop next to them is the case the cap exists for. */
+export const PAYLOAD_BINARY_MAX_BYTES = 10 * 1024 * 1024;
+
+const MIME_BY_EXTENSION: Record<string, string> = {
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.dotx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.template',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  '.xltx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.template',
+  '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  '.potx': 'application/vnd.openxmlformats-officedocument.presentationml.template',
+  '.pdf': 'application/pdf',
+};
+
+export type PayloadBytes =
+  | { kind: 'bytes'; name: string; mime: string; size: number; base64: string }
+  | { kind: 'not-found' };
+
+/**
+ * A payload file as bytes, for the desktop to render or hand to another program.
+ *
+ * Reads the CATALOG CACHE copy, not the installed one, so a person can look at
+ * a template before pulling it -- the same "browse before you commit" principle
+ * every other Detail tab follows. Containment is `resolvePayloadTarget`'s and
+ * is not re-implemented here: a path that escapes the payload THROWS, as it
+ * does for text, rather than being softened into `not-found`.
+ *
+ * The size is checked BEFORE the read. A file over the cap is refused with a
+ * sentence naming the cap, not read into memory and then refused.
+ */
+export function readArtifactPayloadBinary(
+  remoteName: string,
+  id: string,
+  relativePath: string,
+  options: { maxBytes?: number } = {},
+): PayloadBytes {
+  const payloadDir = resolvePayloadDir(remoteName, id);
+  const resolvedFilePath = resolvePayloadTarget(payloadDir, relativePath);
+
+  if (!fs.existsSync(resolvedFilePath) || !fs.statSync(resolvedFilePath).isFile()) {
+    return { kind: 'not-found' };
+  }
+
+  const maxBytes = options.maxBytes ?? PAYLOAD_BINARY_MAX_BYTES;
+  const size = fs.statSync(resolvedFilePath).size;
+  if (size > maxBytes) {
+    throw new DeliveryOsError(
+      `"${path.basename(resolvedFilePath)}" is ${(size / (1024 * 1024)).toFixed(1)} MB, over the `
+        + `${Math.round(maxBytes / (1024 * 1024))} MB limit for viewing inside DeliveryOS. Pull the artifact and `
+        + 'open the file in its own program instead.',
+    );
+  }
+
+  const name = path.basename(resolvedFilePath);
+  const mime = MIME_BY_EXTENSION[path.extname(name).toLowerCase()] ?? 'application/octet-stream';
+  return { kind: 'bytes', name, mime, size, base64: fs.readFileSync(resolvedFilePath).toString('base64') };
 }
