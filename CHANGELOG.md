@@ -6,6 +6,61 @@ All notable changes to DeliveryOS are recorded here, newest first. See
 
 ---
 
+## The Document tab -- see the template you pulled (branch `feat/document-viewer`)
+
+A pulled `.docx` showed its description, an "Open folder" button, and nothing
+else. The consultant the client-shaped work is for could not see the template
+they had just pulled, let alone launch it. `read_artifact_file` on MCP *failed*
+on the same file, and the sidecar's `readPayloadFile` would have returned it as
+mojibake -- no binary detection, no size cap.
+
+### What renders, and what hands off
+
+Decided with the user: **Word and PDF render in-app; Excel and PowerPoint open
+in their own programs.** In-browser renderers for spreadsheets show a grid, not
+the template, and for decks are immature -- and the person has Excel.
+
+- **Word** through `docx-preview` (Apache-2.0, vendored with `jszip`) inside a
+  sandboxed `srcdoc` iframe: the same isolation and `contentHeight` protocol
+  the markdown renderer uses. The page stays white like Word's; the surround
+  follows the theme, and a toggle re-renders it.
+- **PDF** through the webview's own viewer from a `blob:` URL -- zero KB, no
+  asset protocol.
+- **Every file** gets Open, Open with… and Reveal once the artifact is pulled,
+  at the path it actually landed. For a single-file payload that *is*
+  `install_target`; getting it wrong opens Explorer on the wrong thing.
+
+### How it fits a frozen `app.js`
+
+`viewer.js` is a sibling script publishing `window.DeliveryOSViewer`; `app.js`
+touches it in two places and shrinks by 16 lines (the ceiling ratchets to
+7,589). The renderer is vendored as a **string** (`window.DeliveryOSDocxBundle`)
+and inlined into the frame, because an opaque-origin `srcdoc` frame cannot
+reliably load a sibling `<script src>` and the app's origin differs between
+`tauri.localhost` and the browser tests' `file://`. The frame fetches nothing.
+
+Two sidecar RPCs -- `artifact.listPayloadFiles`, `artifact.readPayloadBinary`
+(base64, 10 MB cap checked *before* the read, containment as the text reader's)
+-- both reading the catalog cache so a template can be looked at before it is
+pulled. The capability-registry guard now scans every top-level `spike-ui`
+script, not just `app.js`; a `call('x.y')` in `viewer.js` was invisible to it.
+
+"Open with…" is a Rust command (`open_with_dialog`, `rundll32` OpenAs) that
+canonicalises the path and the project folder and refuses anything outside it.
+Windows only; the button is hidden elsewhere.
+
+Four browser tests, the first of which proves the whole chain in a real
+Chromium: the paragraph a person wrote is visible inside the frame, joined
+back across its runs. The Office ZIP fixture moved to `test/fixtures/officeZip.ts`
+and gained the parts a DOM-based renderer needs, so one fixture serves the
+regex reader and the viewer.
+
+**Not verified here:** the same frame inside WebView2 in the packaged app.
+Chromium and WebView2 share an engine, but that is the one check that needs
+`npx tauri dev`.
+
+---
+
 ## Adopting again -- and one adoption pipeline instead of two (branch `feat/adopt-round-trip`)
 
 A pilot client would have hit this on day two: **a second `adopt` failed for
