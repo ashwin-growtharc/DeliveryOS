@@ -42,6 +42,51 @@ struct SidecarResponseRaw {
 /// simple (no shared child-process state to manage between calls, no
 /// request/response multiplexing needed since exactly one request is ever
 /// in flight per spawned process).
+/// Windows' "Open with" chooser for a file the artifact installed.
+///
+/// A Rust command rather than the shell plugin: the plugin's argument
+/// validators are regexes over strings, and this codebase's containment rule
+/// is a resolved-path check (`resolveContainedPath` in the engine). So the same
+/// check is done here, in the same spirit -- canonicalise both, require the
+/// file to sit under the project the person is working in, and require it to
+/// be a file at all. Anything else is refused with a sentence, never launched.
+///
+/// `rundll32 shell32.dll,OpenAs_RunDLL` is the documented way to summon the
+/// dialog without a COM binding, and needs no new crate. Not available off
+/// Windows; the frontend hides the button there and this returns an error if
+/// reached anyway.
+#[tauri::command]
+async fn open_with_dialog(path: String, project_dir: String) -> Result<(), String> {
+  let file = std::fs::canonicalize(&path)
+    .map_err(|_| format!("\"{path}\" is not on disk any more. Pull the artifact again."))?;
+  let root = std::fs::canonicalize(&project_dir)
+    .map_err(|_| format!("The project folder \"{project_dir}\" is not on disk."))?;
+  if !file.starts_with(&root) {
+    return Err(format!(
+      "\"{path}\" is outside the project folder, so DeliveryOS will not open it."
+    ));
+  }
+  if !file.is_file() {
+    return Err(format!("\"{path}\" is a folder, not a file."));
+  }
+  open_with_dialog_platform(&file)
+}
+
+#[cfg(windows)]
+fn open_with_dialog_platform(file: &std::path::Path) -> Result<(), String> {
+  std::process::Command::new("rundll32.exe")
+    .arg("shell32.dll,OpenAs_RunDLL")
+    .arg(file)
+    .spawn()
+    .map(|_| ())
+    .map_err(|e| format!("Could not show the Open with dialog: {e}"))
+}
+
+#[cfg(not(windows))]
+fn open_with_dialog_platform(_file: &std::path::Path) -> Result<(), String> {
+  Err("Open with… is only available on Windows. Use Open instead.".to_string())
+}
+
 #[tauri::command]
 async fn sidecar_call(
   app: tauri::AppHandle,
@@ -217,6 +262,7 @@ pub fn run() {
     })
     .invoke_handler(tauri::generate_handler![
       sidecar_call,
+      open_with_dialog,
       pty::pty_spawn,
       pty::pty_write,
       pty::pty_resize,
